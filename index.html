@@ -111,6 +111,8 @@ svg{display:block}
 .bus-status.ok{color:var(--ok);font-weight:700}
 .bus-when{font-size:14px;color:var(--muted);text-align:right;white-space:nowrap}
 .live-meta{margin-top:8px}
+.attr{font-size:13px;margin-top:4px}
+.attr a,.foot a{color:var(--dusk)}
 
 /* Buttons and fields */
 .btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;min-height:52px;border-radius:14px;font-weight:700;border:0;cursor:pointer;margin-top:10px;padding:0 16px;text-decoration:none;font-size:17px}
@@ -265,6 +267,7 @@ button.pill{cursor:pointer}
     <div class="chips" id="liveChips"></div>
     <div class="list" id="liveList"></div>
     <p class="hint live-meta" id="liveMeta"></p>
+    <p class="hint attr">Live times from <a href="https://transitous.org/sources/" target="_blank" rel="noopener">Transitous</a>, with map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors.</p>
   </section>
 
   <section>
@@ -272,7 +275,7 @@ button.pill{cursor:pointer}
     <div class="list" id="stops"></div>
   </section>
 
-  <p class="foot">The alarm works with your phone’s GPS, so delays and detours don’t throw it off. Live times come from the open OVapi feed.</p>
+  <p class="foot">The alarm works with your phone’s GPS, so delays and detours don’t throw it off. Questions or problems? <a href="https://github.com/kupperma/Halte-wekker" target="_blank" rel="noopener">github.com/kupperma/Halte-wekker</a></p>
 </main>
 
 <!-- Sleeping -->
@@ -356,7 +359,8 @@ const PRESET_ROUTES=[
   {id:'via-eindhoven',name:'Via Eindhoven',legs:[{mode:'bus',stop:'eindhoven'},{mode:'train'}]}
 ];
 const DEFAULT_SETTINGS={trainKm:5,busKm:2,arrivalRing:true,sound:'beeps',music:'pause',prepSeen:false};
-const DEFAULT_LIVE={name:'Veghel, Busstation',codes:null,lines:['305','306','158']};
+const RELAY='https://haltewekker-relay.tsfaw1.workers.dev/?url=';
+const DEFAULT_LIVE={name:'Veghel, Busstation',id:null,lines:['305','306','158'],proxy:RELAY};
 const ARRIVE_M=450;
 const KEY='haltewekker:v2',OLD_KEY='haltewekker:v1';
 
@@ -367,7 +371,10 @@ function load(){
     if(raw){
       const d=JSON.parse(raw),f=fresh();
       if(d&&Array.isArray(d.stops)&&Array.isArray(d.routes)){
-        return {stops:d.stops,home:d.home!==undefined?d.home:f.home,school:d.school!==undefined?d.school:f.school,routes:d.routes,kmMem:d.kmMem||{},settings:Object.assign(f.settings,d.settings||{}),live:Object.assign(f.live,d.live||{})};
+        const live=Object.assign(f.live,d.live||{});
+        if(live.codes!==undefined){delete live.codes;delete live.route;live.id=null;}
+        if(!String(live.proxy||'').trim()) live.proxy=RELAY;
+        return {stops:d.stops,home:d.home!==undefined?d.home:f.home,school:d.school!==undefined?d.school:f.school,routes:d.routes,kmMem:d.kmMem||{},settings:Object.assign(f.settings,d.settings||{}),live};
       }
     }
     // Bring over stops and settings from the first version.
@@ -462,9 +469,10 @@ function stopRow(s){
   return `<div class="row"><button type="button" class="row-main" data-act="start-stop" data-id="${esc(s.id)}"><span class="row-title">${esc(s.name)}</span>${role?`<span class="tagline">${role}</span>`:''}${s.approx?'<span class="badge">Location is approximate. Set it with the pencil.</span>':''}</button><button type="button" class="row-edit" data-act="edit-stop" data-id="${esc(s.id)}" aria-label="Edit ${esc(s.name)}">${ICON.edit}</button></div>`;
 }
 
-/* ---------- Live bus times (OVapi) ---------- */
-const OV='https://v0.ovapi.nl';
-let liveFilter='mine',liveBusy=false,liveData=null,liveErr=null,liveAt=null,stopListCache=null;
+/* ---------- Live bus times (Transitous) ---------- */
+// Transitous is a free, volunteer-run service for open-source, non-commercial apps. Keep requests light.
+const TAPI='https://api.transitous.org/api';
+let liveFilter='mine',liveBusy=false,liveData=null,liveErr=null,liveAt=null,viaRelay=false;
 const liveLines=()=>(db.live.lines||[]).map(String);
 const norm=s=>String(s||'').toLowerCase().replace(/[’`]/g,"'").replace(/\s+/g,' ').trim();
 
@@ -480,102 +488,65 @@ async function getJSON(url,ms){
     throw e;
   }finally{clearTimeout(t);}
 }
-// Try OVapi directly first. If the browser blocks that, go through a public relay that adds the permission header.
-const ROUTES=[
-  u=>u,
-  u=>'https://api.allorigins.win/raw?url='+encodeURIComponent(u),
-  u=>'https://api.codetabs.com/v1/proxy/?quest='+encodeURIComponent(u)
-];
-async function ovJSON(path,ms){
-  const target=OV+path,custom=String(db.live.proxy||'').trim();
-  if(custom) return getJSON(custom+encodeURIComponent(target),ms);
-  const first=Number.isInteger(db.live.route)&&ROUTES[db.live.route]?db.live.route:0;
-  const order=[first].concat(ROUTES.map((_,i)=>i).filter(i=>i!==first));
-  let last;
-  for(const i of order){
-    try{
-      const data=await getJSON(ROUTES[i](target),ms);
-      if(db.live.route!==i){db.live.route=i;save();}
-      return data;
-    }catch(e){last=e;}
-  }
-  throw last;
+// Ask Transitous directly. If the browser blocks that and you've set up your own relay, go through it.
+async function tJSON(path,ms){
+  const target=TAPI+path,px=String(db.live.proxy||'').trim();
+  const direct=()=>getJSON(target,ms),relay=()=>getJSON(px+encodeURIComponent(target),ms);
+  if(!px) return direct();
+  if(viaRelay){try{return await relay();}catch(e){const d=await direct();viaRelay=false;return d;}}
+  try{return await direct();}catch(e){const d=await relay();viaRelay=true;return d;}
 }
-async function loadStopList(){
-  if(stopListCache) return stopListCache;
-  const data=await ovJSON('/stopareacode',30000);
-  const list=[];
-  Object.keys(data||{}).forEach(k=>{
-    const v=data[k];if(!v||typeof v!=='object') return;
-    list.push({code:v.StopAreaCode||k,name:v.TimingPointName||k,town:v.TimingPointTown||''});
-  });
-  stopListCache=list;return list;
+function areaName(m){
+  const a=Array.isArray(m.areas)?m.areas:[];
+  const d=a.find(x=>x&&x.default)||a.find(x=>x&&x.matched)||a[0];
+  return d&&d.name?d.name:'';
 }
-function searchStops(list,q){
-  const words=norm(q).split(/[\s,]+/).filter(Boolean);
-  if(!words.length) return [];
-  const groups=new Map();
-  list.forEach(s=>{
-    const hay=norm(s.name+' '+s.town);
-    if(!words.every(w=>hay.includes(w))) return;
-    const key=norm(s.name);
-    if(!groups.has(key)) groups.set(key,{name:s.name,town:s.town,codes:[]});
-    groups.get(key).codes.push(s.code);
-  });
-  return Array.from(groups.values()).sort((a,b)=>a.name.localeCompare(b.name)).slice(0,30);
+async function findStops(q){
+  const h=stopById(db.home),bias=h?`&place=${h.lat},${h.lon}`:'';
+  const data=await tJSON(`/v1/geocode?text=${encodeURIComponent(q)}&type=STOP&numResults=12${bias}`,15000);
+  return (Array.isArray(data)?data:[]).filter(m=>m&&m.id&&m.name).map(m=>({id:m.id,name:m.name,town:areaName(m)}));
 }
-async function findStopCodes(name){
-  const list=await loadStopList(),n=norm(name);
-  let m=list.filter(s=>norm(s.name)===n).map(s=>s.code);
-  if(!m.length){const g=searchStops(list,name);if(g.length===1) m=g[0].codes;}
-  return m;
+function pickStop(results,name){
+  const n=norm(name),words=n.split(/[\s,]+/).filter(Boolean);
+  return results.find(r=>norm(r.name)===n)||results.find(r=>words.every(w=>norm(r.name+' '+r.town).includes(w)))||null;
 }
-function parseLocal(s){
-  const m=String(s||'').match(/(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/);
-  if(!m) return null;
-  return new Date(+m[1],+m[2]-1,+m[3],+m[4],+m[5],+(m[6]||0)).getTime();
-}
-function collectPasses(data){
-  const out=[],seen=new Set();
-  const visit=(o,depth)=>{
-    if(!o||typeof o!=='object'||depth>4) return;
-    if(o.Passes&&typeof o.Passes==='object'){
-      Object.keys(o.Passes).forEach(k=>{
-        const p=o.Passes[k];if(!p) return;
-        const id=[p.DataOwnerCode,p.OperationDate,p.LinePlanningNumber,p.JourneyNumber].join('|');
-        const key=id==='|||'?k:id;
-        if(seen.has(key)) return;seen.add(key);
-        const arr=p.JourneyStopType==='LAST';
-        const target=parseLocal(arr?p.TargetArrivalTime:(p.TargetDepartureTime||p.TargetArrivalTime));
-        const exp=parseLocal(arr?p.ExpectedArrivalTime:(p.ExpectedDepartureTime||p.ExpectedArrivalTime))||target;
-        if(!exp) return;
-        const status=String(p.TripStopStatus||'').toUpperCase();
-        const live=status==='DRIVING'||status==='ARRIVED';
-        out.push({line:String(p.LinePublicNumber||p.LinePlanningNumber||'?'),dest:p.DestinationName50||'',time:exp,target:target||exp,delay:live&&target?Math.round((exp-target)/60000):0,status,live,arr});
-      });
-      return;
-    }
-    Object.keys(o).forEach(k=>visit(o[k],depth+1));
-  };
-  visit(data,0);
-  return out.sort((a,b)=>a.time-b.time);
+function parseStopTimes(data){
+  const list=data&&Array.isArray(data.stopTimes)?data.stopTimes:[];
+  return list.map(st=>{
+    const pl=st.place||{};
+    const time=Date.parse(pl.departure||pl.arrival||'');
+    if(!isFinite(time)) return null;
+    let target=Date.parse(pl.scheduledDeparture||pl.scheduledArrival||'');
+    if(!isFinite(target)) target=time;
+    const live=!!st.realTime,cancelled=!!(st.cancelled||st.tripCancelled||pl.cancelled);
+    return {
+      line:String(st.routeShortName||st.tripShortName||st.displayName||'?'),
+      dest:st.headsign||(st.tripTo&&st.tripTo.name)||'',
+      time,target,live,
+      delay:live?Math.round((time-target)/60000):0,
+      status:cancelled?'CANCEL':(live?'DRIVING':'PLANNED'),
+      arr:!pl.departure&&!!pl.arrival,
+      track:pl.track||pl.scheduledTrack||''
+    };
+  }).filter(Boolean).sort((a,b)=>a.time-b.time);
 }
 function homeOnScreen(){return sleepEl.hidden&&alarmEl.hidden&&betweenEl.hidden&&document.visibilityState==='visible';}
 async function fetchLive(){
   if(liveBusy||!db.live.name||!homeOnScreen()) return;
   liveBusy=true;
   try{
-    if(!db.live.codes||!db.live.codes.length){
+    if(!db.live.id){
       if(!liveData) renderLiveList('Looking up your stop…');
-      const codes=await findStopCodes(db.live.name);
-      if(!codes.length){liveData=null;liveErr=`${db.live.name} isn’t in the live feed. Tap Change to search for your stop.`;return;}
-      db.live.codes=codes;save();
+      const pick=pickStop(await findStops(db.live.name),db.live.name);
+      if(!pick){liveData=null;liveErr=`Couldn’t find ${db.live.name}. Tap Change to search for your stop.`;return;}
+      db.live.id=pick.id;db.live.name=pick.name;save();
+      $('#liveStop').textContent=`At ${db.live.name}`;
     }
-    const data=await ovJSON('/stopareacode/'+db.live.codes.map(encodeURIComponent).join(','),12000);
-    liveData=collectPasses(data);liveErr=null;liveAt=Date.now();
+    const data=await tJSON(`/v6/stoptimes?stopId=${encodeURIComponent(db.live.id)}&n=30&withAlerts=false`,15000);
+    liveData=parseStopTimes(data);liveErr=null;liveAt=Date.now();
   }catch(e){
     const why=e&&e.reason?e.reason:'something went wrong';
-    liveErr=liveData?`Couldn’t refresh just now (${why}), so these may be a bit old.`:`Couldn’t load live times because ${why}. It tries again in 30 seconds.`;
+    liveErr=liveData?`Couldn’t refresh just now (${why}), so these may be a bit old.`:`Couldn’t load live times because ${why}. It tries again in a minute.`;
   }finally{
     liveBusy=false;renderLiveList();
   }
@@ -597,12 +568,12 @@ function renderLiveList(loadingText){
     meta.textContent='';return;
   }
   const now=Date.now(),lines=liveLines();
-  let list=liveData.filter(p=>p.time>=now-60000&&p.status!=='PASSED');
+  let list=liveData.filter(p=>p.time>=now-60000);
   if(liveFilter==='mine'&&lines.length) list=list.filter(p=>lines.includes(p.line));
   else if(liveFilter!=='mine'&&liveFilter!=='all') list=list.filter(p=>p.line===liveFilter);
   list=list.slice(0,12);
   el.innerHTML=list.length?list.map(busRow).join(''):'<p class="empty">No buses coming up for this choice right now.</p>';
-  meta.textContent=liveErr||(liveAt?`Updated at ${hhmm(liveAt)}. Refreshes every 30 seconds.`:'');
+  meta.textContent=liveErr||(liveAt?`Updated at ${hhmm(liveAt)}. Refreshes every minute.`:'');
 }
 function busRow(p){
   const mins=Math.round((p.time-Date.now())/60000);
@@ -614,8 +585,9 @@ function busRow(p){
     else if(p.delay<=-1){st=`${-p.delay} min early`;cls='late';}
     else{st='on time';cls='ok';}
     if(p.live&&Math.abs(p.delay)>=1) st+=`, planned ${hhmm(p.target)}`;
-    when=p.status==='ARRIVED'?'at the stop':mins<=0?'now':`in ${mins} min`;
+    when=mins<=0?'now':`in ${mins} min`;
   }
+  if(p.track) st+=`, platform ${p.track}`;
   const label=cap((p.arr?'arrives, ':'')+st);
   return `<div class="bus"><span class="line-no">${esc(p.line)}</span><span class="bus-dest">${esc(p.dest)}</span><span class="bus-time${p.status==='CANCEL'?' gone':''}">${hhmm(p.time)}</span><span class="bus-status ${cls}">${esc(label)}</span><span class="bus-when">${esc(when)}</span></div>`;
 }
@@ -855,10 +827,10 @@ function openLiveSettings(){sheetState={type:'live',query:'',results:null,search
 function renderLiveSettings(){
   const st=sheetState;
   let res='';
-  if(st.searching) res='<p class="hint">Searching… The first search downloads the list of all stops, so it can take a few seconds.</p>';
+  if(st.searching) res='<p class="hint">Searching…</p>';
   else if(st.error) res=`<p class="warn">${esc(st.error)}</p>`;
   else if(st.results){
-    res=st.results.length?st.results.map((g,i)=>`<button type="button" class="result" data-act="live-pick" data-i="${i}" aria-pressed="${norm(g.name)===norm(db.live.name)}"><span>${esc(g.name)}</span>${g.town?`<small>${esc(g.town.replace(/(^|[\s-])(\S)/g,(m,a,b)=>a+b.toUpperCase()))}</small>`:''}</button>`).join(''):'<p class="hint">No stops match. Try only the town, or only the stop name.</p>';
+    res=st.results.length?st.results.map((g,i)=>`<button type="button" class="result" data-act="live-pick" data-i="${i}" aria-pressed="${g.id===db.live.id}"><span>${esc(g.name)}</span>${g.town?`<small>${esc(g.town)}</small>`:''}</button>`).join(''):'<p class="hint">No stops match. Try the town and stop name, like “Veghel Busstation”.</p>';
   }
   sheetBody.innerHTML=`<h3 class="sheet-title" id="sheetTitle" tabindex="-1">Live bus times</h3>
   <div class="field"><span class="field-label">Stop</span><p class="loc-readout">${esc(db.live.name||'None chosen yet')}</p></div>
@@ -866,8 +838,8 @@ function renderLiveSettings(){
   <div class="results">${res}</div>
   <label class="field"><span class="field-label">Your lines</span><input type="text" id="lLines" value="${esc(st.linesText)}" placeholder="305, 306, 158" autocomplete="off"></label>
   <p class="hint">Separate line numbers with commas. Leave it empty to see every bus.</p>
-  <label class="field"><span class="field-label">Own relay address (optional)</span><input type="text" id="lProxy" value="${esc(st.proxyText)}" placeholder="Leave empty unless asked" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
-  <p class="hint">Only fill this in if you set up your own relay. The bus data address is added to the end.</p>
+  <label class="field"><span class="field-label">Own relay address (optional)</span><input type="text" id="lProxy" value="${esc(st.proxyText)}" placeholder="${esc(RELAY)}" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+  <p class="hint">Only needed if live times say they’re blocked. The bus data address is added to the end.</p>
   <button type="button" class="btn primary big" data-act="live-save">Done</button>`;
 }
 async function liveSearch(){
@@ -875,7 +847,7 @@ async function liveSearch(){
   const q=($('#lQuery')||{}).value||st.query;st.query=q;
   if(!q.trim()) return;
   st.searching=true;st.error=null;renderLiveSettings();
-  try{const list=await loadStopList();st.results=searchStops(list,q);}
+  try{st.results=await findStops(q);}
   catch(e){st.results=null;st.error=`Couldn’t reach the stop list because ${e&&e.reason?e.reason:'something went wrong'}. Try again in a moment.`;}
   st.searching=false;
   if(sheetState===st) renderLiveSettings();
@@ -883,8 +855,8 @@ async function liveSearch(){
 function liveSave(){
   const st=sheetState;
   db.live.lines=String(st.linesText||'').split(/[,\s]+/).map(s=>s.trim()).filter(Boolean);
-  const px=String(st.proxyText||'').trim();
-  if(px!==(db.live.proxy||'')){db.live.proxy=px;db.live.route=null;liveData=null;liveErr=null;}
+  const px=String(st.proxyText||'').trim()||RELAY;
+  if(px!==(db.live.proxy||'')){db.live.proxy=px;viaRelay=false;liveData=null;liveErr=null;}
   save();liveFilter='mine';closeSheet();renderLiveShell();fetchLive();
 }
 
@@ -1319,7 +1291,7 @@ document.addEventListener('click',e=>{
     case 'live-search':liveSearch();break;
     case 'live-pick':{
       const g=sheetState.results[+el.dataset.i];if(!g) break;
-      db.live.name=g.name;db.live.codes=g.codes;save();liveData=null;liveErr=null;liveAt=null;
+      db.live.name=g.name;db.live.id=g.id;save();liveData=null;liveErr=null;liveAt=null;
       renderLiveSettings();renderLiveShell();
       break;
     }
@@ -1377,7 +1349,7 @@ if(!db.settings.prepSeen) prep.open=true;
 prep.addEventListener('toggle',()=>{if(!prep.open&&!db.settings.prepSeen){db.settings.prepSeen=true;save();}});
 renderHome();
 fetchLive();
-setInterval(()=>{if(homeOnScreen()){fetchLive();}},30000);
+setInterval(()=>{if(homeOnScreen()){fetchLive();}},60000);
 })();
 </script>
 </body>
