@@ -107,8 +107,12 @@ svg{display:block}
 .bus-time{font-family:var(--font-display);font-weight:800;font-size:22px;line-height:1.1;text-align:right;font-variant-numeric:tabular-nums}
 .bus-time.gone{text-decoration:line-through;color:var(--muted)}
 .bus-status{font-size:14px;color:var(--muted);min-width:0}
-.bus-status.late{color:var(--warn);font-weight:700}
-.bus-status.ok{color:var(--ok);font-weight:700}
+.bus-status.late,.bus-status .late{color:var(--warn);font-weight:700}
+.bus-status.ok,.bus-status .ok{color:var(--ok);font-weight:700}
+.bus-stop{color:var(--ink);font-weight:700}
+.live-stops{margin:0 0 4px}
+.live-stop-row{display:flex;justify-content:space-between;align-items:center;gap:12px;border-top:1px solid var(--line)}
+.live-stop-row:last-child{border-bottom:1px solid var(--line)}
 .bus-when{font-size:14px;color:var(--muted);text-align:right;white-space:nowrap}
 .live-meta{margin-top:8px}
 .attr{font-size:13px;margin-top:4px}
@@ -264,6 +268,7 @@ button.pill{cursor:pointer}
   <section>
     <div class="sec-head"><h2 class="sec">Live bus times</h2><button type="button" class="text-btn" data-act="live-settings">Change</button></div>
     <p class="commute-sub" id="liveStop"></p>
+    <div class="chips" id="liveStopChips" hidden></div>
     <div class="chips" id="liveChips"></div>
     <div class="list" id="liveList"></div>
     <p class="hint live-meta" id="liveMeta"></p>
@@ -360,7 +365,8 @@ const PRESET_ROUTES=[
 ];
 const DEFAULT_SETTINGS={trainKm:5,busKm:2,arrivalRing:true,sound:'beeps',music:'pause',prepSeen:false};
 const RELAY='https://haltewekker-relay.tsfaw1.workers.dev/?url=';
-const DEFAULT_LIVE={name:'Veghel, Busstation',id:null,lines:['305','306','158'],proxy:RELAY};
+const DEFAULT_LIVE={stops:[{name:'Veghel, Busstation',id:null},{name:'Veghel, Bolkenplein',id:null}],lines:['305','306','158'],proxy:RELAY};
+const MAX_LIVE=3;
 const ARRIVE_M=450;
 const KEY='haltewekker:v2',OLD_KEY='haltewekker:v1';
 
@@ -371,8 +377,15 @@ function load(){
     if(raw){
       const d=JSON.parse(raw),f=fresh();
       if(d&&Array.isArray(d.stops)&&Array.isArray(d.routes)){
-        const live=Object.assign(f.live,d.live||{});
-        if(live.codes!==undefined){delete live.codes;delete live.route;live.id=null;}
+        const dl=d.live||{},live=Object.assign(f.live,dl);
+        // Older versions kept one stop. Turn it into a list, and add Bolkenplein next to the old default stop.
+        if(!Array.isArray(dl.stops)&&dl.name!==undefined){
+          const one=dl.name?[{name:dl.name,id:dl.codes!==undefined?null:(dl.id||null)}]:[];
+          if(one.length&&one[0].name.toLowerCase()==='veghel, busstation') one.push({name:'Veghel, Bolkenplein',id:null});
+          live.stops=one;
+        }
+        live.stops=(live.stops||[]).filter(x=>x&&x.name).slice(0,MAX_LIVE);
+        delete live.name;delete live.id;delete live.codes;delete live.route;
         if(!String(live.proxy||'').trim()) live.proxy=RELAY;
         return {stops:d.stops,home:d.home!==undefined?d.home:f.home,school:d.school!==undefined?d.school:f.school,routes:d.routes,kmMem:d.kmMem||{},settings:Object.assign(f.settings,d.settings||{}),live};
       }
@@ -472,8 +485,18 @@ function stopRow(s){
 /* ---------- Live bus times (Transitous) ---------- */
 // Transitous is a free, volunteer-run service for open-source, non-commercial apps. Keep requests light.
 const TAPI='https://api.transitous.org/api';
-let liveFilter='mine',liveBusy=false,liveData=null,liveErr=null,liveAt=null,viaRelay=false;
+let liveFilter='mine',liveStopFilter='all',liveBusy=false,liveData=null,liveErr=null,liveAt=null,viaRelay=false;
 const liveLines=()=>(db.live.lines||[]).map(String);
+const liveStops=()=>db.live.stops||[];
+const shortStop=n=>String(n||'').replace(/^[^,]+,\s*/,'')||String(n||'');
+const joinAnd=a=>a.length<2?(a[0]||''):a.slice(0,-1).join(', ')+' and '+a[a.length-1];
+function liveTitle(){
+  const st=liveStops();
+  if(st.length<2) return st.length?`At ${st[0].name}`:'';
+  const towns=st.map(x=>(x.name.match(/^([^,]+),/)||[])[1]);
+  if(towns[0]&&towns.every(t=>t===towns[0])) return `${towns[0]}: ${joinAnd(st.map(x=>shortStop(x.name)))}`;
+  return `At ${joinAnd(st.map(x=>x.name))}`;
+}
 const norm=s=>String(s||'').toLowerCase().replace(/[’`]/g,"'").replace(/\s+/g,' ').trim();
 
 async function getJSON(url,ms){
@@ -532,27 +555,45 @@ function parseStopTimes(data){
 }
 function homeOnScreen(){return sleepEl.hidden&&alarmEl.hidden&&betweenEl.hidden&&document.visibilityState==='visible';}
 async function fetchLive(){
-  if(liveBusy||!db.live.name||!homeOnScreen()) return;
+  const stops=liveStops();
+  if(liveBusy||!stops.length||!homeOnScreen()) return;
   liveBusy=true;
+  if(!liveData) renderLiveList(stops.some(x=>!x.id)?'Looking up your stops…':'');
   try{
-    if(!db.live.id){
-      if(!liveData) renderLiveList('Looking up your stop…');
-      const pick=pickStop(await findStops(db.live.name),db.live.name);
-      if(!pick){liveData=null;liveErr=`Couldn’t find ${db.live.name}. Tap Change to search for your stop.`;return;}
-      db.live.id=pick.id;db.live.name=pick.name;save();
-      $('#liveStop').textContent=`At ${db.live.name}`;
+    const res=await Promise.all(stops.map(async x=>{
+      try{
+        if(!x.id){
+          const pick=pickStop(await findStops(x.name),x.name);
+          if(!pick) return {x,notFound:true};
+          x.id=pick.id;x.name=pick.name;save();
+        }
+        const data=await tJSON(`/v6/stoptimes?stopId=${encodeURIComponent(x.id)}&n=30&withAlerts=false`,15000);
+        return {x,list:parseStopTimes(data).map(p=>Object.assign(p,{stop:x.id,stopName:shortStop(x.name)}))};
+      }catch(e){return {x,err:e&&e.reason?e.reason:'something went wrong'};}
+    }));
+    const ok=res.filter(r=>r.list),bad=res.filter(r=>!r.list);
+    const badText=bad.map(r=>r.notFound?`Couldn’t find ${r.x.name}. Tap Change to search for it.`:`Couldn’t refresh ${shortStop(r.x.name)} just now (${r.err}).`).join(' ');
+    if(ok.length){
+      let merged=[].concat(...ok.map(r=>r.list));
+      // Keep the last times we had for a stop that failed this time.
+      if(liveData) merged=merged.concat(liveData.filter(p=>bad.some(r=>r.x.id&&r.x.id===p.stop)));
+      liveData=merged.sort((p,q)=>p.time-q.time);liveAt=Date.now();liveErr=bad.length?badText:null;
+    }else if(bad.every(r=>r.notFound)){liveData=null;liveErr=badText;}
+    else{
+      const why=(bad.find(r=>r.err)||{}).err;
+      liveErr=liveData?`Couldn’t refresh just now (${why}), so these may be a bit old.`:`Couldn’t load live times because ${why}. It tries again in a minute.`;
     }
-    const data=await tJSON(`/v6/stoptimes?stopId=${encodeURIComponent(db.live.id)}&n=30&withAlerts=false`,15000);
-    liveData=parseStopTimes(data);liveErr=null;liveAt=Date.now();
-  }catch(e){
-    const why=e&&e.reason?e.reason:'something went wrong';
-    liveErr=liveData?`Couldn’t refresh just now (${why}), so these may be a bit old.`:`Couldn’t load live times because ${why}. It tries again in a minute.`;
   }finally{
-    liveBusy=false;renderLiveList();
+    liveBusy=false;renderLiveShell();
   }
 }
 function renderLiveShell(){
-  $('#liveStop').textContent=db.live.name?`At ${db.live.name}`:'';
+  $('#liveStop').textContent=liveTitle();
+  const stops=liveStops();
+  if(liveStopFilter!=='all'&&!stops.some(x=>x.id===liveStopFilter)) liveStopFilter='all';
+  const sc=stops.length>1?[['all',stops.length===2?'Both stops':'All stops']].concat(stops.filter(x=>x.id).map(x=>[x.id,shortStop(x.name)])):[];
+  $('#liveStopChips').innerHTML=sc.map(c=>`<button type="button" class="chip" data-act="live-stopfilter" data-v="${esc(c[0])}" aria-pressed="${c[0]===liveStopFilter}">${esc(c[1])}</button>`).join('');
+  $('#liveStopChips').hidden=!sc.length;
   const lines=liveLines();
   if(liveFilter!=='mine'&&liveFilter!=='all'&&!lines.includes(liveFilter)) liveFilter='mine';
   const chips=lines.length?[['mine','My lines']].concat(lines.map(l=>[l,l]),[['all','All buses']]):[];
@@ -562,13 +603,14 @@ function renderLiveShell(){
 }
 function renderLiveList(loadingText){
   const el=$('#liveList'),meta=$('#liveMeta');
-  if(!db.live.name){el.innerHTML='<p class="empty">Choose a stop to see live bus times.</p>';meta.textContent='';return;}
+  if(!liveStops().length){el.innerHTML='<p class="empty">Choose a stop to see live bus times.</p>';meta.textContent='';return;}
   if(!liveData){
     el.innerHTML=`<p class="empty">${esc(liveErr||loadingText||'Loading live times…')}</p>`+(liveErr&&!liveBusy?'<div class="row"><button type="button" class="row-main" data-act="live-retry"><span class="row-title">Try again</span></button></div>':'');
     meta.textContent='';return;
   }
   const now=Date.now(),lines=liveLines();
   let list=liveData.filter(p=>p.time>=now-60000);
+  if(liveStopFilter!=='all') list=list.filter(p=>p.stop===liveStopFilter);
   if(liveFilter==='mine'&&lines.length) list=list.filter(p=>lines.includes(p.line));
   else if(liveFilter!=='mine'&&liveFilter!=='all') list=list.filter(p=>p.line===liveFilter);
   list=list.slice(0,12);
@@ -589,7 +631,9 @@ function busRow(p){
   }
   if(p.track) st+=`, platform ${p.track}`;
   const label=cap((p.arr?'arrives, ':'')+st);
-  return `<div class="bus"><span class="line-no">${esc(p.line)}</span><span class="bus-dest">${esc(p.dest)}</span><span class="bus-time${p.status==='CANCEL'?' gone':''}">${hhmm(p.time)}</span><span class="bus-status ${cls}">${esc(label)}</span><span class="bus-when">${esc(when)}</span></div>`;
+  const showStop=liveStops().length>1&&liveStopFilter==='all'&&p.stopName;
+  const status=showStop?`<span class="bus-status"><span class="bus-stop">${esc(p.stopName)}</span> · <span class="${cls}">${esc(label)}</span></span>`:`<span class="bus-status ${cls}">${esc(label)}</span>`;
+  return `<div class="bus"><span class="line-no">${esc(p.line)}</span><span class="bus-dest">${esc(p.dest)}</span><span class="bus-time${p.status==='CANCEL'?' gone':''}">${hhmm(p.time)}</span>${status}<span class="bus-when">${esc(when)}</span></div>`;
 }
 
 /* ---------- Sheet ---------- */
@@ -678,7 +722,7 @@ function renderSettings(){
   sheetBody.innerHTML=`<h3 class="sheet-title" id="sheetTitle" tabindex="-1">Settings</h3>
   <div class="field"><span class="field-label">Your stops</span>
     <button type="button" class="btn secondary" data-act="commute">Home, school and routes</button>
-    <button type="button" class="btn secondary" data-act="live-settings">Live bus times stop</button>
+    <button type="button" class="btn secondary" data-act="live-settings">Live bus times stops</button>
   </div>
   <div class="field"><span class="field-label">If music is playing when it rings</span>${seg('music',[['pause','Pause it'],['mix','Keep it playing']],S.music)}
     <p class="hint">${S.music==='mix'?'The alarm plays over your music. Your phone mustn’t be in silent mode, or you won’t hear it.':'The loudest option, and it works in silent mode. To restart your music afterwards, press play on your earbuds.'}</p>
@@ -830,11 +874,13 @@ function renderLiveSettings(){
   if(st.searching) res='<p class="hint">Searching…</p>';
   else if(st.error) res=`<p class="warn">${esc(st.error)}</p>`;
   else if(st.results){
-    res=st.results.length?st.results.map((g,i)=>`<button type="button" class="result" data-act="live-pick" data-i="${i}" aria-pressed="${g.id===db.live.id}"><span>${esc(g.name)}</span>${g.town?`<small>${esc(g.town)}</small>`:''}</button>`).join(''):'<p class="hint">No stops match. Try the town and stop name, like “Veghel Busstation”.</p>';
+    res=st.results.length?st.results.map((g,i)=>`<button type="button" class="result" data-act="live-pick" data-i="${i}" aria-pressed="${liveStops().some(x=>x.id===g.id)}"><span>${esc(g.name)}</span>${g.town?`<small>${esc(g.town)}</small>`:''}</button>`).join(''):'<p class="hint">No stops match. Try the town and stop name, like “Veghel Busstation”.</p>';
   }
+  const stops=liveStops();
+  const stopList=stops.length?`<div class="live-stops">${stops.map((x,i)=>`<div class="live-stop-row"><span>${esc(x.name)}</span><button type="button" class="text-btn" data-act="live-remove" data-i="${i}" aria-label="Remove ${esc(x.name)}">Remove</button></div>`).join('')}</div>`:'<p class="loc-readout">None chosen yet</p>';
   sheetBody.innerHTML=`<h3 class="sheet-title" id="sheetTitle" tabindex="-1">Live bus times</h3>
-  <div class="field"><span class="field-label">Stop</span><p class="loc-readout">${esc(db.live.name||'None chosen yet')}</p></div>
-  <div class="field"><span class="field-label">Find a stop</span><div class="search-row"><input type="search" id="lQuery" value="${esc(st.query)}" placeholder="e.g. Heeswijk-Dinther Laag Beugt" autocomplete="off" enterkeyhint="search"><button type="button" class="btn secondary inline" data-act="live-search">Search</button></div></div>
+  <div class="field"><span class="field-label">Your stops</span>${stopList}<p class="hint">Departures from all of these show together. You can pick up to ${MAX_LIVE}.</p></div>
+  <div class="field"><span class="field-label">Add a stop</span><div class="search-row"><input type="search" id="lQuery" value="${esc(st.query)}" placeholder="e.g. Veghel Bolkenplein" autocomplete="off" enterkeyhint="search"><button type="button" class="btn secondary inline" data-act="live-search">Search</button></div></div>
   <div class="results">${res}</div>
   <label class="field"><span class="field-label">Your lines</span><input type="text" id="lLines" value="${esc(st.linesText)}" placeholder="305, 306, 158" autocomplete="off"></label>
   <p class="hint">Separate line numbers with commas. Leave it empty to see every bus.</p>
@@ -1291,10 +1337,20 @@ document.addEventListener('click',e=>{
     case 'live-search':liveSearch();break;
     case 'live-pick':{
       const g=sheetState.results[+el.dataset.i];if(!g) break;
-      db.live.name=g.name;db.live.id=g.id;save();liveData=null;liveErr=null;liveAt=null;
+      const stops=db.live.stops=liveStops(),i=stops.findIndex(x=>x.id===g.id);
+      if(i>=0) stops.splice(i,1);
+      else if(stops.length>=MAX_LIVE){toast(`You can pick up to ${MAX_LIVE} stops. Remove one first.`);break;}
+      else stops.push({name:g.name,id:g.id});
+      save();liveData=null;liveErr=null;liveAt=null;
       renderLiveSettings();renderLiveShell();
       break;
     }
+    case 'live-remove':{
+      liveStops().splice(+el.dataset.i,1);save();liveData=null;liveErr=null;liveAt=null;
+      renderLiveSettings();renderLiveShell();
+      break;
+    }
+    case 'live-stopfilter':liveStopFilter=el.dataset.v;renderLiveShell();break;
     case 'live-save':liveSave();break;
     case 'next-leg':nextLeg();break;
     case 'end-trip':endTrip();break;
