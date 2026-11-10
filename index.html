@@ -11,7 +11,15 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&display=swap">
 <style>
+@property --bg{syntax:'<color>';inherits:true;initial-value:#EEF0F7}
+@property --hue-top{syntax:'<color>';inherits:true;initial-value:#D3DCFF}
+@property --dir-a{syntax:'<color>';inherits:true;initial-value:#4655C4}
+@property --dir-b{syntax:'<color>';inherits:true;initial-value:#2D3A8F}
+@property --dusk{syntax:'<color>';inherits:true;initial-value:#2D3A8F}
+@property --line{syntax:'<color>';inherits:true;initial-value:#D7DBE8}
 :root{
+  --hue-top:#D3DCFF;--dir-a:#4655C4;--dir-b:#2D3A8F;
+  transition:--bg .7s ease,--hue-top .7s ease,--dir-a .7s ease,--dir-b .7s ease,--dusk .7s ease,--line .7s ease;
   --bg:#EEF0F7;
   --surface:#FFFFFF;
   --ink:#151A30;
@@ -34,18 +42,32 @@
   :root:not([data-theme="light"]){
     --bg:#131838; --surface:#1C2250; --ink:#EDEFF9; --muted:#A4AAC6; --line:#2F3770;
     --dusk:#9AA6FF; --dusk-ink:#10153A; --dawn:#FFB25C; --warn:#FFB57E; --warn-bg:#3B2B2A; --ok:#72D3A2;
+    --hue-top:#24317F; --dir-a:#3E4BB0; --dir-b:#262F7E;
     color-scheme:dark;
   }
 }
 :root[data-theme="dark"]{
   --bg:#131838; --surface:#1C2250; --ink:#EDEFF9; --muted:#A4AAC6; --line:#2F3770;
   --dusk:#9AA6FF; --dusk-ink:#10153A; --dawn:#FFB25C; --warn:#FFB57E; --warn-bg:#3B2B2A; --ok:#72D3A2;
+  --hue-top:#24317F; --dir-a:#3E4BB0; --dir-b:#262F7E;
   color-scheme:dark;
+}
+/* Going home: a warm sunset hue instead of the morning blue */
+:root[data-dir="back"]{
+  --bg:#F7EEEA; --line:#EBD8D2; --muted:#6E5960; --dusk:#9A3357; --hue-top:#FBCDB9; --dir-a:#D45F45; --dir-b:#9A3357;
+}
+@media (prefers-color-scheme: dark){
+  :root[data-dir="back"]:not([data-theme="light"]){
+    --bg:#1F1423; --surface:#2C1D31; --line:#4A3150; --muted:#C2A9B6; --dusk:#FF9DBA; --dusk-ink:#2B0E1C; --hue-top:#4D2036; --dir-a:#B5503F; --dir-b:#7C2850;
+  }
+}
+:root[data-theme="dark"][data-dir="back"]{
+  --bg:#1F1423; --surface:#2C1D31; --line:#4A3150; --muted:#C2A9B6; --dusk:#FF9DBA; --dusk-ink:#2B0E1C; --hue-top:#4D2036; --dir-a:#B5503F; --dir-b:#7C2850;
 }
 *,*::before,*::after{box-sizing:inherit}
 html{scroll-padding-top:env(safe-area-inset-top,0px);-webkit-text-size-adjust:100%}
 html,body{min-height:100%}
-body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font-body);font-size:17px;line-height:1.45;-webkit-font-smoothing:antialiased}
+body{margin:0;background:linear-gradient(180deg,var(--hue-top) 0,var(--bg) 520px) no-repeat,var(--bg);color:var(--ink);font-family:var(--font-body);font-size:17px;line-height:1.45;-webkit-font-smoothing:antialiased}
 [hidden]{display:none !important}
 button{font:inherit;color:inherit;-webkit-tap-highlight-color:transparent}
 :focus-visible{outline:3px solid var(--dawn);outline-offset:2px}
@@ -95,6 +117,41 @@ svg{display:block}
 .text-btn{background:none;border:0;color:var(--dusk);font-weight:700;padding:12px 2px;cursor:pointer}
 .foot{color:var(--muted);font-size:15px;margin:30px 0 0;max-width:36ch}
 
+/* Direction switch */
+.dir-toggle{width:100%;display:flex;align-items:center;gap:14px;text-align:left;border:0;border-radius:22px;padding:18px 18px 18px 22px;margin:0 0 8px;background:linear-gradient(135deg,var(--dir-a),var(--dir-b));color:#fff;cursor:pointer;box-shadow:0 10px 26px -14px var(--dir-b);transition:transform .15s}
+.dir-toggle:active{transform:scale(.985)}
+.dir-text{flex:1;min-width:0;display:flex;flex-direction:column}
+.dir-kicker{font-size:13px;text-transform:uppercase;letter-spacing:.09em;font-weight:700;opacity:.85}
+.dir-title{font-family:var(--font-display);font-weight:800;font-size:32px;line-height:1.08;letter-spacing:-0.02em}
+.dir-sub{font-size:15px;opacity:.92;margin-top:2px}
+.dir-swap{width:50px;height:50px;flex:none;border-radius:50%;background:rgba(255,255,255,.2);display:grid;place-items:center;transition:transform .5s ease}
+.dir-swap svg{width:24px;height:24px}
+:root[data-dir="back"] .dir-swap{transform:rotate(180deg)}
+
+/* Fold-out panels */
+.drops{display:flex;flex-direction:column;gap:10px}
+.drop{background:var(--surface);border:1px solid var(--line);border-radius:16px;overflow:hidden}
+.drop+.drop.solo{margin-top:10px}
+.drop>summary{list-style:none;display:flex;align-items:center;gap:12px;padding:12px 16px;min-height:60px;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.drop>summary::-webkit-details-marker{display:none}
+.drop>summary::after{content:"";flex:none;width:8px;height:8px;margin:0 3px 4px 2px;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);transform:rotate(45deg);transition:transform .2s}
+.drop[open]>summary::after{transform:translateY(5px) rotate(225deg)}
+.drop-icon{width:36px;height:36px;flex:none;border-radius:11px;background:color-mix(in srgb,var(--dusk) 13%,transparent);color:var(--dusk);display:grid;place-items:center}
+.drop-icon svg{width:20px;height:20px}
+.drop-title{flex:1;min-width:0;font-weight:700}
+.drop-next{font-size:15px;color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}
+.drop-body{border-top:1px solid var(--line)}
+.drop-body.pad{padding:2px 16px 14px}
+.drop-body>.list{border:0;border-radius:0;background:none}
+.drop-tools{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:4px 16px 0}
+.drop-tools .commute-sub{margin:0}
+.drop-tools+.list{border-top:1px solid var(--line);margin-top:4px}
+.drop-body .chips{padding:6px 16px 8px}
+.drop-body>.hint{margin:0;padding:10px 16px 12px;border-top:1px solid var(--line)}
+.drop-body>.hint:empty{display:none}
+.sec.solo-h{margin:30px 0 10px}
+.bus-extra{grid-column:2/4;font-size:14px;color:var(--muted)}
+
 /* Live bus times */
 .chips{display:flex;gap:8px;overflow-x:auto;padding:2px 0 10px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
 .chips::-webkit-scrollbar{display:none}
@@ -103,7 +160,7 @@ svg{display:block}
 .bus{display:grid;grid-template-columns:auto 1fr auto;column-gap:12px;row-gap:2px;align-items:center;padding:12px 16px}
 .bus+.bus{border-top:1px solid var(--line)}
 .line-no{grid-row:span 2;min-width:48px;height:32px;padding:0 8px;border-radius:8px;background:var(--dusk);color:var(--dusk-ink);font-weight:700;display:grid;place-items:center;font-variant-numeric:tabular-nums}
-.bus-dest{font-weight:700;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bus-dest{font-weight:700;min-width:0;overflow-wrap:anywhere}
 .bus-time{font-family:var(--font-display);font-weight:800;font-size:22px;line-height:1.1;text-align:right;font-variant-numeric:tabular-nums}
 .bus-time.gone{text-decoration:line-through;color:var(--muted)}
 .bus-status{font-size:14px;color:var(--muted);min-width:0}
@@ -248,37 +305,64 @@ button.pill{cursor:pointer}
     </button>
   </header>
 
-  <details class="prep" id="prep">
-    <summary>Before you nap</summary>
+  <button type="button" class="dir-toggle" data-act="dir-toggle" id="dirToggle">
+    <span class="dir-text"><span class="dir-kicker">Going</span><span class="dir-title" id="dirTitle"></span><span class="dir-sub" id="dirSub"></span></span>
+    <span class="dir-swap" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7.5 19V5M7.5 5 4 8.5M7.5 5 11 8.5M16.5 5v14M16.5 19 13 15.5M16.5 19 20 15.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+  </button>
+
+  <section>
+    <div class="sec-head"><h2 class="sec">Wake me up</h2><button type="button" class="text-btn" data-act="commute">Edit</button></div>
+    <div class="list" id="routes"></div>
+  </section>
+
+  <section>
+    <h2 class="sec solo-h">Live times</h2>
+    <div class="drops">
+      <details class="drop" data-panel="board">
+        <summary><span class="drop-icon" data-icon="bus"></span><span class="drop-title">Bus in Veghel</span><span class="drop-next" id="next-board"></span></summary>
+        <div class="drop-body">
+          <div class="drop-tools"><p class="commute-sub" id="liveStop"></p><button type="button" class="text-btn" data-act="live-settings">Change</button></div>
+          <div class="chips" id="liveStopChips" hidden></div>
+          <div class="chips" id="liveChips"></div>
+          <div class="list" id="liveList"></div>
+          <p class="hint" id="liveMeta"></p>
+        </div>
+      </details>
+      <details class="drop" data-panel="vhome">
+        <summary><span class="drop-icon" data-icon="bus"></span><span class="drop-title">Bus to Veghel</span><span class="drop-next" id="next-vhome"></span></summary>
+        <div class="drop-body"><div class="list" id="pl-vhome"></div><p class="hint" id="pm-vhome"></p></div>
+      </details>
+      <details class="drop" data-panel="train">
+        <summary><span class="drop-icon" data-icon="train"></span><span class="drop-title" id="t-train"></span><span class="drop-next" id="next-train"></span></summary>
+        <div class="drop-body"><div class="list" id="pl-train"></div><p class="hint" id="pm-train"></p></div>
+      </details>
+      <details class="drop" data-panel="buas">
+        <summary><span class="drop-icon" data-icon="bus"></span><span class="drop-title" id="t-buas"></span><span class="drop-next" id="next-buas"></span></summary>
+        <div class="drop-body"><div class="list" id="pl-buas"></div><p class="hint" id="pm-buas"></p></div>
+      </details>
+    </div>
+    <p class="hint attr">Live times from <a href="https://transitous.org/sources/" target="_blank" rel="noopener">Transitous</a>, with map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors.</p>
+  </section>
+
+  <h2 class="sec solo-h">More</h2>
+  <details class="drop" data-panel="stops">
+    <summary><span class="drop-title">Wake me at a single stop</span></summary>
+    <div class="drop-body">
+      <div class="drop-tools"><p class="commute-sub">For trips without a route.</p><button type="button" class="text-btn" data-act="add-stop">Add a stop</button></div>
+      <div class="list" id="stops"></div>
+    </div>
+  </details>
+  <details class="drop solo" id="prep">
+    <summary><span class="drop-title">Before you nap</span></summary>
+    <div class="drop-body pad">
     <ul class="checks">
       <li>Open this page in Safari and leave it on screen. If you lock the phone or switch apps, it can’t follow you.</li>
       <li>Turn the volume up or wear earbuds. A web page can’t make an iPhone vibrate, so the sound is what wakes you.</li>
       <li>Switch off Low Power Mode and plug in if you can. Turn brightness down in Control Center; the sleep screen is dark anyway.</li>
       <li>Run the test alarm once, in Settings.</li>
     </ul>
+    </div>
   </details>
-
-  <section>
-    <div class="sec-head"><h2 class="sec">Your commute</h2><button type="button" class="text-btn" data-act="commute">Edit</button></div>
-    <div class="dir-seg" id="dirSeg"></div>
-    <p class="commute-sub" id="commuteSub"></p>
-    <div class="list" id="routes"></div>
-  </section>
-
-  <section>
-    <div class="sec-head"><h2 class="sec">Live bus times</h2><button type="button" class="text-btn" data-act="live-settings">Change</button></div>
-    <p class="commute-sub" id="liveStop"></p>
-    <div class="chips" id="liveStopChips" hidden></div>
-    <div class="chips" id="liveChips"></div>
-    <div class="list" id="liveList"></div>
-    <p class="hint live-meta" id="liveMeta"></p>
-    <p class="hint attr">Live times from <a href="https://transitous.org/sources/" target="_blank" rel="noopener">Transitous</a>, with map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors.</p>
-  </section>
-
-  <section>
-    <div class="sec-head"><h2 class="sec">Single stop</h2><button type="button" class="text-btn" data-act="add-stop">Add a stop</button></div>
-    <div class="list" id="stops"></div>
-  </section>
 
   <p class="foot">The alarm works with your phone’s GPS, so delays and detours don’t throw it off. Questions or problems? <a href="https://github.com/kupperma/Halte-wekker" target="_blank" rel="noopener">github.com/kupperma/Halte-wekker</a></p>
 </main>
@@ -455,17 +539,29 @@ function parseCoords(s){
 }
 
 /* ---------- Home ---------- */
-let commuteDir=new Date().getHours()<12?'out':'back';
-function renderHome(){renderCommute();renderStops();renderLiveShell();}
+const autoDir=()=>new Date().getHours()<12?'out':'back';
+// A direction you picked yourself sticks for 3 hours, then it follows the clock again.
+let commuteDir=(db.settings.dirAt&&Date.now()-db.settings.dirAt<3*3600e3&&/^(out|back)$/.test(db.settings.dir))?db.settings.dir:autoDir();
+function renderHome(){renderCommute();renderStops();renderLiveShell();applyDir();}
+function applyDir(){
+  const out=commuteDir==='out',h=stopById(db.home),sc=stopById(db.school);
+  const hn=h?(h.short||h.name):'Home',sn=sc?(sc.short||sc.name):'School';
+  document.documentElement.dataset.dir=commuteDir;
+  $('#dirTitle').textContent=out?`To ${sn}`:'Home';
+  $('#dirSub').textContent=`${out?hn:sn} → ${out?sn:hn} · tap to switch`;
+  $('#dirToggle').setAttribute('aria-label',out?`Going to ${sn}. Tap to switch to going home.`:`Going home. Tap to switch to going to ${sn}.`);
+  $('#t-train').textContent=out?`Train to ${PL.bd.short}`:'Train home';
+  $('#t-buas').textContent=out?'Bus to BUas':'Bus to Breda station';
+  const order=panelsFor(commuteDir);
+  document.querySelectorAll('.drops>.drop').forEach(d=>{const i=order.indexOf(d.dataset.panel);d.hidden=i<0;d.style.order=i;});
+  order.forEach(p=>{if(p!=='board') renderPlan(p,commuteDir);});
+}
 function renderCommute(){
   const h=stopById(db.home),sc=stopById(db.school);
-  $('#dirSeg').innerHTML=seg('dir',[['out','To school'],['back','Home']],commuteDir);
   if(!h||!sc){
-    $('#commuteSub').textContent='';
     $('#routes').innerHTML=`<p class="empty">Choose your home and school stops to get started.</p><div class="row"><button type="button" class="row-main" data-act="commute"><span class="row-title">Set up your commute</span></button></div>`;
     return;
   }
-  $('#commuteSub').textContent=commuteDir==='out'?`From ${h.name} to ${sc.name}`:`From ${sc.name} to ${h.name}`;
   $('#routes').innerHTML=db.routes.length?db.routes.map(routeRow).join(''):'<p class="empty">No routes yet. Tap Edit to add how you travel.</p>';
 }
 function pathHtml(legs){
@@ -603,10 +699,10 @@ function renderLiveShell(){
 }
 function renderLiveList(loadingText){
   const el=$('#liveList'),meta=$('#liveMeta');
-  if(!liveStops().length){el.innerHTML='<p class="empty">Choose a stop to see live bus times.</p>';meta.textContent='';return;}
+  if(!liveStops().length){el.innerHTML='<p class="empty">Choose a stop to see live bus times.</p>';meta.textContent='';$('#next-board').textContent='';return;}
   if(!liveData){
     el.innerHTML=`<p class="empty">${esc(liveErr||loadingText||'Loading live times…')}</p>`+(liveErr&&!liveBusy?'<div class="row"><button type="button" class="row-main" data-act="live-retry"><span class="row-title">Try again</span></button></div>':'');
-    meta.textContent='';return;
+    meta.textContent='';$('#next-board').textContent='';return;
   }
   const now=Date.now(),lines=liveLines();
   let list=liveData.filter(p=>p.time>=now-60000);
@@ -615,14 +711,15 @@ function renderLiveList(loadingText){
   else if(liveFilter!=='mine'&&liveFilter!=='all') list=list.filter(p=>p.line===liveFilter);
   list=list.slice(0,12);
   el.innerHTML=list.length?list.map(busRow).join(''):'<p class="empty">No buses coming up for this choice right now.</p>';
+  $('#next-board').textContent=list[0]?`${list[0].line} · ${hhmm(list[0].time)}`:'';
   meta.textContent=liveErr||(liveAt?`Updated at ${hhmm(liveAt)}. Refreshes every minute.`:'');
 }
-function busRow(p){
+function statusBits(p){
   const mins=Math.round((p.time-Date.now())/60000);
   let st,cls='',when;
   if(p.status==='CANCEL'){st='cancelled';cls='late';when='';}
   else{
-    if(!p.live) st='timetable time, no live data yet';
+    if(!p.live) st='timetable time';
     else if(p.delay>=1){st=`${p.delay} min late`;cls='late';}
     else if(p.delay<=-1){st=`${-p.delay} min early`;cls='late';}
     else{st='on time';cls='ok';}
@@ -630,10 +727,143 @@ function busRow(p){
     when=mins<=0?'now':`in ${mins} min`;
   }
   if(p.track) st+=`, platform ${p.track}`;
-  const label=cap((p.arr?'arrives, ':'')+st);
+  return {label:cap((p.arr?'arrives, ':'')+st),cls,when};
+}
+function busRow(p){
+  const {label,cls,when}=statusBits(p);
   const showStop=liveStops().length>1&&liveStopFilter==='all'&&p.stopName;
   const status=showStop?`<span class="bus-status"><span class="bus-stop">${esc(p.stopName)}</span> · <span class="${cls}">${esc(label)}</span></span>`:`<span class="bus-status ${cls}">${esc(label)}</span>`;
   return `<div class="bus"><span class="line-no">${esc(p.line)}</span><span class="bus-dest">${esc(p.dest)}</span><span class="bus-time${p.status==='CANCEL'?' gone':''}">${hhmm(p.time)}</span>${status}<span class="bus-when">${esc(when)}</span></div>`;
+}
+
+/* ---------- Trains and the bus in Breda (Transitous trip planner) ---------- */
+const PL={
+  ehv:{short:'Eindhoven',id:'de-DELFI_000008400206'},
+  ht:{short:'Den Bosch',id:'de-DELFI_000008400319'},
+  bd:{short:'Breda',id:'nl-OpenOV_stoparea:17911'},
+  buas:{short:'BUas',id:'51.5907,4.7932'}
+};
+const panelsFor=dir=>dir==='out'?['board','train','buas']:['buas','train','vhome'];
+const pstate={};
+const OPEN_MS=55000,CLOSED_MS=5*60000;
+function planSpec(panel,dir){
+  const out=dir==='out';
+  if(panel==='train') return {modes:'RAIL',n:5,maxT:1,pairs:out?[[PL.ehv,PL.bd],[PL.ht,PL.bd]]:[[PL.bd,PL.ehv],[PL.bd,PL.ht]]};
+  if(panel==='buas') return {modes:'BUS',n:8,maxT:0,pairs:out?[[PL.bd,PL.buas]]:[[PL.buas,PL.bd]]};
+  return {modes:'BUS',n:5,maxT:0,pairs:[].concat(...[PL.ht,PL.ehv].map(o=>liveStops().filter(x=>x.id).map(x=>[o,{short:shortStop(x.name),id:x.id}])))};
+}
+function trainLabel(n){return /intercity/i.test(n)?'IC':/sprinter/i.test(n)?'SPR':String(n||'?').slice(0,4);}
+const legMins=l=>Math.round((Date.parse(l.endTime)-Date.parse(l.startTime))/60000);
+function parsePlan(d,a,b){
+  return (d&&Array.isArray(d.itineraries)?d.itineraries:[]).map(it=>{
+    const legs=it.legs||[],T=legs.filter(l=>l.mode!=='WALK');
+    if(!T.length) return null;
+    const f=T[0],z=T[T.length-1],rail=!/BUS|COACH/.test(f.mode);
+    const time=Date.parse(f.startTime);if(!isFinite(time)) return null;
+    let target=Date.parse(f.scheduledStartTime||'');if(!isFinite(target)) target=time;
+    const live=!!f.realTime,cancelled=T.some(l=>l.cancelled);
+    return {
+      trip:T.map(l=>l.tripId).join('+'),rail,
+      line:rail?trainLabel(f.routeShortName||f.displayName):String(f.routeShortName||f.displayName||'?'),
+      trainName:f.routeShortName||'',
+      time,target,live,delay:live?Math.round((time-target)/60000):0,
+      status:cancelled?'CANCEL':(live?'DRIVING':'PLANNED'),
+      track:(f.from&&(f.from.track||f.from.scheduledTrack))||'',
+      fromStop:f.from?f.from.name:'',a,b,
+      changes:T.slice(1).map(l=>l.from.name),
+      arrivals:[{stop:z.to.name,time:Date.parse(z.endTime)}],
+      start:Date.parse(it.startTime),end:Date.parse(it.endTime),
+      walkBefore:legs[0].mode==='WALK'?legMins(legs[0]):0,
+      walkAfter:legs[legs.length-1].mode==='WALK'?legMins(legs[legs.length-1]):0
+    };
+  }).filter(Boolean);
+}
+async function ensureLiveIds(){
+  for(const x of liveStops()){
+    if(x.id) continue;
+    try{const pick=pickStop(await findStops(x.name),x.name);if(pick){x.id=pick.id;x.name=pick.name;save();}}catch(e){}
+  }
+}
+async function fetchPlan(panel,dir){
+  const k=panel+':'+dir,s=pstate[k]||(pstate[k]={data:null,err:null,at:0,busy:false,walk:null});
+  if(s.busy) return;
+  s.busy=true;
+  try{
+    if(panel==='vhome') await ensureLiveIds();
+    const spec=planSpec(panel,dir);
+    if(!spec.pairs.length){s.data=null;s.err='Pick your Veghel stops first: switch to “To Breda”, open Bus in Veghel and tap Change.';return;}
+    const res=await Promise.all(spec.pairs.map(async([a,b])=>{
+      try{
+        const d=await tJSON(`/v5/plan?fromPlace=${encodeURIComponent(a.id)}&toPlace=${encodeURIComponent(b.id)}&transitModes=${spec.modes}&numItineraries=${spec.n}&maxTransfers=${spec.maxT}`,20000);
+        return {a,b,d};
+      }catch(e){return {a,b,err:e&&e.reason?e.reason:'something went wrong'};}
+    }));
+    const ok=res.filter(r=>r.d),bad=res.filter(r=>!r.d);
+    if(!ok.length){
+      const why=bad[0].err;
+      s.err=s.data?`Couldn’t refresh just now (${why}), so these may be a bit old.`:`Couldn’t load these times because ${why}. It tries again in a minute.`;
+      return;
+    }
+    // The same bus can show up once per stop it reaches. Keep it once, with every stop it reaches.
+    const by=new Map();
+    ok.forEach(r=>parsePlan(r.d,r.a,r.b).forEach(o=>{
+      const e=by.get(o.trip);
+      if(!e) by.set(o.trip,o);
+      else o.arrivals.forEach(x=>{if(!e.arrivals.some(y=>y.stop===x.stop)) e.arrivals.push(x);});
+    }));
+    by.forEach(o=>o.arrivals.sort((x,y)=>x.time-y.time));
+    // Drop an option when one that leaves later still gets you there as early.
+    const all=[...by.values()];
+    s.data=all.filter(o=>!all.some(q=>q!==o&&q.a===o.a&&q.b===o.b&&q.time>o.time&&q.end<=o.end)).sort((x,y)=>x.time-y.time);
+    const w=ok.map(r=>r.d.direct&&r.d.direct[0]&&r.d.direct[0].duration).find(Boolean);
+    s.walk=w?Math.round(w/60):null;
+    s.at=Date.now();
+    s.err=bad.length?`Couldn’t refresh the times ${bad.map(r=>(dir==='out'?'from ':'to ')+(dir==='out'?r.a.short:r.b.short)).join(' and ')} just now.`:null;
+  }finally{
+    s.busy=false;renderPlan(panel,dir);
+  }
+}
+function planRow(o,panel,dir){
+  const {label,cls,when}=statusBits(o),out=dir==='out',arr=o.arrivals[0];
+  let head,extra;
+  if(panel==='train'){
+    head=out?`From ${o.a.short}`:`To ${o.b.short}`;
+    extra=`${o.trainName?o.trainName+' · ':''}${o.changes.length?'change at '+o.changes.join(', '):'direct'} · arrives ${hhmm(arr.time)}`;
+  }else if(panel==='buas'&&out){
+    head=`Get off at ${shortStop(arr.stop)}`;
+    extra=`At BUas ${hhmm(o.end)}${o.walkAfter?` after a ${o.walkAfter} min walk`:''}`;
+  }else if(panel==='buas'){
+    head=`From ${shortStop(o.fromStop)}`;
+    extra=`${o.walkBefore?`Leave BUas ${hhmm(o.start)}, ${o.walkBefore} min walk · `:''}at the station ${hhmm(arr.time)}`;
+  }else{
+    head=`From ${o.a.short}`;
+    extra='Arrives '+o.arrivals.map(x=>`${shortStop(x.stop)} ${hhmm(x.time)}`).join(', ');
+  }
+  return `<div class="bus"><span class="line-no">${esc(o.line)}</span><span class="bus-dest">${esc(head)}</span><span class="bus-time${o.status==='CANCEL'?' gone':''}">${hhmm(o.time)}</span><span class="bus-status ${cls}">${esc(label)}</span><span class="bus-when">${esc(when)}</span><span class="bus-extra">${esc(extra)}</span></div>`;
+}
+function renderPlan(panel,dir){
+  if(dir!==commuteDir) return;
+  const s=pstate[panel+':'+dir]||{},el=$('#pl-'+panel),meta=$('#pm-'+panel),nx=$('#next-'+panel);
+  if(!el) return;
+  if(!s.data){
+    el.innerHTML=`<p class="empty">${esc(s.err||'Loading…')}</p>`+(s.err&&!s.busy?`<div class="row"><button type="button" class="row-main" data-act="plan-retry" data-panel="${panel}"><span class="row-title">Try again</span></button></div>`:'');
+    meta.textContent='';nx.textContent='';return;
+  }
+  const now=Date.now(),list=s.data.filter(o=>o.time>=now-60000).slice(0,6);
+  el.innerHTML=list.length?list.map(o=>planRow(o,panel,dir)).join(''):'<p class="empty">Nothing coming up right now.</p>';
+  nx.textContent=list[0]?`${list[0].line} · ${hhmm(list[0].time)}`:'';
+  meta.textContent=(s.err||`Updated at ${hhmm(s.at)}.`)+(panel==='buas'&&s.walk?` Walking takes about ${s.walk} min.`:'');
+}
+const panelOpen=p=>{const d=document.querySelector(`.drop[data-panel="${p}"]`);return !!(d&&d.open);};
+// Open panels refresh every minute, closed ones every 5 minutes (only to show the next departure). Transitous is volunteer-run.
+function refreshPanels(){
+  if(!homeOnScreen()) return;
+  const now=Date.now();
+  panelsFor(commuteDir).forEach(p=>{
+    const at=p==='board'?liveAt:(pstate[p+':'+commuteDir]||{}).at;
+    if(!at||now-at>=(panelOpen(p)?OPEN_MS:CLOSED_MS)) p==='board'?fetchLive():fetchPlan(p,commuteDir);
+    else p==='board'?renderLiveList():renderPlan(p,commuteDir);
+  });
 }
 
 /* ---------- Sheet ---------- */
@@ -903,6 +1133,7 @@ function liveSave(){
   db.live.lines=String(st.linesText||'').split(/[,\s]+/).map(s=>s.trim()).filter(Boolean);
   const px=String(st.proxyText||'').trim()||RELAY;
   if(px!==(db.live.proxy||'')){db.live.proxy=px;viaRelay=false;liveData=null;liveErr=null;}
+  delete pstate['vhome:back'];
   save();liveFilter='mine';closeSheet();renderLiveShell();fetchLive();
 }
 
@@ -1350,6 +1581,11 @@ document.addEventListener('click',e=>{
       renderLiveSettings();renderLiveShell();
       break;
     }
+    case 'dir-toggle':
+      commuteDir=commuteDir==='out'?'back':'out';db.settings.dir=commuteDir;db.settings.dirAt=Date.now();save();
+      renderCommute();applyDir();refreshPanels();
+      break;
+    case 'plan-retry':{const k=el.dataset.panel+':'+commuteDir;if(pstate[k]) pstate[k].err=null;renderPlan(el.dataset.panel,commuteDir);fetchPlan(el.dataset.panel,commuteDir);break;}
     case 'live-stopfilter':liveStopFilter=el.dataset.v;renderLiveShell();break;
     case 'live-save':liveSave();break;
     case 'next-leg':nextLeg();break;
@@ -1386,7 +1622,7 @@ sheetBody.addEventListener('keydown',e=>{
 });
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!sheet.hidden) closeSheet();});
 document.addEventListener('visibilitychange',()=>{
-  if(document.visibilityState==='visible'&&!run) fetchLive();
+  if(document.visibilityState==='visible'&&!run) refreshPanels();
   if(!run||watchId==null) return;
   if(document.visibilityState==='hidden'){run.wasHidden=true;}
   else{
@@ -1403,9 +1639,18 @@ holdify($('#holdStop'),1200,dismissAlarm);
 const prep=$('#prep');
 if(!db.settings.prepSeen) prep.open=true;
 prep.addEventListener('toggle',()=>{if(!prep.open&&!db.settings.prepSeen){db.settings.prepSeen=true;save();}});
+document.querySelectorAll('[data-icon]').forEach(e=>{e.innerHTML=ICON[e.dataset.icon]||'';});
+const openPanels=db.settings.open||{};
+document.querySelectorAll('.drop[data-panel]').forEach(d=>{d.open=!!openPanels[d.dataset.panel];});
+document.addEventListener('toggle',e=>{
+  const d=e.target;
+  if(!d.classList||!d.classList.contains('drop')||!d.dataset.panel) return;
+  db.settings.open=Object.assign({},db.settings.open,{[d.dataset.panel]:d.open});save();
+  if(d.open) refreshPanels();
+},true);
 renderHome();
-fetchLive();
-setInterval(()=>{if(homeOnScreen()){fetchLive();}},60000);
+refreshPanels();
+setInterval(refreshPanels,60000);
 })();
 </script>
 </body>
