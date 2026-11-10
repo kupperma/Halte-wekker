@@ -472,13 +472,38 @@ async function getJSON(url,ms){
   const ctl=new AbortController(),t=setTimeout(()=>ctl.abort(),ms||15000);
   try{
     const r=await fetch(url,{signal:ctl.signal,cache:'no-store'});
-    if(!r.ok) throw new Error('HTTP '+r.status);
-    return await r.json();
+    if(!r.ok){const e=new Error('HTTP '+r.status);e.reason='the server answered with error '+r.status;throw e;}
+    const txt=await r.text();
+    try{return JSON.parse(txt);}catch(_){const e=new Error('bad json');e.reason='the answer wasn’t bus data';throw e;}
+  }catch(e){
+    if(!e.reason) e.reason=e.name==='AbortError'?'it took too long':'the request was blocked or there’s no connection';
+    throw e;
   }finally{clearTimeout(t);}
+}
+// Try OVapi directly first. If the browser blocks that, go through a public relay that adds the permission header.
+const ROUTES=[
+  u=>u,
+  u=>'https://api.allorigins.win/raw?url='+encodeURIComponent(u),
+  u=>'https://api.codetabs.com/v1/proxy/?quest='+encodeURIComponent(u)
+];
+async function ovJSON(path,ms){
+  const target=OV+path,custom=String(db.live.proxy||'').trim();
+  if(custom) return getJSON(custom+encodeURIComponent(target),ms);
+  const first=Number.isInteger(db.live.route)&&ROUTES[db.live.route]?db.live.route:0;
+  const order=[first].concat(ROUTES.map((_,i)=>i).filter(i=>i!==first));
+  let last;
+  for(const i of order){
+    try{
+      const data=await getJSON(ROUTES[i](target),ms);
+      if(db.live.route!==i){db.live.route=i;save();}
+      return data;
+    }catch(e){last=e;}
+  }
+  throw last;
 }
 async function loadStopList(){
   if(stopListCache) return stopListCache;
-  const data=await getJSON(OV+'/stopareacode',45000);
+  const data=await ovJSON('/stopareacode',30000);
   const list=[];
   Object.keys(data||{}).forEach(k=>{
     const v=data[k];if(!v||typeof v!=='object') return;
@@ -546,10 +571,11 @@ async function fetchLive(){
       if(!codes.length){liveData=null;liveErr=`${db.live.name} isn’t in the live feed. Tap Change to search for your stop.`;return;}
       db.live.codes=codes;save();
     }
-    const data=await getJSON(OV+'/stopareacode/'+db.live.codes.map(encodeURIComponent).join(','));
+    const data=await ovJSON('/stopareacode/'+db.live.codes.map(encodeURIComponent).join(','),12000);
     liveData=collectPasses(data);liveErr=null;liveAt=Date.now();
   }catch(e){
-    liveErr=liveData?'Couldn’t refresh just now, so these may be a bit old.':'Couldn’t load live times. Check your connection; it tries again in 30 seconds.';
+    const why=e&&e.reason?e.reason:'something went wrong';
+    liveErr=liveData?`Couldn’t refresh just now (${why}), so these may be a bit old.`:`Couldn’t load live times because ${why}. It tries again in 30 seconds.`;
   }finally{
     liveBusy=false;renderLiveList();
   }
@@ -566,7 +592,10 @@ function renderLiveShell(){
 function renderLiveList(loadingText){
   const el=$('#liveList'),meta=$('#liveMeta');
   if(!db.live.name){el.innerHTML='<p class="empty">Choose a stop to see live bus times.</p>';meta.textContent='';return;}
-  if(!liveData){el.innerHTML=`<p class="empty">${esc(liveErr||loadingText||'Loading live times…')}</p>`;meta.textContent='';return;}
+  if(!liveData){
+    el.innerHTML=`<p class="empty">${esc(liveErr||loadingText||'Loading live times…')}</p>`+(liveErr&&!liveBusy?'<div class="row"><button type="button" class="row-main" data-act="live-retry"><span class="row-title">Try again</span></button></div>':'');
+    meta.textContent='';return;
+  }
   const now=Date.now(),lines=liveLines();
   let list=liveData.filter(p=>p.time>=now-60000&&p.status!=='PASSED');
   if(liveFilter==='mine'&&lines.length) list=list.filter(p=>lines.includes(p.line));
@@ -822,7 +851,7 @@ function stopDelete(){
 }
 
 /* Live bus times settings */
-function openLiveSettings(){sheetState={type:'live',query:'',results:null,searching:false,linesText:liveLines().join(', ')};renderLiveSettings();openSheet();}
+function openLiveSettings(){sheetState={type:'live',query:'',results:null,searching:false,linesText:liveLines().join(', '),proxyText:db.live.proxy||''};renderLiveSettings();openSheet();}
 function renderLiveSettings(){
   const st=sheetState;
   let res='';
@@ -837,6 +866,8 @@ function renderLiveSettings(){
   <div class="results">${res}</div>
   <label class="field"><span class="field-label">Your lines</span><input type="text" id="lLines" value="${esc(st.linesText)}" placeholder="305, 306, 158" autocomplete="off"></label>
   <p class="hint">Separate line numbers with commas. Leave it empty to see every bus.</p>
+  <label class="field"><span class="field-label">Own relay address (optional)</span><input type="text" id="lProxy" value="${esc(st.proxyText)}" placeholder="Leave empty unless asked" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+  <p class="hint">Only fill this in if you set up your own relay. The bus data address is added to the end.</p>
   <button type="button" class="btn primary big" data-act="live-save">Done</button>`;
 }
 async function liveSearch(){
@@ -845,13 +876,15 @@ async function liveSearch(){
   if(!q.trim()) return;
   st.searching=true;st.error=null;renderLiveSettings();
   try{const list=await loadStopList();st.results=searchStops(list,q);}
-  catch(e){st.results=null;st.error='Couldn’t reach the stop list. Check your connection and try again.';}
+  catch(e){st.results=null;st.error=`Couldn’t reach the stop list because ${e&&e.reason?e.reason:'something went wrong'}. Try again in a moment.`;}
   st.searching=false;
   if(sheetState===st) renderLiveSettings();
 }
 function liveSave(){
   const st=sheetState;
   db.live.lines=String(st.linesText||'').split(/[,\s]+/).map(s=>s.trim()).filter(Boolean);
+  const px=String(st.proxyText||'').trim();
+  if(px!==(db.live.proxy||'')){db.live.proxy=px;db.live.route=null;liveData=null;liveErr=null;}
   save();liveFilter='mine';closeSheet();renderLiveShell();fetchLive();
 }
 
@@ -1282,6 +1315,7 @@ document.addEventListener('click',e=>{
     case 'route-delete':routeDelete();break;
     case 'live-settings':openLiveSettings();break;
     case 'live-filter':liveFilter=el.dataset.v;renderLiveShell();break;
+    case 'live-retry':liveErr=null;renderLiveList();fetchLive();break;
     case 'live-search':liveSearch();break;
     case 'live-pick':{
       const g=sheetState.results[+el.dataset.i];if(!g) break;
@@ -1301,6 +1335,7 @@ sheetBody.addEventListener('input',e=>{
   if(t.id==='sName'||t.id==='rName') sheetState.draft.name=t.value;
   if(t.id==='lQuery') sheetState.query=t.value;
   if(t.id==='lLines') sheetState.linesText=t.value;
+  if(t.id==='lProxy') sheetState.proxyText=t.value;
   if(t.id==='sCoords'){
     const c=parseCoords(t.value),d=sheetState.draft;
     if(c){d.lat=c[0];d.lon=c[1];d.approx=false;setLoc(locLabel(d));}
