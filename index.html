@@ -128,6 +128,35 @@ svg{display:block}
 .dir-swap svg{width:24px;height:24px}
 :root[data-dir="back"] .dir-swap{transform:rotate(180deg)}
 
+/* Planned trip */
+.trip-sec{margin:0 0 6px}
+.trip-plan{width:100%;display:flex;align-items:center;gap:12px;text-align:left;background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:12px 16px;min-height:60px;cursor:pointer}
+.trip-plan .row-title{display:block}
+.trip-plan .tagline{display:block}
+.trip{background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:14px 16px 12px}
+.trip-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:12px}
+.trip-kicker{display:block;font-size:13px;text-transform:uppercase;letter-spacing:.08em;font-weight:700;color:var(--dusk)}
+.trip-title{display:block;font-family:var(--font-display);font-weight:800;font-size:22px;line-height:1.15}
+.trip-head .text-btn{padding:2px}
+.trip .chips{padding:0 0 10px}
+.tl{list-style:none;margin:0;padding:0}
+.tl li{display:grid;grid-template-columns:50px 30px 1fr;column-gap:8px;position:relative;padding-bottom:16px}
+.tl li:not(:last-child)::before{content:"";position:absolute;left:72px;top:30px;bottom:2px;width:2px;border-radius:1px;background:var(--line)}
+.tl-time{font-family:var(--font-display);font-weight:800;font-size:19px;line-height:30px;font-variant-numeric:tabular-nums}
+.tl-time.gone{text-decoration:line-through;color:var(--muted)}
+.tl-ico{width:30px;height:30px;border-radius:50%;background:var(--dusk);color:var(--dusk-ink);display:grid;place-items:center}
+.tl-ico svg{width:16px;height:16px}
+.tl-ico.end{background:none;color:var(--dusk)}
+.tl-ico.end::after{content:"";width:12px;height:12px;border-radius:50%;border:3px solid var(--dusk)}
+.tl-body{min-width:0;padding-top:4px}
+.tl-title{display:block;font-weight:700;line-height:1.3}
+.tl-sub{display:block;font-size:15px;color:var(--muted)}
+.tl-sub.ok{color:var(--ok);font-weight:700}
+.tl-sub.late,.tl-sub.tight{color:var(--warn);font-weight:700}
+.tl li.end{padding-bottom:4px}
+.trip .btn{margin-top:6px}
+.trip>.hint{margin:10px 0 0}
+
 /* Fold-out panels */
 .drops{display:flex;flex-direction:column;gap:10px}
 .drop{background:var(--surface);border:1px solid var(--line);border-radius:16px;overflow:hidden}
@@ -186,7 +215,7 @@ svg{display:block}
 .btn:disabled{opacity:.6}
 .field{display:block;margin:18px 0 0}
 .field-label{display:block;font-weight:700;font-size:15px;margin:0 0 8px}
-input[type=text],input[type=search],select{width:100%;min-height:50px;border-radius:12px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:17px;padding:0 12px}
+input[type=text],input[type=search],input[type=time],select{width:100%;min-height:50px;border-radius:12px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:17px;padding:0 12px}
 select{appearance:none;-webkit-appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),linear-gradient(135deg,var(--muted) 50%,transparent 50%);background-position:calc(100% - 20px) 50%,calc(100% - 14px) 50%;background-size:6px 6px;background-repeat:no-repeat;padding-right:36px}
 .search-row{display:flex;gap:8px}
 .hint{color:var(--muted);font-size:15px;margin:6px 0 0}
@@ -309,6 +338,8 @@ button.pill{cursor:pointer}
     <span class="dir-text"><span class="dir-kicker">Going</span><span class="dir-title" id="dirTitle"></span><span class="dir-sub" id="dirSub"></span></span>
     <span class="dir-swap" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7.5 19V5M7.5 5 4 8.5M7.5 5 11 8.5M16.5 5v14M16.5 19 13 15.5M16.5 19 20 15.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
   </button>
+
+  <section class="trip-sec" id="tripSec"></section>
 
   <section>
     <div class="sec-head"><h2 class="sec">Wake me up</h2><button type="button" class="text-btn" data-act="commute">Edit</button></div>
@@ -471,7 +502,7 @@ function load(){
         live.stops=(live.stops||[]).filter(x=>x&&x.name).slice(0,MAX_LIVE);
         delete live.name;delete live.id;delete live.codes;delete live.route;
         if(!String(live.proxy||'').trim()) live.proxy=RELAY;
-        return {stops:d.stops,home:d.home!==undefined?d.home:f.home,school:d.school!==undefined?d.school:f.school,routes:d.routes,kmMem:d.kmMem||{},settings:Object.assign(f.settings,d.settings||{}),live};
+        return {stops:d.stops,home:d.home!==undefined?d.home:f.home,school:d.school!==undefined?d.school:f.school,routes:d.routes,kmMem:d.kmMem||{},settings:Object.assign(f.settings,d.settings||{}),live,trip:d.trip&&d.trip.date&&d.trip.time?d.trip:undefined};
       }
     }
     // Bring over stops and settings from the first version.
@@ -542,7 +573,7 @@ function parseCoords(s){
 const autoDir=()=>new Date().getHours()<12?'out':'back';
 // A direction you picked yourself sticks for 3 hours, then it follows the clock again.
 let commuteDir=(db.settings.dirAt&&Date.now()-db.settings.dirAt<3*3600e3&&/^(out|back)$/.test(db.settings.dir))?db.settings.dir:autoDir();
-function renderHome(){renderCommute();renderStops();renderLiveShell();applyDir();}
+function renderHome(){renderCommute();renderStops();renderLiveShell();applyDir();renderTrip();}
 function applyDir(){
   const out=commuteDir==='out',h=stopById(db.home),sc=stopById(db.school);
   const hn=h?(h.short||h.name):'Home',sn=sc?(sc.short||sc.name):'School';
@@ -772,6 +803,7 @@ function parsePlan(d,a,b){
       fromStop:f.from?f.from.name:'',a,b,
       changes:T.slice(1).map(l=>l.from.name),
       arrivals:[{stop:z.to.name,time:Date.parse(z.endTime)}],
+      schedArr:Date.parse(z.scheduledEndTime||z.endTime),
       start:Date.parse(it.startTime),end:Date.parse(it.endTime),
       walkBefore:legs[0].mode==='WALK'?legMins(legs[0]):0,
       walkAfter:legs[legs.length-1].mode==='WALK'?legMins(legs[legs.length-1]):0
@@ -854,11 +886,163 @@ function renderPlan(panel,dir){
   nx.textContent=list[0]?`${list[0].line} · ${hhmm(list[0].time)}`:'';
   meta.textContent=(s.err||`Updated at ${hhmm(s.at)}.`)+(panel==='buas'&&s.walk?` Walking takes about ${s.walk} min.`:'');
 }
+/* ---------- A planned trip around one train (to travel with a friend) ---------- */
+const MIN=60000;
+const STATION_STOP={ehv:'eindhoven',ht:'denbosch'};
+let tripState={};
+const ymd=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+function tripMs(t){const [h,m]=t.time.split(':').map(Number),[y,mo,d]=t.date.split('-').map(Number);return new Date(y,mo-1,d,h,m).getTime();}
+function dayLabel(date){
+  const n=new Date(),tm=new Date(n.getFullYear(),n.getMonth(),n.getDate()+1);
+  if(date===ymd(n)) return 'Today';
+  if(date===ymd(tm)) return 'Tomorrow';
+  const [y,mo,d]=date.split('-').map(Number);
+  return new Date(y,mo-1,d).toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'short'});
+}
+function tripExpired(t){return !t||Date.now()>tripMs(t)+(t.dir==='out'?90:150)*MIN;}
+const planQ=(a,b,modes,at,n,maxT)=>tJSON(`/v5/plan?fromPlace=${encodeURIComponent(a.id)}&toPlace=${encodeURIComponent(b.id)}&transitModes=${modes}&numItineraries=${n}&maxTransfers=${maxT}&time=${encodeURIComponent(new Date(at).toISOString())}`,20000).then(d=>parsePlan(d,a,b));
+const vStops=()=>liveStops().filter(x=>x.id).map(x=>({short:shortStop(x.name),id:x.id}));
+async function tripBuses(o,out){
+  const M=MIN,station=out?o.a:o.b,arr=o.arrivals[0].time;
+  const settle=ps=>Promise.all(ps.map(p=>p.catch(()=>[]))).then(r=>[].concat(...r));
+  let before,after;
+  if(out){
+    before=await settle(vStops().map(x=>planQ(x,station,'BUS',o.time-90*M,8,0)));
+    after=await settle([planQ(PL.bd,PL.buas,'BUS',arr,4,0)]);
+  }else{
+    before=await settle([planQ(PL.buas,PL.bd,'BUS',o.time-60*M,8,0)]);
+    after=await settle(vStops().map(x=>planQ(station,x,'BUS',arr,3,0)));
+  }
+  // The same bus can come up from both Veghel stops. Keep it once, from the stop with the least walking.
+  const once=list=>{const m=new Map();list.slice().sort((x,y)=>x.walkBefore-y.walkBefore).forEach(b=>{if(!m.has(b.trip)) m.set(b.trip,b);});return [...m.values()];};
+  before=once(before);after=once(after);
+  // Latest bus that still makes the train (2 min spare), and the first one after it.
+  const inn=before.filter(b=>b.end<=o.time-2*M).sort((x,y)=>y.time-x.time);
+  const nxt=after.filter(b=>b.start>=arr-M).sort((x,y)=>(out?x.end-y.end:x.arrivals[0].time-y.arrivals[0].time)||x.time-y.time);
+  return {busIn:inn[0]||null,busInAlt:inn[1]||null,busOut:nxt[0]||null,busOutAlt:nxt[1]||null};
+}
+async function fetchTrip(){
+  const t=db.trip;if(!t||tripState.busy) return;
+  const key=JSON.stringify(t);
+  if(tripState.key!==key) tripState={key,pick:0};
+  tripState.busy=true;
+  try{
+    const T=tripMs(t),out=t.dir==='out',M=MIN;
+    await ensureLiveIds();
+    const settle=ps=>Promise.all(ps.map(p=>p.catch(e=>{throw e;})));
+    const lists=await settle([PL.ehv,PL.ht].map(st=>out?planQ(st,PL.bd,'RAIL',T-80*M,8,1):planQ(PL.bd,st,'RAIL',T-10*M,6,1)));
+    const trains=[].concat(...lists);
+    if(!trains.length) throw {reason:'no trains were found for that time'};
+    const ref=o=>out?o.schedArr:o.target;
+    trains.sort((x,y)=>Math.abs(ref(x)-T)-Math.abs(ref(y)-T)||x.changes.length-y.changes.length);
+    const exact=trains.filter(o=>Math.abs(ref(o)-T)<=M);
+    const opts=(exact.length?exact:trains.slice(0,1)).slice(0,3);
+    const legs=await Promise.all(opts.map(o=>tripBuses(o,out)));
+    if(tripState.key!==key) return;
+    tripState.data={options:opts.map((o,i)=>Object.assign({train:o},legs[i])),inexact:!exact.length};
+    if(tripState.pick>=opts.length) tripState.pick=0;
+    tripState.err=null;tripState.at=Date.now();
+  }catch(e){
+    if(tripState.key===key) tripState.err=`Couldn’t plan this trip because ${e&&e.reason?e.reason:'something went wrong'}. It tries again in a minute.`;
+  }finally{
+    if(tripState.key===key){tripState.busy=false;renderTrip();}
+  }
+}
+function tripRoute(t,o){
+  const sk=Object.keys(PL).find(k=>PL[k]===(t.dir==='out'?o.a:o.b)),local=STATION_STOP[sk];
+  return db.routes.find(r=>r.legs.length>1&&r.legs[0].stop===local&&stopById(local));
+}
+function tlLeg(time,gone,icon,title,subs){
+  return `<li><span class="tl-time${gone?' gone':''}">${hhmm(time)}</span><span class="tl-ico${icon?'':' end'}">${icon?ICON[icon]:''}</span><span class="tl-body"><span class="tl-title">${esc(title)}</span>${subs.filter(Boolean).map(x=>`<span class="tl-sub${x[1]?' '+x[1]:''}">${esc(x[0])}</span>`).join('')}</span></li>`;
+}
+function liveSub(o){
+  const bits=[];
+  if(o.track) bits.push(`Platform ${o.track}`);
+  if(o.status==='CANCEL') return ['Cancelled','late'];
+  if(o.live&&o.time-Date.now()<4*3600e3){const b=statusBits(o);return [[cap(b.label.replace(/, platform .*/,'')),o.track?`platform ${o.track}`:''].filter(Boolean).join(' · '),b.cls];}
+  return bits.length?[bits.join(' · ')]:null;
+}
+const changeSub=(mins,what)=>[`${mins} min to ${what}`,mins<3?'tight':''];
+function renderTrip(){
+  const el=$('#tripSec');if(!el) return;
+  if(db.trip&&tripExpired(db.trip)){delete db.trip;save();tripState={};}
+  const t=db.trip;
+  if(!t){
+    el.innerHTML=`<button type="button" class="trip-plan" data-act="trip-edit"><span class="drop-icon">${ICON.train}</span><span style="flex:1;min-width:0"><span class="row-title">Plan by train time</span><span class="tagline">Pick the train you take with your friend. The buses before and after it are added for you.</span></span></button>`;
+    return;
+  }
+  const out=t.dir==='out',T=tripMs(t);
+  const head=`<div class="trip-head"><div><span class="trip-kicker">${esc(dayLabel(t.date))} · ${out?'To Breda':'Home'}</span><span class="trip-title">${out?'Arrive in Breda':'Leave Breda'} ${esc(t.time)}</span></div><button type="button" class="text-btn" data-act="trip-edit">Change</button></div>`;
+  const st=tripState.key===JSON.stringify(t)?tripState:{};
+  if(!st.data){
+    el.innerHTML=`<div class="trip">${head}<p class="empty" style="padding:0 0 6px">${esc(st.err||'Finding your train and buses…')}</p></div>`;
+    return;
+  }
+  const opts=st.data.options,op=opts[st.pick]||opts[0],o=op.train,arr=o.arrivals[0].time;
+  const chips=opts.length>1?`<div class="chips">${opts.map((x,i)=>`<button type="button" class="chip" data-act="trip-pick" data-v="${i}" aria-pressed="${i===st.pick}">${esc((x.train.trainName||'Train')+' '+(out?'from '+x.train.a.short:'to '+x.train.b.short))}</button>`).join('')}</div>`:'';
+  let warn='';
+  if(st.data.inexact) warn=`<p class="warn">No train ${out?'arrives in':'leaves'} Breda at exactly ${esc(t.time)}. This is the closest one.</p>`;
+  const items=[];
+  const bi=op.busIn,bo=op.busOut;
+  if(out){
+    if(bi) items.push(tlLeg(bi.time,bi.status==='CANCEL','bus',`Bus ${bi.line} from ${shortStop(bi.fromStop)}`,[liveSub(bi),[`Arrives ${o.a.short} ${hhmm(bi.arrivals[0].time)}`],changeSub(Math.round((o.time-bi.end)/MIN),'change')]));
+    else items.push(tlLeg(o.time-45*MIN,false,'bus','No bus found in time',[[`Take an earlier bus to ${o.a.short}.`,'tight']]));
+    items.push(tlLeg(o.time,o.status==='CANCEL','train',`${o.trainName||'Train'} from ${o.a.short}`,[liveSub(o),o.changes.length?[`Change at ${o.changes.join(', ')}`]:null,[`Arrives Breda ${hhmm(arr)}`]]));
+    if(bo){
+      items.push(tlLeg(bo.time,bo.status==='CANCEL','bus',`Bus ${bo.line} from Breda station`,[liveSub(bo),[`Get off at ${shortStop(bo.arrivals[0].stop)}`],changeSub(Math.round((bo.time-arr)/MIN)-bo.walkBefore,'get to the bus')]));
+      items.push(`<li class="end"><span class="tl-time">${hhmm(bo.end)}</span><span class="tl-ico end"></span><span class="tl-body"><span class="tl-title">At BUas</span>${bo.walkAfter?`<span class="tl-sub">${bo.walkAfter} min walk from the stop</span>`:''}</span></li>`);
+    }else items.push(`<li class="end"><span class="tl-time">${hhmm(arr)}</span><span class="tl-ico end"></span><span class="tl-body"><span class="tl-title">Breda station</span><span class="tl-sub">No bus to BUas found after this train. Walking takes about 17 min.</span></span></li>`);
+  }else{
+    if(bi) items.push(tlLeg(bi.time,bi.status==='CANCEL','bus',`Bus ${bi.line} from ${shortStop(bi.fromStop)}`,[liveSub(bi),bi.walkBefore?[`Leave BUas ${hhmm(bi.start)}, ${bi.walkBefore} min walk`]:null,changeSub(Math.round((o.time-bi.end)/MIN),'change')]));
+    else items.push(tlLeg(o.time-25*MIN,false,'bus','No bus found in time',[['Walk to the station, about 17 min.','tight']]));
+    items.push(tlLeg(o.time,o.status==='CANCEL','train',`${o.trainName||'Train'} to ${o.b.short}`,[liveSub(o),o.changes.length?[`Change at ${o.changes.join(', ')}`]:null,[`Arrives ${o.b.short} ${hhmm(arr)}`]]));
+    if(bo){
+      items.push(tlLeg(bo.time,bo.status==='CANCEL','bus',`Bus ${bo.line} from ${o.b.short} station`,[liveSub(bo),changeSub(Math.round((bo.time-arr)/MIN)-bo.walkBefore,'get to the bus')]));
+      items.push(`<li class="end"><span class="tl-time">${hhmm(bo.arrivals[0].time)}</span><span class="tl-ico end"></span><span class="tl-body"><span class="tl-title">${esc(shortStop(bo.arrivals[0].stop))}, Veghel</span></span></li>`);
+    }else items.push(`<li class="end"><span class="tl-time">${hhmm(arr)}</span><span class="tl-ico end"></span><span class="tl-body"><span class="tl-title">${esc(o.b.short)}</span><span class="tl-sub">No bus to Veghel found after this train.</span></span></li>`);
+  }
+  const notes=[];
+  if(op.busInAlt) notes.push(`Earlier bus for more time: ${op.busInAlt.line} at ${hhmm(op.busInAlt.time)}.`);
+  if(op.busOutAlt) notes.push(`If you miss it: ${op.busOutAlt.line} at ${hhmm(op.busOutAlt.time)}.`);
+  const r=tripRoute(t,o);
+  el.innerHTML=`<div class="trip">${head}${chips}${warn}<ol class="tl">${items.join('')}</ol>${r?`<button type="button" class="btn primary" data-act="trip-alarm" data-id="${esc(r.id)}">Wake me on this trip</button>`:''}${notes.length?`<p class="hint">${esc(notes.join(' '))}</p>`:''}<p class="hint">Updated at ${hhmm(st.at)}.${T-Date.now()>4*3600e3?' Live delays show up a few hours before.':''}</p></div>`;
+}
+function openTrip(){
+  const t=db.trip,n=new Date();
+  const day=t?(t.date===ymd(n)?'today':'tomorrow'):(n.getHours()>=12?'tomorrow':'today');
+  sheetState={type:'trip',dir:t?t.dir:commuteDir,time:t?t.time:'',day};
+  renderTripSheet();openSheet();
+}
+function renderTripSheet(){
+  const st=sheetState,out=st.dir==='out';
+  sheetBody.innerHTML=`<h3 class="sheet-title" id="sheetTitle" tabindex="-1">Plan by train time</h3>
+  <div class="field"><span class="field-label">Direction</span>${seg('trip-dir',[['out','To Breda'],['back','Home']],st.dir)}</div>
+  <label class="field"><span class="field-label">${out?'Arrive in Breda at':'Leave Breda at'}</span><input type="time" id="tTime" value="${esc(st.time)}"></label>
+  <div class="field"><span class="field-label">Day</span>${seg('trip-day',[['today','Today'],['tomorrow','Tomorrow']],st.day)}</div>
+  <p class="hint">Use the time of your friend’s train. The app finds that train, the ${out?'bus from Veghel that gets you there in time and the bus to BUas after it':'bus from BUas to catch it and the bus to Veghel after it'}.</p>
+  ${st.error?`<p class="warn">${esc(st.error)}</p>`:''}
+  <button type="button" class="btn primary big" data-act="trip-save">Find this trip</button>
+  ${db.trip?'<button type="button" class="btn ghost" data-act="trip-clear">Remove the trip</button>':''}`;
+}
+function tripSave(){
+  const st=sheetState,v=(($('#tTime')||{}).value||st.time||'').slice(0,5);
+  if(!/^\d{2}:\d{2}$/.test(v)){st.error='Enter a time first, like 08:21.';renderTripSheet();return;}
+  const n=new Date(),d=st.day==='today'?n:new Date(n.getFullYear(),n.getMonth(),n.getDate()+1);
+  const t={dir:st.dir,date:ymd(d),time:v};
+  if(tripExpired(t)){st.error='That time has already passed today. Pick Tomorrow.';st.time=v;renderTripSheet();return;}
+  db.trip=t;save();tripState={};closeSheet();renderTrip();fetchTrip();
+}
 const panelOpen=p=>{const d=document.querySelector(`.drop[data-panel="${p}"]`);return !!(d&&d.open);};
 // Open panels refresh every minute, closed ones every 5 minutes (only to show the next departure). Transitous is volunteer-run.
 function refreshPanels(){
   if(!homeOnScreen()) return;
   const now=Date.now();
+  if(db.trip){
+    const T=tripMs(db.trip),key=JSON.stringify(db.trip);
+    // Close to the trip it refreshes every 2 minutes for live delays, otherwise every 30.
+    const every=(now>T-4*3600e3&&now<T+2*3600e3)?2*MIN:30*MIN;
+    if(tripState.key!==key||!tripState.at||now-tripState.at>=every) fetchTrip(); else renderTrip();
+  }
   panelsFor(commuteDir).forEach(p=>{
     const at=p==='board'?liveAt:(pstate[p+':'+commuteDir]||{}).at;
     if(!at||now-at>=(panelOpen(p)?OPEN_MS:CLOSED_MS)) p==='board'?fetchLive():fetchPlan(p,commuteDir);
@@ -1585,6 +1769,13 @@ document.addEventListener('click',e=>{
       commuteDir=commuteDir==='out'?'back':'out';db.settings.dir=commuteDir;db.settings.dirAt=Date.now();save();
       renderCommute();applyDir();refreshPanels();
       break;
+    case 'trip-edit':openTrip();break;
+    case 'trip-dir':sheetState.time=($('#tTime')||{}).value||sheetState.time;sheetState.dir=el.dataset.v;renderTripSheet();break;
+    case 'trip-day':sheetState.time=($('#tTime')||{}).value||sheetState.time;sheetState.day=el.dataset.v;sheetState.error=null;renderTripSheet();break;
+    case 'trip-save':tripSave();break;
+    case 'trip-clear':delete db.trip;save();tripState={};closeSheet();renderTrip();break;
+    case 'trip-pick':tripState.pick=+el.dataset.v;renderTrip();break;
+    case 'trip-alarm':commuteDir=db.trip.dir;db.settings.dir=commuteDir;db.settings.dirAt=Date.now();save();renderCommute();applyDir();openStartRoute(id);break;
     case 'plan-retry':{const k=el.dataset.panel+':'+commuteDir;if(pstate[k]) pstate[k].err=null;renderPlan(el.dataset.panel,commuteDir);fetchPlan(el.dataset.panel,commuteDir);break;}
     case 'live-stopfilter':liveStopFilter=el.dataset.v;renderLiveShell();break;
     case 'live-save':liveSave();break;
@@ -1600,6 +1791,7 @@ sheetBody.addEventListener('input',e=>{
   if(t.id==='lQuery') sheetState.query=t.value;
   if(t.id==='lLines') sheetState.linesText=t.value;
   if(t.id==='lProxy') sheetState.proxyText=t.value;
+  if(t.id==='tTime') sheetState.time=t.value;
   if(t.id==='sCoords'){
     const c=parseCoords(t.value),d=sheetState.draft;
     if(c){d.lat=c[0];d.lon=c[1];d.approx=false;setLoc(locLabel(d));}
