@@ -1,0 +1,1349 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Haltewekker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&display=swap">
+<style>
+:root{
+  --bg:#EEF0F7;
+  --surface:#FFFFFF;
+  --ink:#151A30;
+  --muted:#596079;
+  --line:#D7DBE8;
+  --dusk:#2D3A8F;
+  --dusk-ink:#FFFFFF;
+  --dawn:#E8862E;
+  --warn:#A2470C;
+  --warn-bg:#FDEBD8;
+  --ok:#1D7348;
+  --font-body:"Atkinson Hyperlegible",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  --font-display:"Bricolage Grotesque","Atkinson Hyperlegible",-apple-system,"Segoe UI",sans-serif;
+  color-scheme:light;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#131838; --surface:#1C2250; --ink:#EDEFF9; --muted:#A4AAC6; --line:#2F3770;
+    --dusk:#9AA6FF; --dusk-ink:#10153A; --dawn:#FFB25C; --warn:#FFB57E; --warn-bg:#3B2B2A; --ok:#72D3A2;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#131838; --surface:#1C2250; --ink:#EDEFF9; --muted:#A4AAC6; --line:#2F3770;
+  --dusk:#9AA6FF; --dusk-ink:#10153A; --dawn:#FFB25C; --warn:#FFB57E; --warn-bg:#3B2B2A; --ok:#72D3A2;
+  color-scheme:dark;
+}
+*,*::before,*::after{box-sizing:inherit}
+html{scroll-padding-top:env(safe-area-inset-top,0px);-webkit-text-size-adjust:100%}
+html,body{min-height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font-body);font-size:17px;line-height:1.45;-webkit-font-smoothing:antialiased}
+[hidden]{display:none !important}
+button{font:inherit;color:inherit;-webkit-tap-highlight-color:transparent}
+:focus-visible{outline:3px solid var(--dawn);outline-offset:2px}
+svg{display:block}
+
+/* Home */
+.app{max-width:460px;margin:0 auto;padding:18px 20px 40px}
+.top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin:10px 0 20px}
+.wordmark{font-family:var(--font-display);font-weight:800;font-size:38px;line-height:1;letter-spacing:-0.035em;margin:0;display:flex;align-items:flex-end;gap:10px}
+.mark{display:inline-block;width:28px;height:16px;border-bottom:2.5px solid var(--ink);position:relative;margin-bottom:5px}
+.mark::before{content:"";position:absolute;left:3px;right:3px;bottom:0;height:11px;border-radius:11px 11px 0 0;background:var(--dawn)}
+.tag{margin:10px 0 0;color:var(--muted);max-width:30ch}
+.icon-btn{width:46px;height:46px;flex:none;border-radius:50%;border:1px solid var(--line);background:var(--surface);color:var(--ink);display:grid;place-items:center;cursor:pointer}
+.icon-btn svg{width:22px;height:22px}
+.icon-btn.small{width:40px;height:40px;background:transparent;border-color:transparent;color:var(--muted)}
+.icon-btn.small svg{width:18px;height:18px}
+
+.prep{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:14px 16px}
+.prep summary{cursor:pointer;font-weight:700;list-style:none;display:flex;justify-content:space-between;align-items:center}
+.prep summary::-webkit-details-marker{display:none}
+.prep summary::after{content:"+";font-size:22px;line-height:1;color:var(--muted)}
+.prep[open] summary::after{content:"\2212"}
+.checks{margin:12px 0 2px;padding:0;list-style:none;display:grid;gap:10px}
+.checks li{padding-left:24px;position:relative;font-size:16px}
+.checks li::before{content:"";position:absolute;left:2px;top:.55em;width:12px;height:6px;border-radius:6px 6px 0 0;background:var(--dawn)}
+
+.sec-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin:32px 0 10px}
+.sec{font-family:var(--font-display);font-weight:600;font-size:23px;letter-spacing:-0.01em;margin:0}
+.sec-head .text-btn{padding:6px 2px}
+.dir-seg{margin:0 0 10px}
+.commute-sub{color:var(--muted);font-size:15px;margin:0 0 10px}
+.list{background:var(--surface);border:1px solid var(--line);border-radius:16px;overflow:hidden}
+.row{display:flex;align-items:stretch}
+.row+.row{border-top:1px solid var(--line)}
+.row-main{flex:1;min-width:0;text-align:left;background:none;border:0;padding:14px 16px;display:flex;flex-direction:column;gap:6px;cursor:pointer;min-height:58px;justify-content:center}
+.row-main:active{background:color-mix(in srgb,var(--dusk) 9%,transparent)}
+.row-title{font-weight:700;font-size:17px}
+.route{display:flex;align-items:center;flex-wrap:wrap;gap:6px 7px;color:var(--muted);font-size:15px}
+.leg-chip{display:inline-flex;align-items:center;gap:5px}
+.leg-chip svg{width:17px;height:17px}
+.leg-join{width:16px;height:2px;border-radius:1px;background:currentColor;opacity:.45}
+.row-edit{width:54px;flex:none;background:none;border:0;border-left:1px solid var(--line);color:var(--muted);display:grid;place-items:center;cursor:pointer}
+.row-edit svg{width:20px;height:20px}
+.badge{font-size:14px;color:var(--warn)}
+.tagline{font-size:14px;color:var(--muted)}
+.empty{padding:16px;margin:0;color:var(--muted)}
+.text-btn{background:none;border:0;color:var(--dusk);font-weight:700;padding:12px 2px;cursor:pointer}
+.foot{color:var(--muted);font-size:15px;margin:30px 0 0;max-width:36ch}
+
+/* Live bus times */
+.chips{display:flex;gap:8px;overflow-x:auto;padding:2px 0 10px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.chips::-webkit-scrollbar{display:none}
+.chip{flex:none;min-height:38px;padding:0 15px;border-radius:999px;border:1.5px solid var(--line);background:var(--surface);font-weight:700;font-size:15px;cursor:pointer;font-variant-numeric:tabular-nums}
+.chip[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.bus{display:grid;grid-template-columns:auto 1fr auto;column-gap:12px;row-gap:2px;align-items:center;padding:12px 16px}
+.bus+.bus{border-top:1px solid var(--line)}
+.line-no{grid-row:span 2;min-width:48px;height:32px;padding:0 8px;border-radius:8px;background:var(--dusk);color:var(--dusk-ink);font-weight:700;display:grid;place-items:center;font-variant-numeric:tabular-nums}
+.bus-dest{font-weight:700;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bus-time{font-family:var(--font-display);font-weight:800;font-size:22px;line-height:1.1;text-align:right;font-variant-numeric:tabular-nums}
+.bus-time.gone{text-decoration:line-through;color:var(--muted)}
+.bus-status{font-size:14px;color:var(--muted);min-width:0}
+.bus-status.late{color:var(--warn);font-weight:700}
+.bus-status.ok{color:var(--ok);font-weight:700}
+.bus-when{font-size:14px;color:var(--muted);text-align:right;white-space:nowrap}
+.live-meta{margin-top:8px}
+
+/* Buttons and fields */
+.btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;min-height:52px;border-radius:14px;font-weight:700;border:0;cursor:pointer;margin-top:10px;padding:0 16px;text-decoration:none;font-size:17px}
+.btn.primary{background:var(--dusk);color:var(--dusk-ink)}
+.btn.big{min-height:60px;font-size:19px;margin-top:20px}
+.btn.secondary{background:transparent;border:1.5px solid var(--dusk);color:var(--dusk)}
+.btn.ghost{background:transparent;color:var(--muted)}
+.btn.danger{color:var(--warn)}
+.btn.inline{width:auto;margin:0;flex:none}
+.btn:disabled{opacity:.6}
+.field{display:block;margin:18px 0 0}
+.field-label{display:block;font-weight:700;font-size:15px;margin:0 0 8px}
+input[type=text],input[type=search],select{width:100%;min-height:50px;border-radius:12px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:17px;padding:0 12px}
+select{appearance:none;-webkit-appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),linear-gradient(135deg,var(--muted) 50%,transparent 50%);background-position:calc(100% - 20px) 50%,calc(100% - 14px) 50%;background-size:6px 6px;background-repeat:no-repeat;padding-right:36px}
+.search-row{display:flex;gap:8px}
+.hint{color:var(--muted);font-size:15px;margin:6px 0 0}
+.warn{background:var(--warn-bg);color:var(--warn);border-radius:10px;padding:10px 12px;font-size:15px;margin:10px 0 0}
+.seg{display:flex;background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:3px;gap:3px}
+.seg button{flex:1;min-height:44px;border:0;border-radius:9px;background:transparent;font-weight:700;display:flex;align-items:center;justify-content:center;gap:7px;cursor:pointer;padding:0 8px}
+.seg button svg{width:18px;height:18px}
+.seg button[aria-pressed="true"]{background:var(--surface);box-shadow:0 1px 3px rgba(10,14,40,.18)}
+.app .seg{background:color-mix(in srgb,var(--line) 55%,var(--bg))}
+.stepper{display:flex;align-items:center;gap:10px;margin:10px 0 0;flex:1}
+.step{width:48px;height:48px;flex:none;border-radius:50%;border:1.5px solid var(--line);background:var(--bg);font-size:24px;line-height:1;cursor:pointer;display:grid;place-items:center}
+.stepper output{flex:1;text-align:center;font-weight:700}
+.leg{padding:14px 0 16px;border-top:1px solid var(--line);margin-top:14px}
+.leg-head{display:flex;align-items:center;gap:8px;font-weight:700;margin:0}
+.leg-head svg{width:20px;height:20px;flex:none}
+.leg-edit{display:flex;gap:12px;align-items:flex-start;padding:12px 0;border-top:1px solid var(--line)}
+.leg-num{width:28px;height:28px;border-radius:50%;background:var(--bg);border:1px solid var(--line);display:grid;place-items:center;font-weight:700;font-size:14px;flex:none;margin-top:9px}
+.leg-edit-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:8px}
+.leg-fixed{margin:4px 0 0;font-weight:700}
+.leg-gap{width:40px;flex:none}
+.set-step{display:flex;align-items:center;gap:12px}
+.set-step-name{display:flex;align-items:center;gap:7px;width:80px;font-weight:700;flex:none}
+.set-step-name svg{width:18px;height:18px}
+.switch-row{display:flex;gap:16px;align-items:center;justify-content:space-between;padding:16px 0;margin-top:16px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);cursor:pointer}
+.switch-text{display:flex;flex-direction:column}
+.switch{appearance:none;-webkit-appearance:none;width:52px;height:32px;border-radius:16px;background:var(--line);position:relative;flex:none;margin:0;cursor:pointer;transition:background .2s}
+.switch::before{content:"";position:absolute;top:3px;left:3px;width:26px;height:26px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.25);transition:transform .2s}
+.switch:checked{background:var(--dusk)}
+.switch:checked::before{transform:translateX(20px)}
+.loc-readout{margin:0 0 4px;font-variant-numeric:tabular-nums}
+.loc-readout.bad{color:var(--warn)}
+.results{margin-top:8px}
+.result{display:flex;flex-direction:column;width:100%;text-align:left;padding:12px 2px;border:0;border-top:1px solid var(--line);background:none;cursor:pointer}
+.result small{color:var(--muted);font-size:14px}
+.result[aria-pressed="true"]{color:var(--dusk)}
+
+/* Sheet */
+.scrim{position:fixed;inset:0;background:rgba(8,10,30,.5);z-index:30}
+.sheet{position:fixed;left:0;right:0;bottom:0;z-index:31;max-width:520px;margin:0 auto;background:var(--surface);border-radius:22px 22px 0 0;max-height:calc(100% - env(safe-area-inset-top,0px) - 20px);overflow-y:auto;overscroll-behavior:contain;padding:10px 20px calc(env(safe-area-inset-bottom,0px) + 16px);box-shadow:0 -12px 40px rgba(5,8,30,.3);transform:translateY(30px);opacity:0;transition:transform .22s ease,opacity .22s ease}
+.sheet.open{transform:none;opacity:1}
+.sheet::before{content:"";display:block;width:40px;height:5px;border-radius:3px;background:var(--line);margin:0 auto 14px}
+.sheet-title{font-family:var(--font-display);font-weight:600;font-size:26px;line-height:1.15;letter-spacing:-0.01em;margin:2px 0 4px}
+.sheet-sub{color:var(--muted);margin:0}
+.sheet-title:focus{outline:none}
+.sheet p{max-width:42ch}
+
+.toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 22px);transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:12px 18px;border-radius:999px;z-index:80;font-weight:700;font-size:15px;max-width:calc(100% - 40px);text-align:center}
+
+/* Full-screen views */
+.overlay{position:fixed;inset:0;z-index:50;display:flex;flex-direction:column;padding:calc(env(safe-area-inset-top,0px) + 14px) 22px calc(env(safe-area-inset-bottom,0px) + 18px);overflow:hidden}
+.overlay > :not(.dawn){width:100%;max-width:520px;margin-left:auto;margin-right:auto}
+
+.night{--night-bg:#000;--p:0;--ground:calc(118px + env(safe-area-inset-bottom,0px));background:var(--night-bg);color:#B8BED0}
+.night.awake{--night-bg:#10153A}
+.night-status{display:flex;justify-content:space-between;gap:8px;position:relative;z-index:3}
+.pill{display:inline-flex;align-items:center;gap:7px;padding:7px 12px;border-radius:999px;background:rgba(255,255,255,.06);color:#8C92A8;font-size:14px;border:0;line-height:1.2}
+button.pill{cursor:pointer}
+.pill .dot{width:8px;height:8px;border-radius:50%;background:#5A6078;flex:none}
+.pill.ok .dot{background:#5FBF8E}
+.pill.warn{color:#F2B27A}
+.pill.warn .dot{background:#F2994A}
+.night-main{flex:1;display:flex;flex-direction:column;justify-content:center;position:relative;z-index:3;padding-bottom:9vh}
+.night-count{margin:0 0 14px;color:#6A7088;font-size:15px}
+.night-count:empty{display:none}
+.night-leg{display:flex;align-items:center;gap:8px;margin:0;color:#7C8299;font-size:17px}
+.night-leg svg{width:20px;height:20px}
+.night-stop{font-family:var(--font-display);font-weight:600;font-size:30px;line-height:1.1;letter-spacing:-0.01em;margin:6px 0 0;color:#C7CCDC;max-width:16ch}
+.night-dist{margin:20px 0 0;font-family:var(--font-display);font-weight:800;line-height:.9;letter-spacing:-0.04em;color:#E4E7F0;font-variant-numeric:tabular-nums}
+.night-dist .num{font-size:clamp(72px,24vw,112px)}
+.night-dist .unit{font-size:28px;margin-left:8px;letter-spacing:0;color:#8C92A8;font-weight:600}
+.night-sub{margin:16px 0 0;color:#8C92A8;font-size:17px;max-width:32ch}
+.night-notice{margin:18px 0 0;padding:6px 0 6px 12px;border-left:2px solid #F2994A;color:#E7C6A2;font-size:15px;max-width:34ch}
+.night.awake .night-stop{color:#EEF0F8}
+.night.awake .night-dist{color:#FFFFFF}
+.night.awake .night-sub{color:#C4C9DC}
+.dawn{position:absolute;left:0;right:0;bottom:0;height:72%;overflow:hidden;pointer-events:none;z-index:1}
+.glow{position:absolute;left:-25%;right:-25%;bottom:var(--ground);height:75%;background:radial-gradient(ellipse 50% 60% at 50% 100%,rgba(255,150,70,.55),rgba(255,150,70,0) 70%);opacity:calc(var(--p) * .6);transition:opacity 2s ease}
+.sun{position:absolute;left:50%;width:200px;height:200px;margin-left:-100px;border-radius:50%;background:radial-gradient(circle,#FFC07A 0 37%,#F28A3E 51%,rgba(242,138,62,0) 70%);bottom:calc(var(--ground) - 200px + var(--p) * 150px);opacity:calc(.3 + var(--p) * .55);transition:bottom 2s ease,opacity 2s ease}
+.ground{position:absolute;left:0;right:0;bottom:0;height:var(--ground);background:var(--night-bg);border-top:1px solid rgba(255,176,110,.28)}
+.night-actions{position:relative;z-index:3;display:flex;flex-direction:column;gap:10px}
+.awake-btn{background:rgba(255,255,255,.1);color:#EEF0F8;margin:0}
+.hold{position:relative;overflow:hidden;width:100%;height:58px;border-radius:29px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.05);color:#8C92A8;font-weight:700;font-size:17px;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;cursor:pointer}
+.hold-fill{position:absolute;inset:0;background:rgba(255,180,110,.3);transform:scaleX(0);transform-origin:left center;pointer-events:none}
+.hold-label{position:relative;pointer-events:none}
+
+.alarm{z-index:60;background:#FFB547;color:#1F1200;animation:flash 1s steps(1,end) infinite}
+@keyframes flash{0%{background:#FFB547}50%{background:#FF6A3D}}
+.alarm-main{flex:1;display:flex;flex-direction:column;justify-content:center}
+.alarm h2{font-family:var(--font-display);font-weight:800;font-size:clamp(56px,18vw,92px);line-height:.95;letter-spacing:-0.035em;margin:0}
+.alarm-stop{font-family:var(--font-display);font-weight:600;font-size:28px;line-height:1.15;margin:18px 0 0;max-width:18ch}
+.alarm-sub{font-size:19px;margin:12px 0 0;max-width:30ch}
+.hold-alarm{height:78px;border-radius:39px;background:#1F1200;color:#FFE1B8;border:0;font-size:20px}
+.hold-alarm .hold-fill{background:rgba(255,225,184,.38)}
+
+.between{background:var(--bg);color:var(--ink)}
+.between-main{flex:1;display:flex;flex-direction:column;justify-content:center}
+.between h2{font-family:var(--font-display);font-weight:800;font-size:36px;line-height:1.05;letter-spacing:-0.03em;margin:0;max-width:14ch}
+.between-main > p{font-size:18px;color:var(--muted);margin:14px 0 0;max-width:32ch}
+
+@media (prefers-reduced-motion: reduce){
+  .alarm{animation:none;background:#FFB547}
+  .sheet,.sun,.glow,.switch,.switch::before{transition:none}
+}
+</style>
+</head>
+<body>
+
+<main class="app" id="home">
+  <header class="top">
+    <div>
+      <h1 class="wordmark">Haltewekker<span class="mark" aria-hidden="true"></span></h1>
+      <p class="tag">Fall asleep on the bus or train. It wakes you before your stop.</p>
+    </div>
+    <button type="button" class="icon-btn" data-act="settings" aria-label="Settings">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="15" cy="7" r="2.2" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="9" cy="17" r="2.2" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+    </button>
+  </header>
+
+  <details class="prep" id="prep">
+    <summary>Before you nap</summary>
+    <ul class="checks">
+      <li>Open this page in Safari and leave it on screen. If you lock the phone or switch apps, it can’t follow you.</li>
+      <li>Turn the volume up or wear earbuds. A web page can’t make an iPhone vibrate, so the sound is what wakes you.</li>
+      <li>Switch off Low Power Mode and plug in if you can. Turn brightness down in Control Center; the sleep screen is dark anyway.</li>
+      <li>Run the test alarm once, in Settings.</li>
+    </ul>
+  </details>
+
+  <section>
+    <div class="sec-head"><h2 class="sec">Your commute</h2><button type="button" class="text-btn" data-act="commute">Edit</button></div>
+    <div class="dir-seg" id="dirSeg"></div>
+    <p class="commute-sub" id="commuteSub"></p>
+    <div class="list" id="routes"></div>
+  </section>
+
+  <section>
+    <div class="sec-head"><h2 class="sec">Live bus times</h2><button type="button" class="text-btn" data-act="live-settings">Change</button></div>
+    <p class="commute-sub" id="liveStop"></p>
+    <div class="chips" id="liveChips"></div>
+    <div class="list" id="liveList"></div>
+    <p class="hint live-meta" id="liveMeta"></p>
+  </section>
+
+  <section>
+    <div class="sec-head"><h2 class="sec">Single stop</h2><button type="button" class="text-btn" data-act="add-stop">Add a stop</button></div>
+    <div class="list" id="stops"></div>
+  </section>
+
+  <p class="foot">The alarm works with your phone’s GPS, so delays and detours don’t throw it off. Live times come from the open OVapi feed.</p>
+</main>
+
+<!-- Sleeping -->
+<div class="overlay night" id="sleep" hidden>
+  <div class="dawn" aria-hidden="true"><div class="glow"></div><div class="sun"></div><div class="ground"></div></div>
+  <div class="night-status">
+    <span class="pill" id="gpsPill"><i class="dot"></i><span>Finding GPS…</span></span>
+    <button type="button" class="pill" id="wakePill" data-act="wake-help"><i class="dot"></i><span>Screen stays on</span></button>
+  </div>
+  <div class="night-main">
+    <p class="night-count" id="nCount"></p>
+    <p class="night-leg" id="nLeg"></p>
+    <h2 class="night-stop" id="nStop"></h2>
+    <p class="night-dist"><span class="num" id="nNum">–</span><span class="unit" id="nUnit"></span></p>
+    <p class="night-sub" id="nSub"></p>
+    <p class="night-notice" id="nNotice" hidden></p>
+  </div>
+  <div class="night-actions">
+    <button type="button" class="btn awake-btn" id="btnArrived" data-act="arrived" hidden>I’m off, end this leg</button>
+    <button type="button" class="hold" id="holdEnd"><span class="hold-fill"></span><span class="hold-label">Hold to end trip</span></button>
+  </div>
+</div>
+
+<!-- Ringing -->
+<div class="overlay alarm" id="alarm" role="alertdialog" aria-modal="true" aria-labelledby="aTitle" aria-describedby="aStop" hidden>
+  <div class="alarm-main">
+    <h2 id="aTitle">Wake up</h2>
+    <p class="alarm-stop" id="aStop"></p>
+    <p class="alarm-sub" id="aSub"></p>
+  </div>
+  <button type="button" class="hold hold-alarm" id="holdStop"><span class="hold-fill"></span><span class="hold-label">Hold to stop alarm</span></button>
+</div>
+
+<!-- Transfer / arrived -->
+<div class="overlay between" id="between" hidden>
+  <div class="between-main">
+    <h2 id="bTitle"></h2>
+    <p id="bSub"></p>
+    <div id="bBackupWrap"></div>
+  </div>
+  <div class="between-actions">
+    <button type="button" class="btn primary big" id="btnNext" data-act="next-leg">Start next leg</button>
+    <a class="btn secondary" id="btnSpotify" href="spotify:">Open Spotify</a>
+    <button type="button" class="btn ghost" id="btnEndTrip" data-act="end-trip">End trip here</button>
+  </div>
+</div>
+
+<div class="scrim" id="scrim" data-act="dismiss-sheet" hidden></div>
+<div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle" hidden><div id="sheetBody"></div></div>
+<div class="toast" id="toast" role="status" hidden></div>
+<audio id="snd" loop preload="auto" playsinline></audio>
+
+<script>
+(function(){
+'use strict';
+
+const $=s=>document.querySelector(s);
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
+const clone=o=>JSON.parse(JSON.stringify(o));
+const uid=()=>Math.random().toString(36).slice(2,10);
+const clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
+
+const ICON={
+  bus:'<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4.5" y="3" width="15" height="15" rx="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M4.5 10.5h15M8 18v3M16 18v3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="8.3" cy="14.3" r="1.2" fill="currentColor"/><circle cx="15.7" cy="14.3" r="1.2" fill="currentColor"/></svg>',
+  train:'<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="2.5" width="14" height="14.5" rx="4" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M5 9.5h14M9 17l-3 4.5M15 17l3 4.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="9" cy="13.2" r="1.1" fill="currentColor"/><circle cx="15" cy="13.2" r="1.1" fill="currentColor"/></svg>',
+  edit:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4.2L19.3 8.9a1.6 1.6 0 0 0 0-2.3l-1.9-1.9a1.6 1.6 0 0 0-2.3 0L4 15.8V20z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
+  close:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>'
+};
+const MODES=[['bus','Bus',ICON.bus],['train','Train',ICON.train]];
+
+/* ---------- Data ---------- */
+const PRESET_STOPS=[
+  {id:'breda',name:'Breda station',short:'Breda',lat:51.5955,lon:4.7797},
+  {id:'denbosch',name:'’s-Hertogenbosch Centraal',short:'Den Bosch',lat:51.6905,lon:5.2936},
+  {id:'eindhoven',name:'Eindhoven Centraal',short:'Eindhoven',lat:51.4432,lon:5.4812},
+  {id:'veghel',name:'Veghel',short:'Veghel',lat:51.6165,lon:5.5479,approx:true}
+];
+// A route is the way from home to school. The last part always ends at school; the way home is the same route backwards.
+const PRESET_ROUTES=[
+  {id:'via-denbosch',name:'Via Den Bosch',legs:[{mode:'bus',stop:'denbosch'},{mode:'train'}]},
+  {id:'via-eindhoven',name:'Via Eindhoven',legs:[{mode:'bus',stop:'eindhoven'},{mode:'train'}]}
+];
+const DEFAULT_SETTINGS={trainKm:5,busKm:2,arrivalRing:true,sound:'beeps',music:'pause',prepSeen:false};
+const DEFAULT_LIVE={name:'Veghel, Busstation',codes:null,lines:['305','306','158']};
+const ARRIVE_M=450;
+const KEY='haltewekker:v2',OLD_KEY='haltewekker:v1';
+
+function fresh(){return {stops:clone(PRESET_STOPS),home:'veghel',school:'breda',routes:clone(PRESET_ROUTES),kmMem:{},settings:Object.assign({},DEFAULT_SETTINGS),live:clone(DEFAULT_LIVE)};}
+function load(){
+  try{
+    const raw=localStorage.getItem(KEY);
+    if(raw){
+      const d=JSON.parse(raw),f=fresh();
+      if(d&&Array.isArray(d.stops)&&Array.isArray(d.routes)){
+        return {stops:d.stops,home:d.home!==undefined?d.home:f.home,school:d.school!==undefined?d.school:f.school,routes:d.routes,kmMem:d.kmMem||{},settings:Object.assign(f.settings,d.settings||{}),live:Object.assign(f.live,d.live||{})};
+      }
+    }
+    // Bring over stops and settings from the first version.
+    const old=localStorage.getItem(OLD_KEY);
+    if(old){
+      const o=JSON.parse(old),f=fresh();
+      if(o&&Array.isArray(o.stops)){
+        f.stops=o.stops;
+        f.settings=Object.assign(f.settings,o.settings||{});
+        const has=id=>f.stops.some(s=>s.id===id);
+        if(!has(f.home)) f.home=f.stops[0]?f.stops[0].id:null;
+        if(!has(f.school)) f.school=null;
+        f.routes=f.routes.filter(r=>r.legs.every(l=>!l.stop||has(l.stop)));
+        (o.trips||[]).forEach(t=>(t.legs||[]).forEach(l=>{if(l.km) f.kmMem[l.mode+':'+l.stop]=l.km;}));
+        f.stops.forEach(s=>{if(s.lastKm&&s.lastMode) f.kmMem[s.lastMode+':'+s.id]=s.lastKm;delete s.lastKm;});
+        return f;
+      }
+    }
+  }catch(e){}
+  return fresh();
+}
+let db=load();
+function save(){try{localStorage.setItem(KEY,JSON.stringify(db));}catch(e){}}
+const stopById=id=>db.stops.find(s=>s.id===id);
+const routeById=id=>db.routes.find(r=>r.id===id);
+const defKm=m=>m==='bus'?db.settings.busKm:db.settings.trainKm;
+const kmFor=(mode,stop)=>db.kmMem[mode+':'+stop]||defKm(mode);
+const modeName=m=>m==='bus'?'Bus':'Train';
+const shortName=id=>{const s=stopById(id);return s?(s.short||s.name):'Missing stop';};
+
+function routeLegs(r,dir){
+  const L=r.legs;
+  if(dir==='out') return L.map((l,i)=>({mode:l.mode,stop:i<L.length-1?l.stop:db.school}));
+  const out=[];
+  for(let i=L.length-1;i>=0;i--) out.push({mode:L[i].mode,stop:i>0?L[i-1].stop:db.home});
+  return out;
+}
+
+/* ---------- Formatting ---------- */
+function fmtKm(km){return km<1?Math.round(km*1000)+' m':(Math.round(km*10)/10)+' km';}
+function distParts(m){
+  if(m<1000) return [String(Math.max(0,Math.round(m/10)*10)),'m'];
+  if(m<100000) return [(m/1000).toFixed(1),'km'];
+  return [String(Math.round(m/1000)),'km'];
+}
+function distText(m){const p=distParts(m);return p[0]+' '+p[1];}
+function minsText(sec){return sec<60?'under a minute':Math.round(sec/60)+' min';}
+function estText(km,mode){return minsText(km/(mode==='bus'?40:90)*3600);}
+function accText(a){return a>=1000?'±'+(a/1000).toFixed(1)+' km':'±'+Math.round(a)+' m';}
+function hhmm(t){const d=new Date(t);return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');}
+function cap(s){return s?s.charAt(0).toUpperCase()+s.slice(1):s;}
+function dist(a,b,c,d){
+  const R=6371000,r=Math.PI/180,dLat=(c-a)*r,dLon=(d-b)*r;
+  const x=Math.sin(dLat/2)**2+Math.cos(a*r)*Math.cos(c*r)*Math.sin(dLon/2)**2;
+  return 2*R*Math.asin(Math.min(1,Math.sqrt(x)));
+}
+function parseCoords(s){
+  const m=String(s).match(/(-?\d{1,2}\.\d+)\s*°?\s*([NS])?[\s,;]+(-?\d{1,3}\.\d+)\s*°?\s*([EW])?/i);
+  if(!m) return null;
+  let lat=parseFloat(m[1]),lon=parseFloat(m[3]);
+  if(m[2]&&/s/i.test(m[2])) lat=-Math.abs(lat);
+  if(m[4]&&/w/i.test(m[4])) lon=-Math.abs(lon);
+  if(Math.abs(lat)>90||Math.abs(lon)>180) return null;
+  return [lat,lon];
+}
+
+/* ---------- Home ---------- */
+let commuteDir=new Date().getHours()<12?'out':'back';
+function renderHome(){renderCommute();renderStops();renderLiveShell();}
+function renderCommute(){
+  const h=stopById(db.home),sc=stopById(db.school);
+  $('#dirSeg').innerHTML=seg('dir',[['out','To school'],['back','Home']],commuteDir);
+  if(!h||!sc){
+    $('#commuteSub').textContent='';
+    $('#routes').innerHTML=`<p class="empty">Choose your home and school stops to get started.</p><div class="row"><button type="button" class="row-main" data-act="commute"><span class="row-title">Set up your commute</span></button></div>`;
+    return;
+  }
+  $('#commuteSub').textContent=commuteDir==='out'?`From ${h.name} to ${sc.name}`:`From ${sc.name} to ${h.name}`;
+  $('#routes').innerHTML=db.routes.length?db.routes.map(routeRow).join(''):'<p class="empty">No routes yet. Tap Edit to add how you travel.</p>';
+}
+function pathHtml(legs){
+  return legs.map(l=>`<span class="leg-chip">${ICON[l.mode]}<span>${esc(shortName(l.stop))}</span></span>`).join('<span class="leg-join" aria-hidden="true"></span>');
+}
+function routeRow(r){
+  return `<div class="row"><button type="button" class="row-main" data-act="start-route" data-id="${esc(r.id)}"><span class="row-title">${esc(r.name)}</span><span class="route">${pathHtml(routeLegs(r,commuteDir))}</span></button><button type="button" class="row-edit" data-act="edit-route" data-id="${esc(r.id)}" aria-label="Edit ${esc(r.name)}">${ICON.edit}</button></div>`;
+}
+function renderStops(){
+  $('#stops').innerHTML=db.stops.length?db.stops.map(stopRow).join(''):'<p class="empty">No stops yet. Add the stop you get off at.</p>';
+}
+function stopRow(s){
+  const role=s.id===db.home?'Your home stop':s.id===db.school?'Your school stop':'';
+  return `<div class="row"><button type="button" class="row-main" data-act="start-stop" data-id="${esc(s.id)}"><span class="row-title">${esc(s.name)}</span>${role?`<span class="tagline">${role}</span>`:''}${s.approx?'<span class="badge">Location is approximate. Set it with the pencil.</span>':''}</button><button type="button" class="row-edit" data-act="edit-stop" data-id="${esc(s.id)}" aria-label="Edit ${esc(s.name)}">${ICON.edit}</button></div>`;
+}
+
+/* ---------- Live bus times (OVapi) ---------- */
+const OV='https://v0.ovapi.nl';
+let liveFilter='mine',liveBusy=false,liveData=null,liveErr=null,liveAt=null,stopListCache=null;
+const liveLines=()=>(db.live.lines||[]).map(String);
+const norm=s=>String(s||'').toLowerCase().replace(/[’`]/g,"'").replace(/\s+/g,' ').trim();
+
+async function getJSON(url,ms){
+  const ctl=new AbortController(),t=setTimeout(()=>ctl.abort(),ms||15000);
+  try{
+    const r=await fetch(url,{signal:ctl.signal,cache:'no-store'});
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    return await r.json();
+  }finally{clearTimeout(t);}
+}
+async function loadStopList(){
+  if(stopListCache) return stopListCache;
+  const data=await getJSON(OV+'/stopareacode',45000);
+  const list=[];
+  Object.keys(data||{}).forEach(k=>{
+    const v=data[k];if(!v||typeof v!=='object') return;
+    list.push({code:v.StopAreaCode||k,name:v.TimingPointName||k,town:v.TimingPointTown||''});
+  });
+  stopListCache=list;return list;
+}
+function searchStops(list,q){
+  const words=norm(q).split(/[\s,]+/).filter(Boolean);
+  if(!words.length) return [];
+  const groups=new Map();
+  list.forEach(s=>{
+    const hay=norm(s.name+' '+s.town);
+    if(!words.every(w=>hay.includes(w))) return;
+    const key=norm(s.name);
+    if(!groups.has(key)) groups.set(key,{name:s.name,town:s.town,codes:[]});
+    groups.get(key).codes.push(s.code);
+  });
+  return Array.from(groups.values()).sort((a,b)=>a.name.localeCompare(b.name)).slice(0,30);
+}
+async function findStopCodes(name){
+  const list=await loadStopList(),n=norm(name);
+  let m=list.filter(s=>norm(s.name)===n).map(s=>s.code);
+  if(!m.length){const g=searchStops(list,name);if(g.length===1) m=g[0].codes;}
+  return m;
+}
+function parseLocal(s){
+  const m=String(s||'').match(/(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/);
+  if(!m) return null;
+  return new Date(+m[1],+m[2]-1,+m[3],+m[4],+m[5],+(m[6]||0)).getTime();
+}
+function collectPasses(data){
+  const out=[],seen=new Set();
+  const visit=(o,depth)=>{
+    if(!o||typeof o!=='object'||depth>4) return;
+    if(o.Passes&&typeof o.Passes==='object'){
+      Object.keys(o.Passes).forEach(k=>{
+        const p=o.Passes[k];if(!p) return;
+        const id=[p.DataOwnerCode,p.OperationDate,p.LinePlanningNumber,p.JourneyNumber].join('|');
+        const key=id==='|||'?k:id;
+        if(seen.has(key)) return;seen.add(key);
+        const arr=p.JourneyStopType==='LAST';
+        const target=parseLocal(arr?p.TargetArrivalTime:(p.TargetDepartureTime||p.TargetArrivalTime));
+        const exp=parseLocal(arr?p.ExpectedArrivalTime:(p.ExpectedDepartureTime||p.ExpectedArrivalTime))||target;
+        if(!exp) return;
+        const status=String(p.TripStopStatus||'').toUpperCase();
+        const live=status==='DRIVING'||status==='ARRIVED';
+        out.push({line:String(p.LinePublicNumber||p.LinePlanningNumber||'?'),dest:p.DestinationName50||'',time:exp,target:target||exp,delay:live&&target?Math.round((exp-target)/60000):0,status,live,arr});
+      });
+      return;
+    }
+    Object.keys(o).forEach(k=>visit(o[k],depth+1));
+  };
+  visit(data,0);
+  return out.sort((a,b)=>a.time-b.time);
+}
+function homeOnScreen(){return sleepEl.hidden&&alarmEl.hidden&&betweenEl.hidden&&document.visibilityState==='visible';}
+async function fetchLive(){
+  if(liveBusy||!db.live.name||!homeOnScreen()) return;
+  liveBusy=true;
+  try{
+    if(!db.live.codes||!db.live.codes.length){
+      if(!liveData) renderLiveList('Looking up your stop…');
+      const codes=await findStopCodes(db.live.name);
+      if(!codes.length){liveData=null;liveErr=`${db.live.name} isn’t in the live feed. Tap Change to search for your stop.`;return;}
+      db.live.codes=codes;save();
+    }
+    const data=await getJSON(OV+'/stopareacode/'+db.live.codes.map(encodeURIComponent).join(','));
+    liveData=collectPasses(data);liveErr=null;liveAt=Date.now();
+  }catch(e){
+    liveErr=liveData?'Couldn’t refresh just now, so these may be a bit old.':'Couldn’t load live times. Check your connection; it tries again in 30 seconds.';
+  }finally{
+    liveBusy=false;renderLiveList();
+  }
+}
+function renderLiveShell(){
+  $('#liveStop').textContent=db.live.name?`At ${db.live.name}`:'';
+  const lines=liveLines();
+  if(liveFilter!=='mine'&&liveFilter!=='all'&&!lines.includes(liveFilter)) liveFilter='mine';
+  const chips=lines.length?[['mine','My lines']].concat(lines.map(l=>[l,l]),[['all','All buses']]):[];
+  $('#liveChips').innerHTML=chips.map(c=>`<button type="button" class="chip" data-act="live-filter" data-v="${esc(c[0])}" aria-pressed="${c[0]===liveFilter}">${esc(c[1])}</button>`).join('');
+  $('#liveChips').hidden=!chips.length;
+  renderLiveList();
+}
+function renderLiveList(loadingText){
+  const el=$('#liveList'),meta=$('#liveMeta');
+  if(!db.live.name){el.innerHTML='<p class="empty">Choose a stop to see live bus times.</p>';meta.textContent='';return;}
+  if(!liveData){el.innerHTML=`<p class="empty">${esc(liveErr||loadingText||'Loading live times…')}</p>`;meta.textContent='';return;}
+  const now=Date.now(),lines=liveLines();
+  let list=liveData.filter(p=>p.time>=now-60000&&p.status!=='PASSED');
+  if(liveFilter==='mine'&&lines.length) list=list.filter(p=>lines.includes(p.line));
+  else if(liveFilter!=='mine'&&liveFilter!=='all') list=list.filter(p=>p.line===liveFilter);
+  list=list.slice(0,12);
+  el.innerHTML=list.length?list.map(busRow).join(''):'<p class="empty">No buses coming up for this choice right now.</p>';
+  meta.textContent=liveErr||(liveAt?`Updated at ${hhmm(liveAt)}. Refreshes every 30 seconds.`:'');
+}
+function busRow(p){
+  const mins=Math.round((p.time-Date.now())/60000);
+  let st,cls='',when;
+  if(p.status==='CANCEL'){st='cancelled';cls='late';when='';}
+  else{
+    if(!p.live) st='timetable time, no live data yet';
+    else if(p.delay>=1){st=`${p.delay} min late`;cls='late';}
+    else if(p.delay<=-1){st=`${-p.delay} min early`;cls='late';}
+    else{st='on time';cls='ok';}
+    if(p.live&&Math.abs(p.delay)>=1) st+=`, planned ${hhmm(p.target)}`;
+    when=p.status==='ARRIVED'?'at the stop':mins<=0?'now':`in ${mins} min`;
+  }
+  const label=cap((p.arr?'arrives, ':'')+st);
+  return `<div class="bus"><span class="line-no">${esc(p.line)}</span><span class="bus-dest">${esc(p.dest)}</span><span class="bus-time${p.status==='CANCEL'?' gone':''}">${hhmm(p.time)}</span><span class="bus-status ${cls}">${esc(label)}</span><span class="bus-when">${esc(when)}</span></div>`;
+}
+
+/* ---------- Sheet ---------- */
+const scrim=$('#scrim'),sheet=$('#sheet'),sheetBody=$('#sheetBody');
+let sheetState=null;
+function openSheet(){
+  scrim.hidden=false;sheet.hidden=false;sheet.scrollTop=0;
+  requestAnimationFrame(()=>requestAnimationFrame(()=>sheet.classList.add('open')));
+  const t=$('#sheetTitle');if(t) setTimeout(()=>t.focus({preventScroll:true}),50);
+}
+function closeSheet(){sheet.classList.remove('open');scrim.hidden=true;sheet.hidden=true;sheetState=null;}
+function closeOrBack(){
+  const back=sheetState&&sheetState.back;
+  if(back==='commute') openCommute(); else closeSheet();
+}
+function openInfo(title,html){
+  sheetState={type:'info'};
+  sheetBody.innerHTML=`<h3 class="sheet-title" id="sheetTitle" tabindex="-1">${esc(title)}</h3>${html}<button type="button" class="btn primary" data-act="close-sheet">OK</button>`;
+  openSheet();
+}
+function seg(act,options,current,extra){
+  return `<div class="seg" role="group">${options.map(o=>`<button type="button" data-act="${act}" data-v="${o[0]}" ${extra||''} aria-pressed="${o[0]===current}">${o[2]||''}<span>${o[1]}</span></button>`).join('')}</div>`;
+}
+function stepper(act,key,label){
+  return `<div class="stepper"><button type="button" class="step" data-act="${act}" data-k="${key}" data-dir="-1" aria-label="Less">−</button><output>${label}</output><button type="button" class="step" data-act="${act}" data-k="${key}" data-dir="1" aria-label="More">+</button></div>`;
+}
+const stepKm=(km,dir)=>clamp(Math.round((km+dir*0.5)*2)/2,0.5,10);
+function backupSelect(id,val){
+  const opts=[0,10,15,20,25,30,40,50,60,75,90];
+  return `<label class="field"><span class="field-label">Backup alarm</span><select id="${id}">${opts.map(o=>`<option value="${o}"${o===val?' selected':''}>${o?'After '+o+' min':'Off'}</option>`).join('')}</select></label>`;
+}
+const stopOptions=sel=>db.stops.map(s=>`<option value="${esc(s.id)}"${s.id===sel?' selected':''}>${esc(s.name)}</option>`).join('');
+
+/* Start sheet */
+function openStartRoute(id){
+  const r=routeById(id);if(!r) return;
+  const legs=routeLegs(r,commuteDir).filter(l=>stopById(l.stop)).map(l=>({stop:l.stop,mode:l.mode,km:kmFor(l.mode,l.stop)}));
+  if(!legs.length){toast('This route has no stops. Edit it first.');return;}
+  sheetState={type:'start',p:{title:commuteDir==='out'?'To school':'Home',sub:r.name,legs,backup:0}};
+  renderStart();openSheet();
+}
+function openStartStop(id){
+  const s=stopById(id);if(!s) return;
+  const mode=s.lastMode||'train';
+  sheetState={type:'start',p:{title:s.name,single:true,legs:[{stop:id,mode,km:kmFor(mode,id)}],backup:0}};
+  renderStart();openSheet();
+}
+function renderStart(){
+  const p=sheetState.p;
+  let h=`<h3 class="sheet-title" id="sheetTitle" tabindex="-1">${esc(p.title)}</h3>${p.sub?`<p class="sheet-sub">${esc(p.sub)}</p>`:''}`;
+  if(p.single) h+=`<div class="field"><span class="field-label">You’re riding the</span>${seg('leg-mode',MODES,p.legs[0].mode)}</div>`;
+  p.legs.forEach((l,i)=>{
+    const s=stopById(l.stop);
+    h+='<div class="leg">';
+    if(!p.single) h+=`<p class="leg-head">${ICON[l.mode]}<span>${modeName(l.mode)} to ${esc(s.name)}</span></p>`;
+    h+=stepper('leg-step',i,`Ring ${fmtKm(l.km)} before the stop`);
+    h+=`<p class="hint">That’s roughly ${estText(l.km,l.mode)} before you arrive.</p>`;
+    if(s.approx) h+=`<p class="warn">The location for ${esc(s.name)} is approximate. Next time you’re at your stop, tap the pencil next to it and choose “Use my current location”.</p>`;
+    h+='</div>';
+  });
+  h+=backupSelect('pBackup',p.backup);
+  h+=`<p class="hint">${p.legs.length>1?'For the first leg. It rings after this time even if GPS drops out. You can set a new one at your transfer.':'It rings after this time even if GPS drops out. Pick a bit longer than the ride.'}</p>`;
+  h+='<button type="button" class="btn primary big" data-act="go">Start sleeping</button><button type="button" class="btn ghost" data-act="close-sheet">Cancel</button>';
+  sheetBody.innerHTML=h;
+}
+function go(){
+  const p=sheetState.p;
+  p.legs.forEach(l=>{db.kmMem[l.mode+':'+l.stop]=l.km;});
+  if(p.single){const s=stopById(p.legs[0].stop);if(s) s.lastMode=p.legs[0].mode;}
+  save();
+  if(!('geolocation' in navigator)){
+    openInfo('Location isn’t available','<p>This browser doesn’t share your location, so Haltewekker can’t tell when you’re close. Open this page in Safari.</p>');
+    return;
+  }
+  primeAudio();
+  run={legs:p.legs.map(l=>({stop:l.stop,mode:l.mode,km:l.km})),idx:0};
+  const backup=p.backup;
+  closeSheet();
+  beginLeg(backup);
+}
+
+/* Settings sheet */
+function openSettings(){sheetState={type:'settings'};renderSettings();openSheet();}
+function renderSettings(){
+  const S=db.settings;
+  sheetBody.innerHTML=`<h3 class="sheet-title" id="sheetTitle" tabindex="-1">Settings</h3>
+  <div class="field"><span class="field-label">Your stops</span>
+    <button type="button" class="btn secondary" data-act="commute">Home, school and routes</button>
+    <button type="button" class="btn secondary" data-act="live-settings">Live bus times stop</button>
+  </div>
+  <div class="field"><span class="field-label">If music is playing when it rings</span>${seg('music',[['pause','Pause it'],['mix','Keep it playing']],S.music)}
+    <p class="hint">${S.music==='mix'?'The alarm plays over your music. Your phone mustn’t be in silent mode, or you won’t hear it.':'The loudest option, and it works in silent mode. To restart your music afterwards, press play on your earbuds.'}</p>
+  </div>
+  <div class="field"><span class="field-label">Alarm sound</span>${seg('sound',[['beeps','Beeps'],['siren','Siren']],S.sound)}</div>
+  <button type="button" class="btn secondary" data-act="test-alarm">Test alarm</button>
+  <p class="hint">It rings 5 seconds after you tap, the same way it will on a trip. Try it with your music playing.</p>
+  <label class="switch-row"><span class="switch-text"><strong>Ring again when I arrive</strong><span class="hint">A second alarm at the stop itself, in case you dozed off again.</span></span><input type="checkbox" class="switch" id="setArrival"${S.arrivalRing?' checked':''}></label>
+  <div class="field"><span class="field-label">Usual wake distance</span>
+    <div class="set-step"><span class="set-step-name">${ICON.train}Train</span>${stepper('set-step','trainKm',fmtKm(S.trainKm))}</div>
+    <div class="set-step"><span class="set-step-name">${ICON.bus}Bus</span>${stepper('set-step','busKm',fmtKm(S.busKm))}</div>
+    <p class="hint">Used until you pick a distance for a stop. After that, it remembers your choice.</p>
+  </div>
+  <button type="button" class="btn primary" data-act="close-sheet">Done</button>
+  <button type="button" class="btn ghost danger" data-act="reset-all">Reset everything</button>`;
+}
+
+/* Commute editor */
+function openCommute(){sheetState={type:'commute'};renderCommuteEditor();openSheet();}
+function renderCommuteEditor(){
+  const ready=stopById(db.home)&&stopById(db.school);
+  let h=`<h3 class="sheet-title" id="sheetTitle" tabindex="-1">Your commute</h3>
+  <label class="field"><span class="field-label">Home stop</span><select id="cHome">${stopById(db.home)?'':'<option value="">Choose a stop</option>'}${stopOptions(db.home)}</select></label>
+  <label class="field"><span class="field-label">School stop</span><select id="cSchool">${stopById(db.school)?'':'<option value="">Choose a stop</option>'}${stopOptions(db.school)}</select></label>
+  <button type="button" class="text-btn" data-act="commute-add-stop">Add a stop that isn’t listed</button>
+  <div class="field"><span class="field-label">Routes</span><p class="hint" style="margin:0 0 8px">Each route is one way of getting from home to school. The way home is the same route backwards.</p>`;
+  if(ready&&db.routes.length){
+    h+='<div class="list">'+db.routes.map(r=>`<div class="row"><button type="button" class="row-main" data-act="edit-route" data-id="${esc(r.id)}"><span class="row-title">${esc(r.name)}</span><span class="route">${pathHtml(routeLegs(r,'out'))}</span></button></div>`).join('')+'</div>';
+  }else if(!ready){
+    h+='<p class="hint">Choose your home and school stops first.</p>';
+  }
+  if(ready) h+='<button type="button" class="text-btn" data-act="new-route">Add a route</button>';
+  h+='</div><button type="button" class="btn primary big" data-act="close-sheet">Done</button>';
+  sheetBody.innerHTML=h;
+}
+
+/* Route editor */
+function openRouteEditor(id,back){
+  if(!stopById(db.home)||!stopById(db.school)){toast('Choose your home and school stops first.');return;}
+  const r=id?routeById(id):null;
+  const t=db.stops.find(s=>s.id!==db.home&&s.id!==db.school)||db.stops[0];
+  sheetState={type:'route',isNew:!r,back,draft:r?clone(r):{id:null,name:'',legs:[{mode:'bus',stop:t.id},{mode:'train'}]}};
+  renderRouteEditor();openSheet();
+}
+function renderRouteEditor(){
+  const st=sheetState,d=st.draft,home=stopById(db.home),school=stopById(db.school);
+  let h=`<h3 class="sheet-title" id="sheetTitle" tabindex="-1">${st.isNew?'New route':'Edit route'}</h3>
+  <label class="field"><span class="field-label">Name</span><input type="text" id="rName" value="${esc(d.name)}" placeholder="e.g. Via Den Bosch" autocomplete="off"></label>
+  <div class="field"><span class="field-label">From ${esc(home.name)} to ${esc(school.name)}</span><p class="hint" style="margin:0 0 4px">Add a part for every bus or train you take, in order.</p>`;
+  d.legs.forEach((l,i)=>{
+    const last=i===d.legs.length-1;
+    h+=`<div class="leg-edit"><span class="leg-num">${i+1}</span><div class="leg-edit-body">${seg('route-leg-mode',MODES,l.mode,`data-i="${i}"`)}${last?`<p class="leg-fixed">to ${esc(school.name)}</p>`:`<select data-leg="${i}" aria-label="Where part ${i+1} ends">${stopOptions(l.stop)}</select>`}</div>${last?'<span class="leg-gap"></span>':`<button type="button" class="icon-btn small" data-act="route-remove-leg" data-i="${i}" aria-label="Remove part ${i+1}">${ICON.close}</button>`}</div>`;
+  });
+  h+='</div>';
+  if(d.legs.length<5) h+='<button type="button" class="text-btn" data-act="route-add-leg">Add a transfer</button>';
+  h+='<button type="button" class="btn primary big" data-act="route-save">Save route</button>';
+  if(!st.isNew) h+='<button type="button" class="btn ghost danger" data-act="route-delete">Delete route</button>';
+  h+='<button type="button" class="btn ghost" data-act="close-sheet">Cancel</button>';
+  sheetBody.innerHTML=h;
+}
+function routeSave(){
+  const st=sheetState,d=st.draft;
+  d.legs=d.legs.filter((l,i)=>i===d.legs.length-1||stopById(l.stop));
+  if(!d.name||!d.name.trim()) d.name=d.legs.length>1?'Via '+shortName(d.legs[0].stop):'Direct';
+  d.name=d.name.trim();
+  if(st.isNew){d.id=uid();db.routes.push(d);}
+  else{const i=db.routes.findIndex(r=>r.id===d.id);if(i>=0) db.routes[i]=d;}
+  save();renderHome();toast('Route saved');closeOrBack();
+}
+function routeDelete(){
+  const d=sheetState.draft;
+  if(!confirm(`Delete “${d.name||'this route'}”?`)) return;
+  db.routes=db.routes.filter(r=>r.id!==d.id);
+  save();renderHome();toast('Route deleted');closeOrBack();
+}
+
+/* Stop editor */
+function openStopEditor(id,back){
+  const s=id?stopById(id):null;
+  sheetState={type:'stop',isNew:!s,back,draft:s?clone(s):{id:null,name:'',lat:null,lon:null}};
+  renderStopEditor();openSheet();
+}
+function locLabel(d){return d.lat!=null?`${d.lat.toFixed(5)}, ${d.lon.toFixed(5)}${d.approx?' (approximate)':''}`:'Not set yet';}
+function renderStopEditor(){
+  const st=sheetState,d=st.draft,preset=PRESET_STOPS.find(p=>p.id===d.id);
+  const moved=preset&&(preset.lat!==d.lat||preset.lon!==d.lon);
+  sheetBody.innerHTML=`<h3 class="sheet-title" id="sheetTitle" tabindex="-1">${st.isNew?'Add a stop':'Edit stop'}</h3>
+  <label class="field"><span class="field-label">Name</span><input type="text" id="sName" value="${esc(d.name)}" placeholder="e.g. Heeswijk-Dinther, Laag Beugt" autocomplete="off"></label>
+  <div class="field"><span class="field-label">Location</span>
+    <p class="loc-readout" id="sLoc">${esc(locLabel(d))}</p>
+    <button type="button" class="btn secondary" data-act="stop-here">Use my current location</button>
+    <p class="hint">Do this while you’re standing at the stop.</p>
+  </div>
+  <label class="field"><span class="field-label">Or paste coordinates</span><input type="text" id="sCoords" placeholder="51.5955, 4.7797" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+  <p class="hint">Drop a pin on the stop in Apple Maps or Google Maps and copy its coordinates.</p>
+  <button type="button" class="btn primary big" data-act="stop-save">Save stop</button>
+  ${moved?'<button type="button" class="btn ghost" data-act="stop-reset">Reset to the original location</button>':''}
+  ${!st.isNew?'<button type="button" class="btn ghost danger" data-act="stop-delete">Delete stop</button>':''}
+  <button type="button" class="btn ghost" data-act="close-sheet">Cancel</button>`;
+}
+function setLoc(text,bad){const el=$('#sLoc');if(!el) return;el.textContent=text;el.classList.toggle('bad',!!bad);}
+function stopHere(btn){
+  if(!('geolocation' in navigator)){setLoc('Location isn’t available in this browser.',true);return;}
+  btn.disabled=true;btn.textContent='Finding you…';
+  const reset=()=>{btn.disabled=false;btn.textContent='Use my current location';};
+  navigator.geolocation.getCurrentPosition(p=>{
+    if(!sheetState||sheetState.type!=='stop') return;
+    const d=sheetState.draft;d.lat=p.coords.latitude;d.lon=p.coords.longitude;d.approx=false;
+    setLoc(`${d.lat.toFixed(5)}, ${d.lon.toFixed(5)} (${accText(p.coords.accuracy)})`);reset();
+  },err=>{
+    setLoc(err.code===1?'Location access is off. Allow it in Settings → Privacy & Security → Location Services → Safari Websites.':'Couldn’t get a GPS fix. Try again outside or near a window.',true);reset();
+  },{enableHighAccuracy:true,timeout:20000,maximumAge:0});
+}
+function stopSave(){
+  const st=sheetState,d=st.draft,name=(d.name||'').trim();
+  if(!name){toast('Give the stop a name.');return;}
+  if(d.lat==null){toast('Set the stop’s location first.');return;}
+  if(st.isNew){
+    db.stops.push({id:uid(),name,short:name,lat:d.lat,lon:d.lon});
+  }else{
+    const s=stopById(d.id);if(!s) return;
+    if(s.name!==name){s.name=name;s.short=name;}
+    s.lat=d.lat;s.lon=d.lon;
+    if(d.approx) s.approx=true; else delete s.approx;
+  }
+  save();renderHome();toast('Stop saved');closeOrBack();
+}
+function stopReset(){
+  const d=sheetState.draft,p=PRESET_STOPS.find(x=>x.id===d.id);if(!p) return;
+  d.lat=p.lat;d.lon=p.lon;if(p.approx) d.approx=true; else delete d.approx;
+  renderStopEditor();
+}
+function stopDelete(){
+  const d=sheetState.draft,s=stopById(d.id);if(!s) return;
+  if(s.id===db.home||s.id===db.school){toast(`This is your ${s.id===db.home?'home':'school'} stop. Choose another one first.`);return;}
+  const used=db.routes.filter(r=>r.legs.some(l=>l.stop===s.id)).length;
+  const msg=used?`Delete ${s.name}? It’s also taken out of ${used} route${used>1?'s':''}.`:`Delete ${s.name}?`;
+  if(!confirm(msg)) return;
+  db.stops=db.stops.filter(x=>x.id!==s.id);
+  db.routes.forEach(r=>{r.legs=r.legs.filter(l=>l.stop!==s.id);});
+  save();renderHome();toast('Stop deleted');closeOrBack();
+}
+
+/* Live bus times settings */
+function openLiveSettings(){sheetState={type:'live',query:'',results:null,searching:false,linesText:liveLines().join(', ')};renderLiveSettings();openSheet();}
+function renderLiveSettings(){
+  const st=sheetState;
+  let res='';
+  if(st.searching) res='<p class="hint">Searching… The first search downloads the list of all stops, so it can take a few seconds.</p>';
+  else if(st.error) res=`<p class="warn">${esc(st.error)}</p>`;
+  else if(st.results){
+    res=st.results.length?st.results.map((g,i)=>`<button type="button" class="result" data-act="live-pick" data-i="${i}" aria-pressed="${norm(g.name)===norm(db.live.name)}"><span>${esc(g.name)}</span>${g.town?`<small>${esc(g.town.replace(/(^|[\s-])(\S)/g,(m,a,b)=>a+b.toUpperCase()))}</small>`:''}</button>`).join(''):'<p class="hint">No stops match. Try only the town, or only the stop name.</p>';
+  }
+  sheetBody.innerHTML=`<h3 class="sheet-title" id="sheetTitle" tabindex="-1">Live bus times</h3>
+  <div class="field"><span class="field-label">Stop</span><p class="loc-readout">${esc(db.live.name||'None chosen yet')}</p></div>
+  <div class="field"><span class="field-label">Find a stop</span><div class="search-row"><input type="search" id="lQuery" value="${esc(st.query)}" placeholder="e.g. Heeswijk-Dinther Laag Beugt" autocomplete="off" enterkeyhint="search"><button type="button" class="btn secondary inline" data-act="live-search">Search</button></div></div>
+  <div class="results">${res}</div>
+  <label class="field"><span class="field-label">Your lines</span><input type="text" id="lLines" value="${esc(st.linesText)}" placeholder="305, 306, 158" autocomplete="off"></label>
+  <p class="hint">Separate line numbers with commas. Leave it empty to see every bus.</p>
+  <button type="button" class="btn primary big" data-act="live-save">Done</button>`;
+}
+async function liveSearch(){
+  const st=sheetState;if(!st||st.type!=='live') return;
+  const q=($('#lQuery')||{}).value||st.query;st.query=q;
+  if(!q.trim()) return;
+  st.searching=true;st.error=null;renderLiveSettings();
+  try{const list=await loadStopList();st.results=searchStops(list,q);}
+  catch(e){st.results=null;st.error='Couldn’t reach the stop list. Check your connection and try again.';}
+  st.searching=false;
+  if(sheetState===st) renderLiveSettings();
+}
+function liveSave(){
+  const st=sheetState;
+  db.live.lines=String(st.linesText||'').split(/[,\s]+/).map(s=>s.trim()).filter(Boolean);
+  save();liveFilter='mine';closeSheet();renderLiveShell();fetchLive();
+}
+
+/* ---------- Sound ---------- */
+const snd=$('#snd');
+const sampleCache={},wavCache={};
+function alarmSamples(kind){
+  const sr=22050,dur=kind==='siren'?2.4:1.6,n=Math.floor(sr*dur),out=new Float32Array(n);
+  let ph=0;
+  for(let i=0;i<n;i++){
+    const t=i/sr;let v=0;
+    if(kind==='siren'){
+      const f=850+750*(0.5-0.5*Math.cos(2*Math.PI*t/dur));
+      ph+=2*Math.PI*f/sr;const s=Math.sin(ph);
+      v=0.55*Math.tanh(4*s)+0.3*s;
+    }else{
+      const k=Math.floor(t/0.2),wk=t-k*0.2;
+      if(k<4&&wk<0.13){
+        const f=k%2?2350:1870;ph+=2*Math.PI*f/sr;
+        const env=Math.min(1,wk/0.004,(0.13-wk)/0.004),s=Math.sin(ph);
+        v=env*(0.6*Math.tanh(3*s)+0.3*s);
+      }
+    }
+    out[i]=clamp(v,-1,1);
+  }
+  return {data:out,sr};
+}
+const getSamples=k=>sampleCache[k]||(sampleCache[k]=alarmSamples(k));
+function wavUri(k){
+  if(wavCache[k]) return wavCache[k];
+  const {data,sr}=getSamples(k),len=data.length*2,buf=new ArrayBuffer(44+len),dv=new DataView(buf);
+  const w=(o,s)=>{for(let i=0;i<s.length;i++) dv.setUint8(o+i,s.charCodeAt(i));};
+  w(0,'RIFF');dv.setUint32(4,36+len,true);w(8,'WAVE');w(12,'fmt ');
+  dv.setUint32(16,16,true);dv.setUint16(20,1,true);dv.setUint16(22,1,true);
+  dv.setUint32(24,sr,true);dv.setUint32(28,sr*2,true);dv.setUint16(32,2,true);dv.setUint16(34,16,true);
+  w(36,'data');dv.setUint32(40,len,true);
+  for(let i=0;i<data.length;i++) dv.setInt16(44+i*2,Math.round(data[i]*32000),true);
+  const bytes=new Uint8Array(buf);let bin='';
+  for(let i=0;i<bytes.length;i+=0x8000) bin+=String.fromCharCode.apply(null,bytes.subarray(i,i+0x8000));
+  return wavCache[k]='data:audio/wav;base64,'+btoa(bin);
+}
+function setSound(){try{snd.src=wavUri(db.settings.sound);snd.load();}catch(e){}}
+
+let ctx=null,webTimer=null,vibTimer=null,alarmOn=false,keepAlive=null,mixSrc=null;
+const isMix=()=>db.settings.music==='mix';
+function setSession(type){try{if(navigator.audioSession) navigator.audioSession.type=type;}catch(e){}}
+function ensureCtx(){
+  if(!ctx){const AC=window.AudioContext||window.webkitAudioContext;if(AC){try{ctx=new AC();}catch(e){}}}
+  return ctx;
+}
+// Runs inside a tap, so iOS lets the alarm play later without another tap.
+function primeAudio(){
+  setSession(isMix()?'transient':'auto');
+  try{
+    const c=ensureCtx();
+    if(c){if(c.resume) c.resume();const b=c.createBuffer(1,1,22050),s=c.createBufferSource();s.buffer=b;s.connect(c.destination);s.start(0);}
+  }catch(e){}
+  if(isMix()){startKeepAlive();return;}
+  try{
+    snd.muted=true;
+    const p=snd.play();
+    if(p&&p.then){p.then(()=>{if(!alarmOn){snd.pause();snd.currentTime=0;}snd.muted=false;}).catch(()=>{snd.muted=false;});}
+    else{snd.pause();snd.muted=false;}
+  }catch(e){snd.muted=false;}
+}
+// A near-silent loop that keeps the audio engine awake without stopping your music.
+function startKeepAlive(){
+  if(keepAlive||!ctx) return;
+  try{
+    const len=ctx.sampleRate*2,b=ctx.createBuffer(1,len,ctx.sampleRate),d=b.getChannelData(0);
+    for(let i=0;i<len;i++) d[i]=(Math.random()*2-1)*0.00002;
+    const s=ctx.createBufferSource();s.buffer=b;s.loop=true;s.connect(ctx.destination);s.start();keepAlive=s;
+  }catch(e){}
+}
+function stopKeepAlive(){try{if(keepAlive) keepAlive.stop();}catch(e){}keepAlive=null;}
+function playMix(){
+  try{
+    const {data,sr}=getSamples(db.settings.sound);
+    const b=ctx.createBuffer(1,data.length,sr);b.getChannelData(0).set(data);
+    const s=ctx.createBufferSource();s.buffer=b;s.loop=true;s.connect(ctx.destination);s.start();mixSrc=s;
+    return true;
+  }catch(e){return false;}
+}
+function stopMix(){try{if(mixSrc) mixSrc.stop();}catch(e){}mixSrc=null;}
+function webAlarmStart(){
+  try{
+    const c=ensureCtx();if(!c) return;
+    if(c.resume) c.resume();
+    const play=()=>{
+      const t0=c.currentTime+0.02;
+      for(let k=0;k<4;k++){
+        const o=c.createOscillator(),g=c.createGain(),st=t0+k*0.2;
+        o.type='square';o.frequency.value=k%2?2350:1870;
+        g.gain.setValueAtTime(0,st);g.gain.linearRampToValueAtTime(0.45,st+0.01);
+        g.gain.setValueAtTime(0.45,st+0.12);g.gain.linearRampToValueAtTime(0,st+0.13);
+        o.connect(g);g.connect(c.destination);o.start(st);o.stop(st+0.15);
+      }
+    };
+    play();webTimer=setInterval(play,1600);
+  }catch(e){}
+}
+function loudAlarm(){
+  setSession('playback');
+  let fell=false;
+  const fallback=()=>{if(fell||!alarmOn) return;fell=true;webAlarmStart();};
+  try{snd.muted=false;snd.currentTime=0;const p=snd.play();if(p&&p.catch) p.catch(fallback);}catch(e){fallback();}
+  setTimeout(()=>{if(alarmOn&&snd.paused) fallback();},800);
+}
+function startAlarmSound(){
+  alarmOn=true;
+  if(isMix()&&ctx){
+    setSession('transient');
+    try{if(ctx.resume) ctx.resume();}catch(e){}
+    if(!playMix()) loudAlarm();
+    else setTimeout(()=>{if(alarmOn&&mixSrc&&ctx.state!=='running'){stopMix();loudAlarm();}},700);
+  }else loudAlarm();
+  if(navigator.vibrate){navigator.vibrate([500,250,500,250,900]);vibTimer=setInterval(()=>navigator.vibrate([500,250,500,250,900]),2600);}
+}
+function stopAlarmSound(){
+  alarmOn=false;stopMix();
+  try{snd.pause();snd.currentTime=0;}catch(e){}
+  clearInterval(webTimer);webTimer=null;
+  clearInterval(vibTimer);vibTimer=null;
+  try{if(navigator.vibrate) navigator.vibrate(0);}catch(e){}
+  setSession(isMix()&&run&&watchId!=null?'transient':'auto');
+}
+function audioIdle(){stopKeepAlive();setSession('auto');}
+
+/* ---------- Screen wake lock ---------- */
+let wakeLock=null,wakeOk=false;
+async function requestWake(){
+  if(!('wakeLock' in navigator)){wakeOk=false;renderStatus();return;}
+  try{
+    if(!wakeLock||wakeLock.released){
+      wakeLock=await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release',()=>{wakeOk=false;renderStatus();});
+    }
+    wakeOk=true;
+  }catch(e){wakeOk=false;}
+  renderStatus();
+}
+function releaseWake(){
+  try{if(wakeLock&&!wakeLock.released) wakeLock.release().catch(()=>{});}catch(e){}
+  wakeLock=null;wakeOk=false;
+}
+
+/* ---------- Trip running ---------- */
+const sleepEl=$('#sleep'),alarmEl=$('#alarm'),betweenEl=$('#between');
+let run=null,alarmState=null,watchId=null,tickTimer=null;
+
+function beginLeg(backupMin){
+  Object.assign(run,{phase:'sleeping',startDist:null,lastDist:null,lastFixAt:null,acc:null,speed:null,lastPos:null,geoErr:false,gpsLostFired:false,forceArrival:false,notice:null,wasHidden:false,backupAt:backupMin?Date.now()+backupMin*60000:null});
+  betweenEl.hidden=true;sleepEl.hidden=false;
+  renderSleep();startTracking();
+}
+function startTracking(){
+  stopTracking();
+  try{watchId=navigator.geolocation.watchPosition(onPos,onGeoErr,{enableHighAccuracy:true,maximumAge:2000,timeout:30000});}
+  catch(e){onGeoErr({code:2});}
+  tickTimer=setInterval(tick,1000);
+  requestWake();
+}
+function stopTracking(){
+  if(watchId!=null){try{navigator.geolocation.clearWatch(watchId);}catch(e){}watchId=null;}
+  clearInterval(tickTimer);tickTimer=null;
+  releaseWake();
+}
+function onPos(pos){
+  if(!run||watchId==null) return;
+  const c=pos.coords,now=Date.now(),leg=run.legs[run.idx],st=stopById(leg.stop);
+  if(!st) return;
+  const d=dist(c.latitude,c.longitude,st.lat,st.lon),rM=leg.km*1000;
+  let v=(typeof c.speed==='number'&&c.speed>=0&&!isNaN(c.speed))?c.speed:null;
+  if(v==null&&run.lastPos&&c.accuracy<150){
+    const dt=(pos.timestamp-run.lastPos.t)/1000;
+    if(dt>=3) v=dist(run.lastPos.lat,run.lastPos.lon,c.latitude,c.longitude)/dt;
+  }
+  if(v!=null&&v<70) run.speed=run.speed==null?v:run.speed*0.6+v*0.4;
+  if(c.accuracy<150) run.lastPos={lat:c.latitude,lon:c.longitude,t:pos.timestamp};
+  run.lastFixAt=now;run.acc=c.accuracy;run.lastDist=d;run.geoErr=false;run.gpsLostFired=false;
+
+  const goodEnough=c.accuracy<=Math.max(rM*1.5,500);
+  if(run.startDist==null&&goodEnough){
+    run.startDist=Math.max(d,rM+1);
+    if(d<=rM&&run.phase==='sleeping'){
+      run.phase='awake';run.forceArrival=true;
+      run.notice=`You’re already within ${fmtKm(leg.km)} of ${st.name}, so it will ring when you arrive.`;
+    }
+  }
+  if(run.phase==='sleeping'&&goodEnough&&d<=rM){
+    triggerAlarm('approach');
+  }else if(run.phase==='awake'&&d<=ARRIVE_M&&c.accuracy<=600){
+    if(db.settings.arrivalRing||run.forceArrival) triggerAlarm('arrival');
+    else{legDone();return;}
+  }
+  renderSleep();
+}
+function onGeoErr(err){
+  if(!run) return;
+  if(err&&err.code===1){
+    endTrip();
+    openInfo('Location access is off','<p>Haltewekker needs your location to know when you’re close to your stop.</p><p>On your iPhone, go to Settings → Privacy &amp; Security → Location Services. Make sure it’s on, then set Safari Websites to “While Using the App”.</p><p>Also tap <strong>aA</strong> in Safari’s address bar, then Website Settings → Location → Allow. Reload this page afterwards.</p>');
+    return;
+  }
+  run.geoErr=true;renderStatus();
+}
+function tick(){
+  if(!run) return;
+  const now=Date.now(),leg=run.legs[run.idx];
+  if(run.phase==='sleeping'){
+    if(run.backupAt&&now>=run.backupAt){run.backupAt=null;triggerAlarm('backup');return;}
+    if(!run.gpsLostFired&&run.lastFixAt&&now-run.lastFixAt>240000&&run.lastDist!=null&&run.lastDist<leg.km*3000){
+      run.gpsLostFired=true;triggerAlarm('gpslost');return;
+    }
+  }
+  renderStatus();
+}
+function renderStatus(){
+  if(!run) return;
+  const g=$('#gpsPill'),w=$('#wakePill');
+  let cls='',txt;
+  if(!run.lastFixAt){txt=run.geoErr?'No GPS signal yet':'Finding GPS…';cls=run.geoErr?'warn':'';}
+  else{
+    const age=(Date.now()-run.lastFixAt)/1000;
+    if(age<45){cls='ok';txt='GPS '+accText(run.acc);}
+    else{cls='warn';txt='No GPS for '+(age<120?Math.round(age)+' s':Math.round(age/60)+' min');}
+  }
+  g.className='pill '+cls;g.lastElementChild.textContent=txt;
+  w.className='pill '+(wakeOk?'ok':'warn');w.lastElementChild.textContent=wakeOk?'Screen stays on':'Screen may lock';
+}
+function renderSleep(){
+  if(!run) return;
+  const leg=run.legs[run.idx],st=stopById(leg.stop),rM=leg.km*1000;
+  const awake=run.phase==='awake'||run.phase==='arrivalAlarm';
+  sleepEl.classList.toggle('awake',awake);
+  $('#nCount').textContent=run.legs.length>1?`Leg ${run.idx+1} of ${run.legs.length}`:'';
+  $('#nLeg').innerHTML=`${ICON[leg.mode]}<span>${modeName(leg.mode)} to</span>`;
+  $('#nStop').textContent=st?st.name:'';
+  if(run.lastDist==null){$('#nNum').textContent='–';$('#nUnit').textContent='';}
+  else{const p=distParts(run.lastDist);$('#nNum').textContent=p[0];$('#nUnit').textContent=p[1];}
+  let sub;
+  if(run.lastDist==null) sub='Finding your location…';
+  else if(run.phase==='sleeping'){
+    const v=run.speed;
+    if(v&&v>2&&run.lastDist>rM){
+      const s=(run.lastDist-rM)/v;
+      sub=s<60?'The alarm rings in less than a minute.':`Alarm in about ${Math.round(s/60)} min, at ${fmtKm(leg.km)} from the stop.`;
+    }else sub=`The alarm rings at ${fmtKm(leg.km)} from the stop.`;
+  }else{
+    sub=(db.settings.arrivalRing||run.forceArrival)?'You’re awake. It rings once more when you arrive.':'You’re awake. Get your things ready.';
+  }
+  $('#nSub').textContent=sub;
+  const nn=$('#nNotice');
+  if(run.notice){nn.textContent=run.notice;nn.hidden=false;}else nn.hidden=true;
+  $('#btnArrived').hidden=run.phase!=='awake';
+  let p=0;
+  if(run.phase!=='sleeping') p=1;
+  else if(run.startDist!=null&&run.lastDist!=null) p=clamp((run.startDist-run.lastDist)/Math.max(1,run.startDist-rM),0,1);
+  sleepEl.style.setProperty('--p',p.toFixed(3));
+  renderStatus();
+  if(alarmState&&alarmState.reason==='approach') fillAlarm();
+}
+
+/* Alarm */
+function triggerAlarm(reason){
+  if(alarmState) return;
+  if(run) run.phase=reason==='arrival'?'arrivalAlarm':'alarm';
+  alarmState={reason};
+  fillAlarm();
+  alarmEl.hidden=false;
+  startAlarmSound();
+  setTimeout(()=>{try{$('#holdStop').focus({preventScroll:true});}catch(e){}},50);
+  if(run) renderSleep();
+}
+function fillAlarm(){
+  const r=alarmState.reason;let title='Wake up',stopTxt='',sub='';
+  if(r==='test'){
+    title='Test alarm';stopTxt='This is how it sounds on a trip.';
+    sub=isMix()?'Your music should keep playing underneath. Can’t hear the alarm? Check that silent mode is off.':'Too quiet? Turn the volume up, or check which earbuds or speaker it played on.';
+  }else if(run){
+    const leg=run.legs[run.idx],st=stopById(leg.stop),name=st?st.name:'your stop';
+    if(r==='approach'){
+      stopTxt=name;
+      if(run.lastDist!=null){
+        const v=run.speed,eta=v&&v>2?`, about ${minsText(run.lastDist/v)}`:'';
+        sub=`${distText(run.lastDist)} to go${eta}. Get ready to get off.`;
+      }
+    }else if(r==='arrival'){title='Get off now';stopTxt=`You’re at ${name}.`;}
+    else if(r==='backup'){stopTxt='Backup alarm';sub=`Your backup timer went off. Check where you are, ${name} could be close.`;}
+    else if(r==='gpslost'){stopTxt=`GPS lost near ${name}`;sub='The signal dropped while you were close to your stop. Check where you are.';}
+  }
+  $('#aTitle').textContent=title;$('#aStop').textContent=stopTxt;$('#aSub').textContent=sub;
+}
+function dismissAlarm(){
+  if(!alarmState) return;
+  const r=alarmState.reason;alarmState=null;
+  stopAlarmSound();alarmEl.hidden=true;
+  if(r==='test'||!run){if(!run) audioIdle();return;}
+  if(r==='arrival'){legDone();return;}
+  const rM=run.legs[run.idx].km*1000;
+  if((r==='backup'||r==='gpslost')&&(run.lastDist==null||run.lastDist>rM)){
+    run.phase='sleeping';
+    run.notice=r==='backup'?'Backup alarm stopped. The stop alarm is still set.':'Alarm stopped. It rings again when you get close.';
+  }else{
+    run.phase='awake';
+    const again=db.settings.arrivalRing||run.forceArrival;
+    run.notice=isMix()?null:`Was your music playing? Press play on your earbuds or in Control Center to restart it.${again?' Stay on this page so it can ring when you arrive.':''}`;
+  }
+  renderSleep();
+}
+
+/* Legs */
+function legDone(){
+  if(!run) return;
+  stopTracking();audioIdle();
+  const leg=run.legs[run.idx],st=stopById(leg.stop),next=run.legs[run.idx+1];
+  sleepEl.hidden=true;
+  const endBtn=$('#btnEndTrip');
+  if(next){
+    const ns=stopById(next.stop);
+    $('#bTitle').textContent=`Transfer at ${st?st.name:'your stop'}`;
+    $('#bSub').textContent=`Next: ${modeName(next.mode).toLowerCase()} to ${ns?ns.name:'your stop'}. It rings at ${fmtKm(next.km)} from the stop. Tap start once you’re on board.`;
+    $('#bBackupWrap').innerHTML=backupSelect('bBackup',0);$('#bBackupWrap').hidden=false;
+    $('#btnNext').hidden=false;
+    endBtn.textContent='End trip here';endBtn.className='btn ghost';
+  }else{
+    $('#bTitle').textContent=`You’re at ${st?st.name:'your stop'}`;
+    $('#bSub').textContent='Trip finished.';
+    $('#bBackupWrap').hidden=true;$('#btnNext').hidden=true;
+    endBtn.textContent='Done';endBtn.className='btn primary big';
+  }
+  betweenEl.hidden=false;
+}
+function nextLeg(){
+  if(!run) return;
+  const sel=$('#bBackup'),bm=sel?+sel.value:0;
+  run.idx++;
+  primeAudio();
+  beginLeg(bm);
+}
+function endTrip(){
+  stopTracking();stopAlarmSound();audioIdle();
+  run=null;alarmState=null;
+  sleepEl.hidden=true;alarmEl.hidden=true;betweenEl.hidden=true;
+  renderHome();fetchLive();
+}
+function wakeHelp(){
+  if(!run) return;
+  requestWake();
+  run.notice=wakeOk?'Your screen stays on while this page is open.':'Your screen might turn off, and then the alarm can’t ring. For this ride, set Settings → Display & Brightness → Auto-Lock to Never, and turn off Low Power Mode.';
+  renderSleep();
+}
+
+/* Hold-to-confirm buttons (stops a half-asleep tap from ending things) */
+function holdify(btn,ms,done){
+  const fill=btn.querySelector('.hold-fill');let t0=0,raf=0,active=false;
+  const set=p=>{fill.style.transform=`scaleX(${p})`;};
+  const step=()=>{
+    if(!active) return;
+    const p=Math.min(1,(performance.now()-t0)/ms);set(p);
+    if(p>=1){active=false;setTimeout(()=>set(0),250);done();}
+    else raf=requestAnimationFrame(step);
+  };
+  btn.addEventListener('pointerdown',e=>{
+    if(e.button>0) return;
+    active=true;t0=performance.now();
+    try{btn.setPointerCapture(e.pointerId);}catch(_){}
+    raf=requestAnimationFrame(step);
+  });
+  const cancel=()=>{if(!active) return;active=false;cancelAnimationFrame(raf);set(0);};
+  ['pointerup','pointercancel','lostpointercapture'].forEach(ev=>btn.addEventListener(ev,cancel));
+  btn.addEventListener('click',e=>{if(e.detail===0) done();});
+  btn.addEventListener('contextmenu',e=>e.preventDefault());
+}
+
+/* Toast */
+let toastT=null;
+function toast(msg){const t=$('#toast');t.textContent=msg;t.hidden=false;clearTimeout(toastT);toastT=setTimeout(()=>{t.hidden=true;},3200);}
+
+/* ---------- Events ---------- */
+document.addEventListener('click',e=>{
+  const el=e.target.closest('[data-act]');if(!el) return;
+  const act=el.dataset.act,id=el.dataset.id;
+  switch(act){
+    case 'settings':openSettings();break;
+    case 'close-sheet':closeOrBack();break;
+    case 'dismiss-sheet':closeSheet();break;
+    case 'dir':commuteDir=el.dataset.v;renderCommute();break;
+    case 'start-route':openStartRoute(id);break;
+    case 'start-stop':openStartStop(id);break;
+    case 'edit-route':openRouteEditor(id,sheetState&&sheetState.type==='commute'?'commute':null);break;
+    case 'new-route':openRouteEditor(null,'commute');break;
+    case 'commute':openCommute();break;
+    case 'commute-add-stop':openStopEditor(null,'commute');break;
+    case 'edit-stop':openStopEditor(id,null);break;
+    case 'add-stop':openStopEditor(null,null);break;
+    case 'leg-mode':{
+      const l=sheetState.p.legs[0];if(l.mode!==el.dataset.v){l.mode=el.dataset.v;l.km=kmFor(l.mode,l.stop);}
+      renderStart();break;
+    }
+    case 'leg-step':{
+      const l=sheetState.p.legs[+el.dataset.k];l.km=stepKm(l.km,+el.dataset.dir);renderStart();break;
+    }
+    case 'go':go();break;
+    case 'music':db.settings.music=el.dataset.v;save();renderSettings();break;
+    case 'sound':db.settings.sound=el.dataset.v;save();setSound();renderSettings();break;
+    case 'set-step':{
+      const k=el.dataset.k;db.settings[k]=stepKm(db.settings[k],+el.dataset.dir);save();renderSettings();break;
+    }
+    case 'test-alarm':
+      primeAudio();closeSheet();toast('The test alarm rings in 5 seconds');
+      setTimeout(()=>{if(!alarmState) triggerAlarm('test');},5000);
+      break;
+    case 'reset-all':
+      if(confirm('Reset all stops, routes and settings to how they started?')){db=fresh();save();setSound();liveData=null;liveErr=null;closeSheet();renderHome();fetchLive();toast('Everything is reset');}
+      break;
+    case 'stop-here':stopHere(el);break;
+    case 'stop-save':stopSave();break;
+    case 'stop-delete':stopDelete();break;
+    case 'stop-reset':stopReset();break;
+    case 'route-leg-mode':sheetState.draft.legs[+el.dataset.i].mode=el.dataset.v;renderRouteEditor();break;
+    case 'route-add-leg':{
+      const legs=sheetState.draft.legs,t=db.stops.find(s=>s.id!==db.home&&s.id!==db.school)||db.stops[0];
+      legs.splice(legs.length-1,0,{mode:'bus',stop:t.id});renderRouteEditor();break;
+    }
+    case 'route-remove-leg':sheetState.draft.legs.splice(+el.dataset.i,1);renderRouteEditor();break;
+    case 'route-save':routeSave();break;
+    case 'route-delete':routeDelete();break;
+    case 'live-settings':openLiveSettings();break;
+    case 'live-filter':liveFilter=el.dataset.v;renderLiveShell();break;
+    case 'live-search':liveSearch();break;
+    case 'live-pick':{
+      const g=sheetState.results[+el.dataset.i];if(!g) break;
+      db.live.name=g.name;db.live.codes=g.codes;save();liveData=null;liveErr=null;liveAt=null;
+      renderLiveSettings();renderLiveShell();
+      break;
+    }
+    case 'live-save':liveSave();break;
+    case 'next-leg':nextLeg();break;
+    case 'end-trip':endTrip();break;
+    case 'arrived':legDone();break;
+    case 'wake-help':wakeHelp();break;
+  }
+});
+sheetBody.addEventListener('input',e=>{
+  const t=e.target;if(!sheetState) return;
+  if(t.id==='sName'||t.id==='rName') sheetState.draft.name=t.value;
+  if(t.id==='lQuery') sheetState.query=t.value;
+  if(t.id==='lLines') sheetState.linesText=t.value;
+  if(t.id==='sCoords'){
+    const c=parseCoords(t.value),d=sheetState.draft;
+    if(c){d.lat=c[0];d.lon=c[1];d.approx=false;setLoc(locLabel(d));}
+    else if(t.value.trim()) setLoc('Those coordinates don’t look right. Use the format 51.5955, 4.7797',true);
+  }
+});
+sheetBody.addEventListener('change',e=>{
+  const t=e.target;if(!sheetState) return;
+  if(t.id==='pBackup'&&sheetState.p) sheetState.p.backup=+t.value;
+  if(t.id==='setArrival'){db.settings.arrivalRing=t.checked;save();}
+  if(t.id==='cHome'||t.id==='cSchool'){
+    const key=t.id==='cHome'?'home':'school',other=key==='home'?db.school:db.home;
+    if(t.value&&t.value===other){toast('Home and school need to be different stops.');renderCommuteEditor();return;}
+    db[key]=t.value||null;save();renderHome();renderCommuteEditor();
+  }
+  if(t.dataset.leg!=null&&sheetState.type==='route') sheetState.draft.legs[+t.dataset.leg].stop=t.value;
+});
+sheetBody.addEventListener('keydown',e=>{
+  if(e.key==='Enter'&&e.target.id==='lQuery'){e.preventDefault();liveSearch();}
+});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!sheet.hidden) closeSheet();});
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState==='visible'&&!run) fetchLive();
+  if(!run||watchId==null) return;
+  if(document.visibilityState==='hidden'){run.wasHidden=true;}
+  else{
+    requestWake();
+    if(run.wasHidden){run.wasHidden=false;run.notice='This page was in the background, so it couldn’t follow you. Keep it open on screen while you sleep.';renderSleep();}
+  }
+});
+window.addEventListener('beforeunload',e=>{if(run){e.preventDefault();e.returnValue='';}});
+
+/* ---------- Init ---------- */
+setSound();
+holdify($('#holdEnd'),1000,endTrip);
+holdify($('#holdStop'),1200,dismissAlarm);
+const prep=$('#prep');
+if(!db.settings.prepSeen) prep.open=true;
+prep.addEventListener('toggle',()=>{if(!prep.open&&!db.settings.prepSeen){db.settings.prepSeen=true;save();}});
+renderHome();
+fetchLive();
+setInterval(()=>{if(homeOnScreen()){fetchLive();}},30000);
+})();
+</script>
+</body>
+</html>
