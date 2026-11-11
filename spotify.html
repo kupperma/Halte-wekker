@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Haltewekker · Spotify</title>
+<style>
+  :root { --paper: #0F1428; --ink: #EDE3CC; --muted: #A79F8C; --brass: #B9A066; }
+  html, body { margin: 0; height: 100%; background: #07080D; color: var(--ink); }
+  body { display: grid; place-items: center; font: 15px/1.5 "Courier New", Courier, monospace; padding: 0 16px; box-sizing: border-box; }
+  .card { max-width: 360px; width: 100%; background: var(--paper); border: 1px solid var(--brass); outline: 1px solid var(--brass); outline-offset: 4px; padding: 24px; text-align: center; }
+  h1 { font: 700 24px/1.2 Georgia, "Times New Roman", serif; margin: 0 0 8px; }
+  p { color: var(--muted); margin: 0 0 18px; }
+  a { display: inline-block; color: var(--ink); border: 1px solid var(--brass); padding: 12px 18px; text-decoration: none; letter-spacing: .08em; text-transform: uppercase; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1 id="t">Back to Haltewekker…</h1>
+  <p id="m">Spotify sent you here. The app finishes signing in.</p>
+  <a id="go" href="haltewekker://spotify">Open Haltewekker</a>
+</div>
+<script>
+  // Spotify only allows https links to come back to, so this page hands the sign-in code straight to the app.
+  // Nothing is stored or sent anywhere else.
+  (function () {
+    var back = "haltewekker://spotify" + location.search;
+    document.getElementById("go").href = back;
+    if (/[?&]error=/.test(location.search)) {
+      document.getElementById("t").textContent = "Not connected";
+      document.getElementById("m").textContent = "Spotify didn’t connect. Go back to the app and try again.";
+    }
+    if (location.search) location.replace(back);
+  })();
+</script>
+</body>
+</html>

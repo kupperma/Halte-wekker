@@ -29,6 +29,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
     @Published private(set) var next: Ride?
     @Published private(set) var vehicle: Vehicle?
     @Published private(set) var legArrival: Date?
+    @Published private(set) var legFrom: Date?          // when this bus or train left (or should have)
+    @Published private(set) var legTo: Date?            // when it reaches your stop: live, or from the timetable
     @Published private(set) var locationDenied = false
     @Published private(set) var autoStarted = false
     @Published var arrivedAt: String?
@@ -45,6 +47,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
     @Published private(set) var always = false
 
     let sound = AlarmSound()
+    let music = NowPlaying()
     private let location = CLLocationManager()
     private var activity: Activity<TripAttributes>?
     private var legStart = Date()
@@ -55,6 +58,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
     private var samples: [CLLocation] = []
     private var detectTask: Task<Void, Never>?
     private var watchLeft: (place: Place, at: Date)?      // auto-start: which station you just left
+    private var maxDistance: Double?                      // furthest from the stop on this leg, for progress without times
     private let arriveM = 450.0
 
     var leg: Leg? { index < legs.count ? legs[index] : nil }
@@ -71,6 +75,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
         location.activityType = .otherNavigation
         location.pausesLocationUpdatesAutomatically = false
         always = location.authorizationStatus == .authorizedAlways
+        music.onChange = { [weak self] in self?.pushActivity(force: true) }
         updateWatching()
     }
 
@@ -82,6 +87,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
         index = min(legIndex, legs.count - 1)
         autoStarted = auto
         sound.startTrip()
+        music.start()
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
         if location.authorizationStatus == .notDetermined { location.requestWhenInUseAuthorization() }
         beginLeg(vehicle: v)
@@ -90,9 +96,9 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
 
     private func beginLeg(vehicle v: Vehicle? = nil) {
         phase = .sleeping
-        distance = nil; forceArrival = false
+        distance = nil; forceArrival = false; maxDistance = nil
         legStart = Date()
-        arrival = nil; next = nil; legArrival = nil
+        arrival = nil; next = nil; legArrival = nil; legFrom = nil; legTo = nil
         vehicle = v
         location.allowsBackgroundLocationUpdates = true
         location.showsBackgroundLocationIndicator = true
@@ -134,10 +140,12 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
     func endTrip() {
         detectTask?.cancel(); detectTask = nil
         sound.endTrip()
+        music.stop()
         location.stopUpdatingLocation()
         location.allowsBackgroundLocationUpdates = false
         phase = .idle
         route = nil; legs = []; distance = nil; arrival = nil; next = nil; vehicle = nil; legArrival = nil; arrivedAt = nil
+        legFrom = nil; legTo = nil; maxDistance = nil
         let a = activity; activity = nil
         Task { await a?.end(nil, dismissalPolicy: .immediate) }
     }
@@ -174,6 +182,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
         guard let leg, phase == .sleeping || phase == .awake else { return }
         let d = loc.distance(from: CLLocation(latitude: leg.to.coordinate.latitude, longitude: leg.to.coordinate.longitude))
         distance = d
+        if loc.horizontalAccuracy >= 0 && loc.horizontalAccuracy < 250 { maxDistance = max(maxDistance ?? 0, d) }
         accuracy = loc.horizontalAccuracy
         let good = loc.horizontalAccuracy >= 0 && loc.horizontalAccuracy < 250
         if phase == .sleeping && good && d <= wakeKm * 1000 {
@@ -266,6 +275,15 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
             target.distance(from: CLLocation(latitude: $1.coordinate.latitude, longitude: $1.coordinate.longitude)) }),
            target.distance(from: CLLocation(latitude: s.coordinate.latitude, longitude: s.coordinate.longitude)) < 1500 {
             legArrival = s.arrival
+            legTo = s.arrival
+            let from = CLLocation(latitude: leg.from.coordinate.latitude, longitude: leg.from.coordinate.longitude)
+            if let b = stops.filter({ $0.arrival != nil }).min(by: {
+                from.distance(from: CLLocation(latitude: $0.coordinate.latitude, longitude: $0.coordinate.longitude)) <
+                from.distance(from: CLLocation(latitude: $1.coordinate.latitude, longitude: $1.coordinate.longitude)) }),
+               from.distance(from: CLLocation(latitude: b.coordinate.latitude, longitude: b.coordinate.longitude)) < 1500,
+               let dep = b.arrival, dep < s.arrival! {
+                legFrom = dep
+            }
         }
         refreshEta(force: true)
         pushActivity(force: true)
@@ -351,6 +369,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
         Task {
             guard i < legs.count else { return }
             var t: Date
+            var window: (Date, Date)?
             if let known { t = known } else {
                 // Not recognised yet: the ride that left closest to when you started this leg.
                 let l = legs[i]
@@ -358,6 +377,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
                     .filter { abs($0.first.departure.timeIntervalSince(start)) < 40 * 60 }
                 guard let on = opts.min(by: { abs($0.first.departure.timeIntervalSince(start)) < abs($1.first.departure.timeIntervalSince(start)) }) else { return }
                 t = on.rides.last!.arrival
+                window = (on.first.departure, t)
             }
             var firstNext: Ride?
             for k in (i + 1)..<max(i + 1, legs.count) {
@@ -371,6 +391,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
             await MainActor.run {
                 guard self.index == i, self.phase != .idle else { return }
                 self.arrival = t; self.next = firstNext
+                if let window, self.legArrival == nil { self.legFrom = window.0; self.legTo = window.1 }
                 self.pushActivity(force: true)
             }
         }
@@ -379,6 +400,34 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
     var nextText: String? {
         guard let n = next, index + 1 < legs.count else { return nil }
         return "Then \(n.isTrain ? n.name : "bus \(n.line)") at \(Fmt.hhmm(n.departure)) from \(legs[index + 1].from.short)"
+    }
+
+    /// How far along this leg you are, 0…1: by the clock when the times are known, else by distance.
+    func progress(at now: Date = Date()) -> Double {
+        switch phase {
+        case .transfer, .finished: return 1
+        case .idle: return 0
+        default: break
+        }
+        var byDistance: Double?
+        if let d = distance, let m = maxDistance, m > 200 { byDistance = 1 - d / m }
+        if let a = legFrom, let b = legTo, b.timeIntervalSince(a) > 60 {
+            let t = now.timeIntervalSince(a) / b.timeIntervalSince(a)
+            // a late vehicle: don't let the clock run ahead of where you really are
+            if let bd = byDistance, t > bd + 0.25 { return min(1, max(0, bd)) }
+            return min(0.98, max(0, t))
+        }
+        return min(1, max(0, byDistance ?? 0))
+    }
+
+    private var kicker: String {
+        switch phase {
+        case .transfer: return "CHANGE HERE"
+        case .finished: return "YOU’RE THERE"
+        case .alarm(let a): return a ? "WAKE UP" : "GET OFF NOW"
+        case .awake: return "GET READY"
+        default: return "NOW RIDING"
+        }
     }
 
     // MARK: Live Activity
@@ -393,8 +442,12 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
         }
         var awake = false
         if case .alarm = phase { awake = true } else if phase == .awake { awake = true }
+        let song = music.song
         return .init(legTitle: title, isTrain: leg?.mode == .train, distanceText: distance.map { Fmt.distance($0) } ?? "–",
-                     arrival: arrival, finalName: finalName, nextText: nextText, awake: awake, goingHome: direction == .home)
+                     arrival: arrival, finalName: finalName, nextText: nextText, awake: awake, goingHome: direction == .home,
+                     kicker: kicker, stopName: leg?.to.spoken ?? "", progress: (progress() * 100).rounded() / 100,
+                     legFrom: legFrom, legTo: legTo, song: song?.title, artist: song?.artist, songPlaying: song?.playing ?? false,
+                     musicApp: song?.app)
     }
 
     private func startActivity() {
@@ -405,10 +458,36 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
     private func pushActivity(force: Bool) {
         guard let activity else { return }
         let s = state
-        let key = "\(s.legTitle)|\(s.distanceText)|\(s.arrival?.timeIntervalSince1970 ?? 0)|\(s.awake)"
+        let key = "\(s.legTitle)|\(s.distanceText)|\(s.arrival?.timeIntervalSince1970 ?? 0)|\(s.awake)|\(Int(s.progress * 50))|\(s.song ?? "")|\(s.songPlaying)"
         guard force || (key != lastActivityKey && Date().timeIntervalSince(lastActivity) > 8) else { return }
         lastActivity = Date(); lastActivityKey = key
         Task { await activity.update(ActivityContent(state: s, staleDate: nil)) }
+    }
+
+    /// Settings → "Preview on the lock screen": a made-up trip for a minute, so you can see how it looks.
+    func previewActivity() {
+        guard ActivityAuthorizationInfo().areActivitiesEnabled, activity == nil else { return }
+        let now = Date(), home = direction == .home
+        let song = music.song
+        let s = TripAttributes.ContentState(
+            legTitle: home ? "Bus 306 to Veghel" : "Intercity to Breda", isTrain: !home, distanceText: home ? "3.8 km" : "9.6 km",
+            arrival: now.addingTimeInterval(home ? 9 * 60 : 34 * 60), finalName: finalName,
+            nextText: home ? nil : "Then bus 3 to BUas from Breda", awake: false, goingHome: home,
+            kicker: "NOW RIDING", stopName: home ? Place.veghel.spoken : Place.breda.spoken, progress: 0.15,
+            legFrom: now.addingTimeInterval(-4 * 60), legTo: now.addingTimeInterval(home ? 9 * 60 : 18 * 60),
+            song: song?.title ?? "Your song", artist: song?.artist ?? "The artist", songPlaying: true, musicApp: song?.app ?? "Spotify")
+        guard let a = try? Activity.request(attributes: TripAttributes(routeName: "Preview"), content: ActivityContent(state: s, staleDate: nil), pushType: nil) else { return }
+        Task {
+            // the metro drives along, so you can see it move
+            for p in [0.35, 0.55, 0.75, 0.95] {
+                try? await Task.sleep(nanoseconds: 12_000_000_000)
+                var n = s; n.progress = p
+                n.distanceText = Fmt.distance((home ? 3800 : 9600) * (1 - p))
+                await a.update(ActivityContent(state: n, staleDate: nil))
+            }
+            try? await Task.sleep(nanoseconds: 15_000_000_000)
+            await a.end(nil, dismissalPolicy: .immediate)
+        }
     }
 }
 

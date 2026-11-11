@@ -5,8 +5,8 @@ options:
     iOS: "17.0"
 settings:
   base:
-    MARKETING_VERSION: "0.2.1"
-    CURRENT_PROJECT_VERSION: "3"
+    MARKETING_VERSION: "0.3.0"
+    CURRENT_PROJECT_VERSION: "4"
     SWIFT_VERSION: "5.0"
     CODE_SIGNING_ALLOWED: "NO"
     CODE_SIGNING_REQUIRED: "NO"
@@ -27,6 +27,10 @@ targets:
         NSLocationWhenInUseUsageDescription: Haltewekker uses your location to wake you before your stop.
         NSLocationAlwaysAndWhenInUseUsageDescription: Haltewekker keeps following you while the phone is locked, so it can wake you before your stop.
         NSSupportsLiveActivities: true
+        NSAppleMusicUsageDescription: Haltewekker shows the song you’re playing on the ride screen and the lock screen.
+        CFBundleURLTypes:
+          - CFBundleURLName: nl.haltewekker.app
+            CFBundleURLSchemes: [haltewekker]
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         UIAppFonts: [OldStandard-Bold.ttf, OldStandard-Regular.ttf, CourierPrime-Regular.ttf, CourierPrime-Bold.ttf]
         UIUserInterfaceStyle: Dark

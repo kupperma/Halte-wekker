@@ -1,3 +1,4 @@
+import AuthenticationServices
 import SwiftUI
 
 struct RootView: View {
@@ -228,6 +229,7 @@ struct TripRow: View {
 
 struct RideView: View {
     @EnvironmentObject var trip: TripManager
+    @EnvironmentObject var music: NowPlaying
     @Environment(\.scenePhase) private var scene
     @State private var confirmEnd = false
     var pal: HWPalette { .of(home: trip.direction == .home) }
@@ -250,11 +252,23 @@ struct RideView: View {
                 if trip.vehicle == nil { Text("Looking for the bus or train you’re on…").font(HWFont.body(12)).foregroundStyle(HWPalette.muted) }
                 let parts = trip.distance.map { Fmt.distanceParts($0) } ?? ("–", "")
                 VStack(spacing: 4) {
-                    Text(parts.0).font(HWFont.display(104)).foregroundStyle(HWPalette.ink).monospacedDigit()
+                    Text(parts.0).font(HWFont.display(music.song == nil ? 104 : 88)).foregroundStyle(HWPalette.ink).monospacedDigit()
                         .shadow(color: pal.accent.opacity(0.45), radius: 22).contentTransition(.numericText())
                     Text("\(parts.1.uppercased()) TO \((trip.leg?.to.short ?? "").uppercased())").font(HWFont.display(13)).tracking(3).foregroundStyle(pal.accent)
                 }
                 .frame(maxWidth: .infinity).padding(.top, 16)
+                // the metro drives along as you get closer, like a song's progress bar
+                TimelineView(.periodic(from: .now, by: 2)) { ctx in
+                    MetroTrack(progress: trip.progress(at: ctx.date), home: trip.direction == .home).frame(height: 34)
+                }
+                .id(trip.index)
+                .padding(.top, 12)
+                HStack {
+                    Text(trip.legFrom.map { Fmt.hhmm($0) } ?? (trip.leg?.from.short ?? ""))
+                    Spacer()
+                    Text(trip.legTo.map { "\(Fmt.hhmm($0)) \(trip.leg?.to.short ?? "")" } ?? (trip.leg?.to.short ?? ""))
+                }
+                .font(HWFont.body(11)).foregroundStyle(HWPalette.muted).padding(.top, 4)
                 Text(trip.phase == .awake ? (trip.ringAtStop ? "You’re awake. It rings once more at the stop." : "You’re awake. Get your things ready.")
                                           : "It rings at \(Fmt.distance(trip.wakeKm * 1000)) from the stop.")
                     .font(HWFont.body(13)).foregroundStyle(HWPalette.muted).frame(maxWidth: .infinity).padding(.top, 10)
@@ -264,8 +278,9 @@ struct RideView: View {
                         if let n = trip.nextText { Text(n).font(HWFont.body(12)).foregroundStyle(HWPalette.muted) }
                         if let la = trip.legArrival { Text("This \(trip.leg?.mode == .train ? "train" : "bus") arrives at \(Fmt.hhmm(la))").font(HWFont.body(12)).foregroundStyle(pal.accent) }
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading).brass(pal, pad: 16).padding(.top, 22)
+                    .frame(maxWidth: .infinity, alignment: .leading).brass(pal, pad: 16).padding(.top, 18)
                 }
+                if let song = music.song { SongCard(song: song, pal: pal).padding(.top, 12) }
                 Spacer()
                 if trip.phase == .awake {
                     Button { trip.legDone() } label: {
@@ -277,6 +292,36 @@ struct RideView: View {
             }
             .padding(22)
         }
+        .onAppear { music.setFast(scene == .active) }
+        .onDisappear { music.setFast(false) }
+        .onChange(of: scene) { _, s in music.setFast(s == .active) }
+    }
+}
+
+/// What you're listening to, under the trip.
+struct SongCard: View {
+    let song: Song
+    let pal: HWPalette
+    var body: some View {
+        HStack(spacing: 12) {
+            Group {
+                if let img = song.image { Image(uiImage: img).resizable().scaledToFill() }
+                else if let u = song.artURL {
+                    AsyncImage(url: u) { $0.resizable().scaledToFill() } placeholder: { pal.paper }
+                } else { ZStack { pal.paper; Image(systemName: "music.note").foregroundStyle(pal.brass) } }
+            }
+            .frame(width: 46, height: 46).clipShape(RoundedRectangle(cornerRadius: 3))
+            .overlay(RoundedRectangle(cornerRadius: 3).stroke(pal.brass.opacity(0.7), lineWidth: 1))
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(song.playing ? "NOW PLAYING" : "PAUSED") · \(song.app.uppercased())").font(HWFont.body(10)).tracking(1.4).foregroundStyle(pal.accent)
+                Text(song.title).font(HWFont.display(16)).foregroundStyle(HWPalette.ink).lineLimit(1)
+                if !song.artist.isEmpty { Text(song.artist).font(HWFont.body(12)).foregroundStyle(HWPalette.muted).lineLimit(1) }
+            }
+            Spacer(minLength: 0)
+            Image(systemName: song.playing ? "waveform" : "pause.fill").foregroundStyle(pal.accent)
+                .symbolEffect(.variableColor.iterative, isActive: song.playing)
+        }
+        .brass(pal, pad: 12)
     }
 }
 
@@ -384,6 +429,8 @@ struct ArrivalView: View {
 
 struct SettingsView: View {
     @EnvironmentObject var trip: TripManager
+    @EnvironmentObject var music: NowPlaying
+    @Environment(\.webAuthenticationSession) private var webAuth
     var pal: HWPalette { .of(home: trip.direction == .home) }
     var body: some View {
         NavigationStack {
@@ -405,6 +452,22 @@ struct SettingsView: View {
                     Text(trip.soundKind.detail).font(HWFont.body(12)).foregroundStyle(HWPalette.muted)
                     Button("Test alarm") { trip.testAlarm() }.foregroundStyle(pal.accent)
                 } header: { Text("Alarm") } footer: { Text("The alarm plays over your music and also rings in silent mode. Keep the volume up or wear earbuds.") }
+                Section {
+                    Picker("Show music from", selection: $music.source) {
+                        ForEach(MusicSource.allCases) { m in Text(m.title).tag(m) }
+                    }
+                    if music.source == .spotify { spotifyRows }
+                    if music.source == .appleMusic && !music.appleMusicAllowed {
+                        Text("Let Haltewekker see Apple Music: iPhone Settings → Apps → Haltewekker → Media & Apple Music.").font(HWFont.body(12)).foregroundStyle(HWPalette.warn)
+                    }
+                    if let s = music.song {
+                        Label("\(s.title)\(s.artist.isEmpty ? "" : " · \(s.artist)")", systemImage: s.playing ? "music.note" : "pause.fill").font(HWFont.body(13))
+                    }
+                    Button("Preview on the lock screen") { music.checkOnce(); DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { trip.previewActivity() } }
+                        .foregroundStyle(pal.accent).disabled(trip.isRiding)
+                } header: { Text("Lock screen") } footer: {
+                    Text("During a trip your lock screen shows a little train screen: how far to go, a metro that drives along as you get closer, your arrival time and the song you’re playing. The preview runs for about a minute: lock your phone to see it.")
+                }
                 Section("Wake me this far from my stop") {
                     Stepper("Bus: \(String(format: "%.1f", trip.busKm)) km", value: $trip.busKm, in: 0.5...10, step: 0.5)
                     Stepper("Train: \(String(format: "%.1f", trip.trainKm)) km", value: $trip.trainKm, in: 0.5...15, step: 0.5)
@@ -417,6 +480,45 @@ struct SettingsView: View {
             .navigationTitle("Settings")
         }
     }
+    @ViewBuilder private var spotifyRows: some View {
+        if music.spotifyConnected {
+            Label("Spotify is connected", systemImage: "checkmark.circle.fill").foregroundStyle(HWPalette.ok)
+            Button("Check what’s playing") { music.checkOnce() }.foregroundStyle(pal.accent)
+            Button("Disconnect Spotify", role: .destructive) { music.disconnectSpotify() }
+        } else {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Spotify only tells apps what’s playing if you make a (free) Spotify app for it. Once, on developer.spotify.com with your Premium account:")
+                Text("1. Dashboard → Create app. Tick “Web API”.\n2. Redirect URI: the link below.\n3. Settings → User Management: add your own name and Spotify email.\n4. Copy the Client ID and paste it here.")
+            }
+            .font(HWFont.body(12)).foregroundStyle(HWPalette.muted)
+            Button { UIPasteboard.general.string = NowPlaying.redirect } label: { Label("Copy the redirect link", systemImage: "doc.on.doc") }
+                .foregroundStyle(pal.accent)
+            Text(NowPlaying.redirect).font(HWFont.body(11)).foregroundStyle(HWPalette.muted).textSelection(.enabled)
+            HStack {
+                TextField("Client ID", text: $music.clientId)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled().font(HWFont.body(13))
+                PasteButton(payloadType: String.self) { strings in
+                    Task { @MainActor in music.clientId = (strings.first ?? "").trimmingCharacters(in: .whitespacesAndNewlines) }
+                }
+                .labelStyle(.iconOnly).buttonBorderShape(.capsule)
+            }
+            Button(music.busy ? "Connecting…" : "Connect Spotify") { Task { await connectSpotify() } }
+                .foregroundStyle(pal.accent)
+                .disabled(music.clientId.trimmingCharacters(in: .whitespacesAndNewlines).count < 20 || music.busy)
+        }
+        if let e = music.spotifyError { Text(e).font(HWFont.body(12)).foregroundStyle(HWPalette.warn) }
+    }
+
+    private func connectSpotify() async {
+        guard let url = music.spotifySignInURL() else { return }
+        do {
+            let back = try await webAuth.authenticate(using: url, callbackURLScheme: "haltewekker", preferredBrowserSession: .shared)
+            await music.finish(back)
+        } catch {
+            if (error as? ASWebAuthenticationSessionError)?.code != .canceledLogin { music.report("Couldn’t sign in: \(error.localizedDescription)") }
+        }
+    }
+
     private func label(_ t: String, _ d: String) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(t).font(HWFont.display(16))

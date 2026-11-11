@@ -11,7 +11,8 @@ struct HaltewekkerApp: App {
     }
     var body: some Scene {
         WindowGroup {
-            RootView().environmentObject(trip).environmentObject(live)
+            RootView().environmentObject(trip).environmentObject(live).environmentObject(trip.music)
+                .onOpenURL { url in Task { await trip.music.finish(url) } }      // back from the Spotify sign-in page
         }
     }
 }
