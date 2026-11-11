@@ -20,6 +20,8 @@ targets:
       path: App/Info.plist
       properties:
         CFBundleDisplayName: Haltewekker
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen: {}
         UIBackgroundModes: [location, audio]
         NSLocationWhenInUseUsageDescription: Haltewekker uses your location to wake you before your stop.
@@ -42,6 +44,8 @@ targets:
       path: Widget/Info.plist
       properties:
         CFBundleDisplayName: Haltewekker
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UIAppFonts: [OldStandard-Bold.ttf, OldStandard-Regular.ttf, CourierPrime-Regular.ttf, CourierPrime-Bold.ttf]
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension

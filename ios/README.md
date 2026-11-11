@@ -17,6 +17,8 @@ https://github.com/kupperma/Halte-wekker/releases/tag/latest-ios
 6. On the iPhone: **Settings → General → VPN & Device Management** → tap your Apple ID → **Trust**.
 7. Turn on **Settings → Privacy & Security → Developer Mode** (the phone restarts).
 8. Open Haltewekker and allow location, notifications and Live Activities.
+   For trips that start by themselves, choose **Always** when it asks about
+   location (or later: Settings → Haltewekker → Location → Always).
 
 With a free Apple ID the app works for 7 days. Run Sideloadly again to renew it
 (your settings stay).
