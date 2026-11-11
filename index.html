@@ -244,6 +244,11 @@ svg{display:block}
 .sec.solo-h{margin:30px 0 10px}
 .bus-extra{grid-column:2/4;font-size:14px;color:var(--muted)}
 .ride{color:var(--ink);font-weight:700}
+.bus-size{grid-column:2/4;font-size:14px;color:var(--muted)}
+.bus-size.short{color:#B07A06;font-weight:700}
+.bus-size.cut{color:var(--warn);font-weight:700}
+.tl-sub.short{color:#B07A06;font-weight:700}
+.tl-sub.cut{color:var(--warn);font-weight:700}
 
 /* Live bus times */
 .chips{display:flex;gap:8px;overflow-x:auto;padding:2px 0 10px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
@@ -1015,7 +1020,7 @@ async function fetchPlan(panel,dir){
     // Drop an option when one that leaves later still gets you there as early.
     const all=[...by.values()];
     s.data=all.filter(o=>!all.some(q=>q!==o&&q.a===o.a&&q.b===o.b&&q.time>o.time&&q.end<=o.end)).sort((x,y)=>x.time-y.time);
-    if(panel==='train') await Promise.all([enrichRail(s.data),enrichCrowd(s.data)]);
+    if(panel==='train') await Promise.all([enrichRail(s.data),enrichCrowd(s.data),enrichSize(s.data)]);
     const w=ok.map(r=>r.d.direct&&r.d.direct[0]&&r.d.direct[0].duration).find(Boolean);
     s.walk=w?Math.round(w/60):null;
     s.at=Date.now();
@@ -1099,7 +1104,7 @@ function planRow(o,panel,dir){
     head=`From ${o.a.short}`;
     extra='Arrives '+o.arrivals.map(x=>`${shortStop(x.stop)} ${hhmm(x.time)}`).join(', ');
   }
-  return `<div class="bus${o.rail&&codeOf(o.a)?' watchable':''}"${watchAttrs(o)}>${lineCol(o)}<span class="bus-dest">${gradePill(gradePlan(o,panel==='buas'))}${esc(head)}${watchTag(o)}</span><span class="bus-time${o.status==='CANCEL'?' gone':''}">${hhmm(o.time)}</span><span class="bus-status ${cls}">${esc(label)}</span><span class="bus-when">${esc(when)}</span><span class="bus-extra"><b class="ride">${esc(rideLabel(o))}</b> · ${esc(extra)}</span></div>`;
+  return `<div class="bus${o.rail&&codeOf(o.a)?' watchable':''}"${watchAttrs(o)}>${lineCol(o)}<span class="bus-dest">${gradePill(gradePlan(o,panel==='buas'))}${esc(head)}${watchTag(o)}</span><span class="bus-time${o.status==='CANCEL'?' gone':''}">${hhmm(o.time)}</span><span class="bus-status ${cls}">${esc(label)}</span><span class="bus-when">${esc(when)}</span><span class="bus-extra"><b class="ride">${esc(rideLabel(o))}</b> · ${esc(extra)}</span>${sizeHtml(o)}</div>`;
 }
 function renderPlan(panel,dir){
   if(dir!==commuteDir) return;
@@ -1194,6 +1199,38 @@ function crowdHtml(o){
 }
 const lineCol=o=>`<span class="line-col"><span class="line-no">${esc(o.line)}</span>${crowdHtml(o)}</span>`;
 
+/* Train size (Virtual Train API): carriages, seats, and whether NS shortened it. */
+let nsSize=new Map();
+async function nsTrainSize(num,code){
+  const k=num+'@'+code,c=nsSize.get(k);
+  if(c&&Date.now()-c.at<15*MIN) return c.v;
+  if(Date.now()<nsOff) return c?c.v:null;
+  const base=relayBase();if(!base) return null;
+  const ctl=new AbortController(),t=setTimeout(()=>ctl.abort(),12000);
+  try{
+    const r=await fetch(`${base}/ns/train?num=${encodeURIComponent(num)}&station=${code}&features=zitplaats`,{signal:ctl.signal,cache:'no-store'});
+    if(!r.ok||!/json/.test(r.headers.get('content-type')||'')){if(r.status===501) nsOff=Date.now()+10*MIN;nsSize.set(k,{at:Date.now(),v:null});return null;}
+    const d=await r.json(),parts=Array.isArray(d.materieeldelen)?d.materieeldelen:[];
+    let seats=0;parts.forEach(m=>{const z=m.zitplaatsen||{};seats+=(z.zitplaatsEersteKlas||0)+(z.zitplaatsTweedeKlas||0);});
+    const cars=d.lengte||parts.reduce((n,m)=>n+((m.bakken||[]).length),0);
+    const v=cars?{cars,seats,cut:!!d.ingekort}:null;
+    nsSize.set(k,{at:Date.now(),v});return v;
+  }catch(e){return c?c.v:null;}
+  finally{clearTimeout(t);}
+}
+async function enrichSize(list){
+  const rail=(list||[]).filter(o=>o&&o.rail&&o.num&&codeOf(o.a)&&o.target>Date.now()-10*MIN&&o.target-Date.now()<6*3600e3);
+  await Promise.all(rail.map(async o=>{o.size=await nsTrainSize(o.num,codeOf(o.a));}));
+}
+function sizeInfo(o){
+  const z=o&&o.size;if(!z) return null;
+  const base=`${z.cars} carriage${z.cars===1?'':'s'}${z.seats?` · ${z.seats} seats`:''}`;
+  if(z.cut) return {text:`Shortened · ${base}`,cls:'cut'};
+  if(z.cars<=4) return {text:`Short train · ${base}`,cls:'short'};
+  return {text:base,cls:''};
+}
+const sizeHtml=o=>{const i=sizeInfo(o);return i?`<span class="bus-size${i.cls?' '+i.cls:''}">${esc(i.text)}</span>`:'';};
+
 /* Watching: the train of your planned trip is watched automatically; tap a train to watch it too. */
 const watchKey=o=>`${codeOf(o.a)}|${o.num||''}|${o.target}`;
 const watches=()=>db.watch||(db.watch=[]);
@@ -1281,7 +1318,7 @@ async function fetchTransfer(){
     learnPlans(all,false);
     // Hide an option when one that leaves later still gets you there as early.
     x.data=all.filter(o=>!all.some(q=>q!==o&&q.time>o.time&&q.arrivals[0].stop===o.arrivals[0].stop&&q.arrivals[0].time<=o.arrivals[0].time)).sort((a,b)=>a.time-b.time);
-    if(rail) await Promise.all([enrichRail(x.data),enrichCrowd(x.data)]);
+    if(rail) await Promise.all([enrichRail(x.data),enrichCrowd(x.data),enrichSize(x.data)]);
     x.err=null;x.at=Date.now();
   }catch(e){
     x.err=`Couldn’t load the next ${x.mode==='train'?'trains':'buses'} because ${e&&e.reason?e.reason:'something went wrong'}.`;
@@ -1298,7 +1335,7 @@ function transferRow(o,mine){
   const {label,cls,when}=statusBits(o),rail=o.rail,arr=o.arrivals[0];
   const head=rail?`${o.trainName||'Train'} to ${o.b.short}`:`To ${o.arrivals.map(a=>shortStop(a.stop)).join(' / ')}`;
   const extra=`${o.changes.length?'change at '+o.changes.join(', ')+' · ':''}arrives ${hhmm(arr.time)}${!rail&&o.arrivals.length>1?' / '+o.arrivals.slice(1).map(a=>hhmm(a.time)).join(' / '):''}`;
-  return `<div class="bus${mine?' mine':''}${o.rail&&codeOf(o.a)?' watchable':''}"${watchAttrs(o)}>${lineCol(o)}<span class="bus-dest">${gradePill(gradePlan(o,false))}${esc(head)}${mine?'<span class="mine-tag">Your plan</span>':''}${watchTag(o)}</span><span class="bus-time${o.status==='CANCEL'?' gone':''}">${hhmm(o.time)}</span><span class="bus-status ${cls}">${esc(label)}</span><span class="bus-when">${esc(when)}</span><span class="bus-extra"><b class="ride">${esc(rideLabel(o))}</b> · ${esc(extra)}</span></div>`;
+  return `<div class="bus${mine?' mine':''}${o.rail&&codeOf(o.a)?' watchable':''}"${watchAttrs(o)}>${lineCol(o)}<span class="bus-dest">${gradePill(gradePlan(o,false))}${esc(head)}${mine?'<span class="mine-tag">Your plan</span>':''}${watchTag(o)}</span><span class="bus-time${o.status==='CANCEL'?' gone':''}">${hhmm(o.time)}</span><span class="bus-status ${cls}">${esc(label)}</span><span class="bus-when">${esc(when)}</span><span class="bus-extra"><b class="ride">${esc(rideLabel(o))}</b> · ${esc(extra)}</span>${sizeHtml(o)}</div>`;
 }
 function renderTransfer(){
   const el=$('#bDeps'),x=xfer;if(!el||!x) return;
@@ -1420,7 +1457,7 @@ async function fetchTrip(){
     const exact=trains.filter(o=>Math.abs(ref(o)-T)<=M);
     const opts=(exact.length?exact:trains.slice(0,1)).slice(0,3);
     const legs=await Promise.all(opts.map(o=>tripBuses(o,out)));
-    await Promise.all([enrichRail(opts),enrichCrowd(opts)]);
+    await Promise.all([enrichRail(opts),enrichCrowd(opts),enrichSize(opts)]);
     if(tripState.key!==key) return;
     tripState.data={options:opts.map((o,i)=>Object.assign({train:o},legs[i])),inexact:!exact.length};
     if(tripState.pick>=opts.length) tripState.pick=0;
@@ -1475,7 +1512,7 @@ function renderTrip(){
   if(out){
     if(bi) items.push(tlLeg(bi.time,bi.status==='CANCEL','bus',`Bus ${bi.line} from ${shortStop(bi.fromStop)}`,[liveSub(bi),[`${rideLabel(bi)} · arrives ${o.a.short} ${hhmm(bi.arrivals[0].time)}`],changeSub(Math.round((o.time-bi.end)/MIN),'change')],gradePlan(bi,false)));
     else items.push(tlLeg(o.time-45*MIN,false,'bus','No bus found in time',[[`Take an earlier bus to ${o.a.short}.`,'tight']]));
-    items.push(tlLeg(o.time,o.status==='CANCEL','train',`${o.trainName||'Train'} from ${o.a.short}`,[liveSub(o),o.changes.length?[`Change at ${o.changes.join(', ')}`]:null,[`${rideLabel(o)} · arrives Breda ${hhmm(arr)}`]],gradePlan(o,false),o));
+    items.push(tlLeg(o.time,o.status==='CANCEL','train',`${o.trainName||'Train'} from ${o.a.short}`,[liveSub(o),o.changes.length?[`Change at ${o.changes.join(', ')}`]:null,[`${rideLabel(o)} · arrives Breda ${hhmm(arr)}`],(i=>i?[i.text,i.cls]:null)(sizeInfo(o))],gradePlan(o,false),o));
     if(bo){
       items.push(tlLeg(bo.time,bo.status==='CANCEL','bus',`Bus ${bo.line} from Breda station`,[liveSub(bo),[`${rideLabel(bo)} · get off at ${shortStop(bo.arrivals[0].stop)}`],changeSub(Math.round((bo.time-arr)/MIN)-bo.walkBefore,'get to the bus')],gradePlan(bo,true)));
       items.push(`<li class="end"><span class="tl-time">${hhmm(bo.end)}</span><span class="tl-ico end"></span><span class="tl-body"><span class="tl-title">At BUas</span>${bo.walkAfter?`<span class="tl-sub">${bo.walkAfter} min walk from the stop</span>`:''}</span></li>`);
@@ -1483,7 +1520,7 @@ function renderTrip(){
   }else{
     if(bi) items.push(tlLeg(bi.time,bi.status==='CANCEL','bus',`Bus ${bi.line} from ${shortStop(bi.fromStop)}`,[liveSub(bi),bi.walkBefore?[`Leave BUas ${hhmm(bi.start)}, ${bi.walkBefore} min walk`]:null,[`${rideLabel(bi)} to the station`],changeSub(Math.round((o.time-bi.end)/MIN),'change')],gradePlan(bi,true)));
     else items.push(tlLeg(o.time-25*MIN,false,'bus','No bus found in time',[['Walk to the station, about 17 min.','tight']]));
-    items.push(tlLeg(o.time,o.status==='CANCEL','train',`${o.trainName||'Train'} to ${o.b.short}`,[liveSub(o),o.changes.length?[`Change at ${o.changes.join(', ')}`]:null,[`${rideLabel(o)} · arrives ${o.b.short} ${hhmm(arr)}`]],gradePlan(o,false),o));
+    items.push(tlLeg(o.time,o.status==='CANCEL','train',`${o.trainName||'Train'} to ${o.b.short}`,[liveSub(o),o.changes.length?[`Change at ${o.changes.join(', ')}`]:null,[`${rideLabel(o)} · arrives ${o.b.short} ${hhmm(arr)}`],(i=>i?[i.text,i.cls]:null)(sizeInfo(o))],gradePlan(o,false),o));
     if(bo){
       items.push(tlLeg(bo.time,bo.status==='CANCEL','bus',`Bus ${bo.line} from ${o.b.short} station`,[liveSub(bo),[`${rideLabel(bo)} to ${shortStop(bo.arrivals[0].stop)}`],changeSub(Math.round((bo.time-arr)/MIN)-bo.walkBefore,'get to the bus')],gradePlan(bo,false)));
       items.push(`<li class="end"><span class="tl-time">${hhmm(bo.arrivals[0].time)}</span><span class="tl-ico end"></span><span class="tl-body"><span class="tl-title">${esc(shortStop(bo.arrivals[0].stop))}, Veghel</span></span></li>`);
