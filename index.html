@@ -762,7 +762,7 @@ const PRESET_ROUTES=[
   {id:'via-denbosch',name:'Via Den Bosch',legs:[{mode:'bus',stop:'denbosch'},{mode:'train'}]},
   {id:'via-eindhoven',name:'Via Eindhoven',legs:[{mode:'bus',stop:'eindhoven'},{mode:'train'}]}
 ];
-const DEFAULT_SETTINGS={trainKm:5,busKm:2,arrivalRing:true,sound:'chime',soundV:2,music:'mix',musicV:2,autoHome:true,prepSeen:false};
+const DEFAULT_SETTINGS={trainKm:5,busKm:2,arrivalRing:true,sound:'steam',soundV:3,music:'mix',musicV:2,autoHome:true,prepSeen:false};
 const RELAY='https://haltewekker-relay.tsfaw1.workers.dev/?url=';
 const DEFAULT_LIVE={stops:[{name:'Veghel, Busstation',id:null},{name:'Veghel, Bolkenplein',id:null}],lines:['305','306','158'],proxy:RELAY};
 const MAX_LIVE=3;
@@ -786,7 +786,7 @@ function load(){
         live.stops=(live.stops||[]).filter(x=>x&&x.name).slice(0,MAX_LIVE);
         delete live.name;delete live.id;delete live.codes;delete live.route;
         if(!String(live.proxy||'').trim()) live.proxy=RELAY;
-        return {stops:d.stops,home:d.home!==undefined?d.home:f.home,school:d.school!==undefined?d.school:f.school,routes:d.routes,kmMem:d.kmMem||{},settings:(st=>{if(!(d.settings&&d.settings.soundV)&&st.sound==='beeps') st.sound='chime';st.soundV=2;if(!(d.settings&&d.settings.musicV)) st.music='mix';st.musicV=2;return st;})(Object.assign(f.settings,d.settings||{})),live,trip:d.trip&&d.trip.date&&d.trip.time?d.trip:undefined,best:d.best||{},trips:Array.isArray(d.trips)?d.trips:[],watch:Array.isArray(d.watch)?d.watch:[]};
+        return {stops:d.stops,home:d.home!==undefined?d.home:f.home,school:d.school!==undefined?d.school:f.school,routes:d.routes,kmMem:d.kmMem||{},settings:(st=>{const v=(d.settings&&d.settings.soundV)||0;if(!v&&st.sound==='beeps') st.sound='chime';if(v<3&&st.sound==='chime') st.sound='steam';st.soundV=3;if(!(d.settings&&d.settings.musicV)) st.music='mix';st.musicV=2;return st;})(Object.assign(f.settings,d.settings||{})),live,trip:d.trip&&d.trip.date&&d.trip.time?d.trip:undefined,best:d.best||{},trips:Array.isArray(d.trips)?d.trips:[],watch:Array.isArray(d.watch)?d.watch:[]};
       }
     }
     // Bring over stops and settings from the first version.
@@ -1443,9 +1443,7 @@ function firstClassText(L){
     // No platform letters here: say front / middle / back, seen in the direction the train goes.
     const ahead=m=>L.dir==='left'?1-m:m;
     const pos=m=>{const f=ahead(m);return f>0.66?'front':f<0.34?'back':'middle';};
-    const where=[...new Set(zones.map(([a,b])=>pos((a+b)/2)))];
-    if(where.length>2) return '1st class is in the <b>yellow</b> parts · 2nd class everywhere else';
-    return `1st class at the <b>${joinAnd(where)}</b> · 2nd class everywhere else`;
+    return '';
   }
   const near=[];
   zones.forEach(([a,b])=>{
@@ -2293,6 +2291,7 @@ function liveSave(){
 const snd=$('#snd');
 const sampleCache={},wavCache={};
 const SOUNDS=[
+  ['steam','Steam train','A whistle, then an old engine pulling away'],
   ['chime','Chime','Soft bells, like a doorbell'],
   ['marimba','Marimba','Warm wooden notes, a bit livelier'],
   ['sunrise','Sunrise','A slow, rising melody. The gentlest'],
@@ -2320,7 +2319,37 @@ function gentleSamples(kind){
   for(let i=0;i<n;i++){out[i]*=g;if(i>n-fade) out[i]*=(n-i)/fade;}
   return {data:out,sr};
 }
+// An old steam train leaving: a whistle chord, then chuffs that start slow and speed up.
+function steamSamples(){
+  const sr=22050,dur=4.6,n=Math.floor(sr*dur),out=new Float32Array(n);
+  let seed=12345;const rnd=()=>((seed=(seed*1103515245+12345)&0x7fffffff)/0x7fffffff)*2-1;
+  // whistle: three detuned pipes with a little vibrato and breath
+  const pipes=[523,659,784];
+  for(let i=0;i<Math.floor(sr*1.2);i++){
+    const t=i/sr,env=Math.min(1,t/.06)*Math.min(1,Math.max(0,(1.15-t)/.18)),vib=1+.004*Math.sin(2*Math.PI*5.5*t);
+    let v=0;pipes.forEach((f,k)=>{v+=Math.sin(2*Math.PI*f*vib*t+k)*(k===1?.9:.7);});
+    out[i]+=env*(.32*v/2.3+.06*rnd());
+  }
+  // chuffs: band-passed noise with a low thump, accelerating
+  let at=1.05,gap=.46,k=0;
+  while(at<dur-.15){
+    const start=Math.floor(at*sr),len=Math.floor(.22*sr),strong=k%4===0;
+    let lp=0,lp2=0,hp=0,prev=0;
+    for(let i=0;i<len&&start+i<n;i++){
+      const t=i/sr,env=Math.min(1,t/.006)*Math.exp(-t/(.07+(strong?.03:0)));
+      const w=rnd();lp+=.35*(w-lp);lp2+=.35*(lp-lp2);hp=lp2-prev;prev=lp2;   // rough band-pass around a few hundred Hz
+      const thump=Math.sin(2*Math.PI*(70+40*Math.exp(-t*30))*t)*Math.exp(-t/.05);
+      out[start+i]+=env*((strong?1:.75)*1.9*hp*3+.45*thump);
+    }
+    at+=gap;gap=Math.max(.17,gap*.88);k++;
+  }
+  let peak=0;for(let i=0;i<n;i++) peak=Math.max(peak,Math.abs(out[i]));
+  const g=.92/(peak||1),fade=Math.floor(.03*sr);
+  for(let i=0;i<n;i++){out[i]*=g;if(i>n-fade) out[i]*=(n-i)/fade;}
+  return {data:out,sr};
+}
 function alarmSamples(kind){
+  if(kind==='steam') return steamSamples();
   if(kind==='chime'||kind==='marimba'||kind==='sunrise') return gentleSamples(kind);
   const sr=22050,dur=kind==='siren'?2.4:1.6,n=Math.floor(sr*dur),out=new Float32Array(n);
   let ph=0;
