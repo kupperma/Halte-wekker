@@ -128,6 +128,15 @@ svg{display:block}
 .dir-swap svg{width:24px;height:24px}
 :root[data-dir="back"] .dir-swap{transform:rotate(180deg)}
 
+/* Speed grades */
+.grade{display:inline-grid;place-items:center;min-width:22px;height:22px;padding:0 5px;border-radius:7px;font-family:var(--font-display);font-size:13px;font-weight:800;line-height:1;margin-right:7px;vertical-align:2px}
+.g-S{background:#F4C542;color:#3B2A00}
+.g-A{background:#BFE6CF;color:#0F4A2A}
+.g-B{background:#D6DEF5;color:#232D5E}
+.g-C{background:#F6D2C2;color:#76290B}
+.grade-key{margin:-4px 0 12px;font-size:14px}
+.grade-key .grade{margin:0 2px 0 0;vertical-align:1px}
+
 /* Planned trip */
 .trip-sec{margin:0 0 6px}
 .trip-plan{width:100%;display:flex;align-items:center;gap:12px;text-align:left;background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:12px 16px;min-height:60px;cursor:pointer}
@@ -348,6 +357,7 @@ button.pill{cursor:pointer}
 
   <section>
     <h2 class="sec solo-h">Live times</h2>
+    <p class="hint grade-key"><span class="grade g-S">S</span><span class="grade g-A">A</span><span class="grade g-B">B</span><span class="grade g-C">C</span> How fast each bus or train gets you there, compared with the fastest one on that route. Delays count.</p>
     <div class="drops">
       <details class="drop" data-panel="board">
         <summary><span class="drop-icon" data-icon="bus"></span><span class="drop-title">Bus in Veghel</span><span class="drop-next" id="next-board"></span></summary>
@@ -502,7 +512,7 @@ function load(){
         live.stops=(live.stops||[]).filter(x=>x&&x.name).slice(0,MAX_LIVE);
         delete live.name;delete live.id;delete live.codes;delete live.route;
         if(!String(live.proxy||'').trim()) live.proxy=RELAY;
-        return {stops:d.stops,home:d.home!==undefined?d.home:f.home,school:d.school!==undefined?d.school:f.school,routes:d.routes,kmMem:d.kmMem||{},settings:Object.assign(f.settings,d.settings||{}),live,trip:d.trip&&d.trip.date&&d.trip.time?d.trip:undefined};
+        return {stops:d.stops,home:d.home!==undefined?d.home:f.home,school:d.school!==undefined?d.school:f.school,routes:d.routes,kmMem:d.kmMem||{},settings:Object.assign(f.settings,d.settings||{}),live,trip:d.trip&&d.trip.date&&d.trip.time?d.trip:undefined,best:d.best||{}};
       }
     }
     // Bring over stops and settings from the first version.
@@ -671,6 +681,7 @@ function parseStopTimes(data){
     const live=!!st.realTime,cancelled=!!(st.cancelled||st.tripCancelled||pl.cancelled);
     return {
       line:String(st.routeShortName||st.tripShortName||st.displayName||'?'),
+      tripId:st.tripId||'',
       dest:st.headsign||(st.tripTo&&st.tripTo.name)||'',
       time,target,live,
       delay:live?Math.round((time-target)/60000):0,
@@ -743,6 +754,7 @@ function renderLiveList(loadingText){
   list=list.slice(0,12);
   el.innerHTML=list.length?list.map(busRow).join(''):'<p class="empty">No buses coming up for this choice right now.</p>';
   $('#next-board').textContent=list[0]?`${list[0].line} · ${hhmm(list[0].time)}`:'';
+  flushBest();
   meta.textContent=liveErr||(liveAt?`Updated at ${hhmm(liveAt)}. Refreshes every minute.`:'');
 }
 function statusBits(p){
@@ -764,7 +776,7 @@ function busRow(p){
   const {label,cls,when}=statusBits(p);
   const showStop=liveStops().length>1&&liveStopFilter==='all'&&p.stopName;
   const status=showStop?`<span class="bus-status"><span class="bus-stop">${esc(p.stopName)}</span> · <span class="${cls}">${esc(label)}</span></span>`:`<span class="bus-status ${cls}">${esc(label)}</span>`;
-  return `<div class="bus"><span class="line-no">${esc(p.line)}</span><span class="bus-dest">${esc(p.dest)}</span><span class="bus-time${p.status==='CANCEL'?' gone':''}">${hhmm(p.time)}</span>${status}<span class="bus-when">${esc(when)}</span></div>`;
+  return `<div class="bus"><span class="line-no">${esc(p.line)}</span><span class="bus-dest">${gradePill(boardGrade(p))}${esc(p.dest)}</span><span class="bus-time${p.status==='CANCEL'?' gone':''}">${hhmm(p.time)}</span>${status}<span class="bus-when">${esc(when)}</span></div>`;
 }
 
 /* ---------- Trains and the bus in Breda (Transitous trip planner) ---------- */
@@ -783,7 +795,7 @@ function planSpec(panel,dir){
   if(panel==='buas') return {modes:'BUS',n:8,maxT:0,pairs:out?[[PL.bd,PL.buas]]:[[PL.buas,PL.bd]]};
   return {modes:'BUS',n:5,maxT:0,pairs:[].concat(...[PL.ht,PL.ehv].map(o=>liveStops().filter(x=>x.id).map(x=>[o,{short:shortStop(x.name),id:x.id}])))};
 }
-function trainLabel(n){return /intercity/i.test(n)?'IC':/sprinter/i.test(n)?'SPR':String(n||'?').slice(0,4);}
+function trainLabel(n){return /intercity direct/i.test(n)?'ICD':/intercity/i.test(n)?'IC':/sprinter/i.test(n)?'SPR':String(n||'?').slice(0,4);}
 const legMins=l=>Math.round((Date.parse(l.endTime)-Date.parse(l.startTime))/60000);
 function parsePlan(d,a,b){
   return (d&&Array.isArray(d.itineraries)?d.itineraries:[]).map(it=>{
@@ -804,10 +816,18 @@ function parsePlan(d,a,b){
       changes:T.slice(1).map(l=>l.from.name),
       arrivals:[{stop:z.to.name,time:Date.parse(z.endTime)}],
       schedArr:Date.parse(z.scheduledEndTime||z.endTime),
+      toStop:z.to.name,
+      dur:(Date.parse(z.endTime)-time)/60000,
+      sdur:(Date.parse(z.scheduledEndTime||z.endTime)-target)/60000,
       start:Date.parse(it.startTime),end:Date.parse(it.endTime),
       walkBefore:legs[0].mode==='WALK'?legMins(legs[0]):0,
       walkAfter:legs[legs.length-1].mode==='WALK'?legMins(legs[legs.length-1]):0
     };
+  }).filter(Boolean).map(o=>{
+    // Door to door (with the walks) as well as on board only.
+    const walks=o.walkBefore+o.walkAfter;
+    o.ddur=(o.end-o.start)/60000;o.sddur=o.sdur+walks;
+    return o;
   }).filter(Boolean);
 }
 async function ensureLiveIds(){
@@ -855,12 +875,57 @@ async function fetchPlan(panel,dir){
     s.busy=false;renderPlan(panel,dir);
   }
 }
+/* Speed grade: compare a trip with the fastest timetabled trip ever seen on the same stretch. */
+let bestDirty=false;
+function learnBest(key,sdur){
+  const b=db.best||(db.best={});
+  if(sdur>0&&(!b[key]||sdur<b[key]-0.05)){b[key]=Math.round(sdur*10)/10;bestDirty=true;}
+}
+function gradeOf(key,dur,sdur,cancelled){
+  if(cancelled||!(dur>0)) return '';
+  learnBest(key,sdur);
+  const b=db.best;
+  const best=b[key]||dur,e=dur-best,r=dur/best;
+  return e<=1||r<=1.06?'S':(e<=3||r<=1.18)?'A':r<=1.3?'B':'C';
+}
+function flushBest(){if(bestDirty){bestDirty=false;save();}}
+const gradePill=g=>g?`<span class="grade g-${g}" title="Speed grade ${g}">${g}</span>`:'';
+// door: count the walk too (the bus to and from BUas); otherwise only the time on board.
+const planKey=(o,door)=>`${o.a.id}>${door?'door:'+o.b.id:o.toStop}`;
+function gradePlan(o,door){
+  return gradeOf(planKey(o,door),door?o.ddur:o.dur,door?o.sddur:o.sdur,o.status==='CANCEL');
+}
+// Learn the fastest time from every option first, so the first row isn't graded against itself.
+const learnPlans=(list,door)=>(list||[]).forEach(o=>o&&learnBest(planKey(o,door),door?o.sddur:o.sdur));
+// The departure board has no arrival times, so ask the planner how long each bus takes to the stations.
+let boardGrades=new Map(),boardGradesAt=0,boardGradesBusy=false;
+async function fetchBoardGrades(){
+  if(boardGradesBusy) return;
+  boardGradesBusy=true;
+  try{
+    await ensureLiveIds();
+    const stops=liveStops().filter(x=>x.id);if(!stops.length) return;
+    const now=Date.now(),reqs=[];
+    stops.forEach(x=>[PL.ehv,PL.ht].forEach(st=>reqs.push(planQ({short:shortStop(x.name),id:x.id},st,'BUS',now-2*MIN,8,0).catch(()=>[]))));
+    const m=new Map();
+    (await Promise.all(reqs)).forEach(list=>list.forEach(o=>{
+      if(o.walkBefore) return; // a bus from the other Veghel stop
+      if(!m.has(o.trip)) m.set(o.trip,o);
+    }));
+    learnPlans([...m.values()],false);
+    boardGrades=m;boardGradesAt=Date.now();
+  }finally{boardGradesBusy=false;renderLiveList();}
+}
+function boardGrade(p){
+  const o=boardGrades.get(p.tripId);if(!o) return '';
+  return gradeOf(`${o.a.id}>${o.toStop}`,o.dur,o.sdur,p.status==='CANCEL');
+}
 function planRow(o,panel,dir){
   const {label,cls,when}=statusBits(o),out=dir==='out',arr=o.arrivals[0];
   let head,extra;
   if(panel==='train'){
     head=out?`From ${o.a.short}`:`To ${o.b.short}`;
-    extra=`${o.trainName?o.trainName+' · ':''}${o.changes.length?'change at '+o.changes.join(', '):'direct'} · arrives ${hhmm(arr.time)}`;
+    extra=`${o.trainName?o.trainName+' · ':''}${o.changes.length?'change at '+o.changes.join(', '):(/direct/i.test(o.trainName)?'no changes':'direct')} · arrives ${hhmm(arr.time)}`;
   }else if(panel==='buas'&&out){
     head=`Get off at ${shortStop(arr.stop)}`;
     extra=`At BUas ${hhmm(o.end)}${o.walkAfter?` after a ${o.walkAfter} min walk`:''}`;
@@ -871,7 +936,7 @@ function planRow(o,panel,dir){
     head=`From ${o.a.short}`;
     extra='Arrives '+o.arrivals.map(x=>`${shortStop(x.stop)} ${hhmm(x.time)}`).join(', ');
   }
-  return `<div class="bus"><span class="line-no">${esc(o.line)}</span><span class="bus-dest">${esc(head)}</span><span class="bus-time${o.status==='CANCEL'?' gone':''}">${hhmm(o.time)}</span><span class="bus-status ${cls}">${esc(label)}</span><span class="bus-when">${esc(when)}</span><span class="bus-extra">${esc(extra)}</span></div>`;
+  return `<div class="bus"><span class="line-no">${esc(o.line)}</span><span class="bus-dest">${gradePill(gradePlan(o,panel==='buas'))}${esc(head)}</span><span class="bus-time${o.status==='CANCEL'?' gone':''}">${hhmm(o.time)}</span><span class="bus-status ${cls}">${esc(label)}</span><span class="bus-when">${esc(when)}</span><span class="bus-extra">${esc(extra)}</span></div>`;
 }
 function renderPlan(panel,dir){
   if(dir!==commuteDir) return;
@@ -881,9 +946,11 @@ function renderPlan(panel,dir){
     el.innerHTML=`<p class="empty">${esc(s.err||'Loading…')}</p>`+(s.err&&!s.busy?`<div class="row"><button type="button" class="row-main" data-act="plan-retry" data-panel="${panel}"><span class="row-title">Try again</span></button></div>`:'');
     meta.textContent='';nx.textContent='';return;
   }
+  learnPlans(s.data,panel==='buas');
   const now=Date.now(),list=s.data.filter(o=>o.time>=now-60000).slice(0,6);
   el.innerHTML=list.length?list.map(o=>planRow(o,panel,dir)).join(''):'<p class="empty">Nothing coming up right now.</p>';
   nx.textContent=list[0]?`${list[0].line} · ${hhmm(list[0].time)}`:'';
+  flushBest();
   meta.textContent=(s.err||`Updated at ${hhmm(s.at)}.`)+(panel==='buas'&&s.walk?` Walking takes about ${s.walk} min.`:'');
 }
 /* ---------- A planned trip around one train (to travel with a friend) ---------- */
@@ -952,8 +1019,8 @@ function tripRoute(t,o){
   const sk=Object.keys(PL).find(k=>PL[k]===(t.dir==='out'?o.a:o.b)),local=STATION_STOP[sk];
   return db.routes.find(r=>r.legs.length>1&&r.legs[0].stop===local&&stopById(local));
 }
-function tlLeg(time,gone,icon,title,subs){
-  return `<li><span class="tl-time${gone?' gone':''}">${hhmm(time)}</span><span class="tl-ico${icon?'':' end'}">${icon?ICON[icon]:''}</span><span class="tl-body"><span class="tl-title">${esc(title)}</span>${subs.filter(Boolean).map(x=>`<span class="tl-sub${x[1]?' '+x[1]:''}">${esc(x[0])}</span>`).join('')}</span></li>`;
+function tlLeg(time,gone,icon,title,subs,grade){
+  return `<li><span class="tl-time${gone?' gone':''}">${hhmm(time)}</span><span class="tl-ico${icon?'':' end'}">${icon?ICON[icon]:''}</span><span class="tl-body"><span class="tl-title">${gradePill(grade)}${esc(title)}</span>${subs.filter(Boolean).map(x=>`<span class="tl-sub${x[1]?' '+x[1]:''}">${esc(x[0])}</span>`).join('')}</span></li>`;
 }
 function liveSub(o){
   const bits=[];
@@ -979,25 +1046,26 @@ function renderTrip(){
     return;
   }
   const opts=st.data.options,op=opts[st.pick]||opts[0],o=op.train,arr=o.arrivals[0].time;
+  learnPlans(opts.map(x=>x.train),false);learnPlans([op.busIn,op.busInAlt,out?null:op.busOut,out?null:op.busOutAlt],!out);learnPlans(out?[op.busOut,op.busOutAlt]:[],true);
   const chips=opts.length>1?`<div class="chips">${opts.map((x,i)=>`<button type="button" class="chip" data-act="trip-pick" data-v="${i}" aria-pressed="${i===st.pick}">${esc((x.train.trainName||'Train')+' '+(out?'from '+x.train.a.short:'to '+x.train.b.short))}</button>`).join('')}</div>`:'';
   let warn='';
   if(st.data.inexact) warn=`<p class="warn">No train ${out?'arrives in':'leaves'} Breda at exactly ${esc(t.time)}. This is the closest one.</p>`;
   const items=[];
   const bi=op.busIn,bo=op.busOut;
   if(out){
-    if(bi) items.push(tlLeg(bi.time,bi.status==='CANCEL','bus',`Bus ${bi.line} from ${shortStop(bi.fromStop)}`,[liveSub(bi),[`Arrives ${o.a.short} ${hhmm(bi.arrivals[0].time)}`],changeSub(Math.round((o.time-bi.end)/MIN),'change')]));
+    if(bi) items.push(tlLeg(bi.time,bi.status==='CANCEL','bus',`Bus ${bi.line} from ${shortStop(bi.fromStop)}`,[liveSub(bi),[`Arrives ${o.a.short} ${hhmm(bi.arrivals[0].time)}`],changeSub(Math.round((o.time-bi.end)/MIN),'change')],gradePlan(bi,false)));
     else items.push(tlLeg(o.time-45*MIN,false,'bus','No bus found in time',[[`Take an earlier bus to ${o.a.short}.`,'tight']]));
-    items.push(tlLeg(o.time,o.status==='CANCEL','train',`${o.trainName||'Train'} from ${o.a.short}`,[liveSub(o),o.changes.length?[`Change at ${o.changes.join(', ')}`]:null,[`Arrives Breda ${hhmm(arr)}`]]));
+    items.push(tlLeg(o.time,o.status==='CANCEL','train',`${o.trainName||'Train'} from ${o.a.short}`,[liveSub(o),o.changes.length?[`Change at ${o.changes.join(', ')}`]:null,[`Arrives Breda ${hhmm(arr)}`]],gradePlan(o,false)));
     if(bo){
-      items.push(tlLeg(bo.time,bo.status==='CANCEL','bus',`Bus ${bo.line} from Breda station`,[liveSub(bo),[`Get off at ${shortStop(bo.arrivals[0].stop)}`],changeSub(Math.round((bo.time-arr)/MIN)-bo.walkBefore,'get to the bus')]));
+      items.push(tlLeg(bo.time,bo.status==='CANCEL','bus',`Bus ${bo.line} from Breda station`,[liveSub(bo),[`Get off at ${shortStop(bo.arrivals[0].stop)}`],changeSub(Math.round((bo.time-arr)/MIN)-bo.walkBefore,'get to the bus')],gradePlan(bo,true)));
       items.push(`<li class="end"><span class="tl-time">${hhmm(bo.end)}</span><span class="tl-ico end"></span><span class="tl-body"><span class="tl-title">At BUas</span>${bo.walkAfter?`<span class="tl-sub">${bo.walkAfter} min walk from the stop</span>`:''}</span></li>`);
     }else items.push(`<li class="end"><span class="tl-time">${hhmm(arr)}</span><span class="tl-ico end"></span><span class="tl-body"><span class="tl-title">Breda station</span><span class="tl-sub">No bus to BUas found after this train. Walking takes about 17 min.</span></span></li>`);
   }else{
-    if(bi) items.push(tlLeg(bi.time,bi.status==='CANCEL','bus',`Bus ${bi.line} from ${shortStop(bi.fromStop)}`,[liveSub(bi),bi.walkBefore?[`Leave BUas ${hhmm(bi.start)}, ${bi.walkBefore} min walk`]:null,changeSub(Math.round((o.time-bi.end)/MIN),'change')]));
+    if(bi) items.push(tlLeg(bi.time,bi.status==='CANCEL','bus',`Bus ${bi.line} from ${shortStop(bi.fromStop)}`,[liveSub(bi),bi.walkBefore?[`Leave BUas ${hhmm(bi.start)}, ${bi.walkBefore} min walk`]:null,changeSub(Math.round((o.time-bi.end)/MIN),'change')],gradePlan(bi,true)));
     else items.push(tlLeg(o.time-25*MIN,false,'bus','No bus found in time',[['Walk to the station, about 17 min.','tight']]));
-    items.push(tlLeg(o.time,o.status==='CANCEL','train',`${o.trainName||'Train'} to ${o.b.short}`,[liveSub(o),o.changes.length?[`Change at ${o.changes.join(', ')}`]:null,[`Arrives ${o.b.short} ${hhmm(arr)}`]]));
+    items.push(tlLeg(o.time,o.status==='CANCEL','train',`${o.trainName||'Train'} to ${o.b.short}`,[liveSub(o),o.changes.length?[`Change at ${o.changes.join(', ')}`]:null,[`Arrives ${o.b.short} ${hhmm(arr)}`]],gradePlan(o,false)));
     if(bo){
-      items.push(tlLeg(bo.time,bo.status==='CANCEL','bus',`Bus ${bo.line} from ${o.b.short} station`,[liveSub(bo),changeSub(Math.round((bo.time-arr)/MIN)-bo.walkBefore,'get to the bus')]));
+      items.push(tlLeg(bo.time,bo.status==='CANCEL','bus',`Bus ${bo.line} from ${o.b.short} station`,[liveSub(bo),changeSub(Math.round((bo.time-arr)/MIN)-bo.walkBefore,'get to the bus')],gradePlan(bo,false)));
       items.push(`<li class="end"><span class="tl-time">${hhmm(bo.arrivals[0].time)}</span><span class="tl-ico end"></span><span class="tl-body"><span class="tl-title">${esc(shortStop(bo.arrivals[0].stop))}, Veghel</span></span></li>`);
     }else items.push(`<li class="end"><span class="tl-time">${hhmm(arr)}</span><span class="tl-ico end"></span><span class="tl-body"><span class="tl-title">${esc(o.b.short)}</span><span class="tl-sub">No bus to Veghel found after this train.</span></span></li>`);
   }
@@ -1005,6 +1073,7 @@ function renderTrip(){
   if(op.busInAlt) notes.push(`Earlier bus for more time: ${op.busInAlt.line} at ${hhmm(op.busInAlt.time)}.`);
   if(op.busOutAlt) notes.push(`If you miss it: ${op.busOutAlt.line} at ${hhmm(op.busOutAlt.time)}.`);
   const r=tripRoute(t,o);
+  setTimeout(flushBest,0);
   el.innerHTML=`<div class="trip">${head}${chips}${warn}<ol class="tl">${items.join('')}</ol>${r?`<button type="button" class="btn primary" data-act="trip-alarm" data-id="${esc(r.id)}">Wake me on this trip</button>`:''}${notes.length?`<p class="hint">${esc(notes.join(' '))}</p>`:''}<p class="hint">Updated at ${hhmm(st.at)}.${T-Date.now()>4*3600e3?' Live delays show up a few hours before.':''}</p></div>`;
 }
 function openTrip(){
@@ -1046,6 +1115,7 @@ function refreshPanels(){
   panelsFor(commuteDir).forEach(p=>{
     const at=p==='board'?liveAt:(pstate[p+':'+commuteDir]||{}).at;
     if(!at||now-at>=(panelOpen(p)?OPEN_MS:CLOSED_MS)) p==='board'?fetchLive():fetchPlan(p,commuteDir);
+    if(p==='board'&&panelOpen(p)&&now-boardGradesAt>=5*MIN) fetchBoardGrades();
     else p==='board'?renderLiveList():renderPlan(p,commuteDir);
   });
 }
