@@ -38,12 +38,13 @@ export default {
       const num = url.searchParams.get("num") || "";
       const station = (url.searchParams.get("station") || "").toUpperCase();
       const v = url.searchParams.get("v") || "1";
-      if (!/^\d{1,6}$/.test(num) || (station && !/^[A-Z]{2,5}$/.test(station)) || !/^[12]$/.test(v))
+      const features = url.searchParams.get("features") ?? "druktev2";
+      if (!/^\d{1,6}$/.test(num) || (station && !/^[A-Z]{2,5}$/.test(station)) || !/^[12]$/.test(v) || !/^[a-z0-9,]{0,60}$/i.test(features))
         return new Response("Bad request", { status: 400, headers: cors });
       if (!NS_KEY) return new Response("No NS key set", { status: 501, headers: cors });
       try {
         const path = `virtual-train-api/api/v${v}/trein/${num}` + (station ? `/${station}` : "");
-        const r = await fetch(`https://gateway.apiportal.ns.nl/${path}?features=druktev2`, {
+        const r = await fetch(`https://gateway.apiportal.ns.nl/${path}${features ? "?features=" + encodeURIComponent(features) : ""}`, {
           headers: { "Ocp-Apim-Subscription-Key": NS_KEY },
         });
         return new Response(await r.text(), {
