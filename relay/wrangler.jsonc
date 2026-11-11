@@ -1,0 +1,7 @@
+// Cloudflare reads this when it builds the relay from GitHub.
+// "name" must match your worker's name in Cloudflare.
+{
+  "name": "haltewekker-relay",
+  "main": "worker.js",
+  "compatibility_date": "2025-01-01"
+}
