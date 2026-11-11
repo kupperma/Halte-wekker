@@ -11,15 +11,17 @@ export default {
     };
     if (request.method === "OPTIONS") return new Response(null, { headers: cors });
     const url = new URL(request.url);
+    // The key may be saved as NS_KEY or NS-KEY.
+    const NS_KEY = env.NS_KEY || env["NS-KEY"];
 
     if (url.pathname === "/ns/departures") {
       const station = (url.searchParams.get("station") || "").toUpperCase();
       if (!/^[A-Z]{2,5}$/.test(station)) return new Response("Unknown station", { status: 400, headers: cors });
-      if (!env.NS_KEY) return new Response("No NS key set", { status: 501, headers: cors });
+      if (!NS_KEY) return new Response("No NS key set", { status: 501, headers: cors });
       try {
         const r = await fetch(
           `https://gateway.apiportal.ns.nl/reisinformatie-api/api/v2/departures?station=${station}&maxJourneys=40`,
-          { headers: { "Ocp-Apim-Subscription-Key": env.NS_KEY } }
+          { headers: { "Ocp-Apim-Subscription-Key": NS_KEY } }
         );
         return new Response(await r.text(), {
           status: r.status,
@@ -37,11 +39,11 @@ export default {
       const when = url.searchParams.get("dateTime") || "";
       if (!/^[A-Z]{2,5}$/.test(from) || !/^[A-Z]{2,5}$/.test(to) || (when && !/^[0-9T:+\-.Z]{10,30}$/.test(when)))
         return new Response("Bad request", { status: 400, headers: cors });
-      if (!env.NS_KEY) return new Response("No NS key set", { status: 501, headers: cors });
+      if (!NS_KEY) return new Response("No NS key set", { status: 501, headers: cors });
       try {
         const q = `fromStation=${from}&toStation=${to}` + (when ? `&dateTime=${encodeURIComponent(when)}` : "");
         const r = await fetch(`https://gateway.apiportal.ns.nl/reisinformatie-api/api/v3/trips?${q}`, {
-          headers: { "Ocp-Apim-Subscription-Key": env.NS_KEY },
+          headers: { "Ocp-Apim-Subscription-Key": NS_KEY },
         });
         return new Response(await r.text(), {
           status: r.status,
