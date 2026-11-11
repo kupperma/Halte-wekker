@@ -245,6 +245,22 @@ svg{display:block}
 .bus-extra{grid-column:2/4;font-size:14px;color:var(--muted)}
 .ride{color:var(--ink);font-weight:700}
 .bus-size{grid-column:2/4;font-size:14px;color:var(--muted)}
+/* Where 1st and 2nd class stop on the platform */
+.consist{display:block;grid-column:2/4;margin:8px 13px 1px 0}
+.consist>span{display:block}
+.tl-body .consist{margin:7px 0 3px}
+.cs-train{position:relative;height:18px}
+.cs-unit{position:absolute;top:0;bottom:0;background:color-mix(in srgb,var(--dusk) 18%,var(--surface));border-radius:4px;overflow:hidden;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;color:var(--dusk)}
+.cs-unit.first{border-top-left-radius:9px;border-bottom-left-radius:9px}
+.cs-unit.last{border-top-right-radius:9px;border-bottom-right-radius:9px}
+.cs-unit.unknown{background:color-mix(in srgb,var(--muted) 18%,var(--surface));color:var(--muted)}
+.cs-1{position:absolute;top:0;bottom:0;background:#FFC917;color:#3B2A00;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800}
+.cs-2{position:absolute;transform:translateX(-50%);opacity:.75}
+.cs-letters{position:relative;height:15px;margin-top:3px}
+.cs-letters span{position:absolute;transform:translateX(-50%);font-size:11px;font-weight:700;color:var(--muted);line-height:15px}
+.cs-dir{position:absolute;top:50%;transform:translateY(-50%);font-size:12px;color:var(--muted);line-height:1}
+.cs-text{display:block;font-size:13px;color:var(--muted);margin-top:1px}
+.cs-text b{color:var(--ink)}
 .bus-size.short{color:#B07A06;font-weight:700}
 .bus-size.cut{color:var(--warn);font-weight:700}
 .tl-sub.short{color:#B07A06;font-weight:700}
@@ -1104,7 +1120,7 @@ function planRow(o,panel,dir){
     head=`From ${o.a.short}`;
     extra='Arrives '+o.arrivals.map(x=>`${shortStop(x.stop)} ${hhmm(x.time)}`).join(', ');
   }
-  return `<div class="bus${o.rail&&codeOf(o.a)?' watchable':''}"${watchAttrs(o)}>${lineCol(o)}<span class="bus-dest">${gradePill(gradePlan(o,panel==='buas'))}${esc(head)}${watchTag(o)}</span><span class="bus-time${o.status==='CANCEL'?' gone':''}">${hhmm(o.time)}</span><span class="bus-status ${cls}">${esc(label)}</span><span class="bus-when">${esc(when)}</span><span class="bus-extra"><b class="ride">${esc(rideLabel(o))}</b> · ${esc(extra)}</span>${sizeHtml(o)}</div>`;
+  return `<div class="bus${o.rail&&codeOf(o.a)?' watchable':''}"${watchAttrs(o)}>${lineCol(o)}<span class="bus-dest">${gradePill(gradePlan(o,panel==='buas'))}${esc(head)}${watchTag(o)}</span><span class="bus-time${o.status==='CANCEL'?' gone':''}">${hhmm(o.time)}</span><span class="bus-status ${cls}">${esc(label)}</span><span class="bus-when">${esc(when)}</span><span class="bus-extra"><b class="ride">${esc(rideLabel(o))}</b> · ${esc(extra)}</span>${sizeHtml(o)}${consistHtml(o)}</div>`;
 }
 function renderPlan(panel,dir){
   if(dir!==commuteDir) return;
@@ -1213,10 +1229,64 @@ async function nsTrainSize(num,code){
     const d=await r.json(),parts=Array.isArray(d.materieeldelen)?d.materieeldelen:[];
     let seats=0;parts.forEach(m=>{const z=m.zitplaatsen||{};seats+=(z.zitplaatsEersteKlas||0)+(z.zitplaatsTweedeKlas||0);});
     const cars=d.lengte||parts.reduce((n,m)=>n+((m.bakken||[]).length),0);
-    const v=cars?{cars,seats,cut:!!d.ingekort}:null;
+    const v=cars?{cars,seats,cut:!!d.ingekort,layout:trainLayout(d)}:null;
     nsSize.set(k,{at:Date.now(),v});return v;
   }catch(e){return c?c.v:null;}
   finally{clearTimeout(t);}
+}
+const CLASS1={"ddz_4":[[0.015,0.12],[0.669,0.774]],"ddz_6":[[0.01,0.079],[0.439,0.508],[0.783,0.851]],"icm_3":[[0.537,0.669]],"icm_4":[[0.498,0.752]],"icng_5":[[0.41,0.667]],"icng_8":[[0.272,0.379],[0.62,0.727]],"nsr_flirt_3":[[0.039,0.206],[0.791,0.958]],"nsr_flirt_4":[[0.03,0.161],[0.837,0.967]],"slt_4":[[0.02,0.172],[0.825,0.977]],"slt_6":[[0.014,0.119],[0.879,0.984]],"sng_3":[[0.038,0.215],[0.823,1.0]],"sng_4":[[0.03,0.169],[0.861,1.0]],"virm_4":[[0.376,0.667]],"virm_6":[[0.223,0.315],[0.582,0.777]],"virmm1_4":[[0.376,0.625]],"virmm1_6":[[0.25,0.315],[0.582,0.749]]};
+// Place each train unit (and its 1st class part, from NS's drawings) along the platform.
+function trainLayout(d){
+  const parts=Array.isArray(d.materieeldelen)?d.materieeldelen:[];
+  const sum=parts.reduce((n,m)=>n+(m.breedte||0),0),total=d.lengteInPixels||sum;
+  if(!total||!parts.length) return null;
+  let x=0;
+  const units=parts.map(m=>{
+    const w=m.breedte||0,key=String(m.afbeelding||'').split('/').pop().replace(/\.png$/,'').toLowerCase(),z=CLASS1[key];
+    const u={x:x/total,w:w/total,zones:z?z.map(([a,b])=>[(x+a*w)/total,(x+b*w)/total]):null};
+    x+=w;return u;
+  });
+  const letters=(d.perronVoorzieningen||[]).filter(p=>p.type==='PERRONLETTER'&&p.description&&p.paddingLeft>=-0.03*total&&p.paddingLeft<=1.03*total).map(p=>({l:String(p.description),x:p.paddingLeft/total}));
+  return {units,letters,dir:d.rijrichting==='LINKS'?'left':d.rijrichting==='RECHTS'?'right':null};
+}
+function firstClassText(L){
+  const zones=[].concat(...L.units.map(u=>u.zones||[]));
+  if(!zones.length) return '';
+  if(!L.letters.length){
+    // No platform letters here: say front / middle / back, seen in the direction the train goes.
+    const ahead=m=>L.dir==='left'?1-m:m;
+    const pos=m=>{const f=ahead(m);return f>0.66?'front':f<0.34?'back':'middle';};
+    const where=[...new Set(zones.map(([a,b])=>pos((a+b)/2)))];
+    if(where.length>2) return '1st class is in the <b>yellow</b> parts · 2nd class everywhere else';
+    return `1st class at the <b>${joinAnd(where)}</b> · 2nd class everywhere else`;
+  }
+  const near=[];
+  zones.forEach(([a,b])=>{
+    const inside=L.letters.filter(l=>l.x>=a-0.03&&l.x<=b+0.03);
+    const pick=inside.length?inside:[L.letters.reduce((p,l)=>Math.abs(l.x-(a+b)/2)<Math.abs(p.x-(a+b)/2)?l:p)];
+    pick.forEach(l=>{if(!near.includes(l.l)) near.push(l.l);});
+  });
+  near.sort();
+  return `1st class near <b>${near.map(esc).join(', ')}</b> · 2nd class everywhere else`;
+}
+function consistHtml(o){
+  const L=o&&o.size&&o.size.layout;if(!L) return '';
+  const n=L.units.length;
+  const units=L.units.map((u,i)=>{
+    const cls=`cs-unit${i===0?' first':''}${i===n-1?' last':''}${u.zones?'':' unknown'}`;
+    const ones=(u.zones||[]).map(([a,b])=>`<span class="cs-1" style="left:${((a-u.x)/u.w*100).toFixed(1)}%;width:${((b-a)/u.w*100).toFixed(1)}%">1</span>`).join('');
+    // Put the "2" in the middle of the longest 2nd-class stretch, so it isn't hidden behind the yellow.
+    let gaps=[[u.x,u.x+u.w]];
+    (u.zones||[]).forEach(([a,b])=>{gaps=[].concat(...gaps.map(([g0,g1])=>[[g0,Math.min(g1,a)],[Math.max(g0,b),g1]].filter(([p,q])=>q-p>0.001)));});
+    const big=gaps.sort((p,q)=>(q[1]-q[0])-(p[1]-p[0]))[0];
+    const two=big&&(big[1]-big[0])/u.w>0.12?`<span class="cs-2" style="left:${(((big[0]+big[1])/2-u.x)/u.w*100).toFixed(1)}%">${u.zones?'2':'?'}</span>`:'';
+    return `<span class="${cls}" style="left:${(u.x*100).toFixed(2)}%;width:calc(${(u.w*100).toFixed(2)}% - 3px)">${two}${ones}</span>`;
+  }).join('');
+  const arrow=L.dir==='right'?'<span class="cs-dir" style="right:-13px">▶</span>':L.dir==='left'?'<span class="cs-dir" style="left:-13px">◀</span>':'';
+  const letters=L.letters.map(l=>`<span style="left:${(l.x*100).toFixed(1)}%">${esc(l.l)}</span>`).join('');
+  const txt=firstClassText(L);
+  const label=txt.replace(/<[^>]+>/g,'')||'Train layout';
+  return `<span class="consist" role="img" aria-label="${esc(label)}"><span class="cs-train">${units}${arrow}</span>${letters?`<span class="cs-letters">${letters}</span>`:''}${txt?`<span class="cs-text">${txt}</span>`:''}</span>`;
 }
 async function enrichSize(list){
   const rail=(list||[]).filter(o=>o&&o.rail&&o.num&&codeOf(o.a)&&o.target>Date.now()-10*MIN&&o.target-Date.now()<6*3600e3);
@@ -1335,7 +1405,7 @@ function transferRow(o,mine){
   const {label,cls,when}=statusBits(o),rail=o.rail,arr=o.arrivals[0];
   const head=rail?`${o.trainName||'Train'} to ${o.b.short}`:`To ${o.arrivals.map(a=>shortStop(a.stop)).join(' / ')}`;
   const extra=`${o.changes.length?'change at '+o.changes.join(', ')+' · ':''}arrives ${hhmm(arr.time)}${!rail&&o.arrivals.length>1?' / '+o.arrivals.slice(1).map(a=>hhmm(a.time)).join(' / '):''}`;
-  return `<div class="bus${mine?' mine':''}${o.rail&&codeOf(o.a)?' watchable':''}"${watchAttrs(o)}>${lineCol(o)}<span class="bus-dest">${gradePill(gradePlan(o,false))}${esc(head)}${mine?'<span class="mine-tag">Your plan</span>':''}${watchTag(o)}</span><span class="bus-time${o.status==='CANCEL'?' gone':''}">${hhmm(o.time)}</span><span class="bus-status ${cls}">${esc(label)}</span><span class="bus-when">${esc(when)}</span><span class="bus-extra"><b class="ride">${esc(rideLabel(o))}</b> · ${esc(extra)}</span>${sizeHtml(o)}</div>`;
+  return `<div class="bus${mine?' mine':''}${o.rail&&codeOf(o.a)?' watchable':''}"${watchAttrs(o)}>${lineCol(o)}<span class="bus-dest">${gradePill(gradePlan(o,false))}${esc(head)}${mine?'<span class="mine-tag">Your plan</span>':''}${watchTag(o)}</span><span class="bus-time${o.status==='CANCEL'?' gone':''}">${hhmm(o.time)}</span><span class="bus-status ${cls}">${esc(label)}</span><span class="bus-when">${esc(when)}</span><span class="bus-extra"><b class="ride">${esc(rideLabel(o))}</b> · ${esc(extra)}</span>${sizeHtml(o)}${consistHtml(o)}</div>`;
 }
 function renderTransfer(){
   const el=$('#bDeps'),x=xfer;if(!el||!x) return;
@@ -1475,7 +1545,7 @@ function tripRoute(t,o){
   return db.routes.find(r=>r.legs.length>1&&r.legs[0].stop===local&&stopById(local));
 }
 function tlLeg(time,gone,icon,title,subs,grade,o){
-  return `<li><span class="tl-time${gone?' gone':''}">${hhmm(time)}</span><span class="tl-ico${icon?'':' end'}">${icon?ICON[icon]:''}</span><span class="tl-body"><span class="tl-title">${gradePill(grade)}${esc(title)}${crowdHtml(o)}</span>${subs.filter(Boolean).map(x=>`<span class="tl-sub${x[1]?' '+x[1]:''}">${esc(x[0])}</span>`).join('')}</span></li>`;
+  return `<li><span class="tl-time${gone?' gone':''}">${hhmm(time)}</span><span class="tl-ico${icon?'':' end'}">${icon?ICON[icon]:''}</span><span class="tl-body"><span class="tl-title">${gradePill(grade)}${esc(title)}${crowdHtml(o)}</span>${subs.filter(Boolean).map(x=>`<span class="tl-sub${x[1]?' '+x[1]:''}">${esc(x[0])}</span>`).join('')}${o&&o.rail?consistHtml(o):''}</span></li>`;
 }
 function liveSub(o){
   const bits=[];
