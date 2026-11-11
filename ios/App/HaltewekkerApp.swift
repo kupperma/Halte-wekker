@@ -2,9 +2,10 @@ import SwiftUI
 
 @main
 struct HaltewekkerApp: App {
+    @StateObject private var trip = TripManager()
     var body: some Scene {
         WindowGroup {
-            Text("Haltewekker")
+            RootView().environmentObject(trip)
         }
     }
 }
