@@ -134,8 +134,27 @@ svg{display:block}
 .g-A{background:#BFE6CF;color:#0F4A2A}
 .g-B{background:#D6DEF5;color:#232D5E}
 .g-C{background:#F6D2C2;color:#76290B}
+.g-D{background:#F2C4C4;color:#6E1616}
+.g-F{background:#DE9A9A;color:#4D0808}
+.grade.big{min-width:44px;height:44px;border-radius:13px;font-size:24px;margin:0}
 .grade-key{margin:-4px 0 12px;font-size:14px}
 .grade-key .grade{margin:0 2px 0 0;vertical-align:1px}
+
+/* Trip score + leaderboard */
+.score-card{display:flex;align-items:center;gap:14px;margin:22px 0 0}
+.score-num{font-family:var(--font-display);font-weight:800;font-size:54px;line-height:1;letter-spacing:-0.03em;font-variant-numeric:tabular-nums}
+.score-num small{font-size:20px;color:var(--muted);font-weight:600;letter-spacing:0}
+.between-main .score-line{font-size:17px;color:var(--muted);margin:10px 0 0;max-width:32ch}
+.between-main .score-flag{display:inline-block;margin:14px 0 0;padding:8px 14px;border-radius:999px;background:#F4C542;color:#3B2A00;font-weight:700;font-size:16px}
+.lb-tools{display:grid;gap:8px;padding:10px 16px}
+.lb-row{display:flex;align-items:center;gap:10px;padding:10px 6px 10px 16px;border-top:1px solid var(--line)}
+.lb-rank{width:20px;flex:none;font-family:var(--font-display);font-weight:800;color:var(--muted);font-variant-numeric:tabular-nums}
+.lb-row .grade{margin:0;flex:none}
+.lb-main{flex:1;min-width:0;display:flex;flex-direction:column}
+.lb-main b{font-variant-numeric:tabular-nums}
+.lb-main small{font-size:14px;color:var(--muted)}
+.lb-badge{flex:none;font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;padding:4px 8px;border-radius:999px;background:#F4C542;color:#3B2A00}
+.lb-del{width:40px;height:40px;flex:none;border:0;background:none;color:var(--muted);font-size:20px;cursor:pointer}
 
 /* Planned trip */
 .trip-sec{margin:0 0 6px}
@@ -386,7 +405,11 @@ button.pill{cursor:pointer}
   </section>
 
   <h2 class="sec solo-h">More</h2>
-  <details class="drop" data-panel="stops">
+  <details class="drop" data-panel="scores">
+    <summary><span class="drop-icon" data-icon="trophy"></span><span class="drop-title">Leaderboard</span><span class="drop-next" id="next-scores"></span></summary>
+    <div class="drop-body" id="scoresBody"></div>
+  </details>
+  <details class="drop solo" data-panel="stops">
     <summary><span class="drop-title">Wake me at a single stop</span></summary>
     <div class="drop-body">
       <div class="drop-tools"><p class="commute-sub">For trips without a route.</p><button type="button" class="text-btn" data-act="add-stop">Add a stop</button></div>
@@ -444,6 +467,7 @@ button.pill{cursor:pointer}
   <div class="between-main">
     <h2 id="bTitle"></h2>
     <p id="bSub"></p>
+    <div id="bScore"></div>
     <div id="bBackupWrap"></div>
   </div>
   <div class="between-actions">
@@ -472,6 +496,7 @@ const ICON={
   bus:'<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4.5" y="3" width="15" height="15" rx="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M4.5 10.5h15M8 18v3M16 18v3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="8.3" cy="14.3" r="1.2" fill="currentColor"/><circle cx="15.7" cy="14.3" r="1.2" fill="currentColor"/></svg>',
   train:'<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="2.5" width="14" height="14.5" rx="4" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M5 9.5h14M9 17l-3 4.5M15 17l3 4.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="9" cy="13.2" r="1.1" fill="currentColor"/><circle cx="15" cy="13.2" r="1.1" fill="currentColor"/></svg>',
   edit:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4.2L19.3 8.9a1.6 1.6 0 0 0 0-2.3l-1.9-1.9a1.6 1.6 0 0 0-2.3 0L4 15.8V20z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
+  trophy:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h10v5a5 5 0 0 1-10 0V4zM7 6H4.5v1.5A3.5 3.5 0 0 0 8 11M17 6h2.5v1.5A3.5 3.5 0 0 1 16 11M12 14v3.5M8.5 20.5h7M9.5 17.5h5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   close:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>'
 };
 const MODES=[['bus','Bus',ICON.bus],['train','Train',ICON.train]];
@@ -512,7 +537,7 @@ function load(){
         live.stops=(live.stops||[]).filter(x=>x&&x.name).slice(0,MAX_LIVE);
         delete live.name;delete live.id;delete live.codes;delete live.route;
         if(!String(live.proxy||'').trim()) live.proxy=RELAY;
-        return {stops:d.stops,home:d.home!==undefined?d.home:f.home,school:d.school!==undefined?d.school:f.school,routes:d.routes,kmMem:d.kmMem||{},settings:Object.assign(f.settings,d.settings||{}),live,trip:d.trip&&d.trip.date&&d.trip.time?d.trip:undefined,best:d.best||{}};
+        return {stops:d.stops,home:d.home!==undefined?d.home:f.home,school:d.school!==undefined?d.school:f.school,routes:d.routes,kmMem:d.kmMem||{},settings:Object.assign(f.settings,d.settings||{}),live,trip:d.trip&&d.trip.date&&d.trip.time?d.trip:undefined,best:d.best||{},trips:Array.isArray(d.trips)?d.trips:[]};
       }
     }
     // Bring over stops and settings from the first version.
@@ -583,7 +608,7 @@ function parseCoords(s){
 const autoDir=()=>new Date().getHours()<12?'out':'back';
 // A direction you picked yourself sticks for 3 hours, then it follows the clock again.
 let commuteDir=(db.settings.dirAt&&Date.now()-db.settings.dirAt<3*3600e3&&/^(out|back)$/.test(db.settings.dir))?db.settings.dir:autoDir();
-function renderHome(){renderCommute();renderStops();renderLiveShell();applyDir();renderTrip();}
+function renderHome(){renderCommute();renderStops();renderLiveShell();applyDir();renderTrip();renderScores();}
 function applyDir(){
   const out=commuteDir==='out',h=stopById(db.home),sc=stopById(db.school);
   const hn=h?(h.short||h.name):'Home',sn=sc?(sc.short||sc.name):'School';
@@ -896,7 +921,18 @@ function gradePlan(o,door){
   return gradeOf(planKey(o,door),door?o.ddur:o.dur,door?o.sddur:o.sdur,o.status==='CANCEL');
 }
 // Learn the fastest time from every option first, so the first row isn't graded against itself.
-const learnPlans=(list,door)=>(list||[]).forEach(o=>o&&learnBest(planKey(o,door),door?o.sddur:o.sdur));
+function canonPlace(p){
+  if(!p) return null;
+  const k=Object.keys(PL).find(k=>PL[k].id===p.id);
+  return k||(liveStops().some(x=>x.id===p.id)?'veghel':null);
+}
+const learnPlans=(list,door)=>(list||[]).forEach(o=>{
+  if(!o) return;
+  learnBest(planKey(o,door),door?o.sddur:o.sdur);
+  // Also remember the fastest ride per stretch (like Den Bosch → Veghel) for the trip score.
+  const ca=canonPlace(o.a),cb=canonPlace(o.b);
+  if(!door&&ca&&cb) learnBest(`c:${ca}>${cb}`,o.sdur);
+});
 // The departure board has no arrival times, so ask the planner how long each bus takes to the stations.
 let boardGrades=new Map(),boardGradesAt=0,boardGradesBusy=false;
 async function fetchBoardGrades(){
@@ -953,6 +989,61 @@ function renderPlan(panel,dir){
   flushBest();
   meta.textContent=(s.err||`Updated at ${hhmm(s.at)}.`)+(panel==='buas'&&s.walk?` Walking takes about ${s.walk} min.`:'');
 }
+/* ---------- Trip score (out of 500) and leaderboard ---------- */
+const TRANSFER_MIN=5;
+const letter=n=>n>=475?'S':n>=425?'A':n>=375?'B':n>=325?'C':n>=275?'D':'F';
+// Fastest possible: the fastest bus and train seen on this route, plus 5 min to change.
+function idealFor(routeId,dir){
+  const r=routeById(routeId);if(!r||r.legs.length!==2) return null;
+  const x=Object.keys(STATION_STOP).find(k=>STATION_STOP[k]===r.legs[0].stop);if(!x) return null;
+  const b=db.best||{},parts=dir==='out'?[`c:veghel>${x}`,`c:${x}>bd`]:[`c:bd>${x}`,`c:${x}>veghel`];
+  if(!parts.every(k=>b[k])) return null;
+  return parts.reduce((t,k)=>t+b[k],0)+TRANSFER_MIN;
+}
+function weekStart(){const n=new Date(),d=(n.getDay()+6)%7;return new Date(n.getFullYear(),n.getMonth(),n.getDate()-d).getTime();}
+function logTrip(){
+  const L=run.log,leg=run.legs[run.idx],end=leg.arriveAt||Date.now(),mins=Math.round((end-L.startAt)/6000)/10;
+  if(mins<5) return null;
+  const trips=db.trips||(db.trips=[]);
+  const same=trips.filter(t=>t.dir===L.dir&&t.route===L.route);
+  const ideal=idealFor(L.routeId,L.dir);
+  const ref=ideal||(same.length?Math.min(...same.map(t=>t.mins)):mins);
+  const score=Math.round(500*Math.min(1,ref/mins));
+  const e={id:'t'+end.toString(36),at:end,dir:L.dir,route:L.route,mins,score,grade:letter(score),ref:Math.round(ref),est:!ideal};
+  const wk=trips.filter(t=>t.dir===L.dir&&t.at>=weekStart());
+  const fastestWeek=wk.length>0&&wk.every(t=>t.mins>mins);
+  const fastestEver=trips.some(t=>t.dir===L.dir)&&trips.filter(t=>t.dir===L.dir).every(t=>t.mins>mins);
+  trips.unshift(e);if(trips.length>300) trips.length=300;
+  save();renderScores();
+  return {e,fastestWeek,fastestEver,firstWeek:!wk.length};
+}
+function scoreHtml(res){
+  const e=res.e,home=e.dir==='back';
+  let flag='';
+  if(res.fastestEver) flag=`🏆 Your fastest trip ${home?'home':'to Breda'} ever!`;
+  else if(res.fastestWeek) flag=`🏆 Fastest trip ${home?'home':'to Breda'} this week!`;
+  else if(res.firstWeek) flag=`First trip ${home?'home':'to Breda'} this week`;
+  return `<div class="score-card"><span class="score-num">${e.score}<small>/500</small></span><span class="grade big g-${e.grade}">${e.grade}</span></div>
+  <p class="score-line">${Math.round(e.mins)} min${e.est?'. Your next trips on this route are compared with this one.':`. The fastest possible is about ${e.ref} min.`}</p>${flag?`<p class="score-flag">${flag}</p>`:''}`;
+}
+let lbDir='back',lbRange='week';
+function whenText(t){
+  const d=new Date(t),n=new Date(),y=new Date(n.getFullYear(),n.getMonth(),n.getDate()-1);
+  const day=ymd(d)===ymd(n)?'Today':ymd(d)===ymd(y)?'Yesterday':d.toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'short'});
+  return `${day} ${hhmm(t)}`;
+}
+function renderScores(){
+  const el=$('#scoresBody');if(!el) return;
+  const all=(db.trips||[]).filter(t=>t.dir===lbDir);
+  const list=(lbRange==='week'?all.filter(t=>t.at>=weekStart()):all).slice().sort((a,b)=>a.mins-b.mins||b.score-a.score);
+  const wkBest=all.filter(t=>t.at>=weekStart()).sort((a,b)=>a.mins-b.mins)[0];
+  $('#next-scores').textContent=(()=>{const w=(db.trips||[]).filter(t=>t.dir==='back'&&t.at>=weekStart()).sort((a,b)=>a.mins-b.mins)[0];return w?`Home ${Math.round(w.mins)} min`:'';})();
+  const rows=list.slice(0,10).map((t,i)=>`<div class="lb-row"><span class="lb-rank">${i+1}</span><span class="grade g-${t.grade}">${t.grade}</span><span class="lb-main"><b>${Math.round(t.mins)} min · ${t.score}/500</b><small>${esc(whenText(t.at))} · ${esc(t.route)}</small></span>${wkBest&&t.id===wkBest.id?'<span class="lb-badge" title="Fastest this week">Best</span>':''}<button type="button" class="lb-del" data-act="lb-del" data-id="${esc(t.id)}" aria-label="Remove this trip">×</button></div>`).join('');
+  el.innerHTML=`<div class="lb-tools">${seg('lb-dir',[['back','Home'],['out','To Breda']],lbDir)}${seg('lb-range',[['week','This week'],['all','All time']],lbRange)}</div>`+
+    (rows||`<p class="empty">${all.length?'No trips this week yet.':'No trips yet. Start the alarm under “Wake me up” and ride to your last stop. Each trip gets a score out of 500 here.'}</p>`)+
+    `<p class="hint">Time from starting the alarm until you reach your last stop, so waiting at the change counts. 500 means as fast as that route gets.</p>`;
+}
+
 /* ---------- A planned trip around one train (to travel with a friend) ---------- */
 const MIN=60000;
 const STATION_STOP={ehv:'eindhoven',ht:'denbosch'};
@@ -1156,7 +1247,7 @@ function openStartRoute(id){
   const r=routeById(id);if(!r) return;
   const legs=routeLegs(r,commuteDir).filter(l=>stopById(l.stop)).map(l=>({stop:l.stop,mode:l.mode,km:kmFor(l.mode,l.stop)}));
   if(!legs.length){toast('This route has no stops. Edit it first.');return;}
-  sheetState={type:'start',p:{title:commuteDir==='out'?'To school':'Home',sub:r.name,legs,backup:0}};
+  sheetState={type:'start',p:{title:commuteDir==='out'?'To school':'Home',sub:r.name,legs,backup:0,commute:{dir:commuteDir,route:r.name,routeId:r.id}}};
   renderStart();openSheet();
 }
 function openStartStop(id){
@@ -1193,7 +1284,7 @@ function go(){
     return;
   }
   primeAudio();
-  run={legs:p.legs.map(l=>({stop:l.stop,mode:l.mode,km:l.km})),idx:0};
+  run={legs:p.legs.map(l=>({stop:l.stop,mode:l.mode,km:l.km})),idx:0,log:p.commute?Object.assign({startAt:Date.now()},p.commute):null};
   const backup=p.backup;
   closeSheet();
   beginLeg(backup);
@@ -1580,6 +1671,7 @@ function onPos(pos){
   if(run.phase==='sleeping'&&goodEnough&&d<=rM){
     triggerAlarm('approach');
   }else if(run.phase==='awake'&&d<=ARRIVE_M&&c.accuracy<=600){
+    if(!leg.arriveAt) leg.arriveAt=Date.now();
     if(db.settings.arrivalRing||run.forceArrival) triggerAlarm('arrival');
     else{legDone();return;}
   }
@@ -1709,6 +1801,7 @@ function legDone(){
   if(next){
     const ns=stopById(next.stop);
     $('#bTitle').textContent=`Transfer at ${st?st.name:'your stop'}`;
+    $('#bScore').innerHTML='';
     $('#bSub').textContent=`Next: ${modeName(next.mode).toLowerCase()} to ${ns?ns.name:'your stop'}. It rings at ${fmtKm(next.km)} from the stop. Tap start once you’re on board.`;
     $('#bBackupWrap').innerHTML=backupSelect('bBackup',0);$('#bBackupWrap').hidden=false;
     $('#btnNext').hidden=false;
@@ -1716,6 +1809,8 @@ function legDone(){
   }else{
     $('#bTitle').textContent=`You’re at ${st?st.name:'your stop'}`;
     $('#bSub').textContent='Trip finished.';
+    const res=run.log?logTrip():null;
+    $('#bScore').innerHTML=res?scoreHtml(res):'';
     $('#bBackupWrap').hidden=true;$('#btnNext').hidden=true;
     endBtn.textContent='Done';endBtn.className='btn primary big';
   }
@@ -1840,6 +1935,9 @@ document.addEventListener('click',e=>{
       renderCommute();applyDir();refreshPanels();
       break;
     case 'trip-edit':openTrip();break;
+    case 'lb-dir':lbDir=el.dataset.v;renderScores();break;
+    case 'lb-range':lbRange=el.dataset.v;renderScores();break;
+    case 'lb-del':if(confirm('Remove this trip from the leaderboard?')){db.trips=(db.trips||[]).filter(t=>t.id!==id);save();renderScores();}break;
     case 'trip-dir':sheetState.time=($('#tTime')||{}).value||sheetState.time;sheetState.dir=el.dataset.v;renderTripSheet();break;
     case 'trip-day':sheetState.time=($('#tTime')||{}).value||sheetState.time;sheetState.day=el.dataset.v;sheetState.error=null;renderTripSheet();break;
     case 'trip-save':tripSave();break;
