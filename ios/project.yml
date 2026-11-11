@@ -1,0 +1,47 @@
+name: Haltewekker
+options:
+  bundleIdPrefix: nl.haltewekker
+  deploymentTarget:
+    iOS: "17.0"
+settings:
+  base:
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    SWIFT_VERSION: "5.0"
+    CODE_SIGNING_ALLOWED: "NO"
+    CODE_SIGNING_REQUIRED: "NO"
+    CODE_SIGN_IDENTITY: ""
+targets:
+  Haltewekker:
+    type: application
+    platform: iOS
+    sources: [App, Shared]
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: Haltewekker
+        UILaunchScreen: {}
+        UIBackgroundModes: [location, audio]
+        NSLocationWhenInUseUsageDescription: Haltewekker uses your location to wake you before your stop.
+        NSLocationAlwaysAndWhenInUseUsageDescription: Haltewekker keeps following you while the phone is locked, so it can wake you before your stop.
+        NSSupportsLiveActivities: true
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: nl.haltewekker.app
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    dependencies:
+      - target: HaltewekkerWidget
+  HaltewekkerWidget:
+    type: app-extension
+    platform: iOS
+    sources: [Widget, Shared]
+    info:
+      path: Widget/Info.plist
+      properties:
+        CFBundleDisplayName: Haltewekker
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: nl.haltewekker.app.widget

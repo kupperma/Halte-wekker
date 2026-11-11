@@ -1,0 +1,58 @@
+name: Build iPhone app
+
+on:
+  push:
+    branches: [main]
+    paths: ["ios/**", ".github/workflows/ios.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate Xcode project
+        working-directory: ios
+        run: xcodegen generate
+      - name: Build (unsigned)
+        working-directory: ios
+        run: |
+          set -o pipefail
+          xcodebuild -project Haltewekker.xcodeproj -scheme Haltewekker \
+            -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
+            -derivedDataPath build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            build 2>&1 | tee build.log | grep -E "error:|warning: .*deprecated|BUILD (SUCCEEDED|FAILED)" || true
+          test "${PIPESTATUS[0]}" = "0"
+      - name: Package .ipa
+        working-directory: ios
+        run: |
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/Haltewekker.app Payload/
+          zip -qry Haltewekker.ipa Payload
+      - name: Publish build result to the ios-builds branch
+        if: always()
+        working-directory: ios
+        run: |
+          mkdir -p /tmp/out
+          grep -E "error:|BUILD (SUCCEEDED|FAILED)" build.log > /tmp/out/errors.txt 2>/dev/null || echo "no build.log" > /tmp/out/errors.txt
+          tail -n 300 build.log > /tmp/out/build-tail.log 2>/dev/null || true
+          [ -f Haltewekker.ipa ] && cp Haltewekker.ipa /tmp/out/ || true
+          echo "${GITHUB_SHA} $(date -u +%FT%TZ) ${{ job.status }}" > /tmp/out/STATUS.txt
+          cd /tmp/out
+          git init -q -b ios-builds
+          git config user.name "github-actions"; git config user.email "github-actions@users.noreply.github.com"
+          git add -A && git commit -qm "Build for ${GITHUB_SHA}"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" ios-builds
+      - name: Publish release
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        working-directory: ios
+        run: |
+          gh release delete latest-ios -y --cleanup-tag 2>/dev/null || true
+          gh release create latest-ios Haltewekker.ipa --title "iPhone app (latest)" --notes "Install with Sideloadly. Built from ${GITHUB_SHA}." --prerelease
