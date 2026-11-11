@@ -254,6 +254,7 @@ svg{display:block}
 .cs-unit.first{border-top-left-radius:9px;border-bottom-left-radius:9px}
 .cs-unit.last{border-top-right-radius:9px;border-bottom-right-radius:9px}
 .cs-unit.unknown{background:color-mix(in srgb,var(--muted) 18%,var(--surface));color:var(--muted)}
+.cs-cab{position:absolute;top:0;bottom:0;background:color-mix(in srgb,var(--ink) 32%,transparent)}
 .cs-1{position:absolute;top:0;bottom:0;background:#FFC917;color:#3B2A00;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800}
 .cs-2{position:absolute;transform:translateX(-50%);opacity:.75}
 .cs-letters{position:relative;height:15px;margin-top:3px}
@@ -1261,8 +1262,9 @@ async function nsTrainSize(num,code){
   }catch(e){return c?c.v:null;}
   finally{clearTimeout(t);}
 }
-const CLASS1={"ddz_4":[[0.015,0.12],[0.669,0.774]],"ddz_6":[[0.01,0.079],[0.439,0.508],[0.783,0.851]],"icm_3":[[0.537,0.669]],"icm_4":[[0.498,0.752]],"icng_5":[[0.41,0.667]],"icng_8":[[0.272,0.379],[0.62,0.727]],"nsr_flirt_3":[[0.039,0.206],[0.791,0.958]],"nsr_flirt_4":[[0.03,0.161],[0.837,0.967]],"slt_4":[[0.02,0.172],[0.825,0.977]],"slt_6":[[0.014,0.119],[0.879,0.984]],"sng_3":[[0.038,0.215],[0.823,1.0]],"sng_4":[[0.03,0.169],[0.861,1.0]],"virm_4":[[0.376,0.667]],"virm_6":[[0.223,0.315],[0.582,0.777]],"virmm1_4":[[0.376,0.625]],"virmm1_6":[[0.25,0.315],[0.582,0.749]]};
+const CLASS1={"ddz_4":[[0.015,0.12],[0.669,0.774]],"ddz_6":[[0.01,0.079],[0.439,0.508],[0.783,0.851]],"icm_3":[[0.537,0.669]],"icm_4":[[0.498,0.752]],"icng_5":[[0.41,0.667]],"icng_8":[[0.272,0.379],[0.62,0.727]],"nsr_flirt_3":[[0.039,0.206],[0.791,0.958]],"nsr_flirt_4":[[0.03,0.161],[0.837,0.967]],"slt_4":[[0.02,0.172],[0.825,0.977]],"slt_6":[[0.014,0.119],[0.879,0.984]],"sng_3":[[0.038,0.215],[0.823,1.0]],"sng_4":[[0.03,0.169],[0.861,1.0]],"virm_4":[[0.376,0.667]],"virm_6":[[0.223,0.315],[0.582,0.777]],"virmm1_4":[[0.376,0.625]],"virmm1_6":[[0.25,0.315],[0.582,0.749]],"virmm2_4":[[0.376,0.625]],"virmm2_6":[[0.25,0.315],[0.582,0.749]],"i11_eurocity":[[0.708,0.851]]};
 // Place each train unit (and its 1st class part, from NS's drawings) along the platform.
+const CAB=0.045;
 function trainLayout(d){
   const parts=Array.isArray(d.materieeldelen)?d.materieeldelen:[];
   const sum=parts.reduce((n,m)=>n+(m.breedte||0),0),total=d.lengteInPixels||sum;
@@ -1270,7 +1272,9 @@ function trainLayout(d){
   let x=0;
   const units=parts.map(m=>{
     const w=m.breedte||0,key=String(m.afbeelding||'').split('/').pop().replace(/\.png$/,'').toLowerCase(),z=CLASS1[key];
-    const u={x:x/total,w:w/total,zones:z?z.map(([a,b])=>[(x+a*w)/total,(x+b*w)/total]):null};
+    // Every unit has a driver's cab at both ends; 1st class near an end starts right behind it.
+    const snap=([a,b])=>[a<0.08?CAB:a,b>0.92?1-CAB:b];
+    const u={x:x/total,w:w/total,zones:z?z.map(snap).map(([a,b])=>[(x+a*w)/total,(x+b*w)/total]):null};
     x+=w;return u;
   });
   const letters=(d.perronVoorzieningen||[]).filter(p=>p.type==='PERRONLETTER'&&p.description&&p.paddingLeft>=-0.03*total&&p.paddingLeft<=1.03*total).map(p=>({l:String(p.description),x:p.paddingLeft/total}));
@@ -1307,7 +1311,8 @@ function consistHtml(o){
     (u.zones||[]).forEach(([a,b])=>{gaps=[].concat(...gaps.map(([g0,g1])=>[[g0,Math.min(g1,a)],[Math.max(g0,b),g1]].filter(([p,q])=>q-p>0.001)));});
     const big=gaps.sort((p,q)=>(q[1]-q[0])-(p[1]-p[0]))[0];
     const two=big&&(big[1]-big[0])/u.w>0.12?`<span class="cs-2" style="left:${(((big[0]+big[1])/2-u.x)/u.w*100).toFixed(1)}%">${u.zones?'2':'?'}</span>`:'';
-    return `<span class="${cls}" style="left:${(u.x*100).toFixed(2)}%;width:calc(${(u.w*100).toFixed(2)}% - 3px)">${two}${ones}</span>`;
+    const cabs=u.zones?`<span class="cs-cab" style="left:0;width:${CAB*100}%"></span><span class="cs-cab" style="right:0;width:${CAB*100}%"></span>`:'';
+    return `<span class="${cls}" style="left:${(u.x*100).toFixed(2)}%;width:calc(${(u.w*100).toFixed(2)}% - 3px)">${cabs}${two}${ones}</span>`;
   }).join('');
   const arrow=L.dir==='right'?'<span class="cs-dir" style="right:-13px">▶</span>':L.dir==='left'?'<span class="cs-dir" style="left:-13px">◀</span>':'';
   const letters=L.letters.map(l=>`<span style="left:${(l.x*100).toFixed(1)}%">${esc(l.l)}</span>`).join('');
