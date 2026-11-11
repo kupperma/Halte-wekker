@@ -228,11 +228,12 @@ struct TripRow: View {
 
 struct RideView: View {
     @EnvironmentObject var trip: TripManager
+    @Environment(\.scenePhase) private var scene
     @State private var confirmEnd = false
     var pal: HWPalette { .of(home: trip.direction == .home) }
     var body: some View {
         ZStack {
-            StationBackdrop(home: trip.direction == .home, moving: false, dim: 0.72)
+            StationBackdrop(home: trip.direction == .home, moving: trip.movingStation && scene == .active, dim: 0.62)
             VStack(alignment: .leading, spacing: 0) {
                 HStack {
                     Label(trip.accuracy.map { "GPS ±\(Int($0)) m" } ?? "Finding GPS…", systemImage: "location.fill")
@@ -394,7 +395,7 @@ struct SettingsView: View {
                     }
                     Toggle(isOn: $trip.announce) { label("Station announcement", "A jingle and a voice that names your stop, before the alarm.") }
                     Toggle(isOn: $trip.ringAtStop) { label("Ring again at the stop", "A second alarm when you arrive, in case you dozed off again.") }
-                    Toggle(isOn: $trip.movingStation) { label("Moving station", "The station and train behind the home screen. Off shows a still picture.") }
+                    Toggle(isOn: $trip.movingStation) { label("Moving station", "The station and train behind the home and ride screens. It pauses when the screen is off. Off shows a still picture.") }
                 } header: { Text("Trips") }
                 Section {
                     Picker("Sound", selection: $trip.soundKind) {
