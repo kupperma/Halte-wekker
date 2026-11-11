@@ -208,6 +208,7 @@ svg{display:block}
 .drop-body>.hint:empty{display:none}
 .sec.solo-h{margin:30px 0 10px}
 .bus-extra{grid-column:2/4;font-size:14px;color:var(--muted)}
+.ride{color:var(--ink);font-weight:700}
 
 /* Live bus times */
 .chips{display:flex;gap:8px;overflow-x:auto;padding:2px 0 10px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
@@ -801,7 +802,11 @@ function busRow(p){
   const {label,cls,when}=statusBits(p);
   const showStop=liveStops().length>1&&liveStopFilter==='all'&&p.stopName;
   const status=showStop?`<span class="bus-status"><span class="bus-stop">${esc(p.stopName)}</span> · <span class="${cls}">${esc(label)}</span></span>`:`<span class="bus-status ${cls}">${esc(label)}</span>`;
-  return `<div class="bus"><span class="line-no">${esc(p.line)}</span><span class="bus-dest">${gradePill(boardGrade(p))}${esc(p.dest)}</span><span class="bus-time${p.status==='CANCEL'?' gone':''}">${hhmm(p.time)}</span>${status}<span class="bus-when">${esc(when)}</span></div>`;
+  return `<div class="bus"><span class="line-no">${esc(p.line)}</span><span class="bus-dest">${gradePill(boardGrade(p))}${esc(p.dest)}</span><span class="bus-time${p.status==='CANCEL'?' gone':''}">${hhmm(p.time)}</span>${status}<span class="bus-when">${esc(when)}</span>${boardRide(p)}</div>`;
+}
+function boardRide(p){
+  const o=boardGrades.get(p.stop+'|'+p.tripId);if(!o||p.status==='CANCEL') return '';
+  return `<span class="bus-extra"><b class="ride">${esc(rideLabel(o))}</b> to ${esc(o.b.short)} station, arrives ${hhmm(o.arrivals[0].time)}</span>`;
 }
 
 /* ---------- Trains and the bus in Breda (Transitous trip planner) ---------- */
@@ -946,16 +951,19 @@ async function fetchBoardGrades(){
     const m=new Map();
     (await Promise.all(reqs)).forEach(list=>list.forEach(o=>{
       if(o.walkBefore) return; // a bus from the other Veghel stop
-      if(!m.has(o.trip)) m.set(o.trip,o);
+      const k=o.a.id+'|'+o.trip;if(!m.has(k)) m.set(k,o);
     }));
     learnPlans([...m.values()],false);
     boardGrades=m;boardGradesAt=Date.now();
   }finally{boardGradesBusy=false;renderLiveList();}
 }
 function boardGrade(p){
-  const o=boardGrades.get(p.tripId);if(!o) return '';
+  const o=boardGrades.get(p.stop+'|'+p.tripId);if(!o) return '';
   return gradeOf(`${o.a.id}>${o.toStop}`,o.dur,o.sdur,p.status==='CANCEL');
 }
+const rideText=m=>{m=Math.max(1,Math.round(m));return m>=60?`${Math.floor(m/60)} h ${String(m%60).padStart(2,'0')} min`:`${m} min`;};
+// How long you're on board: with a change the wait in between is included.
+const rideLabel=o=>`${rideText(o.dur)} ${o.changes&&o.changes.length?'incl. change':'ride'}`;
 function planRow(o,panel,dir){
   const {label,cls,when}=statusBits(o),out=dir==='out',arr=o.arrivals[0];
   let head,extra;
@@ -972,7 +980,7 @@ function planRow(o,panel,dir){
     head=`From ${o.a.short}`;
     extra='Arrives '+o.arrivals.map(x=>`${shortStop(x.stop)} ${hhmm(x.time)}`).join(', ');
   }
-  return `<div class="bus"><span class="line-no">${esc(o.line)}</span><span class="bus-dest">${gradePill(gradePlan(o,panel==='buas'))}${esc(head)}</span><span class="bus-time${o.status==='CANCEL'?' gone':''}">${hhmm(o.time)}</span><span class="bus-status ${cls}">${esc(label)}</span><span class="bus-when">${esc(when)}</span><span class="bus-extra">${esc(extra)}</span></div>`;
+  return `<div class="bus"><span class="line-no">${esc(o.line)}</span><span class="bus-dest">${gradePill(gradePlan(o,panel==='buas'))}${esc(head)}</span><span class="bus-time${o.status==='CANCEL'?' gone':''}">${hhmm(o.time)}</span><span class="bus-status ${cls}">${esc(label)}</span><span class="bus-when">${esc(when)}</span><span class="bus-extra"><b class="ride">${esc(rideLabel(o))}</b> · ${esc(extra)}</span></div>`;
 }
 function renderPlan(panel,dir){
   if(dir!==commuteDir) return;
@@ -1144,19 +1152,19 @@ function renderTrip(){
   const items=[];
   const bi=op.busIn,bo=op.busOut;
   if(out){
-    if(bi) items.push(tlLeg(bi.time,bi.status==='CANCEL','bus',`Bus ${bi.line} from ${shortStop(bi.fromStop)}`,[liveSub(bi),[`Arrives ${o.a.short} ${hhmm(bi.arrivals[0].time)}`],changeSub(Math.round((o.time-bi.end)/MIN),'change')],gradePlan(bi,false)));
+    if(bi) items.push(tlLeg(bi.time,bi.status==='CANCEL','bus',`Bus ${bi.line} from ${shortStop(bi.fromStop)}`,[liveSub(bi),[`${rideLabel(bi)} · arrives ${o.a.short} ${hhmm(bi.arrivals[0].time)}`],changeSub(Math.round((o.time-bi.end)/MIN),'change')],gradePlan(bi,false)));
     else items.push(tlLeg(o.time-45*MIN,false,'bus','No bus found in time',[[`Take an earlier bus to ${o.a.short}.`,'tight']]));
-    items.push(tlLeg(o.time,o.status==='CANCEL','train',`${o.trainName||'Train'} from ${o.a.short}`,[liveSub(o),o.changes.length?[`Change at ${o.changes.join(', ')}`]:null,[`Arrives Breda ${hhmm(arr)}`]],gradePlan(o,false)));
+    items.push(tlLeg(o.time,o.status==='CANCEL','train',`${o.trainName||'Train'} from ${o.a.short}`,[liveSub(o),o.changes.length?[`Change at ${o.changes.join(', ')}`]:null,[`${rideLabel(o)} · arrives Breda ${hhmm(arr)}`]],gradePlan(o,false)));
     if(bo){
-      items.push(tlLeg(bo.time,bo.status==='CANCEL','bus',`Bus ${bo.line} from Breda station`,[liveSub(bo),[`Get off at ${shortStop(bo.arrivals[0].stop)}`],changeSub(Math.round((bo.time-arr)/MIN)-bo.walkBefore,'get to the bus')],gradePlan(bo,true)));
+      items.push(tlLeg(bo.time,bo.status==='CANCEL','bus',`Bus ${bo.line} from Breda station`,[liveSub(bo),[`${rideLabel(bo)} · get off at ${shortStop(bo.arrivals[0].stop)}`],changeSub(Math.round((bo.time-arr)/MIN)-bo.walkBefore,'get to the bus')],gradePlan(bo,true)));
       items.push(`<li class="end"><span class="tl-time">${hhmm(bo.end)}</span><span class="tl-ico end"></span><span class="tl-body"><span class="tl-title">At BUas</span>${bo.walkAfter?`<span class="tl-sub">${bo.walkAfter} min walk from the stop</span>`:''}</span></li>`);
     }else items.push(`<li class="end"><span class="tl-time">${hhmm(arr)}</span><span class="tl-ico end"></span><span class="tl-body"><span class="tl-title">Breda station</span><span class="tl-sub">No bus to BUas found after this train. Walking takes about 17 min.</span></span></li>`);
   }else{
-    if(bi) items.push(tlLeg(bi.time,bi.status==='CANCEL','bus',`Bus ${bi.line} from ${shortStop(bi.fromStop)}`,[liveSub(bi),bi.walkBefore?[`Leave BUas ${hhmm(bi.start)}, ${bi.walkBefore} min walk`]:null,changeSub(Math.round((o.time-bi.end)/MIN),'change')],gradePlan(bi,true)));
+    if(bi) items.push(tlLeg(bi.time,bi.status==='CANCEL','bus',`Bus ${bi.line} from ${shortStop(bi.fromStop)}`,[liveSub(bi),bi.walkBefore?[`Leave BUas ${hhmm(bi.start)}, ${bi.walkBefore} min walk`]:null,[`${rideLabel(bi)} to the station`],changeSub(Math.round((o.time-bi.end)/MIN),'change')],gradePlan(bi,true)));
     else items.push(tlLeg(o.time-25*MIN,false,'bus','No bus found in time',[['Walk to the station, about 17 min.','tight']]));
-    items.push(tlLeg(o.time,o.status==='CANCEL','train',`${o.trainName||'Train'} to ${o.b.short}`,[liveSub(o),o.changes.length?[`Change at ${o.changes.join(', ')}`]:null,[`Arrives ${o.b.short} ${hhmm(arr)}`]],gradePlan(o,false)));
+    items.push(tlLeg(o.time,o.status==='CANCEL','train',`${o.trainName||'Train'} to ${o.b.short}`,[liveSub(o),o.changes.length?[`Change at ${o.changes.join(', ')}`]:null,[`${rideLabel(o)} · arrives ${o.b.short} ${hhmm(arr)}`]],gradePlan(o,false)));
     if(bo){
-      items.push(tlLeg(bo.time,bo.status==='CANCEL','bus',`Bus ${bo.line} from ${o.b.short} station`,[liveSub(bo),changeSub(Math.round((bo.time-arr)/MIN)-bo.walkBefore,'get to the bus')],gradePlan(bo,false)));
+      items.push(tlLeg(bo.time,bo.status==='CANCEL','bus',`Bus ${bo.line} from ${o.b.short} station`,[liveSub(bo),[`${rideLabel(bo)} to ${shortStop(bo.arrivals[0].stop)}`],changeSub(Math.round((bo.time-arr)/MIN)-bo.walkBefore,'get to the bus')],gradePlan(bo,false)));
       items.push(`<li class="end"><span class="tl-time">${hhmm(bo.arrivals[0].time)}</span><span class="tl-ico end"></span><span class="tl-body"><span class="tl-title">${esc(shortStop(bo.arrivals[0].stop))}, Veghel</span></span></li>`);
     }else items.push(`<li class="end"><span class="tl-time">${hhmm(arr)}</span><span class="tl-ico end"></span><span class="tl-body"><span class="tl-title">${esc(o.b.short)}</span><span class="tl-sub">No bus to Veghel found after this train.</span></span></li>`);
   }
