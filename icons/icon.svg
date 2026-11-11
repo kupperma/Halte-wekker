@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4655C4"/><stop offset="1" stop-color="#232C7A"/>
+    </linearGradient>
+    <linearGradient id="sun" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFC46B"/><stop offset="1" stop-color="#E8862E"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.62" r="0.5">
+      <stop offset="0" stop-color="#FFB25C" stop-opacity=".45"/><stop offset="1" stop-color="#FFB25C" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <rect width="512" height="512" fill="url(#glow)"/>
+  <!-- rising sun -->
+  <path d="M136 322a120 120 0 0 1 240 0z" fill="url(#sun)"/>
+  <!-- horizon -->
+  <rect x="96" y="318" width="320" height="16" rx="8" fill="#FFFFFF"/>
+  <!-- road dashes -->
+  <rect x="150" y="372" width="64" height="12" rx="6" fill="#FFFFFF" opacity=".45"/>
+  <rect x="244" y="372" width="64" height="12" rx="6" fill="#FFFFFF" opacity=".45"/>
+  <rect x="338" y="372" width="30" height="12" rx="6" fill="#FFFFFF" opacity=".45"/>
+  <!-- z z -->
+  <g fill="none" stroke="#FFFFFF" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M318 112h40l-40 44h40" stroke-width="13"/>
+    <path d="M374 74h26l-26 28h26" stroke-width="10" opacity=".7"/>
+  </g>
+</svg>
