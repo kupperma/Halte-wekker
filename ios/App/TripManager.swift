@@ -338,7 +338,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
         c.title = "Trip started by itself"
         c.body = "\(v.title) to \(legs[safe: i]?.to.short ?? "your stop"). It rings \(Fmt.distance(wakeKm * 1000)) before your stop."
         c.sound = .default
-        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "autostart", content: c, trigger: nil))
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "autostart", content: c, trigger: nil)) { _ in }
         return true
     }
 
