@@ -290,6 +290,16 @@ select{appearance:none;-webkit-appearance:none;background-image:linear-gradient(
 .scrim{position:fixed;inset:0;background:rgba(8,10,30,.5);z-index:30}
 .sheet{position:fixed;left:0;right:0;bottom:0;z-index:31;max-width:520px;margin:0 auto;background:var(--surface);border-radius:22px 22px 0 0;max-height:calc(100% - env(safe-area-inset-top,0px) - 20px);overflow-y:auto;overscroll-behavior:contain;padding:10px 20px calc(env(safe-area-inset-bottom,0px) + 16px);box-shadow:0 -12px 40px rgba(5,8,30,.3);transform:translateY(30px);opacity:0;transition:transform .22s ease,opacity .22s ease}
 .sheet.open{transform:none;opacity:1}
+.sheet.dragging{transition:none}
+.sheet.leaving{transform:translateY(100%);opacity:1;transition:transform .22s ease-in}
+.sound-list{border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.sound-opt{display:flex;align-items:center;gap:12px;width:100%;text-align:left;padding:12px 14px;border:0;background:none;cursor:pointer;min-height:56px}
+.sound-opt+.sound-opt{border-top:1px solid var(--line)}
+.sound-opt .so-text{flex:1;min-width:0;display:flex;flex-direction:column}
+.sound-opt small{color:var(--muted);font-size:14px}
+.sound-opt .so-dot{width:22px;height:22px;flex:none;border-radius:50%;border:2px solid var(--line)}
+.sound-opt[aria-pressed="true"] .so-dot{border:7px solid var(--dusk)}
+.sound-opt[aria-pressed="true"] strong{color:var(--dusk)}
 .sheet::before{content:"";display:block;width:40px;height:5px;border-radius:3px;background:var(--line);margin:0 auto 14px}
 .sheet-title{font-family:var(--font-display);font-weight:600;font-size:26px;line-height:1.15;letter-spacing:-0.01em;margin:2px 0 4px}
 .sheet-sub{color:var(--muted);margin:0}
@@ -529,7 +539,7 @@ const PRESET_ROUTES=[
   {id:'via-denbosch',name:'Via Den Bosch',legs:[{mode:'bus',stop:'denbosch'},{mode:'train'}]},
   {id:'via-eindhoven',name:'Via Eindhoven',legs:[{mode:'bus',stop:'eindhoven'},{mode:'train'}]}
 ];
-const DEFAULT_SETTINGS={trainKm:5,busKm:2,arrivalRing:true,sound:'beeps',music:'pause',prepSeen:false};
+const DEFAULT_SETTINGS={trainKm:5,busKm:2,arrivalRing:true,sound:'chime',soundV:2,music:'pause',prepSeen:false};
 const RELAY='https://haltewekker-relay.tsfaw1.workers.dev/?url=';
 const DEFAULT_LIVE={stops:[{name:'Veghel, Busstation',id:null},{name:'Veghel, Bolkenplein',id:null}],lines:['305','306','158'],proxy:RELAY};
 const MAX_LIVE=3;
@@ -553,7 +563,7 @@ function load(){
         live.stops=(live.stops||[]).filter(x=>x&&x.name).slice(0,MAX_LIVE);
         delete live.name;delete live.id;delete live.codes;delete live.route;
         if(!String(live.proxy||'').trim()) live.proxy=RELAY;
-        return {stops:d.stops,home:d.home!==undefined?d.home:f.home,school:d.school!==undefined?d.school:f.school,routes:d.routes,kmMem:d.kmMem||{},settings:Object.assign(f.settings,d.settings||{}),live,trip:d.trip&&d.trip.date&&d.trip.time?d.trip:undefined,best:d.best||{},trips:Array.isArray(d.trips)?d.trips:[]};
+        return {stops:d.stops,home:d.home!==undefined?d.home:f.home,school:d.school!==undefined?d.school:f.school,routes:d.routes,kmMem:d.kmMem||{},settings:(st=>{if(!(d.settings&&d.settings.soundV)&&st.sound==='beeps') st.sound='chime';st.soundV=2;return st;})(Object.assign(f.settings,d.settings||{})),live,trip:d.trip&&d.trip.date&&d.trip.time?d.trip:undefined,best:d.best||{},trips:Array.isArray(d.trips)?d.trips:[]};
       }
     }
     // Bring over stops and settings from the first version.
@@ -1307,7 +1317,45 @@ function openSheet(){
   requestAnimationFrame(()=>requestAnimationFrame(()=>sheet.classList.add('open')));
   const t=$('#sheetTitle');if(t) setTimeout(()=>t.focus({preventScroll:true}),50);
 }
-function closeSheet(){sheet.classList.remove('open');scrim.hidden=true;sheet.hidden=true;sheetState=null;}
+function closeSheet(){sheet.style.transform='';sheet.classList.remove('open','dragging','leaving');scrim.hidden=true;sheet.hidden=true;sheetState=null;}
+// Drag the sheet down to close it, or tap the dark area around it.
+function dismissSheet(){
+  if(sheet.hidden) return;
+  sheet.classList.remove('dragging');sheet.classList.add('leaving');sheet.style.transform='';
+  setTimeout(()=>{sheet.classList.remove('leaving');closeSheet();},220);
+}
+scrim.addEventListener('click',dismissSheet);
+(()=>{
+  let y0=null,x0=0,t0=0,dy=0,active=false;
+  sheet.addEventListener('touchstart',e=>{
+    if(e.touches.length!==1) return;
+    const r=sheet.getBoundingClientRect(),y=e.touches[0].clientY;
+    // From the handle area at the top, or anywhere when the sheet is scrolled to the top.
+    if(sheet.scrollTop>0&&y-r.top>48){y0=null;return;}
+    y0=y;x0=e.touches[0].clientX;t0=Date.now();dy=0;active=false;
+  },{passive:true});
+  sheet.addEventListener('touchmove',e=>{
+    if(y0==null) return;
+    const y=e.touches[0].clientY,dx=Math.abs(e.touches[0].clientX-x0);
+    dy=y-y0;
+    if(!active){
+      if(dy>8&&dy>dx&&(sheet.scrollTop<=0||y0-sheet.getBoundingClientRect().top<=48)){active=true;sheet.classList.add('dragging');}
+      else if(dy<-4||dx>10){y0=null;return;}
+      else return;
+    }
+    e.preventDefault();
+    sheet.style.transform=`translateY(${Math.max(0,dy)}px)`;
+  },{passive:false});
+  const end=()=>{
+    if(y0==null) return;
+    const wasActive=active,v=dy/Math.max(1,Date.now()-t0);
+    y0=null;active=false;sheet.classList.remove('dragging');
+    if(!wasActive) return;
+    if(dy>110||(dy>40&&v>0.5)) dismissSheet();
+    else sheet.style.transform='';
+  };
+  sheet.addEventListener('touchend',end);sheet.addEventListener('touchcancel',end);
+})();
 function closeOrBack(){
   const back=sheetState&&sheetState.back;
   if(back==='commute') openCommute(); else closeSheet();
@@ -1390,7 +1438,7 @@ function renderSettings(){
   <div class="field"><span class="field-label">If music is playing when it rings</span>${seg('music',[['pause','Pause it'],['mix','Keep it playing']],S.music)}
     <p class="hint">${S.music==='mix'?'The alarm plays over your music. Your phone mustn’t be in silent mode, or you won’t hear it.':'The loudest option, and it works in silent mode. To restart your music afterwards, press play on your earbuds.'}</p>
   </div>
-  <div class="field"><span class="field-label">Alarm sound</span>${seg('sound',[['beeps','Beeps'],['siren','Siren']],S.sound)}</div>
+  <div class="field"><span class="field-label">Alarm sound</span><div class="sound-list">${SOUNDS.map(o=>`<button type="button" class="sound-opt" data-act="sound" data-v="${o[0]}" aria-pressed="${o[0]===S.sound}"><span class="so-dot" aria-hidden="true"></span><span class="so-text"><strong>${o[1]}</strong><small>${o[2]}</small></span></button>`).join('')}</div><p class="hint">Tap one to hear it.</p></div>
   <button type="button" class="btn secondary" data-act="test-alarm">Test alarm</button>
   <p class="hint">It rings 5 seconds after you tap, the same way it will on a trip. Try it with your music playing.</p>
   <label class="switch-row"><span class="switch-text"><strong>Ring again when I arrive</strong><span class="hint">A second alarm at the stop itself, in case you dozed off again.</span></span><input type="checkbox" class="switch" id="setArrival"${S.arrivalRing?' checked':''}></label>
@@ -1573,7 +1621,36 @@ function liveSave(){
 /* ---------- Sound ---------- */
 const snd=$('#snd');
 const sampleCache={},wavCache={};
+const SOUNDS=[
+  ['chime','Chime','Soft bells, like a doorbell'],
+  ['marimba','Marimba','Warm wooden notes, a bit livelier'],
+  ['sunrise','Sunrise','A slow, rising melody. The gentlest'],
+  ['beeps','Beeps','Sharp and loud'],
+  ['siren','Siren','The loudest, for deep sleepers']
+];
+// Gentle sounds: notes with soft attacks and natural decay, in a comfortable pitch range.
+function gentleSamples(kind){
+  const sr=22050,N={C4:261.63,E4:329.63,G4:392,A4:440,C5:523.25,D5:587.33,E5:659.25,G5:783.99,C6:1046.5};
+  let dur,notes,voice;
+  if(kind==='chime'){dur=2.6;notes=[[0,'G5'],[0.45,'E5'],[0.9,'C5']];voice={parts:[[1,1,1.6],[2,.42,.9],[2.76,.22,.5],[5.4,.06,.25]],att:.004};}
+  else if(kind==='marimba'){dur=2.2;notes=[[0,'C5'],[0.17,'E5'],[0.34,'G5'],[0.51,'C6'],[0.85,'G5'],[1.02,'E5']];voice={parts:[[1,1,.45],[3.9,.18,.08],[10,.04,.02]],att:.003};}
+  else{dur=3.2;notes=[[0,'C4'],[0.32,'E4'],[0.64,'G4'],[0.96,'C5'],[1.28,'E5'],[1.6,'G5']];voice={parts:[[1,1,1.1],[2,.3,.7],[3,.12,.45]],att:.05};}
+  const n=Math.floor(sr*dur),out=new Float32Array(n);
+  notes.forEach(([at,nm],idx)=>{
+    const f=N[nm],start=Math.floor(at*sr),lift=kind==='sunrise'?0.55+0.45*idx/(notes.length-1):1;
+    for(let i=start;i<n;i++){
+      const t=(i-start)/sr,a=Math.min(1,t/voice.att);let v=0;
+      for(const [m,amp,dec] of voice.parts) v+=amp*Math.exp(-t/dec)*Math.sin(2*Math.PI*f*m*t);
+      out[i]+=a*v*lift;
+    }
+  });
+  let peak=0;for(let i=0;i<n;i++) peak=Math.max(peak,Math.abs(out[i]));
+  const g=0.92/(peak||1),fade=Math.floor(0.03*sr);
+  for(let i=0;i<n;i++){out[i]*=g;if(i>n-fade) out[i]*=(n-i)/fade;}
+  return {data:out,sr};
+}
 function alarmSamples(kind){
+  if(kind==='chime'||kind==='marimba'||kind==='sunrise') return gentleSamples(kind);
   const sr=22050,dur=kind==='siren'?2.4:1.6,n=Math.floor(sr*dur),out=new Float32Array(n);
   let ph=0;
   for(let i=0;i<n;i++){
@@ -1655,17 +1732,11 @@ function webAlarmStart(){
   try{
     const c=ensureCtx();if(!c) return;
     if(c.resume) c.resume();
-    const play=()=>{
-      const t0=c.currentTime+0.02;
-      for(let k=0;k<4;k++){
-        const o=c.createOscillator(),g=c.createGain(),st=t0+k*0.2;
-        o.type='square';o.frequency.value=k%2?2350:1870;
-        g.gain.setValueAtTime(0,st);g.gain.linearRampToValueAtTime(0.45,st+0.01);
-        g.gain.setValueAtTime(0.45,st+0.12);g.gain.linearRampToValueAtTime(0,st+0.13);
-        o.connect(g);g.connect(c.destination);o.start(st);o.stop(st+0.15);
-      }
-    };
-    play();webTimer=setInterval(play,1600);
+    // Same sound as the one you picked, played through Web Audio.
+    const {data,sr}=getSamples(db.settings.sound);
+    const b=c.createBuffer(1,data.length,sr);b.getChannelData(0).set(data);
+    const play=()=>{const s=c.createBufferSource();s.buffer=b;s.connect(c.destination);s.start();};
+    play();webTimer=setInterval(play,Math.round(data.length/sr*1000));
   }catch(e){}
 }
 function loudAlarm(){
@@ -1692,6 +1763,16 @@ function stopAlarmSound(){
   clearInterval(vibTimer);vibTimer=null;
   try{if(navigator.vibrate) navigator.vibrate(0);}catch(e){}
   setSession(isMix()&&run&&watchId!=null?'transient':'auto');
+}
+let previewSrc=null;
+function previewSound(k){
+  try{
+    const c=ensureCtx();if(!c) return;
+    if(c.resume) c.resume();
+    if(previewSrc) try{previewSrc.stop();}catch(e){}
+    const {data,sr}=getSamples(k),b=c.createBuffer(1,data.length,sr);b.getChannelData(0).set(data);
+    const s=c.createBufferSource();s.buffer=b;s.connect(c.destination);s.start();previewSrc=s;
+  }catch(e){}
 }
 function audioIdle(){stopKeepAlive();setSession('auto');}
 
@@ -1980,7 +2061,7 @@ document.addEventListener('click',e=>{
     }
     case 'go':go();break;
     case 'music':db.settings.music=el.dataset.v;save();renderSettings();break;
-    case 'sound':db.settings.sound=el.dataset.v;save();setSound();renderSettings();break;
+    case 'sound':db.settings.sound=el.dataset.v;save();setSound();renderSettings();previewSound(el.dataset.v);break;
     case 'set-step':{
       const k=el.dataset.k;db.settings[k]=stepKm(db.settings[k],+el.dataset.dir);save();renderSettings();break;
     }
