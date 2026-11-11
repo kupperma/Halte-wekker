@@ -212,6 +212,14 @@ svg{display:block}
 .trip .btn{margin-top:6px}
 .trip>.hint{margin:10px 0 0}
 
+/* Near me */
+.near-btn{display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:0 13px;border-radius:999px;border:1.5px solid var(--line);background:var(--surface);color:var(--ink);font-weight:700;font-size:15px;cursor:pointer}
+.near-btn svg{width:16px;height:16px}
+.near-btn[aria-pressed="true"]{background:var(--dusk);border-color:var(--dusk);color:var(--dusk-ink)}
+.near-note{margin:-2px 0 12px;font-size:15px;color:var(--muted)}
+.near-note b{color:var(--ink)}
+.near-note .text-btn{padding:0 0 0 4px;font-size:15px}
+
 /* Fold-out panels */
 .drops{display:flex;flex-direction:column;gap:10px}
 .drop{background:var(--surface);border:1px solid var(--line);border-radius:16px;overflow:hidden}
@@ -422,7 +430,8 @@ button.pill{cursor:pointer}
   </section>
 
   <section>
-    <h2 class="sec solo-h">Live times</h2>
+    <div class="sec-head"><h2 class="sec">Live times</h2><button type="button" class="near-btn" data-act="near-toggle" id="nearBtn" aria-pressed="false"><span data-icon="locate"></span>Near me</button></div>
+    <p class="near-note" id="nearNote" hidden></p>
     <p class="hint grade-key"><span class="grade g-S">S</span><span class="grade g-A">A</span><span class="grade g-B">B</span><span class="grade g-C">C</span> How fast each bus or train gets you there, compared with the fastest one on that route. Delays count.</p>
     <div class="drops">
       <details class="drop" data-panel="board">
@@ -554,6 +563,7 @@ const ICON={
   train:'<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="2.5" width="14" height="14.5" rx="4" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M5 9.5h14M9 17l-3 4.5M15 17l3 4.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="9" cy="13.2" r="1.1" fill="currentColor"/><circle cx="15" cy="13.2" r="1.1" fill="currentColor"/></svg>',
   edit:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4.2L19.3 8.9a1.6 1.6 0 0 0 0-2.3l-1.9-1.9a1.6 1.6 0 0 0-2.3 0L4 15.8V20z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
   person:'<svg viewBox="0 0 11 13" aria-hidden="true"><circle cx="5.5" cy="3" r="2.6" fill="currentColor"/><path d="M1 12.5v-2.2A3.3 3.3 0 0 1 4.3 7h2.4A3.3 3.3 0 0 1 10 10.3v2.2z" fill="currentColor"/></svg>',
+  locate:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="12" cy="10" r="2.4" fill="currentColor"/></svg>',
   bell:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15L6 16zM10 20.5a2 2 0 0 0 4 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   trophy:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h10v5a5 5 0 0 1-10 0V4zM7 6H4.5v1.5A3.5 3.5 0 0 0 8 11M17 6h2.5v1.5A3.5 3.5 0 0 1 16 11M12 14v3.5M8.5 20.5h7M9.5 17.5h5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   close:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>'
@@ -678,7 +688,8 @@ function applyDir(){
   $('#t-train').textContent=out?`Train to ${PL.bd.short}`:'Train home';
   $('#t-buas').textContent=out?'Bus to BUas':'Bus to Breda station';
   const order=panelsFor(commuteDir);
-  document.querySelectorAll('.drops>.drop').forEach(d=>{const i=order.indexOf(d.dataset.panel);d.hidden=i<0;d.style.order=i;});
+  document.querySelectorAll('.drops>.drop').forEach(d=>{const i=order.indexOf(d.dataset.panel);d.hidden=i<0||!panelNear(d.dataset.panel,commuteDir);d.style.order=i;});
+  renderNear();
   order.forEach(p=>{if(p!=='board') renderPlan(p,commuteDir);});
 }
 function renderCommute(){
@@ -875,6 +886,51 @@ const PL={
   bd:{short:'Breda',id:'nl-OpenOV_stoparea:17911'},
   buas:{short:'BUas',id:'51.5907,4.7932'}
 };
+/* Near me: only show what leaves from where you are */
+const NEAR_M=2000;
+const PLACE_XY={veghel:[51.6137,5.5474],ehv:[51.4430,5.4796],ht:[51.6905,5.2936],bd:[51.5950,4.7799],buas:[51.5907,4.7932]};
+const PLACE_NAME={veghel:'Veghel',ehv:'Eindhoven station',ht:'Den Bosch station',bd:'Breda station',buas:'BUas'};
+let nearPos=null,nearAt=0,nearErr=null,nearBusy=false;
+function nearSet(){
+  if(!db.settings.nearMe||!nearPos) return null;
+  const s=new Set(Object.keys(PLACE_XY).filter(k=>dist(nearPos.lat,nearPos.lon,PLACE_XY[k][0],PLACE_XY[k][1])<=NEAR_M));
+  return s.size?s:null;
+}
+function panelFrom(p,dir){
+  if(p==='board') return ['veghel'];
+  if(p==='vhome') return ['ht','ehv'];
+  if(p==='train') return dir==='out'?['ehv','ht']:['bd'];
+  if(p==='buas') return dir==='out'?['bd']:['buas'];
+  return [];
+}
+const panelNear=(p,dir)=>{const n=nearSet();return !n||panelFrom(p,dir).some(k=>n.has(k));};
+function locateNear(force){
+  if(!db.settings.nearMe||nearBusy||!('geolocation' in navigator)) return;
+  if(!force&&nearAt&&Date.now()-nearAt<90000) return;
+  nearBusy=true;
+  navigator.geolocation.getCurrentPosition(p=>{
+    nearBusy=false;nearAt=Date.now();nearErr=null;
+    nearPos={lat:p.coords.latitude,lon:p.coords.longitude};
+    applyDir();refreshPanels();
+  },e=>{
+    nearBusy=false;nearAt=Date.now();
+    nearErr=e&&e.code===1?'Location is blocked for this page. Allow it in Safari to use Near me.':'Couldn’t find where you are right now.';
+    applyDir();
+  },{enableHighAccuracy:false,maximumAge:60000,timeout:15000});
+}
+function renderNear(){
+  const on=!!db.settings.nearMe,btn=$('#nearBtn'),note=$('#nearNote');
+  btn.setAttribute('aria-pressed',on);
+  if(!on){note.hidden=true;return;}
+  const n=nearSet(),shown=panelsFor(commuteDir).filter(p=>panelNear(p,commuteDir));
+  let html;
+  if(nearErr&&!nearPos) html=esc(nearErr);
+  else if(!nearPos) html='Finding where you are…';
+  else if(!n) html='You’re not near Veghel, Den Bosch, Eindhoven or Breda, so everything is shown.';
+  else if(!shown.length) html=`Near <b>${esc(joinAnd([...n].map(k=>PLACE_NAME[k])))}</b>. Nothing ${commuteDir==='out'?'to Breda':'home'} leaves from here. <button type="button" class="text-btn" data-act="dir-toggle">Switch direction</button>`;
+  else html=`Showing what leaves near <b>${esc(joinAnd([...n].filter(k=>shown.some(p=>panelFrom(p,commuteDir).includes(k))).map(k=>PLACE_NAME[k])))}</b>.`;
+  note.innerHTML=html;note.hidden=false;
+}
 const panelsFor=dir=>dir==='out'?['board','train','buas']:['buas','train','vhome'];
 const pstate={};
 const OPEN_MS=55000,CLOSED_MS=5*60000;
@@ -1054,7 +1110,8 @@ function renderPlan(panel,dir){
     meta.textContent='';nx.textContent='';return;
   }
   learnPlans(s.data,panel==='buas');
-  const now=Date.now(),list=s.data.filter(o=>o.time>=now-60000).slice(0,6);
+  const near=nearSet();
+  const now=Date.now(),list=s.data.filter(o=>o.time>=now-60000&&(!near||near.has(canonPlace(o.a)))).slice(0,6);
   el.innerHTML=list.length?list.map(o=>planRow(o,panel,dir)).join(''):'<p class="empty">Nothing coming up right now.</p>';
   nx.textContent=list[0]?`${list[0].line} · ${hhmm(list[0].time)}`:'';
   flushBest();
@@ -1476,7 +1533,9 @@ function refreshPanels(){
     const every=(now>T-4*3600e3&&now<T+2*3600e3)?2*MIN:30*MIN;
     if(tripState.key!==key||!tripState.at||now-tripState.at>=every) fetchTrip(); else renderTrip();
   }
+  locateNear(false);
   panelsFor(commuteDir).forEach(p=>{
+    if(!panelNear(p,commuteDir)) return;
     const at=p==='board'?liveAt:(pstate[p+':'+commuteDir]||{}).at;
     if(!at||now-at>=(panelOpen(p)?OPEN_MS:CLOSED_MS)) p==='board'?fetchLive():fetchPlan(p,commuteDir);
     if(p==='board'&&panelOpen(p)&&now-boardGradesAt>=5*MIN) fetchBoardGrades();
@@ -2284,6 +2343,11 @@ document.addEventListener('click',e=>{
       renderCommute();applyDir();refreshPanels();
       break;
     case 'trip-edit':openTrip();break;
+    case 'near-toggle':
+      db.settings.nearMe=!db.settings.nearMe;save();
+      if(db.settings.nearMe){nearErr=null;locateNear(true);}
+      applyDir();refreshPanels();
+      break;
     case 'watch':{
       const k=el.dataset.k,o=lastRows.get(k);
       if(watches().some(w=>w.key===k)){removeWatch(k);toast('Stopped watching this train');}
