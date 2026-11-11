@@ -382,6 +382,8 @@ button.pill{cursor:pointer}
 .night-dist .num{font-size:clamp(72px,24vw,112px)}
 .night-dist .unit{font-size:28px;margin-left:8px;letter-spacing:0;color:#8C92A8;font-weight:600}
 .night-sub{margin:16px 0 0;color:#8C92A8;font-size:17px;max-width:32ch}
+.night-eta{margin:22px 0 0;color:#A9AFC6;font-size:17px;max-width:32ch}
+.night-eta b{display:block;color:#CDD1E2;font-family:var(--font-display);font-weight:800;font-size:28px;letter-spacing:-0.01em;line-height:1.15}
 .night-notice{margin:18px 0 0;padding:6px 0 6px 12px;border-left:2px solid #F2994A;color:#E7C6A2;font-size:15px;max-width:34ch}
 .night.awake .night-stop{color:#EEF0F8}
 .night.awake .night-dist{color:#FFFFFF}
@@ -521,6 +523,7 @@ button.pill{cursor:pointer}
     <h2 class="night-stop" id="nStop"></h2>
     <p class="night-dist"><span class="num" id="nNum">–</span><span class="unit" id="nUnit"></span></p>
     <p class="night-sub" id="nSub"></p>
+    <p class="night-eta" id="nEta" hidden></p>
     <p class="night-notice" id="nNotice" hidden></p>
   </div>
   <div class="night-actions">
@@ -1378,6 +1381,61 @@ function showPlatAlert(){
 }
 setInterval(()=>{if(document.visibilityState==='visible') checkWatches();},60000);
 
+/* ---------- Expected arrival on the sleep screen ---------- */
+let eta=null,etaTimer=null;
+function startEta(){
+  stopEta();
+  if(!run||!run.log) return;
+  eta={busy:false,time:null,next:null};
+  fetchEta();
+  etaTimer=setInterval(()=>{if(run&&!sleepEl.hidden) fetchEta();},120000);
+}
+function stopEta(){if(etaTimer) clearInterval(etaTimer);etaTimer=null;eta=null;const e=$('#nEta');if(e) e.hidden=true;}
+const legModes=m=>m==='train'?'RAIL':'BUS';
+async function plansBetween(from,to,mode,at,n){
+  const lists=await Promise.all(from.flatMap(f=>to.map(t=>planQ(f,t,mode,at,n,mode==='RAIL'?1:0).catch(()=>[]))));
+  return [].concat(...lists);
+}
+async function fetchEta(){
+  const e=eta;if(!e||e.busy||!run) return;
+  e.busy=true;
+  try{
+    const legs=run.legs,i=run.idx,dir=run.log.dir;
+    const origin=i===0?(dir==='out'?db.home:db.school):legs[i-1].stop;
+    const from=placesFor(origin),to=placesFor(legs[i].stop);
+    if(!from||!to) return;
+    await ensureLiveIds();
+    const start=legs[i].startAt||run.log.startAt,mode=legModes(legs[i].mode);
+    // The bus or train you're on: the one that left closest to when you started this leg.
+    const cands=(await plansBetween(from,to,mode,start-40*MIN,8)).filter(o=>o.time>=start-40*MIN&&o.time<=start+15*MIN);
+    const on=cands.sort((a,b)=>Math.abs(a.time-start)-Math.abs(b.time-start))[0];
+    if(!on) return;
+    let t=on.arrivals[0].time,next=null;
+    for(let k=i+1;k<legs.length;k++){
+      const nf=placesFor(legs[k-1].stop),nt=placesFor(legs[k].stop);if(!nf||!nt) return;
+      const opts=(await plansBetween(nf,nt,legModes(legs[k].mode),t+2*MIN,4)).filter(o=>o.start>=t+MIN);
+      const best=opts.sort((a,b)=>a.arrivals[0].time-b.arrivals[0].time||a.time-b.time)[0];
+      if(!best) return;
+      if(!next) next=best;
+      t=best.arrivals[0].time;
+    }
+    if(eta!==e) return;
+    e.time=t;e.next=next;
+  }finally{
+    e.busy=false;if(eta===e) renderEta();
+  }
+}
+function renderEta(){
+  const el=$('#nEta');if(!el) return;
+  if(!eta||!eta.time||!run){el.hidden=true;return;}
+  const sc=stopById(db.school),home=run.log.dir==='back';
+  const where=home?'Home':`In ${sc?(sc.short||sc.name):'Breda'}`;
+  const n=eta.next;
+  const then=n?`Then ${n.rail?(n.trainName||'train'):'bus '+n.line} at ${hhmm(n.time)}${n.a&&n.a.short?' from '+n.a.short:''}`:'';
+  el.innerHTML=`<b>${esc(where)} around ${hhmm(eta.time)}</b>${esc(then)}`;
+  el.hidden=false;
+}
+
 /* ---------- Transfer screen: what leaves next from here ---------- */
 const LOCAL_PL={eindhoven:'ehv',denbosch:'ht',breda:'bd'};
 let xfer=null,xferTimer=null;
@@ -2167,7 +2225,8 @@ let run=null,alarmState=null,watchId=null,tickTimer=null;
 function beginLeg(backupMin){
   Object.assign(run,{phase:'sleeping',startDist:null,lastDist:null,lastFixAt:null,acc:null,speed:null,lastPos:null,geoErr:false,gpsLostFired:false,forceArrival:false,notice:null,wasHidden:false,backupAt:backupMin?Date.now()+backupMin*60000:null});
   betweenEl.hidden=true;sleepEl.hidden=false;
-  renderSleep();startTracking();
+  run.legs[run.idx].startAt=Date.now();
+  renderSleep();startTracking();startEta();
 }
 function startTracking(){
   stopTracking();
@@ -2329,6 +2388,7 @@ function dismissAlarm(){
 /* Legs */
 function legDone(){
   if(!run) return;
+  stopEta();
   stopTracking();audioIdle();
   const leg=run.legs[run.idx],st=stopById(leg.stop),next=run.legs[run.idx+1];
   sleepEl.hidden=true;
@@ -2363,7 +2423,7 @@ function nextLeg(){
   beginLeg(bm);
 }
 function endTrip(){
-  stopTransfer();
+  stopTransfer();stopEta();
   stopTracking();stopAlarmSound();audioIdle();
   run=null;alarmState=null;
   sleepEl.hidden=true;alarmEl.hidden=true;betweenEl.hidden=true;
