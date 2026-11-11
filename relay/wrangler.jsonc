@@ -3,5 +3,7 @@
 {
   "name": "haltewekker-relay",
   "main": "worker.js",
-  "compatibility_date": "2025-01-01"
+  "compatibility_date": "2025-01-01",
+  // Keep variables set in the Cloudflare dashboard when deploying from GitHub.
+  "keep_vars": true
 }
