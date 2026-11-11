@@ -340,7 +340,16 @@ button.pill{cursor:pointer}
 .hold-alarm .hold-fill{background:rgba(255,225,184,.38)}
 
 .between{background:var(--bg);color:var(--ink)}
-.between-main{flex:1;display:flex;flex-direction:column;justify-content:center}
+.between-main{flex:1;display:flex;flex-direction:column;justify-content:center;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch}
+.between-main.has-deps{justify-content:flex-start;padding-top:18px}
+.b-deps{margin:20px 0 4px}
+.b-deps:empty{display:none}
+.b-deps-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin:0 0 8px}
+.b-deps-head h3{font-family:var(--font-display);font-weight:600;font-size:20px;margin:0}
+.b-deps-head span{font-size:14px;color:var(--muted)}
+.b-deps .list{background:var(--surface)}
+.bus.mine{background:color-mix(in srgb,var(--dusk) 9%,transparent)}
+.mine-tag{display:inline-block;font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--dusk);margin-left:6px;vertical-align:1px}
 .between h2{font-family:var(--font-display);font-weight:800;font-size:36px;line-height:1.05;letter-spacing:-0.03em;margin:0;max-width:14ch}
 .between-main > p{font-size:18px;color:var(--muted);margin:14px 0 0;max-width:32ch}
 
@@ -470,6 +479,7 @@ button.pill{cursor:pointer}
     <p id="bSub"></p>
     <div id="bScore"></div>
     <div id="bBackupWrap"></div>
+    <div class="b-deps" id="bDeps"></div>
   </div>
   <div class="between-actions">
     <button type="button" class="btn primary big" id="btnNext" data-act="next-leg">Start next leg</button>
@@ -997,6 +1007,71 @@ function renderPlan(panel,dir){
   flushBest();
   meta.textContent=(s.err||`Updated at ${hhmm(s.at)}.`)+(panel==='buas'&&s.walk?` Walking takes about ${s.walk} min.`:'');
 }
+/* ---------- Transfer screen: what leaves next from here ---------- */
+const LOCAL_PL={eindhoven:'ehv',denbosch:'ht',breda:'bd'};
+let xfer=null,xferTimer=null;
+function placesFor(localId){
+  if(LOCAL_PL[localId]) return [PL[LOCAL_PL[localId]]];
+  if(localId===db.home) return vStops();
+  return null;
+}
+function startTransfer(fromId,next){
+  stopTransfer();
+  const from=placesFor(fromId),to=placesFor(next.stop);
+  if(!from||from.length!==1||!to||!to.length) return;
+  xfer={from:from[0],to,mode:next.mode,data:null,err:null,at:0,busy:false};
+  renderTransfer();fetchTransfer();
+  xferTimer=setInterval(()=>{if(!xfer) return;if(Date.now()-xfer.at>=60000) fetchTransfer();else renderTransfer();},20000);
+}
+function stopTransfer(){if(xferTimer) clearInterval(xferTimer);xferTimer=null;xfer=null;const b=$('#bDeps');if(b) b.innerHTML='';$('.between-main').classList.remove('has-deps');}
+async function fetchTransfer(){
+  const x=xfer;if(!x||x.busy) return;
+  x.busy=true;
+  try{
+    const rail=x.mode==='train',now=Date.now();
+    const lists=await Promise.all(x.to.map(t=>planQ(x.from,t,rail?'RAIL':'BUS',now-MIN,rail?8:6,rail?1:0).catch(e=>{x.lastErr=e;return null;})));
+    if(lists.every(l=>!l)) throw x.lastErr||{};
+    const m=new Map();
+    [].concat(...lists.filter(Boolean)).forEach(o=>{
+      const e=m.get(o.trip);
+      if(!e) m.set(o.trip,o);
+      else o.arrivals.forEach(a=>{if(!e.arrivals.some(y=>y.stop===a.stop)) e.arrivals.push(a);});
+    });
+    const all=[...m.values()];all.forEach(o=>o.arrivals.sort((a,b)=>a.time-b.time));
+    learnPlans(all,false);
+    // Hide an option when one that leaves later still gets you there as early.
+    x.data=all.filter(o=>!all.some(q=>q!==o&&q.time>o.time&&q.arrivals[0].stop===o.arrivals[0].stop&&q.arrivals[0].time<=o.arrivals[0].time)).sort((a,b)=>a.time-b.time);
+    x.err=null;x.at=Date.now();
+  }catch(e){
+    x.err=`Couldn’t load the next ${x.mode==='train'?'trains':'buses'} because ${e&&e.reason?e.reason:'something went wrong'}.`;
+  }finally{
+    x.busy=false;if(xfer===x){renderTransfer();flushBest();}
+  }
+}
+function plannedTrips(){
+  const st=tripState&&tripState.data;if(!st) return [];
+  const op=st.options[tripState.pick]||st.options[0];
+  return [op.train,op.busIn,op.busOut].filter(Boolean).map(o=>o.trip);
+}
+function transferRow(o,mine){
+  const {label,cls,when}=statusBits(o),rail=o.rail,arr=o.arrivals[0];
+  const head=rail?`${o.trainName||'Train'} to ${o.b.short}`:`To ${o.arrivals.map(a=>shortStop(a.stop)).join(' / ')}`;
+  const extra=`${o.changes.length?'change at '+o.changes.join(', ')+' · ':''}arrives ${hhmm(arr.time)}${!rail&&o.arrivals.length>1?' / '+o.arrivals.slice(1).map(a=>hhmm(a.time)).join(' / '):''}`;
+  return `<div class="bus${mine?' mine':''}"><span class="line-no">${esc(o.line)}</span><span class="bus-dest">${gradePill(gradePlan(o,false))}${esc(head)}${mine?'<span class="mine-tag">Your plan</span>':''}</span><span class="bus-time${o.status==='CANCEL'?' gone':''}">${hhmm(o.time)}</span><span class="bus-status ${cls}">${esc(label)}</span><span class="bus-when">${esc(when)}</span><span class="bus-extra"><b class="ride">${esc(rideLabel(o))}</b> · ${esc(extra)}</span></div>`;
+}
+function renderTransfer(){
+  const el=$('#bDeps'),x=xfer;if(!el||!x) return;
+  $('.between-main').classList.add('has-deps');
+  const what=x.mode==='train'?'trains':'buses',dest=x.mode==='train'?x.to[0].short:'Veghel';
+  let body;
+  if(!x.data) body=`<p class="empty">${esc(x.err||`Looking up the next ${what}…`)}</p>`;
+  else{
+    const now=Date.now(),mine=plannedTrips(),list=x.data.filter(o=>o.time>=now-MIN).slice(0,6);
+    body=list.length?list.map(o=>transferRow(o,mine.includes(o.trip))).join(''):`<p class="empty">No ${what} to ${esc(dest)} coming up.</p>`;
+  }
+  el.innerHTML=`<div class="b-deps-head"><h3>Next ${what} to ${esc(dest)}</h3><span>${x.at?'Updated '+hhmm(x.at):''}</span></div><div class="list">${body}</div>`;
+}
+
 /* ---------- Trip score (out of 500) and leaderboard ---------- */
 const TRANSFER_MIN=5;
 const letter=n=>n>=475?'S':n>=425?'A':n>=375?'B':n>=325?'C':n>=275?'D':'F';
@@ -1810,6 +1885,7 @@ function legDone(){
     const ns=stopById(next.stop);
     $('#bTitle').textContent=`Transfer at ${st?st.name:'your stop'}`;
     $('#bScore').innerHTML='';
+    startTransfer(leg.stop,next);
     $('#bSub').textContent=`Next: ${modeName(next.mode).toLowerCase()} to ${ns?ns.name:'your stop'}. It rings at ${fmtKm(next.km)} from the stop. Tap start once you’re on board.`;
     $('#bBackupWrap').innerHTML=backupSelect('bBackup',0);$('#bBackupWrap').hidden=false;
     $('#btnNext').hidden=false;
@@ -1817,6 +1893,7 @@ function legDone(){
   }else{
     $('#bTitle').textContent=`You’re at ${st?st.name:'your stop'}`;
     $('#bSub').textContent='Trip finished.';
+    stopTransfer();
     const res=run.log?logTrip():null;
     $('#bScore').innerHTML=res?scoreHtml(res):'';
     $('#bBackupWrap').hidden=true;$('#btnNext').hidden=true;
@@ -1827,11 +1904,13 @@ function legDone(){
 function nextLeg(){
   if(!run) return;
   const sel=$('#bBackup'),bm=sel?+sel.value:0;
+  stopTransfer();
   run.idx++;
   primeAudio();
   beginLeg(bm);
 }
 function endTrip(){
+  stopTransfer();
   stopTracking();stopAlarmSound();audioIdle();
   run=null;alarmState=null;
   sleepEl.hidden=true;alarmEl.hidden=true;betweenEl.hidden=true;
