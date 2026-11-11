@@ -603,7 +603,7 @@ const PRESET_ROUTES=[
   {id:'via-denbosch',name:'Via Den Bosch',legs:[{mode:'bus',stop:'denbosch'},{mode:'train'}]},
   {id:'via-eindhoven',name:'Via Eindhoven',legs:[{mode:'bus',stop:'eindhoven'},{mode:'train'}]}
 ];
-const DEFAULT_SETTINGS={trainKm:5,busKm:2,arrivalRing:true,sound:'chime',soundV:2,music:'mix',musicV:2,prepSeen:false};
+const DEFAULT_SETTINGS={trainKm:5,busKm:2,arrivalRing:true,sound:'chime',soundV:2,music:'mix',musicV:2,autoHome:true,prepSeen:false};
 const RELAY='https://haltewekker-relay.tsfaw1.workers.dev/?url=';
 const DEFAULT_LIVE={stops:[{name:'Veghel, Busstation',id:null},{name:'Veghel, Bolkenplein',id:null}],lines:['305','306','158'],proxy:RELAY};
 const MAX_LIVE=3;
@@ -932,12 +932,36 @@ function locateNear(force){
   navigator.geolocation.getCurrentPosition(p=>{
     nearBusy=false;nearAt=Date.now();nearErr=null;
     nearPos={lat:p.coords.latitude,lon:p.coords.longitude};
+    maybeAutoHome(nearPos.lat,nearPos.lon);
     applyDir();refreshPanels();
   },e=>{
     nearBusy=false;nearAt=Date.now();
     nearErr=e&&e.code===1?'Location is blocked for this page. Allow it in Safari to use Near me.':'Couldn’t find where you are right now.';
     applyDir();
   },{enableHighAccuracy:false,maximumAge:60000,timeout:15000});
+}
+/* Arriving at school switches the app to going home, once a day. */
+const SCHOOL_M=350;
+function atSchool(lat,lon){return dist(lat,lon,PLACE_XY.buas[0],PLACE_XY.buas[1])<=SCHOOL_M;}
+function maybeAutoHome(lat,lon){
+  const S=db.settings,today=ymd(new Date());
+  if(S.autoHome===false||commuteDir!=='out'||S.autoHomeDay===today||run) return;
+  if(!atSchool(lat,lon)) return;
+  S.autoHomeDay=today;commuteDir='back';S.dir='back';S.dirAt=Date.now();save();
+  renderCommute();applyDir();refreshPanels();
+  toast('You’re at BUas, so it switched to Home. Tap the big button to switch back.');
+}
+let schoolCheckAt=0;
+async function checkSchool(force){
+  const S=db.settings;
+  if(S.autoHome===false||commuteDir!=='out'||S.autoHomeDay===ymd(new Date())||run||!('geolocation' in navigator)) return;
+  if(!force&&Date.now()-schoolCheckAt<110000) return;
+  // Only when location is already allowed: never pop up a permission question for this.
+  let ok=false;
+  try{if(navigator.permissions&&navigator.permissions.query) ok=(await navigator.permissions.query({name:'geolocation'})).state==='granted';}catch(e){}
+  if(!ok) return;
+  schoolCheckAt=Date.now();
+  navigator.geolocation.getCurrentPosition(p=>maybeAutoHome(p.coords.latitude,p.coords.longitude),()=>{},{enableHighAccuracy:false,maximumAge:60000,timeout:15000});
 }
 function renderNear(){
   const on=!!db.settings.nearMe,btn=$('#nearBtn'),note=$('#nearNote');
@@ -1640,7 +1664,7 @@ function refreshPanels(){
     const every=(now>T-4*3600e3&&now<T+2*3600e3)?2*MIN:30*MIN;
     if(tripState.key!==key||!tripState.at||now-tripState.at>=every) fetchTrip(); else renderTrip();
   }
-  locateNear(false);
+  locateNear(false);checkSchool(false);
   panelsFor(commuteDir).forEach(p=>{
     if(!panelNear(p,commuteDir)) return;
     const at=p==='board'?liveAt:(pstate[p+':'+commuteDir]||{}).at;
@@ -1782,6 +1806,7 @@ function renderSettings(){
   <div class="field"><span class="field-label">Alarm sound</span><div class="sound-list">${SOUNDS.map(o=>`<button type="button" class="sound-opt" data-act="sound" data-v="${o[0]}" aria-pressed="${o[0]===S.sound}"><span class="so-dot" aria-hidden="true"></span><span class="so-text"><strong>${o[1]}</strong><small>${o[2]}</small></span></button>`).join('')}</div><p class="hint">Tap one to hear it.</p></div>
   <button type="button" class="btn secondary" data-act="test-alarm">Test alarm</button>
   <p class="hint">It rings 5 seconds after you tap, the same way it will on a trip. Try it with your music playing.</p>
+  <label class="switch-row"><span class="switch-text"><strong>Switch to Home at school</strong><span class="hint">When you reach BUas, the app switches to going home once that day. Switch back whenever you like. Uses location only if you’ve already allowed it.</span></span><input type="checkbox" class="switch" id="setAutoHome"${S.autoHome!==false?' checked':''}></label>
   <label class="switch-row"><span class="switch-text"><strong>Ring again when I arrive</strong><span class="hint">A second alarm at the stop itself, in case you dozed off again.</span></span><input type="checkbox" class="switch" id="setArrival"${S.arrivalRing?' checked':''}></label>
   <div class="field"><span class="field-label">Usual wake distance</span>
     <div class="set-step"><span class="set-step-name">${ICON.train}Train</span>${stepper('set-step','trainKm',fmtKm(S.trainKm))}</div>
@@ -2503,6 +2528,7 @@ sheetBody.addEventListener('change',e=>{
   const t=e.target;if(!sheetState) return;
   if(t.id==='pBackup'&&sheetState.p) sheetState.p.backup=+t.value;
   if(t.id==='setArrival'){db.settings.arrivalRing=t.checked;save();}
+  if(t.id==='setAutoHome'){db.settings.autoHome=t.checked;save();}
   if(t.id==='cHome'||t.id==='cSchool'){
     const key=t.id==='cHome'?'home':'school',other=key==='home'?db.school:db.home;
     if(t.value&&t.value===other){toast('Home and school need to be different stops.');renderCommuteEditor();return;}
@@ -2515,7 +2541,7 @@ sheetBody.addEventListener('keydown',e=>{
 });
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!sheet.hidden) closeSheet();});
 document.addEventListener('visibilitychange',()=>{
-  if(document.visibilityState==='visible'&&!run) refreshPanels();
+  if(document.visibilityState==='visible'&&!run){schoolCheckAt=0;refreshPanels();}
   if(!run||watchId==null) return;
   if(document.visibilityState==='hidden'){run.wasHidden=true;}
   else{
