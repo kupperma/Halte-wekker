@@ -2,6 +2,7 @@
 // 1. Passes Transitous requests through:   /?url=https://api.transitous.org/...
 // 2. Gets NS departures with platforms:     /ns/departures?station=EHV
 // 3. Gets NS trips with crowd forecasts:    /ns/trips?from=EHV&to=BD&dateTime=...
+// 4. Gets one train from the Virtual Train API: /ns/train?num=1126&station=EHV
 //    Needs a free NS API key saved as the secret NS_KEY (Settings → Variables and Secrets).
 export default {
   async fetch(request, env) {
@@ -26,6 +27,28 @@ export default {
         return new Response(await r.text(), {
           status: r.status,
           headers: { ...cors, "Content-Type": "application/json", "Cache-Control": "max-age=20" },
+        });
+      } catch (e) {
+        return new Response("NS didn't answer", { status: 502, headers: cors });
+      }
+    }
+
+    if (url.pathname === "/ns/train") {
+      // Virtual Train API: one train's composition and how busy it is.
+      const num = url.searchParams.get("num") || "";
+      const station = (url.searchParams.get("station") || "").toUpperCase();
+      const v = url.searchParams.get("v") || "1";
+      if (!/^\d{1,6}$/.test(num) || (station && !/^[A-Z]{2,5}$/.test(station)) || !/^[12]$/.test(v))
+        return new Response("Bad request", { status: 400, headers: cors });
+      if (!NS_KEY) return new Response("No NS key set", { status: 501, headers: cors });
+      try {
+        const path = `virtual-train-api/api/v${v}/trein/${num}` + (station ? `/${station}` : "");
+        const r = await fetch(`https://gateway.apiportal.ns.nl/${path}?features=druktev2`, {
+          headers: { "Ocp-Apim-Subscription-Key": NS_KEY },
+        });
+        return new Response(await r.text(), {
+          status: r.status,
+          headers: { ...cors, "Content-Type": "application/json", "Cache-Control": "max-age=60" },
         });
       } catch (e) {
         return new Response("NS didn't answer", { status: 502, headers: cors });
