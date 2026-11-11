@@ -539,7 +539,7 @@ const PRESET_ROUTES=[
   {id:'via-denbosch',name:'Via Den Bosch',legs:[{mode:'bus',stop:'denbosch'},{mode:'train'}]},
   {id:'via-eindhoven',name:'Via Eindhoven',legs:[{mode:'bus',stop:'eindhoven'},{mode:'train'}]}
 ];
-const DEFAULT_SETTINGS={trainKm:5,busKm:2,arrivalRing:true,sound:'chime',soundV:2,music:'pause',prepSeen:false};
+const DEFAULT_SETTINGS={trainKm:5,busKm:2,arrivalRing:true,sound:'chime',soundV:2,music:'mix',musicV:2,prepSeen:false};
 const RELAY='https://haltewekker-relay.tsfaw1.workers.dev/?url=';
 const DEFAULT_LIVE={stops:[{name:'Veghel, Busstation',id:null},{name:'Veghel, Bolkenplein',id:null}],lines:['305','306','158'],proxy:RELAY};
 const MAX_LIVE=3;
@@ -563,7 +563,7 @@ function load(){
         live.stops=(live.stops||[]).filter(x=>x&&x.name).slice(0,MAX_LIVE);
         delete live.name;delete live.id;delete live.codes;delete live.route;
         if(!String(live.proxy||'').trim()) live.proxy=RELAY;
-        return {stops:d.stops,home:d.home!==undefined?d.home:f.home,school:d.school!==undefined?d.school:f.school,routes:d.routes,kmMem:d.kmMem||{},settings:(st=>{if(!(d.settings&&d.settings.soundV)&&st.sound==='beeps') st.sound='chime';st.soundV=2;return st;})(Object.assign(f.settings,d.settings||{})),live,trip:d.trip&&d.trip.date&&d.trip.time?d.trip:undefined,best:d.best||{},trips:Array.isArray(d.trips)?d.trips:[]};
+        return {stops:d.stops,home:d.home!==undefined?d.home:f.home,school:d.school!==undefined?d.school:f.school,routes:d.routes,kmMem:d.kmMem||{},settings:(st=>{if(!(d.settings&&d.settings.soundV)&&st.sound==='beeps') st.sound='chime';st.soundV=2;if(!(d.settings&&d.settings.musicV)) st.music='mix';st.musicV=2;return st;})(Object.assign(f.settings,d.settings||{})),live,trip:d.trip&&d.trip.date&&d.trip.time?d.trip:undefined,best:d.best||{},trips:Array.isArray(d.trips)?d.trips:[]};
       }
     }
     // Bring over stops and settings from the first version.
