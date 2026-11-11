@@ -8,22 +8,27 @@ struct Place: Hashable {
     let short: String
     let ids: [String]
     let coordinate: CLLocationCoordinate2D
+    var spoken: String          // how the announcer says it
 
     static func == (a: Place, b: Place) -> Bool { a.key == b.key }
     func hash(into h: inout Hasher) { h.combine(key) }
 
-    static let veghel = Place(key: "veghel", name: "Veghel", short: "Veghel",
+    static let veghel = Place(key: "veghel", name: "Veghel, Busstation", short: "Veghel",
                               ids: ["nl-OpenOV_NL:S:64553000", "nl-OpenOV_4219829"],
-                              coordinate: .init(latitude: 51.6137, longitude: 5.5474))
+                              coordinate: .init(latitude: 51.6137, longitude: 5.5474), spoken: "Veghel")
     static let denBosch = Place(key: "ht", name: "’s-Hertogenbosch Centraal", short: "Den Bosch",
                                 ids: ["de-DELFI_000008400319"],
-                                coordinate: .init(latitude: 51.6905, longitude: 5.2936))
+                                coordinate: .init(latitude: 51.6905, longitude: 5.2936), spoken: "Den Bosch")
     static let eindhoven = Place(key: "ehv", name: "Eindhoven Centraal", short: "Eindhoven",
                                  ids: ["de-DELFI_000008400206"],
-                                 coordinate: .init(latitude: 51.4432, longitude: 5.4812))
+                                 coordinate: .init(latitude: 51.4432, longitude: 5.4812), spoken: "Eindhoven Central")
     static let breda = Place(key: "bd", name: "Breda station", short: "Breda",
                              ids: ["nl-OpenOV_stoparea:17911"],
-                             coordinate: .init(latitude: 51.5955, longitude: 4.7797))
+                             coordinate: .init(latitude: 51.5955, longitude: 4.7797), spoken: "Breda station")
+    static let buas = Place(key: "buas", name: "Breda University (BUas)", short: "BUas",
+                            ids: ["51.5907,4.7932"],
+                            coordinate: .init(latitude: 51.5907, longitude: 4.7932), spoken: "Breda University")
+    static let all: [Place] = [.veghel, .denBosch, .eindhoven, .breda, .buas]
 }
 
 enum Mode: String, Codable {
@@ -35,7 +40,8 @@ enum Mode: String, Codable {
 
 enum Direction: String {
     case toSchool, home
-    var title: String { self == .toSchool ? "To Breda" : "Home" }
+    var word: String { self == .toSchool ? "BREDA" : "HOME" }
+    var kicker: String { self == .toSchool ? "Going to" : "Going" }
 }
 
 struct Leg: Hashable {
@@ -55,6 +61,7 @@ struct RoutePlan: Identifiable, Hashable {
         RoutePlan(id: "via-denbosch", name: "Via Den Bosch", station: .denBosch),
         RoutePlan(id: "via-eindhoven", name: "Via Eindhoven", station: .eindhoven),
     ]
+    static func via(_ station: Place) -> RoutePlan? { all.first { $0.station == station } }
 
     func legs(_ dir: Direction) -> [Leg] {
         switch dir {
@@ -72,6 +79,10 @@ enum Fmt {
         if m < 100_000 { return String(format: "%.1f km", m / 1000) }
         return "\(Int((m / 1000).rounded())) km"
     }
+    static func distanceParts(_ m: Double) -> (String, String) {
+        let s = distance(m).split(separator: " ")
+        return (String(s.first ?? ""), String(s.last ?? ""))
+    }
     static let time: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "HH:mm"
@@ -79,4 +90,16 @@ enum Fmt {
         return f
     }()
     static func hhmm(_ d: Date) -> String { time.string(from: d) }
+    static func mins(_ s: TimeInterval) -> Int { max(0, Int((s / 60).rounded())) }
+    /// "’s-Hertogenbosch, Centraal Station" → "Den Bosch"; "Breda, Nassausingel" → "Nassausingel"
+    static func place(_ n: String) -> String {
+        let l = n.lowercased()
+        if l.contains("hertogenbosch") { return "Den Bosch" }
+        if l.contains("eindhoven") { return "Eindhoven" }
+        if l.contains("veghel") { return "Veghel" }
+        if n == "END" || n == "START" { return "BUas" }
+        if l == "breda" || l.hasPrefix("breda (") || l.hasPrefix("breda, centraal") { return "Breda" }
+        if let r = n.range(of: ", ") { return String(n[r.upperBound...]) }
+        return n
+    }
 }

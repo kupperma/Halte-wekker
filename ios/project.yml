@@ -5,8 +5,8 @@ options:
     iOS: "17.0"
 settings:
   base:
-    MARKETING_VERSION: "0.1.0"
-    CURRENT_PROJECT_VERSION: "1"
+    MARKETING_VERSION: "0.2.0"
+    CURRENT_PROJECT_VERSION: "2"
     SWIFT_VERSION: "5.0"
     CODE_SIGNING_ALLOWED: "NO"
     CODE_SIGNING_REQUIRED: "NO"
@@ -26,6 +26,8 @@ targets:
         NSLocationAlwaysAndWhenInUseUsageDescription: Haltewekker keeps following you while the phone is locked, so it can wake you before your stop.
         NSSupportsLiveActivities: true
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        UIAppFonts: [OldStandard-Bold.ttf, OldStandard-Regular.ttf, CourierPrime-Regular.ttf, CourierPrime-Bold.ttf]
+        UIUserInterfaceStyle: Dark
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: nl.haltewekker.app
@@ -40,6 +42,7 @@ targets:
       path: Widget/Info.plist
       properties:
         CFBundleDisplayName: Haltewekker
+        UIAppFonts: [OldStandard-Bold.ttf, OldStandard-Regular.ttf, CourierPrime-Regular.ttf, CourierPrime-Bold.ttf]
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
     settings:
