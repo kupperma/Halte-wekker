@@ -2108,6 +2108,7 @@ function renderSettings(){
   <div class="field"><span class="field-label">Alarm sound</span><div class="sound-list">${SOUNDS.map(o=>`<button type="button" class="sound-opt" data-act="sound" data-v="${o[0]}" aria-pressed="${o[0]===S.sound}"><span class="so-dot" aria-hidden="true"></span><span class="so-text"><strong>${o[1]}</strong><small>${o[2]}</small></span></button>`).join('')}</div><p class="hint">Tap one to hear it.</p></div>
   <button type="button" class="btn secondary" data-act="test-alarm">Test alarm</button>
   <p class="hint">It rings 5 seconds after you tap, the same way it will on a trip. Try it with your music playing.</p>
+  <label class="switch-row"><span class="switch-text"><strong>Station announcement</strong><span class="hint">Before the alarm: a jingle and a voice that names your stop, like on the train.</span></span><input type="checkbox" class="switch" id="setAnnounce"${S.announce===false?'':' checked'}></label>
   <label class="switch-row"><span class="switch-text"><strong>Moving station</strong><span class="hint">The 3D station and train behind the home screen. Off shows a still picture, which saves a little battery.</span></span><input type="checkbox" class="switch" id="setMoving"${S.stillBg?'':' checked'}></label>
   <label class="switch-row"><span class="switch-text"><strong>Switch to Home at school</strong><span class="hint">When you reach BUas, the app switches to going home once that day. Switch back whenever you like. Uses location only if you’ve already allowed it.</span></span><input type="checkbox" class="switch" id="setAutoHome"${S.autoHome!==false?' checked':''}></label>
   <label class="switch-row"><span class="switch-text"><strong>Ring again when I arrive</strong><span class="hint">A second alarm at the stop itself, in case you dozed off again.</span></span><input type="checkbox" class="switch" id="setArrival"${S.arrivalRing?' checked':''}></label>
@@ -2396,6 +2397,7 @@ function ensureCtx(){
 }
 // Runs inside a tap, so iOS lets the alarm play later without another tap.
 function primeAudio(){
+  if(db.settings.announce!==false&&'speechSynthesis' in window){try{const u=new SpeechSynthesisUtterance(' ');u.volume=0;speechSynthesis.speak(u);}catch(e){}}
   setSession(isMix()?'transient':'auto');
   try{
     const c=ensureCtx();
@@ -2457,6 +2459,7 @@ function startAlarmSound(){
   if(navigator.vibrate){navigator.vibrate([500,250,500,250,900]);vibTimer=setInterval(()=>navigator.vibrate([500,250,500,250,900]),2600);}
 }
 function stopAlarmSound(){
+  stopAnnounce();
   alarmOn=false;stopMix();
   try{snd.pause();snd.currentTime=0;}catch(e){}
   clearInterval(webTimer);webTimer=null;
@@ -2464,6 +2467,65 @@ function stopAlarmSound(){
   try{if(navigator.vibrate) navigator.vibrate(0);}catch(e){}
   setSession(isMix()&&run&&watchId!=null?'transient':'auto');
 }
+/* ---------- Station announcement: a jingle, a voice naming your stop, then the alarm ---------- */
+function jingleSamples(){
+  const sr=22050,n=Math.floor(sr*1.9),out=new Float32Array(n);
+  const notes=[[0,659.25],[.34,783.99],[.68,1046.5]];             // a rising three-tone bell chime
+  const parts=[[1,1,1.3],[2,.38,.7],[2.76,.18,.4],[5.4,.05,.2]];
+  notes.forEach(([at,f])=>{const st=Math.floor(at*sr);for(let i=st;i<n;i++){const t=(i-st)/sr;let v=0;for(const [m,a,d] of parts) v+=a*Math.exp(-t/d)*Math.sin(2*Math.PI*f*m*t);out[i]+=Math.min(1,t/.004)*v;}});
+  let pk=0;for(let i=0;i<n;i++) pk=Math.max(pk,Math.abs(out[i]));for(let i=0;i<n;i++) out[i]*=.85/(pk||1);
+  return {data:out,sr};
+}
+let jingleSrc=null,announceTimer=null;
+function pickVoice(){
+  if(!('speechSynthesis' in window)) return null;
+  const en=speechSynthesis.getVoices().filter(v=>/^en/i.test(v.lang));
+  const pref=['Serena','Kate','Stephanie','Martha','Samantha','Karen','Moira','Tessa','Fiona','Victoria','Susan','Allison','Ava','Zoe','Google UK English Female','Microsoft Libby','Microsoft Sonia','Microsoft Hazel','Microsoft Zira'];
+  for(const p of pref){const v=en.find(x=>x.name.includes(p));if(v) return v;}
+  return en.find(x=>/female|woman/i.test(x.name))||en.find(x=>/en-GB/i.test(x.lang))||en[0]||null;
+}
+if('speechSynthesis' in window){try{speechSynthesis.getVoices();speechSynthesis.addEventListener('voiceschanged',()=>{});}catch(e){}}
+function spokenStop(st,mode){
+  if(!st) return 'your stop';
+  let n=st.short||st.name;
+  if(/hertogenbosch/i.test(n)) n='Den Bosch';
+  n=n.replace(/\bCentraal\b/i,'Central');
+  if(mode==='train'&&!/station|central/i.test(n)) n+=' station';
+  return n;
+}
+function announceText(reason){
+  const leg=run&&run.legs[run.idx],st=leg?stopById(leg.stop):stopById(db.school),mode=leg?leg.mode:'train',veh=mode==='train'?'train':'bus',place=spokenStop(st,mode);
+  if(reason==='approach') return `Attention please. We are now approaching ${place}. Please get ready to leave the ${veh}.`;
+  if(reason==='arrival') return `Arriving at ${place}. This is your stop. Please leave the ${veh} here.`;
+  if(reason==='backup') return `This is your backup alarm. Please check where you are. ${place} could be close.`;
+  if(reason==='test') return `This is a test. Attention please. We are now arriving at ${place}.`;
+  return '';
+}
+// Plays the jingle and the announcement, then calls done(). Never holds the alarm back for more than 9 seconds.
+function announce(reason,done){
+  const text=announceText(reason);let finished=false;
+  const finish=()=>{if(finished) return;finished=true;clearTimeout(announceTimer);done();};
+  announceTimer=setTimeout(finish,9000);
+  try{
+    setSession(isMix()?'transient':'playback');
+    const c=ensureCtx();if(c&&c.resume) c.resume();
+    if(c){const {data,sr}=getJingle(),b=c.createBuffer(1,data.length,sr);b.getChannelData(0).set(data);const s=c.createBufferSource();s.buffer=b;s.connect(c.destination);s.start();jingleSrc=s;}
+  }catch(e){}
+  setTimeout(()=>{
+    if(finished) return;
+    if(!text||!('speechSynthesis' in window)){finish();return;}
+    try{
+      speechSynthesis.cancel();
+      const u=new SpeechSynthesisUtterance(text),v=pickVoice();
+      if(v){u.voice=v;u.lang=v.lang;}else u.lang='en-GB';
+      u.rate=.95;u.pitch=1.05;u.volume=1;
+      u.onend=()=>setTimeout(finish,250);u.onerror=finish;
+      speechSynthesis.speak(u);
+    }catch(e){finish();}
+  },1500);
+}
+let jingleCache=null;const getJingle=()=>jingleCache||(jingleCache=jingleSamples());
+function stopAnnounce(){clearTimeout(announceTimer);try{if(jingleSrc) jingleSrc.stop();}catch(e){}jingleSrc=null;try{if('speechSynthesis' in window) speechSynthesis.cancel();}catch(e){}}
 let previewSrc=null;
 function previewSound(k){
   try{
@@ -2620,7 +2682,9 @@ function triggerAlarm(reason){
   alarmState={reason};
   fillAlarm();
   alarmEl.hidden=false;
-  startAlarmSound();
+  const mine=alarmState;
+  if(db.settings.announce!==false&&reason!=='gpslost') announce(reason,()=>{if(alarmState===mine) startAlarmSound();});
+  else startAlarmSound();
   setTimeout(()=>{try{$('#holdStop').focus({preventScroll:true});}catch(e){}},50);
   if(run) renderSleep();
 }
@@ -2874,6 +2938,7 @@ sheetBody.addEventListener('change',e=>{
   if(t.id==='pBackup'&&sheetState.p) sheetState.p.backup=+t.value;
   if(t.id==='setArrival'){db.settings.arrivalRing=t.checked;save();}
   if(t.id==='setAutoHome'){db.settings.autoHome=t.checked;save();}
+  if(t.id==='setAnnounce'){db.settings.announce=t.checked;save();}
   if(t.id==='setMoving'){db.settings.stillBg=!t.checked;save();stageKick();}
   if(t.id==='cHome'||t.id==='cSchool'){
     const key=t.id==='cHome'?'home':'school',other=key==='home'?db.school:db.home;
