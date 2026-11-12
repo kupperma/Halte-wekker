@@ -51,6 +51,7 @@ struct HomeView: View {
     @State private var loopToken = 0
     @State private var picked: BoardPick?            // the line you tapped on a board
     @State private var choosingDestination = false
+    @State private var nearShift: [String: Int] = [:]     // how far back or forward you've gone at each stop near you
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -239,7 +240,9 @@ struct HomeView: View {
     /// The trains for the LED strip: the last few that left (dimmed) and the next ones.
     private var ledRows: [LEDTrain] {
         let now = Date(), since = now.addingTimeInterval(-20 * 60)
-        let list = live.trains.filter { $0.trip.first.departure > since || $0.trip.first.scheduledDeparture > since }.prefix(12)
+        let all = live.trains.filter { $0.trip.first.departure > since || $0.trip.first.scheduledDeparture > since }
+        let firstNext = all.firstIndex { $0.trip.first.departure > now.addingTimeInterval(-60) } ?? all.count
+        let list = all.dropFirst(max(0, firstNext - 2)).prefix(12)         // at most two that have left
         return list.map { p in
             let f = p.trip.first, info = ns.rail(f)
             let cancelled = f.cancelled || info?.cancelled == true
@@ -265,7 +268,9 @@ struct HomeView: View {
         let rail = Set(live.nearStops.filter(\.rail).map(\.id))
         let station = live.nearStops.first(where: \.rail).map { Fmt.place($0.name) } ?? ""
         let now = Date()
-        return live.nearBoard.filter { rail.contains($0.stopId) && $0.time > now.addingTimeInterval(-15 * 60) }.prefix(12).map { d in
+        let list = live.nearBoard.filter { rail.contains($0.stopId) && $0.time > now.addingTimeInterval(-30 * 60) }
+        let firstNext = list.firstIndex { ($0.cancelled ? $0.scheduled : $0.time) > now.addingTimeInterval(-60) } ?? list.count
+        return list.dropFirst(max(0, firstNext - 2)).prefix(12).map { d in
             let gone = !d.cancelled && d.time < now.addingTimeInterval(-60)
             let status = d.cancelled ? "Cancelled" : gone ? "Departed" : (d.live && d.delay >= 1) ? Fmt.hhmm(d.time) : d.live ? "On time" : "Planned"
             var isPicked = false
@@ -493,11 +498,21 @@ struct HomeView: View {
             let here = live.nearStops.filter { $0.name == name }
             let ids = Set(here.map(\.id))
             let isRail = !ids.isDisjoint(with: rail)
-            let rows = Array(live.nearBoard.filter { ids.contains($0.stopId) && ($0.time > Date().addingTimeInterval(-5 * 60) || $0.cancelled) }.prefix(6))
+            // at most two that have left, then what's next; Earlier and Later move through the rest
+            let all = live.nearBoard.filter { ids.contains($0.stopId) }
+            let firstNext = all.firstIndex { ($0.cancelled ? $0.scheduled : $0.time) > Date().addingTimeInterval(-60) } ?? all.count
+            let start = min(max(0, firstNext - 2 + (nearShift[name] ?? 0)), max(0, all.count - 6))
+            let rows = Array(all.dropFirst(start).prefix(6))
             PlannerStop(name: "\(Fmt.place(name)) · \(Fmt.distance(here.map(\.meters).min() ?? 0))", rail: isRail)
             if rows.isEmpty {
                 Text("Nothing leaving here soon.").font(BoardInk.sans(11, .regular)).foregroundStyle(Color.white.opacity(0.75))
             } else {
+                HStack(spacing: 6) {
+                    shiftButton("‹ Earlier", enabled: start > 0) { nearShift[name] = (nearShift[name] ?? 0) - 3 }
+                    if (nearShift[name] ?? 0) != 0 { shiftButton("Now", enabled: true) { nearShift[name] = nil } }
+                    Spacer()
+                    shiftButton("Later ›", enabled: start + 6 < all.count) { nearShift[name] = (nearShift[name] ?? 0) + 4 }
+                }
                 PlannerColumns()
                 ForEach(rows) { d in
                     PlannerBusRow(line: isRail ? Transit.trainLabel(d.line) : d.line, to: Fmt.place(d.headsign), time: d.cancelled ? d.scheduled : d.time,
@@ -507,6 +522,14 @@ struct HomeView: View {
                 }
             }
         }
+    }
+
+    private func shiftButton(_ t: String, enabled: Bool, _ go: @escaping () -> Void) -> some View {
+        Button { withAnimation(.easeInOut(duration: 0.2)) { go() } } label: {
+            Text(t).font(BoardInk.sans(11)).foregroundStyle(.white)
+                .padding(.horizontal, 10).padding(.vertical, 4).background(Color.white.opacity(0.14), in: Capsule())
+        }
+        .buttonStyle(.plain).disabled(!enabled).opacity(enabled ? 1 : 0.35)
     }
 
     /// "All lines" on the planner: your trip, then the buses (the trains are on the LED strip above).

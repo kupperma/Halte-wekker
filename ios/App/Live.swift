@@ -82,8 +82,15 @@ final class LiveStore: ObservableObject {
             }
         }
         guard !nearStops.isEmpty else { return }
-        let b = await Transit.board(stopIds: nearStops.map(\.id), from: Date().addingTimeInterval(-10 * 60), n: 14)
-        if !b.isEmpty { nearBoard = b.sorted { $0.time < $1.time } }
+        // the last few that left, and the next ones (asked for apart, or a busy stop fills the list with ones that left)
+        let ids = nearStops.map(\.id)
+        async let past = Transit.board(stopIds: ids, from: Date().addingTimeInterval(-20 * 60), n: 6)
+        async let next = Transit.board(stopIds: ids, from: Date().addingTimeInterval(-60), n: 20)
+        let (p, n) = await (past, next)
+        // the sides of a stop can each list the same bus: keep it once
+        var seen = Set<String>()
+        let b = (n + p).filter { seen.insert("\($0.tripId)|\($0.stopName)").inserted }
+        if !b.isEmpty { nearBoard = b.sorted { ($0.cancelled ? $0.scheduled : $0.time) < ($1.cancelled ? $1.scheduled : $1.time) } }
     }
 
     var stops: StopsStore { StopsStore.shared }
