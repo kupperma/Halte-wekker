@@ -2983,8 +2983,8 @@ const add=(geo,m,x,y,z,rx=0,ry=0)=>{const o=new T.Mesh(geo,m);o.position.set(x,y
 add(jag(new T.PlaneGeometry(90,8,40,6),.35),wallM,-3.3,2.6,-34,0,Math.PI/2);
 add(jag(new T.PlaneGeometry(16,90,8,40),.3),wallM,1.6,5.5,-34,Math.PI/2,0);
 add(jag(new T.PlaneGeometry(90,7,40,5),.35),wallM,8.4,2.2,-34,0,-Math.PI/2);
-add(jag(new T.BoxGeometry(4.8,1,90,4,1,40),.1),floorM,-1,-.5,-34);
-add(new T.BoxGeometry(.22,.05,90),edgeM,1.25,.02,-34);
+add(jag(new T.BoxGeometry(6.02,1,90,6,1,40),.1),floorM,-.39,-.5,-34);   // the platform reaches the train (15 cm gap)
+add(new T.BoxGeometry(.22,.05,90),edgeM,2.4,.02,-34);
 add(new T.BoxGeometry(7,.4,90),darkM,4.6,-1.25,-34);
 const railM=mat(0x8a93a8,{metalness:.4,roughness:.5});[3.45,5.0].forEach(x=>add(new T.BoxGeometry(.1,.12,90),railM,x,-.98,-34));
 for(let z=4;z>-80;z-=1.4) add(new T.BoxGeometry(2.4,.1,.35),mat(0x2b2420),4.22,-1.04,z);
