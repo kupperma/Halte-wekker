@@ -105,7 +105,7 @@ struct LockScreenTrip: View {
                     }
                 }
             }
-            MetroTrack(progress: s.progress, home: s.goingHome)
+            MetroTrack(progress: s.progress, home: s.goingHome, stops: s.stops)
                 .frame(height: 24)
                 .id(s.stopName)                              // a new leg: a new metro rolls in
             if s.ringing { StopButton(size: 15) }
@@ -157,7 +157,7 @@ struct TripLiveActivity: Widget {
                             Spacer(minLength: 4)
                             Countdown(to: s.legTo ?? s.arrival).font(HWFont.body(12, bold: true)).foregroundStyle(p.accent).frame(maxWidth: 70, alignment: .trailing)
                         }
-                        MetroTrack(progress: s.progress, home: s.goingHome).frame(height: 18).id(s.stopName)
+                        MetroTrack(progress: s.progress, home: s.goingHome, stops: s.stops).frame(height: 18).id(s.stopName)
                         if s.ringing { StopButton(size: 14) }
                         else if s.song != nil { SongLine(s: s, size: 10) }
                         else if let n = s.nextText { Text(n).font(HWFont.body(11)).foregroundStyle(HWPalette.muted).lineLimit(1) }

@@ -739,7 +739,7 @@ struct RideView: View {
         .frame(maxWidth: .infinity).padding(.top, 12)
         // the metro drives along as you get closer, like a song's progress bar
         TimelineView(.periodic(from: .now, by: 2)) { ctx in
-            MetroTrack(progress: trip.progress(at: ctx.date), home: trip.direction == .home).frame(height: 34)
+            MetroTrack(progress: trip.progress(at: ctx.date), home: trip.direction == .home, stops: trip.stopMarks.map(\.fraction)).frame(height: 34)
         }
         .id(trip.index)
         .padding(.top, 10)
@@ -749,6 +749,7 @@ struct RideView: View {
             Text(trip.legTo.map { "\(Fmt.hhmm($0)) \(trip.leg?.to.short ?? "")" } ?? (trip.leg?.to.short ?? ""))
         }
         .font(HWFont.body(11)).foregroundStyle(HWPalette.muted).padding(.top, 4)
+        if !trip.stopMarks.isEmpty { StopLabels(marks: trip.stopMarks, pal: pal).padding(.top, 4) }
         Text(trip.phase == .awake ? (trip.ringAtStop ? "You’re awake. It rings once more at the stop." : "You’re awake. Get your things ready.")
                                   : "It rings at \(Fmt.distance(trip.wakeKm * 1000)) from the stop.")
             .font(HWFont.body(13)).foregroundStyle(HWPalette.muted).frame(maxWidth: .infinity).padding(.top, 8)
@@ -780,6 +781,45 @@ struct RideView: View {
         if !line.isEmpty { Text(line.prefix(1).uppercased() + line.dropFirst()).font(HWFont.body(12)).foregroundStyle(HWPalette.ink.opacity(0.85)) }
         Text(trip.pickedByHand ? "You picked it in the list." : trip.matchMeters.map { "Recognised: its live position is \($0) m from yours." } ?? "Recognised from its live position.")
             .font(HWFont.body(11)).foregroundStyle(HWPalette.muted)
+    }
+}
+
+/// The stops along the way under the track: name and time, the next one highlighted, the ones you passed faded.
+/// Two rows when names would overlap.
+struct StopLabels: View {
+    let marks: [StopMark]
+    let pal: HWPalette
+    private static func width(_ m: StopMark) -> CGFloat { CGFloat(max(m.name.count, 5)) * 6.2 + 8 }
+    private static func rows(_ marks: [StopMark], _ w: CGFloat) -> [Int] {
+        var last: [CGFloat?] = [nil, nil], out: [Int] = []
+        for m in marks {
+            let x = MetroTrack.x(m.fraction) * w, half = width(m) / 2
+            var row = 0
+            if let l = last[0], x - half < l + 6 { row = (last[1].map { x - half >= $0 + 6 } ?? true) ? 1 : 0 }
+            last[row] = x + half
+            out.append(row)
+        }
+        return out
+    }
+    var body: some View {
+        GeometryReader { g in
+            let w = g.size.width, rows = Self.rows(marks, w), now = Date()
+            let next = marks.firstIndex { ($0.time ?? .distantFuture) > now }
+            ZStack(alignment: .topLeading) {
+                ForEach(Array(marks.enumerated()), id: \.offset) { i, m in
+                    let passed = (m.time ?? .distantFuture) <= now
+                    VStack(spacing: 0) {
+                        Text(m.name).font(HWFont.body(10, bold: true)).lineLimit(1).fixedSize()
+                        if let t = m.time { Text(Fmt.hhmm(t)).font(HWFont.body(9)) }
+                    }
+                    .foregroundStyle(i == next ? pal.accent : HWPalette.ink.opacity(passed ? 0.4 : 0.85))
+                    .position(x: min(w - Self.width(m) / 2, max(Self.width(m) / 2, MetroTrack.x(m.fraction) * w)), y: rows[i] == 0 ? 13 : 39)
+                }
+            }
+        }
+        .frame(height: Self.rows(marks, 340).contains(1) ? 52 : 26)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Stops along the way: " + marks.map { "\($0.name)\($0.time.map { " at " + Fmt.hhmm($0) } ?? "")" }.joined(separator: ", "))
     }
 }
 

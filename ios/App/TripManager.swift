@@ -569,13 +569,43 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         legArrival = s.arrival
         legTo = s.arrival
         let from = CLLocation(latitude: leg.from.coordinate.latitude, longitude: leg.from.coordinate.longitude)
-        if let b = timed.min(by: { d($0, from) < d($1, from) }), d(b, from) < 1500, let dep = b.arrival, dep < s.arrival! { legFrom = dep }
-        // Only the stops up to yours.
-        if let end = stops.firstIndex(where: { $0.name == s.name && $0.arrival == s.arrival }) { vehicleStops = Array(stops[...end]) } else { vehicleStops = stops }
+        var start = 0
+        if let b = timed.min(by: { d($0, from) < d($1, from) }), d(b, from) < 1500, let dep = b.arrival, dep < s.arrival! {
+            legFrom = dep
+            start = stops.firstIndex(where: { $0.name == b.name && $0.arrival == b.arrival }) ?? 0
+        }
+        // Only the stops from where you got on up to yours.
+        if let end = stops.firstIndex(where: { $0.name == s.name && $0.arrival == s.arrival }), end >= start { vehicleStops = Array(stops[start...end]) } else { vehicleStops = stops }
     }
 
     /// The next stop the bus or train reaches, and when.
     var nextStop: TripStop? { vehicleStops.first { ($0.arrival ?? .distantPast) > Date() } }
+
+    /// The stops along the way, for the track: every station for a train; for a bus only the bigger ones
+    /// (the first stop in each new town, and stations), at most four.
+    var stopMarks: [StopMark] {
+        guard vehicleStops.count > 2, let v = vehicle else { return [] }
+        let mid = Array(vehicleStops.dropFirst().dropLast())
+        let town: (String) -> String = { $0.components(separatedBy: ",").first?.trimmingCharacters(in: .whitespaces) ?? $0 }
+        var picked: [(TripStop, String)] = []
+        if v.isTrain {
+            let list = mid.count <= 6 ? mid : (0..<6).map { mid[$0 * (mid.count - 1) / 5] }
+            picked = list.map { ($0, Fmt.place($0.name)) }
+        } else {
+            var last = town(vehicleStops[0].name)
+            for s in mid {
+                let t = town(s.name), station = s.name.lowercased().contains("station")
+                if t != last || station { picked.append((s, station ? Fmt.place(s.name) : t)); last = t }
+            }
+            picked = Array(picked.prefix(4))
+        }
+        let a = legFrom ?? vehicleStops.first?.arrival, b = legTo ?? vehicleStops.last?.arrival
+        return picked.enumerated().map { (i, p) -> StopMark in
+            var f = Double(i + 1) / Double(picked.count + 1)
+            if let a, let b, let t = p.0.arrival, b > a { f = min(1, max(0, t.timeIntervalSince(a) / b.timeIntervalSince(a))) }
+            return StopMark(name: p.1, time: p.0.arrival, fraction: f)
+        }
+    }
 
     // MARK: what leaves next
 
@@ -792,7 +822,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
                      arrival: arrival, finalName: finalName, nextText: nextText, awake: awake, goingHome: direction == .home,
                      kicker: kicker, stopName: leg?.to.spoken ?? "", progress: (progress() * 100).rounded() / 100,
                      legFrom: legFrom, legTo: legTo, song: song?.title, artist: song?.artist, songPlaying: song?.playing ?? false,
-                     musicApp: song?.app, ringing: { () -> Bool in if case .alarm = phase { return true }; return false }())
+                     musicApp: song?.app, stops: stopMarks.map(\.fraction), ringing: { () -> Bool in if case .alarm = phase { return true }; return false }())
     }
 
     private func startActivity() {

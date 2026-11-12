@@ -22,6 +22,7 @@ struct TripAttributes: ActivityAttributes {
         var artist: String?
         var songPlaying: Bool
         var musicApp: String?
+        var stops: [Double] = []    // where the stops along the way are on the track (0…1)
         var ringing = false         // the alarm is sounding: show "Stop alarm"
     }
     var routeName: String

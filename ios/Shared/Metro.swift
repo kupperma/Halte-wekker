@@ -102,10 +102,21 @@ struct MetroTrain: View {
 }
 
 /// The track along the bottom of the ride screen and the lock screen. `progress` 0…1 moves the train's nose.
+/// A stop along the way: its name, when you're there, and where it is on the track (0…1).
+struct StopMark: Identifiable, Hashable {
+    var id: String { "\(name)|\(fraction)" }
+    let name: String
+    let time: Date?
+    let fraction: Double
+}
+
 struct MetroTrack: View {
     let progress: Double
     let home: Bool
     var cars = 3
+    var stops: [Double] = []            // ticks for the stops along the way
+    /// Where a point of the trip (0…1) sits along the track, as a share of its width.
+    static func x(_ f: Double) -> Double { 0.04 + 0.96 * min(1, max(0, f)) }
     var body: some View {
         let pal = HWPalette.of(home: home)
         GeometryReader { g in
@@ -117,6 +128,11 @@ struct MetroTrack: View {
             ZStack(alignment: .bottomLeading) {
                 Rectangle().fill(pal.brass.opacity(0.45)).frame(width: w, height: 1)
                 Rectangle().fill(pal.accent).frame(width: nose, height: 1.5)
+                ForEach(Array(stops.enumerated()), id: \.offset) { _, f in
+                    Circle().fill(f <= progress ? pal.accent : HWPalette.ink.opacity(0.85)).frame(width: 6, height: 6)
+                        .overlay(Circle().stroke(Color.black.opacity(0.6), lineWidth: 1))
+                        .offset(x: Self.x(f) * w - 3, y: 0)
+                }
                 MetroTrain(home: home, cars: cars)
                     .frame(width: trainW, height: carH)
                     .offset(x: nose - trainW, y: -2)
