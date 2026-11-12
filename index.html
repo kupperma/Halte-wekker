@@ -3348,6 +3348,51 @@ const extrasAt=(()=>{
       const c=(Math.sin(t/LOOP*6.283*3)+1)/2;cook.position.x=-2.95+c*.75;buyer.position.x=XB+.36+Math.sin(t/LOOP*6.283*2)*.03;};
   })();
 
+  // Litter: a few cups, cans, bits of paper, wrappers, receipts and a newspaper page. Mostly by the bins and benches
+  // (and a dropped cone of fries by the stall), a little lying about. Each piece is set down flat on the real floor
+  // (which is a little bumpy): we look straight down for the floor, then lower the piece until its underside touches it.
+  // Litter is drawn after the station but without hiding what's behind it, so people walking over it stay on top.
+  {let sd=101;const rnd=()=>{sd=(sd*16807)%2147483647;return sd/2147483647;};
+   const floor=scene.children.filter(o=>o.isMesh&&o.material===floorM),ray=new T.Raycaster(),down=new T.Vector3(0,-1,0),bb=new T.Box3();
+   const groundAt=(x,z)=>{ray.set(new T.Vector3(x,2,z),down);const h=ray.intersectObjects(floor)[0];return h?h.point.y:0;};
+   // crumpling that keeps the shape closed: each corner moves by an amount that depends only on where it is
+   const crumple=(g,a)=>{const p=g.attributes.position;for(let i=0;i<p.count;i++){const x=p.getX(i),y=p.getY(i),z=p.getZ(i),hh=Math.sin(x*917.3+y*373.1+z*531.7)*43758.5,f=1+(hh-Math.floor(hh)-.5)*a;p.setXYZ(i,x*f,y*f,z*f);}g.computeVertexNormals();return g;};
+   const M={};const m=(c,metal)=>M[c+(metal?'m':'')]||(M[c+(metal?'m':'')]=mat(c,metal?{metalness:.6,roughness:.35}:{roughness:.8}));
+   const news=tex(128,96,(x,w,h)=>{x.fillStyle='#e6e1d4';x.fillRect(0,0,w,h);x.fillStyle='#2a2a28';x.fillRect(8,6,w-16,10);
+     x.fillStyle='#8a8577';x.fillRect(8,22,50,34);x.fillStyle='rgba(40,40,38,.55)';for(let c=0;c<3;c++)for(let r=0;r<10;r++){if(c===0&&r<5) continue;x.fillRect(8+c*40,22+r*7,34,2.5);}});
+   const settle=o=>o.traverse(q=>{if(q.isMesh){q.renderOrder=1;q.material.depthWrite=false;}});
+   // put a piece down: turn it, then lower it so it rests on the floor (on the guide strips, on top of them)
+   const put=(o,x,z,rx,ry,rz)=>{o.rotation.set(rx||0,ry||0,rz||0,'YXZ');o.position.set(x,0,z);scene.add(o);o.updateMatrixWorld(true);bb.setFromObject(o);
+     let g=groundAt(x,z);if((x>1.15&&x<1.45)||(x>1.7&&x<2.2)) g=Math.max(g,.066);o.position.y=g-bb.min.y+.002;settle(o);return o;};
+   const kinds={
+     paper:(x,z)=>{const r=.035+rnd()*.03;put(new T.Mesh(crumple(new T.IcosahedronGeometry(r,1),.6),m([0xe9e4d6,0xd9d2bf,0xf2efe8,0xc9d6e6][Math.floor(rnd()*4)])),x,z,rnd()*6,rnd()*6,0);},
+     can:(x,z)=>{const b=new T.Mesh(new T.CylinderGeometry(.033,.033,.12,8),m([0xc0392b,0xb8bec6,0x2e8b57,0x2a5db0,0xf1c40f][Math.floor(rnd()*5)],true));if(rnd()<.5) b.scale.set(1,.7,1);put(b,x,z,0,rnd()*6,Math.PI/2);},
+     cup:(x,z)=>{const g=new T.Group(),b=new T.Mesh(new T.CylinderGeometry(.045,.033,.11,8,1,true),new T.MeshStandardMaterial({color:[0xf2efe8,0xf2efe8,0x9b1f26,0x6f4a2e][Math.floor(rnd()*4)],roughness:.7,side:T.DoubleSide}));
+       b.rotation.z=Math.PI/2;g.add(b);if(rnd()<.6){const l=new T.Mesh(new T.CylinderGeometry(.047,.047,.012,8),m(0x2b2b2b));l.rotation.z=Math.PI/2;l.position.x=.058;g.add(l);}put(g,x,z,0,rnd()*6,0);},
+     wrapper:(x,z)=>{put(new T.Mesh(crumple(new T.BoxGeometry(.15,.012,.1,2,1,2),.4),m([0xe67e22,0xf1c40f,0x8e44ad,0x2980b9,0xd35400][Math.floor(rnd()*5)],true)),x,z,0,rnd()*6,0);},
+     receipt:(x,z)=>{put(new T.Mesh(new T.PlaneGeometry(.06,.11),m(0xf4f2ec)),x,z,-Math.PI/2,rnd()*6,0);},
+     page:(x,z)=>{put(new T.Mesh(new T.PlaneGeometry(.42,.3),new T.MeshStandardMaterial({map:news,roughness:.9,side:T.DoubleSide})),x,z,-Math.PI/2,rnd()*6,0);},
+     bottle:(x,z)=>{const g=new T.Group(),b=new T.Mesh(new T.CylinderGeometry(.032,.032,.2,8),mat(0x8fc4dc,{roughness:.25,metalness:.1}));b.rotation.z=Math.PI/2;g.add(b);
+       const cap=new T.Mesh(new T.CylinderGeometry(.015,.015,.03,6),m([0x2a5db0,0xe74c3c,0xffffff][Math.floor(rnd()*3)]));cap.rotation.z=Math.PI/2;cap.position.x=.115;g.add(cap);put(g,x,z,0,rnd()*6,0);},
+     cone:(x,z)=>{const g=new T.Group(),c=new T.Mesh(new T.ConeGeometry(.05,.15,8,1,true),new T.MeshStandardMaterial({color:0xb3242c,roughness:.6,side:T.DoubleSide}));c.rotation.z=Math.PI/2;g.add(c);
+       for(let i=0;i<5;i++){const f=new T.Mesh(new T.BoxGeometry(.06,.01,.01),m(0xf4c542));f.position.set(-.09-rnd()*.05,-.02,(rnd()-.5)*.08);f.rotation.y=(rnd()-.5)*1.2;g.add(f);}put(g,x,z,0,rnd()*6,0);},
+   };
+   const pick=w=>{let r=rnd()*w.reduce((a,b)=>a+b[1],0);for(const [k,p] of w){if((r-=p)<0) return k;}return w[0][0];};
+   const mix=[['paper',5],['can',3],['cup',3],['wrapper',3],['receipt',2],['page',1],['bottle',1]];
+   const drop=(x,z,k)=>kinds[k||pick(mix)](x,z);
+   // round the bins, and a full one here and there
+   for(let i=4;i<24;i+=2){const bz=-8-i*6-1.1,n=2+Math.floor(rnd()*3);for(let j=0;j<n;j++){const a=rnd()*6.283,r=.27+rnd()*.3;drop(-1.98+Math.cos(a)*r,bz+Math.sin(a)*r);}
+     if(rnd()<.4){const c=new T.Mesh(new T.CylinderGeometry(.045,.033,.11,8),m(0xf2efe8));c.position.set(-1.92,.88,bz+.05);c.rotation.z=.5;scene.add(c);}}
+   // by the benches, now and then
+   for(let i=3;i<24;i+=2){if(i===9||rnd()<.5) continue;drop(-2.15+(rnd()-.5)*.5,-8-i*6+3+(rnd()-.5)*2);}
+   // a newspaper and a can left on a bench
+   {const o=new T.Mesh(new T.PlaneGeometry(.42,.3),new T.MeshStandardMaterial({map:news,roughness:.9}));o.rotation.order='YXZ';o.rotation.y=.4;o.rotation.x=-Math.PI/2;o.position.set(-1.98,.54,-47.3);scene.add(o);
+    const c=new T.Mesh(new T.CylinderGeometry(.033,.033,.12,8),m(0xc0392b,true));c.position.set(-1.95,.6,-46.2);scene.add(c);}
+   // a few bits lying about, behind the guide line (away from the escalators and the lift)
+   for(let i=0;i<28;i++){const z=-3-Math.pow(rnd(),1.3)*90,x=z>-20?-1.2+rnd()*2.2:-2.2+rnd()*3.2;drop(x,z);}
+   // by the stall: a dropped cone of fries and a napkin
+   drop(-.95,-58.6,'cone');drop(-1.2,-58.1,'receipt');}
+
   return function(time){
     const t=((time%LOOP)+LOOP)%LOOP;
     // escalator steps glide up, one every 0.75 s

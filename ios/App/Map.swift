@@ -159,6 +159,7 @@ private enum MapInk {
 
 /// Wear and tear: the same stains, smudges, scratches, coffee ring and tape as the map on the wall.
 private let mapGrime: UIImage? = Bundle.main.path(forResource: "map-grime", ofType: "png").flatMap(UIImage.init(contentsOfFile:))
+private let mapSticker: UIImage? = Bundle.main.path(forResource: "sticker-smile", ofType: "png").flatMap(UIImage.init(contentsOfFile:))
 
 /// Your commute as a metro map: the rail corridor Breda–Tilburg–Boxtel with both Intercitys side by side, splitting
 /// at Boxtel to Den Bosch and to Eindhoven, the 306 and 305 to Veghel and the bus to BUas. Your fastest route glows yellow.
@@ -282,6 +283,15 @@ struct MetroMapMenu: View {
                 .frame(width: 306, alignment: .trailing).offset(x: 20, y: 543)
             if let g = mapGrime {
                 Image(uiImage: g).resizable().frame(width: MapSpot.design.width, height: MapSpot.design.height).allowsHitTesting(false)
+            }
+            // A sticker someone slapped on the glass over the corner of the map: the same one, in the same spot, as in
+            // the station video (centre 336, 8; 33 wide; turned 0.3 rad), so it sits on top of the menu and hangs over the frame.
+            if let s = mapSticker {
+                Image(uiImage: s).resizable().frame(width: 33.3, height: 33.3)
+                    .rotationEffect(.radians(0.3))
+                    .offset(x: 336 - 16.65, y: 8 - 16.65)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
             }
         }
         .frame(width: MapSpot.design.width, height: MapSpot.design.height)
