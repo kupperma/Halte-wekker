@@ -84,7 +84,16 @@ struct HomeStage: View {
     }
 }
 
-// MARK: the map
+// MARK: the map (Berlin style: white paper, bold colour lines at 45°, white interchange markers, line badges)
+
+private enum MapInk {
+    static let paper = Color(hex: 0xF7F5EF)
+    static let text = Color(hex: 0x1D1D1B)
+    static let grey = Color(hex: 0x6B6B6B)
+    static let soft = Color(hex: 0x8A877F)
+    static let rule = Color(hex: 0xDDD9CE)
+    static func sans(_ size: CGFloat, _ w: Font.Weight = .regular) -> Font { .system(size: size, weight: w) }
+}
 
 /// The double brass rule with corner diamonds, like on the boarding pass.
 private struct MapFrame: View {
@@ -97,51 +106,58 @@ private struct MapFrame: View {
             ctx.stroke(Path(r2), with: .color(pal.brass), lineWidth: 1.5)
             for p in [CGPoint(x: r2.minX, y: r2.minY), CGPoint(x: r2.maxX, y: r2.minY), CGPoint(x: r2.minX, y: r2.maxY), CGPoint(x: r2.maxX, y: r2.maxY)] {
                 var d = Path(); d.move(to: CGPoint(x: p.x, y: p.y - 5)); d.addLine(to: CGPoint(x: p.x + 5, y: p.y)); d.addLine(to: CGPoint(x: p.x, y: p.y + 5)); d.addLine(to: CGPoint(x: p.x - 5, y: p.y)); d.closeSubpath()
-                ctx.fill(d, with: .color(pal.paper)); ctx.stroke(d, with: .color(pal.brass), lineWidth: 1.5)
+                ctx.fill(d, with: .color(MapInk.paper)); ctx.stroke(d, with: .color(pal.brass), lineWidth: 1.5)
             }
-            // faint map grid
-            var g = Path(), x: CGFloat = 0
-            while x < size.width { g.move(to: CGPoint(x: x, y: 0)); g.addLine(to: CGPoint(x: x, y: size.height)); x += 11 }
-            var y: CGFloat = 0
-            while y < size.height { g.move(to: CGPoint(x: 0, y: y)); g.addLine(to: CGPoint(x: size.width, y: y)); y += 11 }
-            ctx.stroke(g, with: .color(.white.opacity(0.035)), lineWidth: 0.5)
         }
         .allowsHitTesting(false)
     }
 }
 
-/// Your commute as a metro map. The route of your fastest trip is drawn bright, the other one paler.
+/// Your commute as a network map. The route of your fastest trip is highlighted in yellow.
 struct NetworkMap: View {
     let via: String?
     var body: some View {
         Canvas { ctx, _ in
-            let pt: [String: CGPoint] = ["bd": .init(x: 40, y: 60), "buas": .init(x: 22, y: 122), "til": .init(x: 122, y: 80),
-                                         "ht": .init(x: 204, y: 30), "ehv": .init(x: 214, y: 124), "vg": .init(x: 300, y: 62)]
-            let gold = Color(hex: 0xF4C542), green = Color(hex: 0x4CC38A), copper = Color(hex: 0xE0814E)
-            let viaEhv = via == "Eindhoven"
-            func line(_ a: String, _ b: String, _ c: Color, _ on: Bool = true) {
-                var p = Path(); p.move(to: pt[a]!); p.addLine(to: pt[b]!)
-                ctx.stroke(p, with: .color(c.opacity(on ? 1 : 0.5)), style: StrokeStyle(lineWidth: 6, lineCap: .round))
+            func stroke(_ pts: [CGPoint], _ c: Color, _ w: CGFloat) {
+                var p = Path(); p.move(to: pts[0]); for q in pts.dropFirst() { p.addLine(to: q) }
+                ctx.stroke(p, with: .color(c), style: StrokeStyle(lineWidth: w, lineCap: .round, lineJoin: .round))
             }
-            line("bd", "til", gold)
-            line("til", "ht", gold, !viaEhv); line("til", "ehv", gold, viaEhv)
-            line("vg", "ht", green, !viaEhv); line("vg", "ehv", green, viaEhv)
-            line("bd", "buas", copper)
-            for (k, big) in [("til", false), ("bd", true), ("ht", true), ("ehv", true), ("vg", true), ("buas", true)] {
-                let r: CGFloat = big ? 7 : 4.5, c = pt[k]!
-                let dot = Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: 2 * r, height: 2 * r))
-                ctx.fill(dot, with: .color(.white)); ctx.stroke(dot, with: .color(Color(hex: 0x14121A)), lineWidth: 2.5)
+            func P(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: x, y: y) }
+            let glow = Color(red: 1, green: 0.84, blue: 0.25).opacity(0.55)
+            if via == "Eindhoven" { stroke([P(46, 110), P(128, 110), P(188, 174), P(228, 174), P(292, 110)], glow, 14) }
+            else { stroke([P(46, 110), P(128, 110), P(188, 46), P(228, 46), P(292, 110)], glow, 14) }
+            stroke([P(46, 110), P(46, 178)], glow, 14)
+            stroke([P(46, 106.5), P(128, 106.5), P(188, 46.5), P(214, 46.5)], Color(hex: 0x224F86), 5)
+            stroke([P(46, 113.5), P(128, 113.5), P(188, 173.5), P(214, 173.5)], Color(hex: 0x528DBA), 5)
+            stroke([P(214, 46), P(228, 46), P(292, 110)], Color(hex: 0xDA421E), 5)
+            stroke([P(214, 174), P(228, 174), P(292, 110)], Color(hex: 0xF3791D), 5)
+            stroke([P(46, 110), P(46, 178)], Color(hex: 0x8C6DAB), 5)
+            func ring(_ c: CGPoint, _ r: CGFloat) {
+                let o = Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: 2 * r, height: 2 * r))
+                ctx.fill(o, with: .color(.white)); ctx.stroke(o, with: .color(MapInk.text), lineWidth: 2)
             }
-            func label(_ t: String, _ k: String, dx: CGFloat, dy: CGFloat, _ anchor: UnitPoint) {
-                ctx.draw(Text(t).font(HWFont.body(10, bold: true)).foregroundColor(HWPalette.ink), at: CGPoint(x: pt[k]!.x + dx, y: pt[k]!.y + dy), anchor: anchor)
+            func pill(_ c: CGPoint, _ w: CGFloat, _ h: CGFloat) {
+                let o = Path(roundedRect: CGRect(x: c.x - w / 2, y: c.y - h / 2, width: w, height: h), cornerRadius: w / 2)
+                ctx.fill(o, with: .color(.white)); ctx.stroke(o, with: .color(MapInk.text), lineWidth: 2)
             }
-            label("BREDA", "bd", dx: 0, dy: -11, .bottom); label("BUAS", "buas", dx: 14, dy: 0, .leading)
-            label("Tilburg", "til", dx: 0, dy: 10, .top); label("DEN BOSCH", "ht", dx: 0, dy: -11, .bottom)
-            label("EINDHOVEN", "ehv", dx: 0, dy: 11, .top); label("VEGHEL", "vg", dx: 0, dy: -11, .bottom)
+            pill(P(46, 110), 13, 22); pill(P(128, 110), 13, 22)
+            ring(P(214, 46), 6); ring(P(214, 174), 6); ring(P(292, 110), 7); ring(P(46, 178), 6)
+            func label(_ t: String, _ at: CGPoint, _ anchor: UnitPoint) {
+                ctx.draw(Text(t).font(MapInk.sans(11, .bold)).foregroundColor(MapInk.text), at: at, anchor: anchor)
+            }
+            label("Breda", P(46, 97), .bottom); label("BUas", P(58, 178), .leading); label("Tilburg", P(128, 125), .top)
+            label("Den Bosch", P(214, 37), .bottom); label("Eindhoven", P(214, 184), .top); label("Veghel", P(292, 97), .bottom)
+            func badge(_ t: String, _ c: CGPoint, _ col: Color) {
+                let w = CGFloat(t.count) * 7 + 10
+                ctx.fill(Path(roundedRect: CGRect(x: c.x - w / 2, y: c.y - 7.5, width: w, height: 15), cornerRadius: 3), with: .color(col))
+                ctx.draw(Text(t).font(MapInk.sans(9.5, .bold)).foregroundColor(.white), at: P(c.x, c.y + 0.5), anchor: .center)
+            }
+            badge("306", P(274, 66), Color(hex: 0xDA421E)); badge("305", P(274, 154), Color(hex: 0xF3791D))
+            badge("IC", P(146, 62), Color(hex: 0x224F86)); badge("IC", P(146, 158), Color(hex: 0x528DBA)); badge("BUS", P(72, 144), Color(hex: 0x8C6DAB))
         }
-        .frame(width: 318, height: 150)
+        .frame(width: 318, height: 220)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Map: Veghel by bus to Den Bosch or Eindhoven, the train to Breda, the bus to BUas.")
+        .accessibilityLabel("Network map: bus 306 from Veghel to Den Bosch or bus 305 to Eindhoven, the Intercity via Tilburg to Breda, the bus to BUas.")
     }
 }
 
@@ -156,63 +172,74 @@ struct MetroMapMenu: View {
     let toggle: () -> Void
     let settings: () -> Void
 
+    private var accent: Color { home ? Color(hex: 0x7A2A1E) : Color(hex: 0x1D2C5A) }
+
     var body: some View {
         let pal = HWPalette.of(home: home)
         ZStack(alignment: .topLeading) {
-            LinearGradient(colors: [pal.paper, pal.paper2], startPoint: .top, endPoint: .bottom)
+            MapInk.paper
             MapFrame(pal: pal)
-            Text("Haltewekker").font(HWFont.display(27)).foregroundStyle(HWPalette.ink).offset(x: 20, y: 19)
-            Text("METRO MAP OF YOUR COMMUTE").font(HWFont.body(9)).tracking(0.6).foregroundStyle(HWPalette.muted).offset(x: 20, y: 53)
+            Text("Haltewekker").font(MapInk.sans(24, .bold)).foregroundStyle(MapInk.text).offset(x: 20, y: 18)
+            Text("Network map · Veghel ⇄ Breda").font(MapInk.sans(10.5)).foregroundStyle(MapInk.grey).offset(x: 20, y: 49)
             Button(action: settings) {
-                Image(systemName: "gearshape").font(.system(size: 15, weight: .semibold)).foregroundStyle(pal.brass)
-                    .frame(width: 32, height: 32).overlay(Circle().stroke(pal.brass, lineWidth: 1.5))
+                Image(systemName: "gearshape").font(.system(size: 14, weight: .semibold)).foregroundStyle(MapInk.text)
+                    .frame(width: 30, height: 30).overlay(Circle().stroke(MapInk.text, lineWidth: 1.5))
             }
-            .buttonStyle(.plain).offset(x: 300, y: 24).accessibilityLabel("Settings")
+            .buttonStyle(.plain).offset(x: 299, y: 23).accessibilityLabel("Settings")
             Button(action: toggle) {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(home ? "GOING" : "GOING TO").font(HWFont.body(9)).foregroundStyle(HWPalette.ink.opacity(0.8))
-                    FlipTiles(word: home ? "HOME" : "BREDA", pal: pal, size: 0.74)
-                    Text(home ? "Breda → Veghel · tap to switch" : "Veghel → Breda · tap to switch").font(HWFont.body(10)).foregroundStyle(HWPalette.ink.opacity(0.8))
+                HStack(spacing: 6) {
+                    directionBadge("TO BREDA", on: !home)
+                    directionBadge("HOME", on: home)
+                    Text("tap to switch").font(MapInk.sans(9.5)).foregroundStyle(MapInk.soft).padding(.leading, 2)
                 }
-                .frame(width: 300, alignment: .leading).contentShape(Rectangle())
+                .contentShape(Rectangle())
             }
-            .buttonStyle(.plain).offset(x: 20, y: 83)
+            .buttonStyle(.plain).offset(x: 20, y: 72)
             .accessibilityLabel(home ? "Going home. Tap to switch to going to Breda." : "Going to Breda. Tap to switch to going home.")
-            NetworkMap(via: via).offset(x: 14, y: 166)
-            row(.fastest, letter: "F", fill: AnyShapeStyle(RatingStyle.fill("S")), sub: fastest, y: 330)
-            row(.lines, letter: "A", fill: AnyShapeStyle(Color(hex: 0x4CC38A)), sub: lines, y: 392)
-            row(.planned, letter: "P", fill: AnyShapeStyle(Color(hex: 0x7AA7FF)), sub: planned, y: 454)
+            NetworkMap(via: via).offset(x: 14, y: 108)
+            Text("PICK A LINE").font(MapInk.sans(9, .bold)).tracking(0.4).foregroundStyle(MapInk.soft).offset(x: 20, y: 334)
+            row(.fastest, letter: "F", fill: Color(hex: 0xF0D722), ink: MapInk.text, sub: fastest, y: 350)
+            row(.lines, letter: "A", fill: Color(hex: 0x7DAD4C), ink: .white, sub: lines, y: 408)
+            row(.planned, letter: "P", fill: Color(hex: 0x7E5330), ink: .white, sub: planned, y: 466)
             Button { open(.more) } label: {
                 HStack(spacing: 8) {
-                    Text("M").font(HWFont.display(12)).foregroundStyle(Color(hex: 0x14121A)).frame(width: 20, height: 20).background(HWPalette.muted, in: Circle())
-                    Text("More · leaderboard, single stop, tips").font(HWFont.body(10.5)).foregroundStyle(HWPalette.ink.opacity(0.85))
+                    Text("M").font(MapInk.sans(10, .bold)).foregroundStyle(.white).frame(width: 22, height: 16)
+                        .background(Color(hex: 0x8E8E8E), in: RoundedRectangle(cornerRadius: 3))
+                    Text("More · leaderboard, single stop, tips").font(MapInk.sans(10.5)).foregroundStyle(Color(hex: 0x3A3A38))
                 }
                 .padding(.vertical, 4).contentShape(Rectangle())
             }
-            .buttonStyle(.plain).offset(x: 20, y: 512)
+            .buttonStyle(.plain).offset(x: 20, y: 520)
         }
         .frame(width: MapSpot.design.width, height: MapSpot.design.height)
     }
 
-    private func row(_ s: HomeSection, letter: String, fill: AnyShapeStyle, sub: String, y: CGFloat) -> some View {
+    private func directionBadge(_ t: String, on: Bool) -> some View {
+        Text(t).font(MapInk.sans(12.5, .bold)).foregroundStyle(on ? .white : MapInk.soft)
+            .frame(width: 100, height: 28)
+            .background(on ? accent : .clear, in: RoundedRectangle(cornerRadius: 4))
+            .overlay(RoundedRectangle(cornerRadius: 4).stroke(on ? .clear : Color(hex: 0xB9B5AA), lineWidth: 1.2))
+    }
+
+    private func row(_ s: HomeSection, letter: String, fill: Color, ink: Color, sub: String, y: CGFloat) -> some View {
         Button { open(s) } label: {
             HStack(spacing: 12) {
-                Text(letter).font(HWFont.display(22)).foregroundStyle(Color(hex: 0x14121A)).offset(y: 1)
-                    .frame(width: 40, height: 40).background(fill, in: Circle())
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(s.title).font(HWFont.display(17)).foregroundStyle(HWPalette.ink)
-                    Text(sub).font(HWFont.body(10.5)).foregroundStyle(HWPalette.muted).lineLimit(1).minimumScaleFactor(0.8)
+                Text(letter).font(MapInk.sans(16, .bold)).foregroundStyle(ink)
+                    .frame(width: 40, height: 28).background(fill, in: RoundedRectangle(cornerRadius: 4))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(s.title).font(MapInk.sans(16, .bold)).foregroundStyle(MapInk.text)
+                    Text(sub).font(MapInk.sans(10.5)).foregroundStyle(MapInk.grey).lineLimit(1).minimumScaleFactor(0.8)
                 }
                 Spacer(minLength: 4)
-                Image(systemName: "chevron.right").font(.system(size: 12, weight: .bold)).foregroundStyle(HWPalette.of(home: home).brass)
+                Image(systemName: "chevron.right").font(.system(size: 12, weight: .bold)).foregroundStyle(MapInk.soft)
             }
-            .padding(.horizontal, 14).frame(width: 318, height: 54)
-            .background(Color.black.opacity(0.28))
-            .overlay(Rectangle().stroke(HWPalette.of(home: home).line, lineWidth: 1))
+            .padding(.leading, 6).padding(.trailing, 8)
+            .frame(width: 318, height: 50)
+            .overlay(alignment: .bottom) { Rectangle().fill(MapInk.rule).frame(height: 1).padding(.leading, 6) }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .offset(x: 14, y: y)
+        .offset(x: 14, y: y + 2)
         .accessibilityLabel("\(s.title). \(sub)")
     }
 }

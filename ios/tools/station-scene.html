@@ -162,44 +162,51 @@ function light(t){
 /* ---------- The metro map on the wall (the home screen's menu) ---------- */
 const PW=.78,PH=PW*562/346,PX0=-3.02,PZ=1.6,PY=2.12;
 function paintMap(home){
+  // A Berlin-style network map: white paper, bold colour lines at 45°, white interchange markers, line badges.
   const W=780,H=Math.round(W*562/346),k=W/346,c=document.createElement('canvas');c.width=W;c.height=H;const x=c.getContext('2d');
-  const P=home?{paper:'#1E1012',paper2:'#120809',brass:'#C9965A',line:'#76523A',accent:'#FFC27A'}:{paper:'#0F1428',paper2:'#090C18',brass:'#B9A066',line:'#5E5A44',accent:'#9BE7FF'};
-  const ink='#EDE3CC',muted='#A79F8C';
-  const g=x.createLinearGradient(0,0,0,H);g.addColorStop(0,P.paper);g.addColorStop(1,P.paper2);x.fillStyle=g;x.fillRect(0,0,W,H);
-  x.strokeStyle='rgba(255,255,255,.035)';x.lineWidth=1;for(let i=0;i<W;i+=22*k/2){x.beginPath();x.moveTo(i,0);x.lineTo(i,H);x.stroke();}for(let j=0;j<H;j+=22*k/2){x.beginPath();x.moveTo(0,j);x.lineTo(W,j);x.stroke();}
-  // brass double rule and corner diamonds
+  const P=home?{brass:'#C9965A',line:'#76523A',acc:'#7A2A1E'}:{brass:'#B9A066',line:'#5E5A44',acc:'#1D2C5A'};
+  const SANS='Helvetica Neue, Helvetica, Arial, sans-serif';
+  x.fillStyle='#F7F5EF';x.fillRect(0,0,W,H);
   x.strokeStyle=P.line;x.lineWidth=1*k;x.strokeRect(4*k,4*k,W-8*k,H-8*k);x.strokeStyle=P.brass;x.lineWidth=1.5*k;x.strokeRect(7*k,7*k,W-14*k,H-14*k);
-  [[7,7],[346-7,7],[7,562-7],[346-7,562-7]].forEach(([a,b])=>{x.beginPath();x.moveTo(a*k,(b-5)*k);x.lineTo((a+5)*k,b*k);x.lineTo(a*k,(b+5)*k);x.lineTo((a-5)*k,b*k);x.closePath();x.fillStyle=P.paper;x.fill();x.stroke();});
-  const TX=(t,px,py,font,col,al)=>{x.font=font;x.fillStyle=col;x.textAlign=al||'left';x.textBaseline='alphabetic';x.fillText(t,px*k,py*k);};
-  TX('Haltewekker',20,46,`700 ${27*k}px "Old Standard TT"`,ink);
-  TX('METRO MAP OF YOUR COMMUTE',20,62,`${9*k}px "Courier Prime"`,muted);
-  // settings dial
-  x.strokeStyle=P.brass;x.lineWidth=1.5*k;x.beginPath();x.arc(316*k,40*k,16*k,0,7);x.stroke();
-  // direction plaque with flip tiles
-  TX(home?'GOING':'GOING TO',20,92,`${9*k}px "Courier Prime"`,'rgba(237,227,204,.8)');
-  const word=home?'HOME':'BREDA';[...word].forEach((ch,i)=>{const tx=(20+i*31)*k,ty=98*k,tw=28*k,th=40*k;
-    const tg=x.createLinearGradient(0,ty,0,ty+th);tg.addColorStop(0,'#1C1A22');tg.addColorStop(.49,'#1C1A22');tg.addColorStop(.51,'#100F15');tg.addColorStop(1,'#100F15');x.fillStyle=tg;x.fillRect(tx,ty,tw,th);
-    x.fillStyle='rgba(0,0,0,.65)';x.fillRect(tx,ty+th/2-.5*k,tw,1*k);TX(ch,20+i*31+14,98+31,`700 ${27*k}px "Old Standard TT"`,P.accent,'center');});
-  TX(home?'Breda → Veghel · tap to switch':'Veghel → Breda · tap to switch',20,154,`${10*k}px "Courier Prime"`,'rgba(237,227,204,.8)');
+  [[7,7],[339,7],[7,555],[339,555]].forEach(([a,b])=>{x.beginPath();x.moveTo(a*k,(b-5)*k);x.lineTo((a+5)*k,b*k);x.lineTo(a*k,(b+5)*k);x.lineTo((a-5)*k,b*k);x.closePath();x.fillStyle='#F7F5EF';x.fill();x.stroke();});
+  const TX=(t,px,py,size,col,weight,al,base)=>{x.font=`${weight||400} ${size*k}px ${SANS}`;x.fillStyle=col;x.textAlign=al||'left';x.textBaseline=base||'alphabetic';x.fillText(t,px*k,py*k);};
+  const rr=(a,b,w,h,r)=>{x.beginPath();x.moveTo((a+r)*k,b*k);x.arcTo((a+w)*k,b*k,(a+w)*k,(b+h)*k,r*k);x.arcTo((a+w)*k,(b+h)*k,a*k,(b+h)*k,r*k);x.arcTo(a*k,(b+h)*k,a*k,b*k,r*k);x.arcTo(a*k,b*k,(a+w)*k,b*k,r*k);x.closePath();};
+  // header
+  TX('Haltewekker',20,44,24,'#1D1D1B',700);
+  TX('Network map · Veghel ⇄ Breda',20,60,10.5,'#6B6B6B',400);
+  x.strokeStyle='#1D1D1B';x.lineWidth=1.5*k;x.beginPath();x.arc(314*k,38*k,15*k,0,7);x.stroke();
+  // direction: two badges, the one you're going is filled
+  [['TO BREDA',20,!home],['HOME',126,home]].forEach(([t,bx,on])=>{rr(bx,72,100,28,4);if(on){x.fillStyle=P.acc;x.fill();}else{x.strokeStyle='#B9B5AA';x.lineWidth=1.2*k;x.stroke();}
+    TX(t,bx+50,86,12.5,on?'#FFFFFF':'#8A877F',700,'center','middle');});
+  TX('tap to switch',234,86,9.5,'#8A877F',400,'left','middle');
   // the network
-  const ox=14,oy=166,pt={bd:[40,60],buas:[22,122],til:[122,80],ht:[204,30],ehv:[214,124],vg:[300,62]};
-  const L=(a,b,col,w,al)=>{x.globalAlpha=al||1;x.strokeStyle=col;x.lineWidth=w*k;x.lineCap='round';x.beginPath();x.moveTo((ox+pt[a][0])*k,(oy+pt[a][1])*k);x.lineTo((ox+pt[b][0])*k,(oy+pt[b][1])*k);x.stroke();x.globalAlpha=1;};
-  L('bd','til','#F4C542',6);L('til','ht','#F4C542',6);L('til','ehv','#F4C542',6,.55);L('vg','ht','#4CC38A',6);L('vg','ehv','#4CC38A',6,.55);L('bd','buas','#E0814E',6);
-  const dot=(p,big)=>{const [a,b]=pt[p];x.fillStyle='#fff';x.strokeStyle='#14121A';x.lineWidth=2.5*k;x.beginPath();x.arc((ox+a)*k,(oy+b)*k,(big?7:4.5)*k,0,7);x.fill();x.stroke();};
-  ['til'].forEach(p=>dot(p,false));['bd','ht','ehv','vg','buas'].forEach(p=>dot(p,true));
-  const lab=(p,t,dx,dy,al)=>TX(t,ox+pt[p][0]+dx,oy+pt[p][1]+dy,`700 ${10*k}px "Courier Prime"`,ink,al);
-  lab('bd','BREDA',0,-12,'center');lab('buas','BUAS',14,4);lab('til','Tilburg',0,18,'center');lab('ht','DEN BOSCH',0,-12,'center');lab('ehv','EINDHOVEN',0,20,'center');lab('vg','VEGHEL',0,-12,'center');
-  // the menu: three lines
-  const rows=[['F','Fastest trip','Your next connection, door to door',null],['A','All lines','Every bus and train, live','#4CC38A'],['P','Planned trip','Travel with your friend’s train','#7AA7FF']];
-  rows.forEach(([l,t,s,col],i)=>{const y0=330+i*62;
-    x.fillStyle='rgba(0,0,0,.28)';x.fillRect(14*k,y0*k,318*k,54*k);x.strokeStyle=P.line;x.lineWidth=1*k;x.strokeRect(14*k,y0*k,318*k,54*k);
-    let f=col;if(!f){f=x.createLinearGradient(26*k,y0*k,70*k,(y0+54)*k);f.addColorStop(0,'#9C6D15');f.addColorStop(.45,'#F4C542');f.addColorStop(.6,'#FFF3C4');f.addColorStop(1,'#A87A1E');}
-    x.fillStyle=f;x.beginPath();x.arc(48*k,(y0+27)*k,20*k,0,7);x.fill();
-    TX(l,48,y0+35,`700 ${22*k}px "Old Standard TT"`,'#14121A','center');
-    TX(t,80,y0+24,`700 ${17*k}px "Old Standard TT"`,ink);TX(s,80,y0+41,`${10.5*k}px "Courier Prime"`,muted);
-    x.strokeStyle=P.brass;x.lineWidth=2*k;x.beginPath();x.moveTo(316*k,(y0+21)*k);x.lineTo(322*k,(y0+27)*k);x.lineTo(316*k,(y0+33)*k);x.stroke();});
-  x.fillStyle='#A79F8C';x.beginPath();x.arc(30*k,526*k,10*k,0,7);x.fill();TX('M',30,530,`700 ${12*k}px "Old Standard TT"`,'#14121A','center');
-  TX('More · leaderboard, single stop, tips',48,530,`${10.5*k}px "Courier Prime"`,'rgba(237,227,204,.85)');
+  const ox=14,oy=108,X=v=>(ox+v)*k,Y=v=>(oy+v)*k;
+  const path=(pts,col,w)=>{x.strokeStyle=col;x.lineWidth=w*k;x.lineCap='round';x.lineJoin='round';x.beginPath();pts.forEach(([a,b],i)=>i?x.lineTo(X(a),Y(b)):x.moveTo(X(a),Y(b)));x.stroke();};
+  const viaDB=[[46,110],[128,110],[188,46],[228,46],[292,110]];
+  path(viaDB,'rgba(255,214,64,.55)',14);path([[46,110],[46,178]],'rgba(255,214,64,.55)',14);   // your fastest route, highlighted
+  path([[46,106.5],[128,106.5],[188,46.5],[214,46.5]],'#224F86',5);
+  path([[46,113.5],[128,113.5],[188,173.5],[214,173.5]],'#528DBA',5);
+  path([[214,46],[228,46],[292,110]],'#DA421E',5);
+  path([[214,174],[228,174],[292,110]],'#F3791D',5);
+  path([[46,110],[46,178]],'#8C6DAB',5);
+  const ring=(a,b,r)=>{x.fillStyle='#fff';x.strokeStyle='#1D1D1B';x.lineWidth=2*k;x.beginPath();x.arc(X(a),Y(b),r*k,0,7);x.fill();x.stroke();};
+  const pill=(a,b,w,h)=>{rr(ox+a-w/2,oy+b-h/2,w,h,w/2);x.fillStyle='#fff';x.fill();x.strokeStyle='#1D1D1B';x.lineWidth=2*k;x.stroke();};
+  pill(46,110,13,22);pill(128,110,13,22);ring(214,46,6);ring(214,174,6);ring(292,110,7);ring(46,178,6);
+  const lab=(t,a,b,al,base)=>TX(t,ox+a,oy+b,11,'#1D1D1B',700,al,base);
+  lab('Breda',46,96,'center','alphabetic');lab('BUas',58,178,'left','middle');lab('Tilburg',128,126,'center','top');
+  lab('Den Bosch',214,36,'center','alphabetic');lab('Eindhoven',214,184,'center','top');lab('Veghel',292,96,'center','alphabetic');
+  const badge=(t,cx,cy,col,ink)=>{const w=t.length*7+10;rr(ox+cx-w/2,oy+cy-7.5,w,15,3);x.fillStyle=col;x.fill();TX(t,ox+cx,oy+cy+.5,9.5,ink||'#fff',700,'center','middle');};
+  badge('306',274,66,'#DA421E');badge('305',274,154,'#F3791D');badge('IC',146,62,'#224F86');badge('IC',146,158,'#528DBA');badge('BUS',72,144,'#8C6DAB');
+  // the menu: pick a line
+  TX('PICK A LINE',20,342,9,'#8A877F',700);
+  const rows=[['F','Fastest trip','Your next connection, door to door','#F0D722','#1D1D1B'],['A','All lines','Every bus and train, live','#7DAD4C','#fff'],['P','Planned trip','Travel with your friend’s train','#7E5330','#fff']];
+  rows.forEach(([l,t,s,col,ink],i)=>{const y0=350+i*58;
+    rr(20,y0+12,40,28,4);x.fillStyle=col;x.fill();TX(l,40,y0+26.5,16,ink,700,'center','middle');
+    TX(t,72,y0+23,16,'#1D1D1B',700);TX(s,72,y0+39,10.5,'#6B6B6B',400);
+    x.strokeStyle='#8A877F';x.lineWidth=2*k;x.beginPath();x.moveTo(318*k,(y0+20)*k);x.lineTo(324*k,(y0+26)*k);x.lineTo(318*k,(y0+32)*k);x.stroke();
+    x.fillStyle='#DDD9CE';x.fillRect(20*k,(y0+52)*k,306*k,1*k);});
+  rr(20,524,22,16,3);x.fillStyle='#8E8E8E';x.fill();TX('M',31,532.5,10,'#fff',700,'center','middle');
+  TX('More · leaderboard, single stop, tips',50,536,10.5,'#3A3A38',400);
   const t=new T.CanvasTexture(c);t.anisotropy=8;return t;
 }
 let mapTex=null;   // painted once the fonts are in
