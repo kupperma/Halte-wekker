@@ -5,8 +5,8 @@ options:
     iOS: "17.0"
 settings:
   base:
-    MARKETING_VERSION: "0.11.0"
-    CURRENT_PROJECT_VERSION: "46"
+    MARKETING_VERSION: "0.11.1"
+    CURRENT_PROJECT_VERSION: "47"
     SWIFT_VERSION: "5.0"
     CODE_SIGNING_ALLOWED: "NO"
     CODE_SIGNING_REQUIRED: "NO"
@@ -23,7 +23,8 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen: {}
-        UIBackgroundModes: [location, audio]
+        UIBackgroundModes: [location, audio, fetch]
+        BGTaskSchedulerPermittedIdentifiers: [nl.haltewekker.app.plan]
         NSLocationWhenInUseUsageDescription: Haltewekker uses your location to wake you before your stop.
         NSLocationAlwaysAndWhenInUseUsageDescription: Haltewekker keeps following you while the phone is locked, so it can wake you before your stop.
         NSSupportsLiveActivities: true

@@ -1,3 +1,4 @@
+import BackgroundTasks
 import CoreLocation
 import EventKit
 import SwiftUI
@@ -23,21 +24,42 @@ final class SchoolAlarm: ObservableObject {
     /// How long before you have to leave it wakes you.
     @Published var wakeMinutes: Int { didSet { d.set(wakeMinutes, forKey: "school.wake"); Task { await self.refresh(force: true) } } }
     @Published private(set) var allowed = false
-    @Published private(set) var next: Day?
     @Published private(set) var note: String?
     /// True when it rings as a real alarm (iOS 26 and later); otherwise it's loud notifications.
     @Published private(set) var realAlarm = false
 
-    /// The next school day: its first class, and the trip and the alarm for it.
+    /// One school day: its first class, the trip and the alarm (kept, so a day's alarm can be moved or taken away later).
+    struct Planned: Codable, Equatable, Identifiable {
+        var id: String { day }
+        let day: String                 // yyyy-MM-dd
+        var title: String
+        var room: String?
+        var classStart: Date
+        var beThere: Date
+        var leave: Date?
+        var arrive: Date?
+        var lines: String?              // "306 · IC · 1"
+        var alarm: Date?
+        var alarmId: String?
+        var checked: Date               // when its trip was last planned
+        /// The alarm has gone off (or its time has passed): never touched again, so it can't ring twice.
+        var rang: Bool { (alarm ?? .distantFuture) <= Date() }
+    }
+
+    /// The next school day, with the full trip (for the metro line), for the screens.
     struct Day: Equatable {
         let title: String
         let room: String?
         let classStart: Date
         let beThere: Date
         var trip: DoorTrip?
-        var leave: Date? { trip?.start }
+        var leave: Date?
         var alarm: Date?
     }
+
+    /// The school days of the next week, the next one first.
+    @Published private(set) var week: [Planned] = []
+    private var trips: [String: DoorTrip] = [:]         // this session's trips, by day
 
     private var lastPlan = Date.distantPast
     private var observer: NSObjectProtocol?
@@ -49,10 +71,22 @@ final class SchoolAlarm: ObservableObject {
         wakeMinutes = d.object(forKey: "school.wake") as? Int ?? 60
         allowed = EKEventStore.authorizationStatus(for: .event) == .fullAccess
         realAlarm = WakeAlarm.available
+        week = (d.data(forKey: "school.week").flatMap { try? JSONDecoder().decode([Planned].self, from: $0) } ?? [])
+            .filter { $0.classStart > Date().addingTimeInterval(-2 * 86400) }
+        updateNext()
         // the timetable changed (TimeEdit synced): plan again
         observer = NotificationCenter.default.addObserver(forName: .EKEventStoreChanged, object: nil, queue: .main) { _ in
             Task { @MainActor in await SchoolAlarm.shared.refresh(force: true) }
         }
+    }
+
+    private func save() { d.set(try? JSONEncoder().encode(week), forKey: "school.week") }
+
+    /// The next school day (whose class is still ahead), for the screens.
+    @Published private(set) var next: Day?
+    private func updateNext() {
+        guard let p = week.filter({ $0.classStart > Date() }).min(by: { $0.classStart < $1.classStart }) else { next = nil; return }
+        next = Day(title: p.title, room: p.room, classStart: p.classStart, beThere: p.beThere, trip: trips[p.day], leave: p.leave, alarm: p.alarm)
     }
 
     /// Turned on: ask for the calendar and the alarm, pick the school calendar, plan.
@@ -66,9 +100,10 @@ final class SchoolAlarm: ObservableObject {
         await refresh(force: true)
     }
 
+    /// Turned off: every alarm that hasn't rung goes.
     private func stop() {
-        WakeAlarm.cancel()
-        d.removeObject(forKey: "school.alarmKey")
+        for p in week where !p.rang { WakeAlarm.cancel(p.alarmId, day: p.day) }
+        week = []; trips = [:]; save()
         next = nil; note = nil
     }
 
@@ -91,19 +126,20 @@ final class SchoolAlarm: ObservableObject {
 
     func suggested() -> Set<String> { Set(store.calendars(for: .event).filter(looksLikeSchool).map(\.calendarIdentifier)) }
 
-    /// The first class of the next day with school that's still ahead (a day whose first class has started is skipped).
-    private func nextFirstClass() -> EKEvent? {
+    /// The first class of each day with school in the next week, by day (yyyy-MM-dd). Only the calendars you picked;
+    /// all-day and cancelled ones don't count.
+    private func firstClasses() -> [String: EKEvent] {
         let cals = store.calendars(for: .event).filter { calendarIds.contains($0.calendarIdentifier) }
-        guard !cals.isEmpty else { return nil }
-        let now = Date()
-        let evs = store.events(matching: store.predicateForEvents(withStart: now.addingTimeInterval(-14 * 3600), end: now.addingTimeInterval(9 * 86400), calendars: cals))
+        guard !cals.isEmpty else { return [:] }
+        let now = Date(), startOfToday = Calendar.current.startOfDay(for: now)
+        let evs = store.events(matching: store.predicateForEvents(withStart: startOfToday, end: startOfToday.addingTimeInterval(8 * 86400), calendars: cals))
             .filter { !$0.isAllDay && $0.status != .canceled && !Self.isCancelled($0.title ?? "") }
-        let byDay = Dictionary(grouping: evs) { Calendar.current.startOfDay(for: $0.startDate) }
-        for day in byDay.keys.sorted() {
-            guard let first = byDay[day]?.min(by: { $0.startDate < $1.startDate }) else { continue }
-            if first.startDate > now.addingTimeInterval(20 * 60) { return first }
+        var out: [String: EKEvent] = [:]
+        for e in evs {
+            let k = Fmt.ymd.string(from: e.startDate)
+            if out[k].map({ e.startDate < $0.startDate }) ?? true { out[k] = e }
         }
-        return nil
+        return out
     }
 
     private static func isCancelled(_ t: String) -> Bool {
@@ -111,34 +147,88 @@ final class SchoolAlarm: ObservableObject {
         return ["cancelled", "canceled", "geannuleerd", "vervalt", "vervallen"].contains { l.contains($0) }
     }
 
-    // MARK: the plan and the alarm
+    // MARK: the plans and the alarms
 
-    /// Plan again (every 15 minutes while the app is open, and whenever the timetable or the settings change).
+    /// Plan the week again: every 15 minutes for today and tomorrow, every few hours for the days after, and right away
+    /// when the timetable or the settings change. An alarm that has gone off is never touched again.
     func refresh(force: Bool = false) async {
         guard on else { return }
         allowed = EKEventStore.authorizationStatus(for: .event) == .fullAccess
-        guard allowed else { next = nil; note = "Allow calendar access to read your timetable."; return }
-        let since = Date().timeIntervalSince(lastPlan)
-        guard since > (force ? 45 : 15 * 60) else { return }
+        guard allowed else { note = "Allow calendar access to read your timetable."; return }
+        guard Date().timeIntervalSince(lastPlan) > (force ? 30 : 5 * 60) else { return }
         lastPlan = Date()
-        guard let e = nextFirstClass() else {
-            next = nil
-            note = calendarIds.isEmpty ? "Pick your school calendar." : "No classes found in the next week."
-            await setAlarm(nil)
-            return
+        let classes = firstClasses()
+        let now = Date()
+        let oldNext = next
+        var changed = false, added: [Planned] = []
+        // days whose first class is gone from the timetable: their alarm goes (if it hasn't rung)
+        for p in week where classes[p.day] == nil && !p.rang && p.classStart > now {
+            WakeAlarm.cancel(p.alarmId, day: p.day)
+            week.removeAll { $0.day == p.day }; trips[p.day] = nil; changed = true
         }
-        let beThere = e.startDate.addingTimeInterval(-Double(earlyMinutes) * 60)
-        var day = Day(title: e.title ?? "Class", room: e.location, classStart: e.startDate, beThere: beThere)
-        let all = await Transit.plan(from: homeStart(), to: .buas, modes: nil, at: beThere, count: 6, maxTransfers: 4, arriveBy: true)
-        var seen = Set<String>()
-        let inTime = all.filter { $0.end <= beThere.addingTimeInterval(60) && $0.first.departure > Date() && seen.insert($0.id).inserted }
-        day.trip = inTime.max { ($0.start, -$0.rides.count) < ($1.start, -$1.rides.count) }      // leave the latest, then fewest changes
-        if day.trip == nil, let old = next, old.classStart == day.classStart { day.trip = old.trip }   // no answer just now: keep the last plan
-        day.alarm = day.trip.map { $0.start.addingTimeInterval(-Double(wakeMinutes) * 60) }
-        next = day
-        note = day.trip == nil ? "Couldn’t plan the trip yet. It tries again in a few minutes." : nil
-        if day.trip == nil { lastPlan = Date().addingTimeInterval(-13 * 60) }
-        await setAlarm(day)
+        for k in classes.keys.sorted() {
+            guard let e = classes[k] else { continue }
+            let old = week.first { $0.day == k }
+            if let old, old.rang { continue }                               // it rang: leave it alone
+            guard e.startDate > now.addingTimeInterval(20 * 60) else { continue }
+            let beThere = e.startDate.addingTimeInterval(-Double(earlyMinutes) * 60)
+            // near days often (live times), far days now and then (the timetable); always when the class moved
+            let soon = e.startDate.timeIntervalSince(now) < 36 * 3600
+            let moved = old.map { $0.classStart != e.startDate || $0.beThere != beThere } ?? true
+            if !force && !moved, let old, now.timeIntervalSince(old.checked) < (soon ? 14 * 60 : 6 * 3600) { continue }
+            let all = await Transit.plan(from: homeStart(), to: .buas, modes: nil, at: beThere, count: 6, maxTransfers: 4, arriveBy: true)
+            guard on else { return }
+            var seen = Set<String>()
+            let inTime = all.filter { $0.end <= beThere.addingTimeInterval(60) && $0.first.departure > now && seen.insert($0.id).inserted }
+            guard let best = inTime.max(by: { ($0.start, -$0.rides.count) < ($1.start, -$1.rides.count) }) else {
+                continue                                                    // no answer just now: keep what it had
+            }
+            trips[k] = best
+            let alarmAt = best.start.addingTimeInterval(-Double(wakeMinutes) * 60)
+            var p = old ?? Planned(day: k, title: e.title ?? "Class", room: e.location, classStart: e.startDate, beThere: beThere, checked: now)
+            p.title = e.title ?? "Class"; p.room = e.location; p.classStart = e.startDate; p.beThere = beThere
+            p.leave = best.start; p.arrive = best.end; p.checked = now
+            p.lines = best.rides.map { $0.isTrain ? $0.line : $0.line }.joined(separator: " · ")
+            // move the alarm only if its minute changed; set none if it's already too late for one
+            let sameMinute = p.alarm.map { Int($0.timeIntervalSince1970 / 60) == Int(alarmAt.timeIntervalSince1970 / 60) } ?? false
+            if !(sameMinute && p.alarmId != nil) {
+                WakeAlarm.cancel(p.alarmId, day: k)
+                p.alarmId = nil
+                p.alarm = alarmAt
+                if alarmAt > now.addingTimeInterval(60) {
+                    p.alarmId = await WakeAlarm.schedule(at: alarmAt, day: k, title: "Time to get up",
+                                                         body: "Leave \(Fmt.hhmm(best.start)) for your \(Fmt.hhmm(e.startDate)) class")
+                }
+                changed = true
+                if old == nil || old?.alarmId == nil { added.append(p) }
+            }
+            if let i = week.firstIndex(where: { $0.day == k }) { week[i] = p } else { week.append(p) }
+        }
+        week.removeAll { $0.classStart < now.addingTimeInterval(-2 * 86400) }
+        week.sort { $0.classStart < $1.classStart }
+        save()
+        realAlarm = WakeAlarm.available
+        updateNext()
+        note = classes.isEmpty ? (calendarIds.isEmpty ? "Pick your school calendar." : "No classes found in the next week.") : nil
+        if changed { tell(added: added, oldNext: oldNext) }
+        Self.scheduleBackground()
+    }
+
+    /// Say what changed: the new alarms of the week, or the next one moving by 5 minutes or more.
+    private func tell(added: [Planned], oldNext: Day?) {
+        let set = added.filter { ($0.alarm ?? .distantPast) > Date() }
+        if !set.isEmpty {
+            let list = set.prefix(5).map { "\(Self.shortDay($0.classStart)) \(Fmt.hhmm($0.alarm!))" }.joined(separator: " · ")
+            let title = set.count == 1 ? "School alarm \(Self.dayWord(set[0].alarm!)) \(Fmt.hhmm(set[0].alarm!))" : "\(set.count) school alarms set"
+            let body = set.count == 1 ? "Leave \(Fmt.hhmm(set[0].leave!)) · first class \(Fmt.hhmm(set[0].classStart)) \(set[0].title)" : list
+            NoticeLog.shared.add(key: "school-set-\(list)", title: title, body: body, kind: "ok")
+            Notices.shared.show(title: title, body: body, kind: "ok")
+        } else if let o = oldNext, let n = next, o.classStart == n.classStart, let a = o.alarm, let b = n.alarm, abs(b.timeIntervalSince(a)) >= 5 * 60, b > Date() {
+            let title = "School alarm moved to \(Fmt.hhmm(b))"
+            let body = "Was \(Fmt.hhmm(a)) · the buses changed · leave \(Fmt.hhmm(n.leave ?? b)) for \(Fmt.hhmm(n.classStart)) \(n.title)"
+            NoticeLog.shared.add(key: "school-move-\(Int(b.timeIntervalSince1970))", title: title, body: body, kind: "late")
+            Notices.shared.show(title: title, body: body, kind: "late")
+        }
     }
 
     /// From home: where you are now if that's in Veghel (and it remembers it), else where it last saw you there, else your
@@ -155,23 +245,20 @@ final class SchoolAlarm: ObservableObject {
         return StopsStore.shared.veghel
     }
 
-    /// Set (or move, or take away) the alarm. It tells you once per school day, when it's first set or moves by 5 minutes.
-    private func setAlarm(_ day: Day?) async {
-        let at = day?.alarm.flatMap { $0 > Date().addingTimeInterval(60) ? $0 : nil }
-        let key = at.map { String(Int($0.timeIntervalSince1970 / 60)) } ?? ""
-        let oldKey = d.string(forKey: "school.alarmKey") ?? ""
-        guard key != oldKey else { return }
-        WakeAlarm.cancel()
-        d.set(key, forKey: "school.alarmKey")
-        guard let at, let day, let leave = day.leave else { return }
-        realAlarm = await WakeAlarm.schedule(at: at, title: "Time to get up", body: "Leave \(Fmt.hhmm(leave)) for your \(Fmt.hhmm(day.classStart)) class")
-        let oldMinute = Int(oldKey) ?? 0, newMinute = Int(key) ?? 0
-        if oldKey.isEmpty || abs(newMinute - oldMinute) >= 5 {
-            let title = "School alarm \(Self.dayWord(at)) \(Fmt.hhmm(at))"
-            let body = "Leave \(Fmt.hhmm(leave)) · at BUas \(Fmt.hhmm(day.trip?.end ?? day.beThere)) · first class \(Fmt.hhmm(day.classStart)) \(day.title)"
-            NoticeLog.shared.add(key: "school-\(key)", title: title, body: body, kind: "ok")
-            Notices.shared.show(title: title, body: body, kind: "ok")
-        }
+    static let backgroundId = "nl.haltewekker.app.plan"
+
+    /// Ask iOS to wake the app now and then (about every hour) to plan the alarms again.
+    static func scheduleBackground() {
+        guard UserDefaults.standard.bool(forKey: "school.on") else { return }
+        let r = BGAppRefreshTaskRequest(identifier: backgroundId)
+        r.earliestBeginDate = Date().addingTimeInterval(50 * 60)
+        try? BGTaskScheduler.shared.submit(r)
+    }
+
+    /// Woken in the background: plan again, and ask to be woken again.
+    static func backgroundRefresh() async {
+        scheduleBackground()
+        await shared.refresh(force: true)
     }
 
     /// "today", "tomorrow", "Monday"
@@ -180,6 +267,12 @@ final class SchoolAlarm: ObservableObject {
         if cal.isDateInToday(d) { return "today" }
         if cal.isDateInTomorrow(d) { return "tomorrow" }
         let f = DateFormatter(); f.locale = Locale(identifier: "en_GB"); f.dateFormat = "EEEE"
+        return f.string(from: d)
+    }
+
+    /// "Mon"
+    static func shortDay(_ d: Date) -> String {
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_GB"); f.dateFormat = "EEE"
         return f.string(from: d)
     }
 }
@@ -191,11 +284,9 @@ final class SchoolAlarm: ObservableObject {
 struct WakeMetadata: AlarmMetadata {}
 #endif
 
-/// A real alarm with AlarmKit (iOS 26: it rings like the Clock app's, also on silent and in a Focus). Before iOS 26 it's
-/// three loud notifications two minutes apart instead.
+/// A real alarm with AlarmKit (iOS 26: it rings like the Clock app's, also on silent and in a Focus), one per school day.
+/// Before iOS 26 it's three loud notifications two minutes apart instead.
 enum WakeAlarm {
-    private static let idKey = "school.alarmId"
-
     static var available: Bool {
         #if canImport(AlarmKit)
         if #available(iOS 26.0, *) { return AlarmManager.shared.authorizationState == .authorized }
@@ -214,9 +305,8 @@ enum WakeAlarm {
         return false
     }
 
-    /// Returns true if it's a real alarm.
-    static func schedule(at date: Date, title: String, body: String) async -> Bool {
-        cancel()
+    /// Set the alarm for a day. Returns its id (the alarm's, or "notifications").
+    static func schedule(at date: Date, day: String, title: String, body: String) async -> String? {
         #if canImport(AlarmKit)
         if #available(iOS 26.0, *), await requestPermission() {
             let stop = AlarmButton(text: "Stop", textColor: .white, systemImageName: "stop.circle.fill")
@@ -225,8 +315,7 @@ enum WakeAlarm {
             let id = UUID()
             do {
                 _ = try await AlarmManager.shared.schedule(id: id, configuration: .alarm(schedule: .fixed(date), attributes: attributes))
-                UserDefaults.standard.set(id.uuidString, forKey: idKey)
-                return true
+                return id.uuidString
             } catch {}
         }
         #endif
@@ -240,19 +329,19 @@ enum WakeAlarm {
             n.interruptionLevel = .timeSensitive
             n.userInfo = ["kind": "go"]
             let at = date.addingTimeInterval(Double(i) * 120)
-            c.add(UNNotificationRequest(identifier: "wake-\(i)", content: n, trigger: UNTimeIntervalNotificationTrigger(timeInterval: max(1, at.timeIntervalSinceNow), repeats: false))) { _ in }
+            c.add(UNNotificationRequest(identifier: "wake-\(day)-\(i)", content: n, trigger: UNTimeIntervalNotificationTrigger(timeInterval: max(1, at.timeIntervalSinceNow), repeats: false))) { _ in }
         }
-        return false
+        return "notifications"
     }
 
-    static func cancel() {
-        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: ["wake-0", "wake-1", "wake-2"])
+    /// Take a day's alarm away (only ever called for one that hasn't rung).
+    static func cancel(_ id: String?, day: String) {
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: (0..<3).map { "wake-\(day)-\($0)" })
         #if canImport(AlarmKit)
-        if #available(iOS 26.0, *), let s = UserDefaults.standard.string(forKey: idKey), let id = UUID(uuidString: s) {
-            try? AlarmManager.shared.cancel(id: id)
+        if #available(iOS 26.0, *), let s = id, let u = UUID(uuidString: s) {
+            try? AlarmManager.shared.cancel(id: u)
         }
         #endif
-        UserDefaults.standard.removeObject(forKey: idKey)
     }
 }
 
@@ -375,6 +464,7 @@ struct SchoolAlarmCard: View {
                 } else {
                     Text(school.note ?? "Planning the trip…").font(BoardInk.sans(12.5)).foregroundStyle(Paper.muted)
                 }
+                weekList
                 Button(action: setUp) {
                     Text("School alarm settings").font(BoardInk.sans(12)).foregroundStyle(Paper.navy).underline()
                 }
@@ -403,6 +493,39 @@ struct SchoolAlarmCard: View {
                 .overlay(RoundedRectangle(cornerRadius: 6).stroke(Paper.edge, lineWidth: 1))
             }
             .buttonStyle(.plain)
+        }
+    }
+
+    /// Every school day of the week with its alarm: the ones that rang are done and stay as they were.
+    @ViewBuilder private var weekList: some View {
+        let days = school.week.filter { $0.classStart > Date().addingTimeInterval(-12 * 3600) }
+        if days.count > 1 {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("THIS WEEK").font(BoardInk.sans(10)).tracking(1.6).foregroundStyle(Paper.muted).padding(.bottom, 4)
+                ForEach(days) { p in
+                    HStack(spacing: 8) {
+                        Text(SchoolAlarm.shortDay(p.classStart)).font(BoardInk.sans(12.5)).foregroundStyle(Paper.ink).frame(width: 34, alignment: .leading)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("\(Fmt.hhmm(p.classStart)) \(p.title)").font(BoardInk.sans(12.5)).foregroundStyle(Paper.ink).lineLimit(1).minimumScaleFactor(0.7)
+                            Text([p.leave.map { "leave \(Fmt.hhmm($0))" }, p.lines].compactMap { $0 }.joined(separator: " · "))
+                                .font(BoardInk.sans(10.5, .regular)).foregroundStyle(Paper.muted).lineLimit(1)
+                        }
+                        Spacer(minLength: 4)
+                        if let a = p.alarm {
+                            HStack(spacing: 4) {
+                                Image(systemName: p.rang ? "checkmark" : p.alarmId == nil ? "alarm" : "alarm.fill").font(.system(size: 10, weight: .bold))
+                                Text(Fmt.hhmm(a)).font(BoardInk.sans(13)).monospacedDigit()
+                            }
+                            .foregroundStyle(p.rang ? Paper.muted : p.alarmId == nil ? Paper.late : Paper.navy)
+                        }
+                    }
+                    .padding(.vertical, 6)
+                    .opacity(p.rang ? 0.55 : 1)
+                    .overlay(alignment: .bottom) { Rectangle().fill(Paper.rule).frame(height: 1) }
+                }
+                Text("Each day’s alarm moves with the buses until it has rung; then it’s left alone.")
+                    .font(BoardInk.sans(10, .regular)).foregroundStyle(Paper.muted).padding(.top, 5)
+            }
         }
     }
 

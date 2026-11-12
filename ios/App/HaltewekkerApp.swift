@@ -26,5 +26,8 @@ struct HaltewekkerApp: App {
                     Task { await NoticeLog.shared.collectDelivered() }
                 }
         }
+        .backgroundTask(.appRefresh(SchoolAlarm.backgroundId)) {
+            await SchoolAlarm.backgroundRefresh()
+        }
     }
 }
