@@ -1,0 +1,235 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Old+Standard+TT:wght@700&family=Courier+Prime&display=block"><style>html,body{margin:0;background:#000}</style></head><body>
+<canvas id="c" width="540" height="1170"></canvas>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(()=>{const reduce=false;
+/* ---------- The shared low-poly station ---------- */
+const T=THREE,RW=540,RH=1170;
+const r=new T.WebGLRenderer({canvas:document.getElementById('c'),antialias:true,preserveDrawingBuffer:true});r.setPixelRatio(1);r.setSize(RW,RH,false);
+const scene=new T.Scene(),cam=new T.PerspectiveCamera(56,RW/RH,.1,160);
+cam.position.set(.1,2.05,6.5);cam.lookAt(2.3,1.5,-30);   // a fixed camera: only the train moves
+const C={out:{fog:0x0d1b33,lamp:0xd6f6ff,key:0x7fd8ff,amb:0x223a66,wall:0x3b5a8c,floor:0x58637f,edge:0xffd34d,inside:0xe6f4ff},
+         home:{fog:0x2a1022,lamp:0xffd9a6,key:0xff8a4a,amb:0x5a2330,wall:0x8c4a3b,floor:0x7a5550,edge:0xffc46b,inside:0xfff0d6}};
+scene.fog=new T.Fog(C.out.fog,10,62);scene.background=new T.Color(C.out.fog);
+const mat=(c,o={})=>new T.MeshStandardMaterial(Object.assign({color:c,flatShading:true,roughness:.85,metalness:0},o));
+const jag=(geo,a)=>{const p=geo.attributes.position;for(let i=0;i<p.count;i++){p.setXYZ(i,p.getX(i)+(Math.random()-.5)*a,p.getY(i)+(Math.random()-.5)*a,p.getZ(i)+(Math.random()-.5)*a);}geo.computeVertexNormals();return geo;};
+const wallM=mat(C.out.wall),floorM=mat(C.out.floor),darkM=mat(0x0d0f18),edgeM=mat(C.out.edge,{emissive:C.out.edge,emissiveIntensity:.35});
+const add=(geo,m,x,y,z,rx=0,ry=0)=>{const o=new T.Mesh(geo,m);o.position.set(x,y,z);o.rotation.set(rx,ry,0);scene.add(o);return o;};
+add(jag(new T.PlaneGeometry(90,8,40,6),.35),wallM,-3.3,2.6,-34,0,Math.PI/2);
+add(jag(new T.PlaneGeometry(16,90,8,40),.3),wallM,1.6,5.5,-34,Math.PI/2,0);
+add(jag(new T.PlaneGeometry(90,7,40,5),.35),wallM,8.4,2.2,-34,0,-Math.PI/2);
+add(jag(new T.BoxGeometry(4.8,1,90,4,1,40),.1),floorM,-1,-.5,-34);
+add(new T.BoxGeometry(.22,.05,90),edgeM,1.25,.02,-34);
+add(new T.BoxGeometry(7,.4,90),darkM,4.6,-1.25,-34);
+const railM=mat(0x8a93a8,{metalness:.4,roughness:.5});[3.45,5.0].forEach(x=>add(new T.BoxGeometry(.1,.12,90),railM,x,-.98,-34));
+for(let z=4;z>-80;z-=1.4) add(new T.BoxGeometry(2.4,.1,.35),mat(0x2b2420),4.22,-1.04,z);
+const lamps=[];
+for(let i=0;i<12;i++){
+  const z=-8-i*6;
+  add(jag(new T.CylinderGeometry(.32,.38,5.5,6,2),.05),mat(0x2a3048),-2.5,2.2,z);
+  const lm=add(new T.BoxGeometry(2,.07,.26),new T.MeshBasicMaterial({color:C.out.lamp}),.4,5.3,z);lamps.push(lm);
+}
+// a bench and a sign for scale
+add(new T.BoxGeometry(.5,.08,2.2),mat(0x23283c),-2.1,.55,-6);add(new T.BoxGeometry(.08,.5,2.2),mat(0x23283c),-2.35,.8,-6);
+const signM=new T.MeshBasicMaterial({color:0x1d3f9a});add(new T.BoxGeometry(.06,.6,2.6),signM,-3.22,3.1,-11);
+const keyL=[0,1,2,3].map(i=>{const l=new T.PointLight(C.out.key,1.25,20,1.6);l.position.set(.4,4.7,-2-i*12);scene.add(l);return l;});
+const amb=new T.HemisphereLight(C.out.amb,0x05060a,.95);scene.add(amb);
+
+/* ---------- A New York-style subway train: four stainless-steel cars ---------- */
+const train=new T.Group();scene.add(train);
+const CAR=15.4,GAP=.6,CH=3.0,CW=2.9,PX=133;      // car length, gap, height, width (m), texture pixels per m
+// Paint one car side (and a matching glow map for the lit windows), once.
+function paintSide(num){
+  const W=Math.round(CAR*PX),H=Math.round(CH*PX);
+  const c=document.createElement('canvas');c.width=W;c.height=H;const x=c.getContext('2d');
+  const e=document.createElement('canvas');e.width=W;e.height=H;const ex=e.getContext('2d');ex.fillStyle='#000';ex.fillRect(0,0,W,H);
+  const Y=m=>H-m*PX,M=m=>m*PX;                        // metres from the bottom / metres to pixels
+  const rr=(g,a,b,w,h,r)=>{g.beginPath();g.moveTo(a+r,b);g.arcTo(a+w,b,a+w,b+h,r);g.arcTo(a+w,b+h,a,b+h,r);g.arcTo(a,b+h,a,b,r);g.arcTo(a,b,a+w,b,r);g.closePath();};
+  // stainless steel with fine vertical fluting
+  const st=x.createLinearGradient(0,0,0,H);st.addColorStop(0,'#d9dde3');st.addColorStop(.45,'#b8bec6');st.addColorStop(.55,'#c7ccd3');st.addColorStop(1,'#a9afb8');
+  x.fillStyle=st;x.fillRect(0,0,W,H);
+  for(let i=0;i<W;i+=7){x.fillStyle='rgba(255,255,255,.16)';x.fillRect(i,Y(1.05),1,M(1.0));x.fillStyle='rgba(0,0,0,.08)';x.fillRect(i+3,Y(1.05),1,M(1.0));}
+  x.fillStyle='#5b6068';x.fillRect(0,0,W,M(.06));x.fillStyle='#3d4148';x.fillRect(0,Y(.14),W,M(.14));   // roof gutter, skirt
+  x.fillStyle='rgba(0,0,0,.18)';x.fillRect(0,Y(1.08),W,M(.03));                                       // panel seam
+  // one window: black frame, lit ceiling, seats, poles, a passenger or two, a reflection
+  function win(cx,cyTop,w,h,seats,people,pole){
+    const a=cx-w/2,b=cyTop;
+    x.fillStyle='#14161a';rr(x,a-M(.05),b-M(.05),w+M(.1),h+M(.1),M(.08));x.fill();
+    const ig=x.createLinearGradient(0,b,0,b+h);ig.addColorStop(0,'#fbf8f0');ig.addColorStop(.25,'#d9d6cf');ig.addColorStop(1,'#77746f');
+    x.save();rr(x,a,b,w,h,M(.06));x.clip();
+    x.fillStyle=ig;x.fillRect(a,b,w,h);
+    x.fillStyle='rgba(255,255,255,.95)';x.fillRect(a,b+h*.04,w,h*.05);
+    x.fillStyle='rgba(60,62,68,.55)';x.fillRect(a,b+h*.18,w,h*.025);
+    if(pole){x.fillStyle='rgba(205,208,214,.9)';x.fillRect(cx-2,b,4,h);}
+    for(let i=0;i<seats;i++){const sx=a+(i+.5)*w/seats;x.fillStyle='#2f3d63';rr(x,sx-w/seats*.38,b+h*.62,w/seats*.76,h*.5,6);x.fill();}
+    for(let i=0;i<people;i++){const px=a+w*(.25+.5*i);x.fillStyle='#1c1e23';x.beginPath();x.arc(px,b+h*.5,h*.09,0,7);x.fill();x.fillRect(px-h*.12,b+h*.58,h*.24,h*.45);}
+    x.globalCompositeOperation='lighter';
+    const rf=x.createLinearGradient(a,b,a+w,b+h);rf.addColorStop(.2,'rgba(255,255,255,0)');rf.addColorStop(.33,'rgba(255,255,255,.2)');rf.addColorStop(.44,'rgba(255,255,255,0)');
+    x.fillStyle=rf;x.fillRect(a,b,w,h);x.globalCompositeOperation='source-over';
+    x.fillStyle='rgba(10,14,20,.25)';x.fillRect(a,b,w,h);x.restore();
+    ex.fillStyle='#9a968c';rr(ex,a,b,w,h,M(.06));ex.fill();ex.fillStyle='#fff';ex.fillRect(a,b+h*.04,w,h*.05);
+  }
+  // four double doors, windows between them
+  const doors=[.125,.375,.625,.875].map(f=>f*W);
+  doors.forEach(dx=>{
+    const dw=M(1.3),top=Y(2.12);
+    x.fillStyle='#9aa1ab';x.fillRect(dx-dw/2,top,dw,Y(.16)-top);
+    x.fillStyle='#16181c';x.fillRect(dx-dw/2-2,top-2,dw+4,3);x.fillRect(dx-dw/2-2,top,3,Y(.16)-top);x.fillRect(dx+dw/2-1,top,3,Y(.16)-top);x.fillRect(dx-1.5,top,3,Y(.16)-top);
+    [-1,1].forEach(sd=>win(dx+sd*dw/4,Y(2.0),M(.36),M(.92),0,0,false));
+  });
+  const gapsX=[[0,doors[0]],[doors[0],doors[1]],[doors[1],doors[2]],[doors[2],doors[3]],[doors[3],W]];
+  gapsX.forEach(([g0,g1],gi)=>{
+    const inner=(g1-g0)-M(1.3)/2*((gi===0||gi===4)?1:2)-M(.3);if(inner<M(.8)) return;
+    const mid=(gi===0)?(g0+M(.4)+(g1-M(.65)-g0-M(.4))/2):(gi===4)?(g0+M(.65)+(g1-M(.4)-g0-M(.65))/2):(g0+g1)/2;
+    const n=inner>M(2.4)?2:1,w=(inner-(n-1)*M(.18))/n;
+    for(let k=0;k<n;k++){const cx=mid-(n-1)*(w+M(.18))/2+k*(w+M(.18));win(cx,Y(2.12),w,M(.86),2,(gi+k+num)%3===0?1:(gi+k)%4===1?2:0,(gi+k)%2===0);}
+  });
+  // car number and a small route sign
+  x.fillStyle='#22252b';x.font=`700 ${M(.17)}px "Old Standard TT",Georgia,serif`;x.fillText(String(7200+num*7),M(.55),Y(2.45));
+  return {map:new T.CanvasTexture(c),glow:new T.CanvasTexture(e)};
+}
+function paintFront(rear){
+  const W=Math.round(CW*PX),H=Math.round(CH*PX),M=m=>m*PX,Y=m=>H-m*PX;
+  const c=document.createElement('canvas');c.width=W;c.height=H;const x=c.getContext('2d');
+  const e=document.createElement('canvas');e.width=W;e.height=H;const ex=e.getContext('2d');ex.fillStyle='#000';ex.fillRect(0,0,W,H);
+  const st=x.createLinearGradient(0,0,W,0);st.addColorStop(0,'#a9afb8');st.addColorStop(.5,'#cfd3d9');st.addColorStop(1,'#a9afb8');x.fillStyle=st;x.fillRect(0,0,W,H);
+  x.fillStyle='#3d4148';x.fillRect(0,Y(.3),W,M(.3));x.fillStyle='#2b2e34';x.fillRect(0,Y(.42),W,M(.08));       // anticlimber
+  const glass=(a,b,w,h,lit)=>{x.fillStyle='#121418';x.fillRect(a-3,b-3,w+6,h+6);const g=x.createLinearGradient(0,b,0,b+h);g.addColorStop(0,lit?'#3a3c40':'#202329');g.addColorStop(1,'#0c0d10');x.fillStyle=g;x.fillRect(a,b,w,h);
+    x.fillStyle='rgba(255,255,255,.14)';x.beginPath();x.moveTo(a,b+h*.7);x.lineTo(a+w*.5,b);x.lineTo(a+w*.68,b);x.lineTo(a+w*.1,b+h);x.lineTo(a,b+h);x.fill();};
+  glass(M(.18),Y(2.25),M(.72),M(.95));glass(W-M(.9),Y(2.25),M(.72),M(.95));        // driver's windows
+  x.fillStyle='#9aa1ab';x.fillRect(W/2-M(.42),Y(2.5),M(.84),M(2.08));               // centre storm door
+  glass(W/2-M(.28),Y(2.3),M(.56),M(1.0),true);
+  // destination sign and route bullet
+  x.fillStyle='#0b0c0e';x.fillRect(M(.2),Y(2.78),W-M(.4),M(.3));
+  if(!rear){x.fillStyle='#ffb02e';x.font=`700 ${M(.2)}px "Courier Prime",monospace`;x.textAlign='center';x.fillText('EXPRESS',W/2,Y(2.56));
+    ex.fillStyle='#ffb02e';ex.fillRect(M(.25),Y(2.74),W-M(.5),M(.22));}
+  const bx=W-M(.55),by=Y(1.95);x.fillStyle=rear?'#2a2d33':'#00933c';x.beginPath();x.arc(bx,by,M(.17),0,7);x.fill();
+  x.fillStyle='#fff';x.font=`700 ${M(.22)}px Helvetica,Arial,sans-serif`;x.textAlign='center';x.textBaseline='middle';x.fillText('H',bx,by+1);
+  if(!rear){ex.fillStyle='#7cff9d';ex.beginPath();ex.arc(bx,by,M(.17),0,7);ex.fill();}
+  // head- or taillights
+  const lc=rear?'#ff3b2f':'#fff6dc';[M(.42),W-M(.42)].forEach(lx=>{x.fillStyle='#16181c';x.fillRect(lx-M(.16),Y(.86),M(.32),M(.22));x.fillStyle=lc;x.fillRect(lx-M(.12),Y(.83),M(.24),M(.16));ex.fillStyle=lc;ex.fillRect(lx-M(.12),Y(.83),M(.24),M(.16));});
+  return {map:new T.CanvasTexture(c),glow:new T.CanvasTexture(e)};
+}
+const steelM=new T.MeshStandardMaterial({color:0xc2c7cf,metalness:.3,roughness:.55});
+const sideMs=[0,1].map(i=>{const t=paintSide(i);return new T.MeshStandardMaterial({map:t.map,emissiveMap:t.glow,emissive:0xffffff,emissiveIntensity:.95,metalness:.25,roughness:.55});});
+const frontT=paintFront(false),rearT=paintFront(true);
+const frontM=new T.MeshStandardMaterial({map:frontT.map,emissiveMap:frontT.glow,emissive:0xffffff,emissiveIntensity:1,metalness:.25,roughness:.55});
+const rearM=new T.MeshStandardMaterial({map:rearT.map,emissiveMap:rearT.glow,emissive:0xffffff,emissiveIntensity:1,metalness:.45,roughness:.38});
+const roofM=mat(0x7d838d,{roughness:.6}),acM=mat(0x9aa0a9,{roughness:.5}),underM=mat(0x1a1c22),wheelM=mat(0x3a3d45,{metalness:.5,roughness:.4});
+const insideM=sideMs[0];   // used by the lighting
+function car(i,lead,tail){
+  const g=new T.Group();g.position.z=-i*(CAR+GAP);train.add(g);
+  const core=new T.Mesh(new T.BoxGeometry(CW,CH,CAR),steelM);core.position.set(0,CH/2,-CAR/2);g.add(core);
+  const side=new T.Mesh(new T.PlaneGeometry(CAR,CH),sideMs[i%2]);side.rotation.y=-Math.PI/2;side.position.set(-CW/2-.004,CH/2,-CAR/2);g.add(side);
+  const roof=new T.Mesh(new T.BoxGeometry(CW-.3,.14,CAR-.3),roofM);roof.position.set(0,CH+.07,-CAR/2);g.add(roof);
+  [-.2,-.5,-.8].forEach(f=>{const ac=new T.Mesh(new T.BoxGeometry(1.5,.32,1.8),acM);ac.position.set(0,CH+.3,CAR*f);g.add(ac);});
+  const und=new T.Mesh(new T.BoxGeometry(CW-.4,.45,CAR-3.4),underM);und.position.set(0,-.2,-CAR/2);g.add(und);
+  [-2.4,-CAR+2.4].forEach(bz=>{const b=new T.Mesh(new T.BoxGeometry(2.2,.38,2.5),underM);b.position.set(0,-.52,bz);g.add(b);
+    [-.75,.75].forEach(o=>{const w=new T.Mesh(new T.CylinderGeometry(.4,.4,.16,10),wheelM);w.rotation.z=Math.PI/2;w.position.set(-1.15,-.62,bz+o);g.add(w);});});
+  if(lead){const f=new T.Mesh(new T.PlaneGeometry(CW,CH),frontM);f.position.set(0,CH/2,.004);g.add(f);}
+  if(tail){const r=new T.Mesh(new T.PlaneGeometry(CW,CH),rearM);r.rotation.y=Math.PI;r.position.set(0,CH/2,-CAR-.004);g.add(r);}
+  if(!lead){const gw=new T.Mesh(new T.BoxGeometry(1.9,2.4,GAP+.1),underM);gw.position.set(0,1.4,GAP/2);g.add(gw);}
+}
+[0,1,2,3].forEach(i=>car(i,i===0,i===3));
+const glowTex=(()=>{const c=document.createElement('canvas');c.width=c.height=64;const x=c.getContext('2d'),gg=x.createRadialGradient(32,32,0,32,32,32);gg.addColorStop(0,'rgba(255,246,220,1)');gg.addColorStop(1,'rgba(255,246,220,0)');x.fillStyle=gg;x.fillRect(0,0,64,64);return new T.CanvasTexture(c);})();
+[-1.03,1.03].forEach(hx=>{const glow=new T.Sprite(new T.SpriteMaterial({map:glowTex,blending:T.AdditiveBlending,depthWrite:false,transparent:true,opacity:.8}));glow.scale.set(1.8,1.1,1);glow.position.set(hx,.74,.3);train.add(glow);});
+train.position.set(4.22,.55,-150);
+
+// Pull in, slow down, stop, wait, leave.
+const STOP=-4,FAR=-150,GONE=150;
+const plan=[{d:9,from:FAR,to:STOP,ease:t=>1-Math.pow(1-t,3)},{d:7,from:STOP,to:STOP,ease:t=>t},{d:8,from:STOP,to:GONE,ease:t=>t*t*t},{d:6,from:GONE,to:GONE,ease:t=>t}];
+let phase=0,phaseAt=performance.now();
+function trainZ(now){
+  if(reduce) return STOP;
+  let p=plan[phase],t=(now-phaseAt)/1000/p.d;
+  if(t>=1){phase=(phase+1)%plan.length;phaseAt=now;p=plan[phase];t=0;if(phase===0) train.position.z=FAR;}
+  return p.from+(p.to-p.from)*p.ease(Math.min(1,t));
+}
+
+const tmp=new T.Color(),ca=new T.Color(),cb=new T.Color();
+const lerpC=(a,b,t)=>tmp.copy(ca.setHex(a)).lerp(cb.setHex(b),t);
+function light(t){
+  const o=C.out,h=C.home;
+  scene.fog.color.copy(lerpC(o.fog,h.fog,t));scene.background.copy(scene.fog.color);
+  lamps.forEach(l=>l.material.color.copy(lerpC(o.lamp,h.lamp,t)));
+  keyL.forEach(l=>l.color.copy(lerpC(o.key,h.key,t)));amb.color.copy(lerpC(o.amb,h.amb,t));
+  wallM.color.copy(lerpC(o.wall,h.wall,t));floorM.color.copy(lerpC(o.floor,h.floor,t));
+  edgeM.color.copy(lerpC(o.edge,h.edge,t));edgeM.emissive.copy(edgeM.color);
+  const ins=lerpC(o.inside,h.inside,t);sideMs.forEach(m=>m.emissive.copy(ins));signM.color.copy(lerpC(0x1d3f9a,0x9a2f1d,t));
+}
+
+
+/* ---------- The metro map on the wall (the home screen's menu) ---------- */
+const PW=.78,PH=PW*562/346,PX0=-3.02,PZ=1.6,PY=2.12;
+function paintMap(home){
+  const W=780,H=Math.round(W*562/346),k=W/346,c=document.createElement('canvas');c.width=W;c.height=H;const x=c.getContext('2d');
+  const P=home?{paper:'#1E1012',paper2:'#120809',brass:'#C9965A',line:'#76523A',accent:'#FFC27A'}:{paper:'#0F1428',paper2:'#090C18',brass:'#B9A066',line:'#5E5A44',accent:'#9BE7FF'};
+  const ink='#EDE3CC',muted='#A79F8C';
+  const g=x.createLinearGradient(0,0,0,H);g.addColorStop(0,P.paper);g.addColorStop(1,P.paper2);x.fillStyle=g;x.fillRect(0,0,W,H);
+  x.strokeStyle='rgba(255,255,255,.035)';x.lineWidth=1;for(let i=0;i<W;i+=22*k/2){x.beginPath();x.moveTo(i,0);x.lineTo(i,H);x.stroke();}for(let j=0;j<H;j+=22*k/2){x.beginPath();x.moveTo(0,j);x.lineTo(W,j);x.stroke();}
+  // brass double rule and corner diamonds
+  x.strokeStyle=P.line;x.lineWidth=1*k;x.strokeRect(4*k,4*k,W-8*k,H-8*k);x.strokeStyle=P.brass;x.lineWidth=1.5*k;x.strokeRect(7*k,7*k,W-14*k,H-14*k);
+  [[7,7],[346-7,7],[7,562-7],[346-7,562-7]].forEach(([a,b])=>{x.beginPath();x.moveTo(a*k,(b-5)*k);x.lineTo((a+5)*k,b*k);x.lineTo(a*k,(b+5)*k);x.lineTo((a-5)*k,b*k);x.closePath();x.fillStyle=P.paper;x.fill();x.stroke();});
+  const TX=(t,px,py,font,col,al)=>{x.font=font;x.fillStyle=col;x.textAlign=al||'left';x.textBaseline='alphabetic';x.fillText(t,px*k,py*k);};
+  TX('Haltewekker',20,46,`700 ${27*k}px "Old Standard TT"`,ink);
+  TX('METRO MAP OF YOUR COMMUTE',20,62,`${9*k}px "Courier Prime"`,muted);
+  // settings dial
+  x.strokeStyle=P.brass;x.lineWidth=1.5*k;x.beginPath();x.arc(316*k,40*k,16*k,0,7);x.stroke();
+  // direction plaque with flip tiles
+  TX(home?'GOING':'GOING TO',20,92,`${9*k}px "Courier Prime"`,'rgba(237,227,204,.8)');
+  const word=home?'HOME':'BREDA';[...word].forEach((ch,i)=>{const tx=(20+i*31)*k,ty=98*k,tw=28*k,th=40*k;
+    const tg=x.createLinearGradient(0,ty,0,ty+th);tg.addColorStop(0,'#1C1A22');tg.addColorStop(.49,'#1C1A22');tg.addColorStop(.51,'#100F15');tg.addColorStop(1,'#100F15');x.fillStyle=tg;x.fillRect(tx,ty,tw,th);
+    x.fillStyle='rgba(0,0,0,.65)';x.fillRect(tx,ty+th/2-.5*k,tw,1*k);TX(ch,20+i*31+14,98+31,`700 ${27*k}px "Old Standard TT"`,P.accent,'center');});
+  TX(home?'Breda → Veghel · tap to switch':'Veghel → Breda · tap to switch',20,154,`${10*k}px "Courier Prime"`,'rgba(237,227,204,.8)');
+  // the network
+  const ox=14,oy=166,pt={bd:[40,60],buas:[22,122],til:[122,80],ht:[204,30],ehv:[214,124],vg:[300,62]};
+  const L=(a,b,col,w,al)=>{x.globalAlpha=al||1;x.strokeStyle=col;x.lineWidth=w*k;x.lineCap='round';x.beginPath();x.moveTo((ox+pt[a][0])*k,(oy+pt[a][1])*k);x.lineTo((ox+pt[b][0])*k,(oy+pt[b][1])*k);x.stroke();x.globalAlpha=1;};
+  L('bd','til','#F4C542',6);L('til','ht','#F4C542',6);L('til','ehv','#F4C542',6,.55);L('vg','ht','#4CC38A',6);L('vg','ehv','#4CC38A',6,.55);L('bd','buas','#E0814E',6);
+  const dot=(p,big)=>{const [a,b]=pt[p];x.fillStyle='#fff';x.strokeStyle='#14121A';x.lineWidth=2.5*k;x.beginPath();x.arc((ox+a)*k,(oy+b)*k,(big?7:4.5)*k,0,7);x.fill();x.stroke();};
+  ['til'].forEach(p=>dot(p,false));['bd','ht','ehv','vg','buas'].forEach(p=>dot(p,true));
+  const lab=(p,t,dx,dy,al)=>TX(t,ox+pt[p][0]+dx,oy+pt[p][1]+dy,`700 ${10*k}px "Courier Prime"`,ink,al);
+  lab('bd','BREDA',0,-12,'center');lab('buas','BUAS',14,4);lab('til','Tilburg',0,18,'center');lab('ht','DEN BOSCH',0,-12,'center');lab('ehv','EINDHOVEN',0,20,'center');lab('vg','VEGHEL',0,-12,'center');
+  // the menu: three lines
+  const rows=[['F','Fastest trip','Your next connection, door to door',null],['A','All lines','Every bus and train, live','#4CC38A'],['P','Planned trip','Travel with your friend’s train','#7AA7FF']];
+  rows.forEach(([l,t,s,col],i)=>{const y0=330+i*62;
+    x.fillStyle='rgba(0,0,0,.28)';x.fillRect(14*k,y0*k,318*k,54*k);x.strokeStyle=P.line;x.lineWidth=1*k;x.strokeRect(14*k,y0*k,318*k,54*k);
+    let f=col;if(!f){f=x.createLinearGradient(26*k,y0*k,70*k,(y0+54)*k);f.addColorStop(0,'#9C6D15');f.addColorStop(.45,'#F4C542');f.addColorStop(.6,'#FFF3C4');f.addColorStop(1,'#A87A1E');}
+    x.fillStyle=f;x.beginPath();x.arc(48*k,(y0+27)*k,20*k,0,7);x.fill();
+    TX(l,48,y0+35,`700 ${22*k}px "Old Standard TT"`,'#14121A','center');
+    TX(t,80,y0+24,`700 ${17*k}px "Old Standard TT"`,ink);TX(s,80,y0+41,`${10.5*k}px "Courier Prime"`,muted);
+    x.strokeStyle=P.brass;x.lineWidth=2*k;x.beginPath();x.moveTo(316*k,(y0+21)*k);x.lineTo(322*k,(y0+27)*k);x.lineTo(316*k,(y0+33)*k);x.stroke();});
+  x.fillStyle='#A79F8C';x.beginPath();x.arc(30*k,526*k,10*k,0,7);x.fill();TX('M',30,530,`700 ${12*k}px "Old Standard TT"`,'#14121A','center');
+  TX('More · leaderboard, single stop, tips',48,530,`${10.5*k}px "Courier Prime"`,'rgba(237,227,204,.85)');
+  const t=new T.CanvasTexture(c);t.anisotropy=8;return t;
+}
+let mapTex=null;   // painted once the fonts are in
+const posterM=new T.MeshBasicMaterial({color:0xffffff});
+const poster=new T.Mesh(new T.PlaneGeometry(PW,PH),posterM);poster.rotation.y=Math.PI/2;poster.position.set(PX0+.035,PY,PZ);scene.add(poster);
+const frameM=mat(0x8a6a30,{metalness:.6,roughness:.35,emissive:0x2a1d08});
+const fr=new T.Mesh(new T.BoxGeometry(.05,PH+.07,PW+.07),frameM);fr.position.set(PX0,PY,PZ);scene.add(fr);
+// a small brass lamp over the map
+add(new T.BoxGeometry(.07,.025,.3),frameM,PX0+.06,PY+PH/2+.09,PZ);add(new T.BoxGeometry(.012,.07,.012),frameM,PX0+.03,PY+PH/2+.065,PZ-.1);add(new T.BoxGeometry(.012,.07,.012),frameM,PX0+.03,PY+PH/2+.065,PZ+.1);
+const mapLamp=new T.PointLight(0xfff0d0,.8,3,2);mapLamp.position.set(PX0+.45,PY+PH/2+.05,PZ);scene.add(mapLamp);
+
+/* ---------- The camera: face to face with the map, then back away and turn to the platform ---------- */
+const CM={p:new T.Vector3(PX0+1.75,PY,PZ),yaw:-Math.PI/2,pitch:0};
+const CS={p:new T.Vector3(.1,2.05,6.5)};{const d=new T.Vector3(2.3,1.5,-30).sub(CS.p).normalize();CS.yaw=Math.atan2(d.x,-d.z);CS.pitch=Math.asin(d.y);}
+const CC=new T.Vector3(.45,2.1,2.4);
+const ease=u=>u<.5?4*u*u*u:1-Math.pow(-2*u+2,3)/2;
+function camAt(u){
+  const e=ease(u),a=1-e;
+  const p=CM.p.clone().multiplyScalar(a*a).add(CC.clone().multiplyScalar(2*a*e)).add(CS.p.clone().multiplyScalar(e*e));
+  const ty=ease(Math.min(1,Math.max(0,(u-.1)/.9)));
+  const yaw=CM.yaw+(CS.yaw-CM.yaw)*ty,pitch=CM.pitch+(CS.pitch-CM.pitch)*ty;
+  cam.position.copy(p);cam.lookAt(p.clone().add(new T.Vector3(Math.sin(yaw)*Math.cos(pitch),Math.sin(pitch),-Math.cos(yaw)*Math.cos(pitch))));
+}
+// Where the map sits on screen in the first frame (0…1 of the picture), for the app to put its own map there.
+window.posterRect=()=>{camAt(0);cam.updateMatrixWorld();const pts=[[-1,-1],[1,-1],[-1,1],[1,1]].map(([s,t])=>new T.Vector3(PX0+.04,PY+t*PH/2,PZ+s*PW/2).project(cam));
+  const xs=pts.map(p=>(p.x+1)/2),ys=pts.map(p=>(1-p.y)/2);return {x0:Math.min(...xs),x1:Math.max(...xs),y0:Math.min(...ys),y1:Math.max(...ys)};};
+window.renderMove=(u,mix)=>{if(!mapTex) mapTex=[paintMap(false),paintMap(true)];light(mix);posterM.map=mapTex[mix>.5?1:0];posterM.needsUpdate=true;train.position.z=zAt(0);camAt(u);r.render(scene,cam);return r.domElement.toDataURL('image/jpeg',0.9);};
+// Deterministic train position for a time t (seconds) in the 30 s loop.
+function zAt(t){let acc=0;for(const p of plan){if(t<acc+p.d){const u=(t-acc)/p.d;return p.from+(p.to-p.from)*p.ease(u);}acc+=p.d;}return plan[0].from;}
+window.renderFrame=(t,mix)=>{light(mix);train.position.z=zAt(t%30);r.render(scene,cam);return r.domElement.toDataURL('image/jpeg',0.9);};
+window.ready=true;
+})();
+</script></body></html>

@@ -60,13 +60,14 @@ extension View {
 struct FlipTiles: View {
     let word: String
     let pal: HWPalette
+    var size: CGFloat = 1
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 4 * size) {
             ForEach(Array(word.enumerated()), id: \.offset) { _, ch in
                 Text(String(ch))
-                    .font(HWFont.display(36)).foregroundStyle(pal.accent)
-                    .offset(y: 3)
-                    .frame(width: 38, height: 54)
+                    .font(HWFont.display(36 * size)).foregroundStyle(pal.accent)
+                    .offset(y: 3 * size)
+                    .frame(width: 38 * size, height: 54 * size)
                     .background(LinearGradient(stops: [.init(color: Color(hex: 0x1C1A22), location: 0), .init(color: Color(hex: 0x1C1A22), location: 0.49),
                                                        .init(color: Color(hex: 0x100F15), location: 0.51), .init(color: Color(hex: 0x100F15), location: 1)],
                                                startPoint: .top, endPoint: .bottom))
@@ -300,7 +301,9 @@ final class LoopingVideoView: UIView {
     private let player = AVQueuePlayer()
     private var looper: AVPlayerLooper?
     private var current = ""
-    func show(_ name: String, playing: Bool) {
+    private var restartToken = 0
+    func show(_ name: String, playing: Bool, restart: Int = 0) {
+        if restart != restartToken { restartToken = restart; player.seek(to: .zero) }
         if current != name, let url = Bundle.main.url(forResource: name, withExtension: "mp4") {
             current = name
             looper = AVPlayerLooper(player: player, templateItem: AVPlayerItem(url: url))
@@ -316,8 +319,40 @@ final class LoopingVideoView: UIView {
 struct StationVideo: UIViewRepresentable {
     let name: String
     let playing: Bool
+    var restart = 0                 // change it to start the loop from the beginning
     func makeUIView(context: Context) -> LoopingVideoView { LoopingVideoView() }
-    func updateUIView(_ v: LoopingVideoView, context: Context) { v.show(name, playing: playing) }
+    func updateUIView(_ v: LoopingVideoView, context: Context) { v.show(name, playing: playing, restart: restart) }
+}
+
+/// A short video that plays once each time `token` changes (the camera stepping back from the map, or towards it).
+final class OneShotVideoView: UIView {
+    override class var layerClass: AnyClass { AVPlayerLayer.self }
+    private var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
+    private let player = AVPlayer()
+    private var current = ""
+    private var token = 0
+    func show(_ name: String, token t: Int) {
+        if current != name, let url = Bundle.main.url(forResource: name, withExtension: "mp4") {
+            current = name
+            player.replaceCurrentItem(with: AVPlayerItem(url: url))
+            player.isMuted = true
+            player.preventsDisplaySleepDuringVideoPlayback = false
+            player.actionAtItemEnd = .pause
+            playerLayer.player = player
+            playerLayer.videoGravity = .resizeAspectFill
+        }
+        if t != token {
+            token = t
+            player.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in self?.player.play() }
+        }
+    }
+}
+
+struct OneShotVideo: UIViewRepresentable {
+    let name: String
+    let token: Int
+    func makeUIView(context: Context) -> OneShotVideoView { OneShotVideoView() }
+    func updateUIView(_ v: OneShotVideoView, context: Context) { v.show(name, token: token) }
 }
 
 struct StationBackdrop: View {

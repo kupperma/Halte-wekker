@@ -45,84 +45,30 @@ struct HomeView: View {
     var home: Bool { trip.direction == .home }
     var pal: HWPalette { .of(home: home) }
 
+    @State private var stage: StageMode = .map
+    @State private var section: HomeSection = .fastest
+    @State private var moveToken = 0
+    @State private var loopToken = 0
+
     var body: some View {
         ZStack(alignment: .top) {
-            StationBackdrop(home: home, moving: trip.movingStation && scene == .active)
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    header
-                    directionButton
-                    if planner.trip != nil {
-                        PlannedPass(edit: { planning = true }, wake: { r in
-                            if let t = planner.trip { trip.pick(t.out ? .toSchool : .home) }
-                            startReq = StartRequest(route: r)
-                        })
-                    } else {
-                        nextPass
-                        planButton
-                    }
-                    WatchingCard(pal: pal)
-
-                    sectionTitle("Wake me up")
-                    VStack(spacing: 0) {
-                        ForEach(RoutePlan.all) { r in
-                            Button { startReq = StartRequest(route: r) } label: {
-                                HStack {
-                                    VStack(alignment: .leading, spacing: 5) {
-                                        Text(r.name).font(HWFont.display(17)).foregroundStyle(HWPalette.ink)
-                                        Text(r.legs(trip.direction).map { "\($0.mode.title) to \($0.to.short)" }.joined(separator: " — ")).font(HWFont.body(12)).foregroundStyle(HWPalette.muted)
-                                    }
-                                    Spacer()
-                                    Image(systemName: "bell.and.waves.left.and.right").foregroundStyle(pal.brass)
-                                }
-                                .padding(.vertical, 12).padding(.horizontal, 6).contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            if r.id != RoutePlan.all.last?.id { Rectangle().fill(.white.opacity(0.07)).frame(height: 1) }
-                        }
-                    }
-                    .brass(pal, pad: 14)
-
-                    HStack(alignment: .firstTextBaseline) {
-                        sectionTitle("Live times")
-                        Spacer()
-                        Button { near.on.toggle() } label: {
-                            Label("Near me", systemImage: near.on ? "location.fill" : "location")
-                                .font(HWFont.body(12, bold: true)).foregroundStyle(near.on ? Color(hex: 0x0B0D14) : pal.accent)
-                                .padding(.horizontal, 10).padding(.vertical, 6)
-                                .background(near.on ? pal.band : Color.black.opacity(0.5), in: Capsule())
-                                .overlay(Capsule().stroke(pal.brass, lineWidth: 1))
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityAddTraits(near.on ? .isSelected : [])
-                    }
-                    nearNote
-                    HStack(spacing: 6) {
-                        ForEach(["S", "A", "B", "C"], id: \.self) { Coin(grade: $0, size: 22) }
-                        Text("How fast each bus or train gets you there, compared with the fastest on that route. Delays count.")
-                            .font(HWFont.body(12)).foregroundStyle(HWPalette.muted)
-                    }
-                    ForEach(panelOrder.filter(shown), id: \.self) { p in panel(p) }
-                    if trip.locationDenied {
-                        Text("Location is off for Haltewekker. Turn it on in Settings → Privacy → Location Services, or it can’t wake you.")
-                            .font(HWFont.body(12, bold: true)).foregroundStyle(HWPalette.warn)
-                    }
-                    Text("Live times from Transitous, map data © OpenStreetMap contributors.").font(HWFont.body(10)).foregroundStyle(HWPalette.muted)
-
-                    sectionTitle("More")
-                    fold("scores", "Leaderboard", icon: "trophy.fill",
-                         next: scores.bestThisWeek(home: true).map { "Home \(Int($0.mins.rounded())) min" } ?? "") {
-                        LeaderboardView(pal: pal).padding(.top, 10)
-                    }
-                    fold("stops", "Wake me at a single stop", icon: "mappin.and.ellipse", next: "") {
-                        StopsList(pal: pal, start: { startReq = StartRequest(stop: $0) }, edit: { stopEdit = StopEditRequest(stop: $0) })
-                    }
-                    fold("tips", "Before you nap", icon: "moon.zzz.fill", next: "") { TipsList() }
-                    Text("The alarm works with your phone’s GPS, so delays and detours don’t throw it off.").font(HWFont.body(11)).foregroundStyle(HWPalette.muted)
-                    Link("Questions or problems? github.com/kupperma/Halte-wekker", destination: URL(string: "https://github.com/kupperma/Halte-wekker")!)
-                        .font(HWFont.body(11, bold: true)).foregroundStyle(pal.accent)
-                }
-                .padding(.horizontal, 18).padding(.top, 8).padding(.bottom, 40)
+            HomeStage(home: home, stage: stage, moving: trip.movingStation && scene == .active, moveToken: moveToken, loopToken: loopToken)
+            // face to face with the map on the wall
+            GeometryReader { g in
+                let r = MapSpot.rect(in: g.size)
+                MetroMapMenu(home: home, fastest: fastestSub, lines: linesSub, planned: plannedSub, via: live.next.first?.via,
+                             open: { go($0) }, toggle: { toggleDirection() }, settings: { settings = true })
+                    .scaleEffect(r.width / MapSpot.design.width, anchor: .topLeading)
+                    .frame(width: r.width, height: r.height, alignment: .topLeading)
+                    .position(x: r.midX, y: r.midY)
+            }
+            .ignoresSafeArea()
+            .opacity(stage == .map ? 1 : 0)
+            .allowsHitTesting(stage == .map)
+            .animation(.easeOut(duration: stage == .map ? 0.3 : 0.15), value: stage)
+            // stepped back: the station, with the part you picked
+            if stage == .station {
+                sectionView.transition(.move(edge: .bottom).combined(with: .opacity))
             }
             if let t = trip.toast {
                 ToastView(text: t, pal: pal)
@@ -160,44 +106,197 @@ struct HomeView: View {
         }
     }
 
-    // MARK: pieces
+    // MARK: map ⇄ station
 
-    private var header: some View {
-        HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Haltewekker").font(HWFont.display(32)).foregroundStyle(HWPalette.ink)
-                Text("Fall asleep on the bus or train. It wakes you before your stop.").font(HWFont.body(13)).foregroundStyle(HWPalette.muted)
+    /// Pick a line on the map: step back from the wall and turn to the platform.
+    private func go(_ s: HomeSection) {
+        guard stage == .map else { return }
+        section = s
+        if s == .more { open.insert("scores") }
+        moveToken += 1; loopToken += 1
+        withAnimation(.easeOut(duration: 0.15)) { stage = .leaving }
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_450_000_000)
+            guard stage == .leaving else { return }
+            withAnimation(.spring(response: 0.45, dampingFraction: 0.9)) { stage = .station }
+            if s == .planned && planner.trip == nil {
+                try? await Task.sleep(nanoseconds: 400_000_000)
+                planning = true
             }
-            Spacer()
-            Button { settings = true } label: {
-                Image(systemName: "slider.horizontal.3").font(.system(size: 18, weight: .semibold)).foregroundStyle(pal.brass)
-                    .frame(width: 46, height: 46).background(Color.black.opacity(0.6), in: Circle()).overlay(Circle().stroke(pal.brass, lineWidth: 1.5))
-            }
-            .accessibilityLabel("Settings")
         }
     }
+
+    /// Back to the map: walk up to the wall again.
+    private func backToMap() {
+        guard stage == .station else { return }
+        moveToken += 1
+        withAnimation(.easeIn(duration: 0.2)) { stage = .returning }
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_600_000_000)
+            guard stage == .returning else { return }
+            withAnimation(.easeOut(duration: 0.3)) { stage = .map }
+        }
+    }
+
+    private var fastestSub: String {
+        guard let t = live.next.first else { return live.nextError == nil ? "Finding your next connection…" : "No trips found right now" }
+        let m = Fmt.mins(t.first.departure.timeIntervalSinceNow)
+        return "Leaves \(Fmt.hhmm(t.first.departure))\(m <= 90 ? " (in \(m) min)" : "") · \(home ? "home" : "BUas") \(Fmt.hhmm(t.end))"
+    }
+    private var linesSub: String {
+        if let w = lines.watches.first { return "Watching \(w.line): \(w.status)" }
+        let now = Date()
+        if home, let t = live.trains.first(where: { $0.trip.first.departure > now }) {
+            return "\(t.trip.first.line) to \(t.to.short) \(Fmt.hhmm(t.trip.first.departure)) · every bus and train"
+        }
+        if !home, let d = live.boardShown.first(where: { $0.time > now && !$0.cancelled }) {
+            return "Bus \(d.line) to \(d.headsign) \(Fmt.hhmm(d.time)) · every bus and train"
+        }
+        return "Every bus and train, live"
+    }
+    private var plannedSub: String {
+        guard let t = planner.trip else { return "Travel with your friend’s train" }
+        return "\(t.dayLabel) · \(t.out ? "arrive Breda" : "leave Breda") \(t.time)"
+    }
+
+    // MARK: on the platform
+
+    private var sectionView: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Button(action: backToMap) {
+                    HStack(spacing: 5) {
+                        Image(systemName: "chevron.left").font(.system(size: 12, weight: .bold))
+                        Text("MAP").font(HWFont.display(13)).tracking(1.4)
+                    }
+                    .foregroundStyle(pal.brass).padding(.horizontal, 12).padding(.vertical, 8)
+                    .background(Color.black.opacity(0.6), in: Capsule()).overlay(Capsule().stroke(pal.brass, lineWidth: 1.2))
+                }
+                .buttonStyle(.plain).accessibilityLabel("Back to the map")
+                Text(section.title).font(HWFont.display(21)).foregroundStyle(HWPalette.ink).lineLimit(1).minimumScaleFactor(0.8)
+                Spacer(minLength: 4)
+                Button(action: toggleDirection) {
+                    HStack(spacing: 5) {
+                        Text(trip.direction.word).font(HWFont.display(13)).tracking(1.6)
+                        Image(systemName: "arrow.up.arrow.down").font(.system(size: 11, weight: .bold))
+                    }
+                    .foregroundStyle(pal.accent).padding(.horizontal, 10).padding(.vertical, 8)
+                    .background(Color.black.opacity(0.6), in: Capsule()).overlay(Capsule().stroke(pal.brass, lineWidth: 1.2))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(home ? "Going home. Tap to switch to going to Breda." : "Going to Breda. Tap to switch to going home.")
+                Button { settings = true } label: {
+                    Image(systemName: "gearshape").font(.system(size: 14, weight: .semibold)).foregroundStyle(pal.brass)
+                        .frame(width: 34, height: 34).background(Color.black.opacity(0.6), in: Circle()).overlay(Circle().stroke(pal.brass, lineWidth: 1.2))
+                }
+                .buttonStyle(.plain).accessibilityLabel("Settings")
+            }
+            .padding(.horizontal, 18).padding(.top, 4).padding(.bottom, 8)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    switch section {
+                    case .fastest: fastestContent
+                    case .lines: linesContent
+                    case .planned: plannedContent
+                    case .more: moreContent
+                    }
+                }
+                .padding(.horizontal, 18).padding(.top, 70).padding(.bottom, 40)
+            }
+            .scrollIndicators(.hidden)
+        }
+    }
+
+    @ViewBuilder private var fastestContent: some View {
+        nextPass
+        WatchingCard(pal: pal)
+        sectionTitle("Wake me up")
+        routesList
+    }
+
+    @ViewBuilder private var linesContent: some View {
+        WatchingCard(pal: pal)
+        HStack(alignment: .firstTextBaseline) {
+            sectionTitle("Live times")
+            Spacer()
+            Button { near.on.toggle() } label: {
+                Label("Near me", systemImage: near.on ? "location.fill" : "location")
+                    .font(HWFont.body(12, bold: true)).foregroundStyle(near.on ? Color(hex: 0x0B0D14) : pal.accent)
+                    .padding(.horizontal, 10).padding(.vertical, 6)
+                    .background(near.on ? pal.band : Color.black.opacity(0.5), in: Capsule())
+                    .overlay(Capsule().stroke(pal.brass, lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+            .accessibilityAddTraits(near.on ? .isSelected : [])
+        }
+        nearNote
+        HStack(spacing: 6) {
+            ForEach(["S", "A", "B", "C"], id: \.self) { Coin(grade: $0, size: 22) }
+            Text("How fast each bus or train gets you there, compared with the fastest on that route. Delays count.")
+                .font(HWFont.body(12)).foregroundStyle(HWPalette.muted)
+        }
+        ForEach(panelOrder.filter(shown), id: \.self) { p in panel(p) }
+        if trip.locationDenied {
+            Text("Location is off for Haltewekker. Turn it on in Settings → Privacy → Location Services, or it can’t wake you.")
+                .font(HWFont.body(12, bold: true)).foregroundStyle(HWPalette.warn)
+        }
+        Text("Live times from Transitous, map data © OpenStreetMap contributors.").font(HWFont.body(10)).foregroundStyle(HWPalette.muted)
+    }
+
+    @ViewBuilder private var plannedContent: some View {
+        if planner.trip != nil {
+            PlannedPass(edit: { planning = true }, wake: { r in
+                if let t = planner.trip { trip.pick(t.out ? .toSchool : .home) }
+                startReq = StartRequest(route: r)
+            })
+        } else {
+            planButton
+            Text("Pick the time of your friend’s train, today or tomorrow. You get a boarding pass with the bus before it and the bus after it, and an alarm if the train changes platform or runs late.")
+                .font(HWFont.body(12)).foregroundStyle(HWPalette.ink.opacity(0.85))
+        }
+        WatchingCard(pal: pal)
+    }
+
+    @ViewBuilder private var moreContent: some View {
+        fold("scores", "Leaderboard", icon: "trophy.fill",
+             next: scores.bestThisWeek(home: true).map { "Home \(Int($0.mins.rounded())) min" } ?? "") {
+            LeaderboardView(pal: pal).padding(.top, 10)
+        }
+        fold("stops", "Wake me at a single stop", icon: "mappin.and.ellipse", next: "") {
+            StopsList(pal: pal, start: { startReq = StartRequest(stop: $0) }, edit: { stopEdit = StopEditRequest(stop: $0) })
+        }
+        fold("tips", "Before you nap", icon: "moon.zzz.fill", next: "") { TipsList() }
+        Text("The alarm works with your phone’s GPS, so delays and detours don’t throw it off.").font(HWFont.body(11)).foregroundStyle(HWPalette.muted)
+        Link("Questions or problems? github.com/kupperma/Halte-wekker", destination: URL(string: "https://github.com/kupperma/Halte-wekker")!)
+            .font(HWFont.body(11, bold: true)).foregroundStyle(pal.accent)
+    }
+
+    private var routesList: some View {
+        VStack(spacing: 0) {
+            ForEach(RoutePlan.all) { r in
+                Button { startReq = StartRequest(route: r) } label: {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(r.name).font(HWFont.display(17)).foregroundStyle(HWPalette.ink)
+                            Text(r.legs(trip.direction).map { "\($0.mode.title) to \($0.to.short)" }.joined(separator: " — ")).font(HWFont.body(12)).foregroundStyle(HWPalette.muted)
+                        }
+                        Spacer()
+                        Image(systemName: "bell.and.waves.left.and.right").foregroundStyle(pal.brass)
+                    }
+                    .padding(.vertical, 12).padding(.horizontal, 6).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                if r.id != RoutePlan.all.last?.id { Rectangle().fill(.white.opacity(0.07)).frame(height: 1) }
+            }
+        }
+        .brass(pal, pad: 14)
+    }
+
+    // MARK: pieces
 
     private func toggleDirection() {
         withAnimation(.easeInOut(duration: 0.6)) { trip.pick(home ? .toSchool : .home) }
         Task { await live.refresh(trip.direction, force: true) }
-    }
-
-    private var directionButton: some View {
-        Button(action: toggleDirection) {
-            HStack(alignment: .bottom) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(trip.direction.kicker.uppercased()).font(HWFont.body(11)).tracking(2.2).foregroundStyle(HWPalette.ink.opacity(0.8))
-                    FlipTiles(word: trip.direction.word, pal: pal)
-                    Text(home ? "Breda → Veghel · tap to switch" : "Veghel → Breda · tap to switch").font(HWFont.body(13)).foregroundStyle(HWPalette.ink.opacity(0.8))
-                }
-                Spacer()
-                Image(systemName: "arrow.up.arrow.down").font(.system(size: 18, weight: .bold)).foregroundStyle(pal.brass)
-                    .frame(width: 46, height: 46).background(Color.black.opacity(0.6), in: Circle()).overlay(Circle().stroke(pal.brass, lineWidth: 1.5))
-                    .rotationEffect(.degrees(home ? 180 : 0))
-            }
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(home ? "Going home. Tap to switch to going to Breda." : "Going to Breda. Tap to switch to going home.")
     }
 
     @ViewBuilder private var nextPass: some View {
