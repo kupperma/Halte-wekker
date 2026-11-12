@@ -22,7 +22,7 @@ struct HaltewekkerApp: App {
                 .onOpenURL { url in Task { await trip.music.finish(url) } }      // back from the Spotify sign-in page
                 .onAppear {
                     let t = trip
-                    near.onPosition = { t.maybeAutoHome($0) }
+                    near.onPosition = { t.guessFromPlace($0); t.maybeAutoHome($0) }
                 }
         }
     }

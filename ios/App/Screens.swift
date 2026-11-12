@@ -93,6 +93,7 @@ struct HomeView: View {
     @State private var walkTo: WalkTarget?                 // the walk to a stop, on a map
     @State private var liveTrack: LiveTrackTarget?         // a bus or train you tapped, live on a map
     @State private var showMoving = false                  // everything moving near you, on a map
+    @State private var showDemo = false                    // try it at home
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -136,7 +137,12 @@ struct HomeView: View {
             }
         }
         .onAppear { Handoff.fromBoards = stage == .station }
-        .sheet(isPresented: $settings) { SettingsView().presentationDetents([.large]) }
+        .sheet(isPresented: $settings) {
+            SettingsView(tryDemo: {
+                Task { @MainActor in try? await Task.sleep(nanoseconds: 500_000_000); showDemo = true }
+            }).presentationDetents([.large])
+        }
+        .sheet(isPresented: $showDemo) { DemoSheet().presentationDetents([.large]) }
         .sheet(isPresented: $planning) { PlanSheet() }
         .sheet(isPresented: $liveSettings, onDismiss: { Task { await live.refresh(trip.direction, force: true) } }) { LiveSettingsSheet() }
         .sheet(item: $startReq) { r in StartSheet(req: r).presentationDetents([.medium, .large]) }
@@ -802,6 +808,21 @@ struct HomeView: View {
     }
 
     @ViewBuilder private var moreContent: some View {
+        Button { showDemo = true } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "play.fill").font(.system(size: 14, weight: .semibold)).foregroundStyle(BoardInk.navy)
+                    .frame(width: 32, height: 32).background(BoardInk.yellow, in: RoundedRectangle(cornerRadius: 6))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Try it at home").font(HWFont.display(17)).foregroundStyle(HWPalette.ink)
+                    Text("A pretend trip: Fastest trip, the ride, the alarm.").font(HWFont.body(12)).foregroundStyle(HWPalette.muted)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right").font(.system(size: 12, weight: .bold)).foregroundStyle(Color.white.opacity(0.8))
+            }
+            .contentShape(Rectangle())
+            .brass(pal, pad: 14)
+        }
+        .buttonStyle(.plain)
         Button { showMoving = true } label: {
             HStack(spacing: 10) {
                 Image(systemName: "map.fill").font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
@@ -1180,7 +1201,8 @@ struct RideView: View {
                         .font(HWFont.body(12)).foregroundStyle(HWPalette.ink.opacity(0.8)).padding(.horizontal, 12).padding(.vertical, 7)
                         .background(.white.opacity(0.07), in: Capsule())
                     Spacer()
-                    if trip.autoStarted { Text("STARTED BY ITSELF").font(HWFont.body(10)).tracking(1.2).foregroundStyle(pal.accent) }
+                    if trip.demo { Text("DEMO").font(HWFont.body(11, bold: true)).tracking(1.4).foregroundStyle(BoardInk.yellow) }
+                    else if trip.autoStarted { Text("STARTED BY ITSELF").font(HWFont.body(10)).tracking(1.2).foregroundStyle(pal.accent) }
                 }
                 if trip.waitingToBoard { boarding } else { riding }
                 if trip.phase == .awake {
@@ -1751,10 +1773,19 @@ struct SettingsView: View {
     @State private var liveStops = false
     @State private var confirmReset = false
     @Environment(\.webAuthenticationSession) private var webAuth
+    @Environment(\.dismiss) private var dismissSettings
+    var tryDemo: (() -> Void)? = nil
     var pal: HWPalette { .of(home: trip.direction == .home) }
     var body: some View {
         NavigationStack {
             Form {
+                if let tryDemo, trip.phase == .idle {
+                    Section {
+                        Button { dismissSettings(); tryDemo() } label: {
+                            Label("Try it at home: a pretend trip", systemImage: "play.circle.fill").foregroundStyle(pal.accent)
+                        }
+                    } footer: { Text("Fastest trip with the map and notifications, being recognised on the bus, the ride ring, the alarm and arriving, all pretend.") }
+                }
                 Section {
                     Toggle(isOn: $trip.autoStart) { label("Start trips by itself", "Notices when you leave your stop or station on a bus or train, and starts the alarm. Needs location set to Always.") }
                     if trip.autoStart && !trip.always {

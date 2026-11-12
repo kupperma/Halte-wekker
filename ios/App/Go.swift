@@ -24,6 +24,8 @@ final class GoStore: ObservableObject {
     @Published private(set) var arrived = false
     @Published private(set) var seen: Vehicle?               // looks like you're on this one (checking)
     @Published private(set) var here: CLLocation?
+    @Published private(set) var demo = false                 // pretend buses, to try it at home
+    private var demoTask: Task<Void, Never>?
     struct Note: Identifiable, Equatable {
         let id = UUID()
         let at: Date
@@ -60,6 +62,8 @@ final class GoStore: ObservableObject {
         stopWatching()
         isOpen = false
         clearPosted()
+        demoTask?.cancel(); demoTask = nil
+        if demo { demo = false; Demo.buses = [:] }
     }
 
     /// Watch again (after it stopped by itself).
@@ -267,9 +271,94 @@ final class GoStore: ObservableObject {
 
     /// "I'm on it": start the trip by hand (it still looks for which one you're on).
     func startByHand() {
+        if demo, let f = best?.first, let a = f.fromLat, let o = f.fromLon {
+            trip?.startDemo(from: .init(latitude: a, longitude: o), line: f.line)
+            close()
+            return
+        }
         guard let t = best, let r = RoutePlan.from(t), let trip else { return }
         trip.start(r)
         close()
+    }
+
+    // MARK: the demo
+
+    /// The screen with pretend buses from the stop nearest to you: what to take, the walk, the bus coming on the map, the
+    /// notifications (time to go, late, something faster), then it "sees" you get on and the pretend ride starts.
+    func startDemo(near loc: CLLocation?) {
+        close()
+        demo = true
+        isOpen = true
+        dest = .breda
+        best = nil; others = []; error = nil; updated = nil; notes = []; arrived = false; seen = nil
+        here = loc ?? trip?.lastFix
+        watching = true
+        demoTask = Task { [weak self] in await self?.runDemo() }
+    }
+
+    private func runDemo() async {
+        let c = here?.coordinate ?? trip?.here ?? Place.veghel.coordinate
+        var name = "Your nearest stop"
+        var s = CLLocationCoordinate2D(latitude: c.latitude + 0.0016, longitude: c.longitude + 0.0022)
+        if let n = await Transit.nearStops(c).first(where: { !$0.rail }) { name = n.name; s = .init(latitude: n.lat, longitude: n.lon) }
+        guard demo, isOpen else { return }
+        let metres = CLLocation(latitude: c.latitude, longitude: c.longitude).distance(from: CLLocation(latitude: s.latitude, longitude: s.longitude))
+        let walk = max(1, Int((metres / 80).rounded()))
+        let t0 = Date()
+        let ht = Place.denBosch.coordinate, bd = Place.breda.coordinate
+        func bus(_ id: String, _ line: String, _ dep: TimeInterval, planned: TimeInterval? = nil, ride: TimeInterval = 20 * 60) -> Ride {
+            let d = t0.addingTimeInterval(dep), p = t0.addingTimeInterval(planned ?? dep)
+            return Ride(tripId: id, line: line, name: line, isTrain: false, departure: d, scheduledDeparture: p,
+                        arrival: d.addingTimeInterval(ride), scheduledArrival: p.addingTimeInterval(ride), fromStop: name, fromId: "demo-stop",
+                        toStop: "’s-Hertogenbosch, Centraal Station", platform: nil, live: true, cancelled: false, walkBefore: walk,
+                        headsign: "Den Bosch", fromLat: s.latitude, fromLon: s.longitude, toLat: ht.latitude, toLon: ht.longitude)
+        }
+        func intercity(_ dep: TimeInterval) -> Ride {
+            let d = t0.addingTimeInterval(dep)
+            return Ride(tripId: "demo-ic-\(Int(dep))", line: "IC", name: "Intercity", isTrain: true, departure: d, scheduledDeparture: d,
+                        arrival: d.addingTimeInterval(30 * 60), scheduledArrival: d.addingTimeInterval(30 * 60), fromStop: "’s-Hertogenbosch",
+                        fromId: "demo-ht", toStop: "Breda", platform: "3", live: true, cancelled: false, walkBefore: 0,
+                        headsign: "Roosendaal", fromLat: ht.latitude, fromLon: ht.longitude, toLat: bd.latitude, toLon: bd.longitude)
+        }
+        func door(_ b: Ride, _ t: Ride) -> DoorTrip { DoorTrip(rides: [b, t], start: b.departure.addingTimeInterval(Double(-walk * 60)), end: t.arrival) }
+        func show(_ b: Ride) { Demo.buses[b.tripId] = Demo.Bus(line: b.line, stopName: name, stop: s, departure: b.departure, planned: b.scheduledDeparture) }
+        func at(_ t: TimeInterval) async -> Bool {
+            let left = t0.addingTimeInterval(t).timeIntervalSinceNow
+            if left > 0 { try? await Task.sleep(nanoseconds: UInt64(left * 1_000_000_000)) }
+            return !Task.isCancelled && demo && isOpen
+        }
+        let stop = Fmt.place(name)
+        // the 306 in two and a half minutes, then the Intercity from Den Bosch
+        let b306 = bus("demo-306", "306", 150), ic2 = intercity(150 + 28 * 60)
+        let later = [door(bus("demo-306-later", "306", 150 + 15 * 60), intercity(150 + 43 * 60)),
+                     door(bus("demo-305", "305", 150 + 26 * 60, ride: 24 * 60), intercity(150 + 58 * 60))]
+        show(b306)
+        best = door(b306, ic2); others = later; updated = Date()
+        guard await at(10) else { return }
+        tell("Time to go", "\(walk) min walk to \(stop) for the bus 306 at \(Fmt.hhmm(b306.departure)).")
+        // it runs late (still your fastest)
+        guard await at(25) else { return }
+        let late = bus("demo-306", "306", 150 + 180, planned: 150)
+        show(late)
+        best = door(late, ic2); updated = Date()
+        tell("Bus 306 is 3 min late", "It leaves \(Fmt.hhmm(late.departure)) instead of \(Fmt.hhmm(late.scheduledDeparture)). Still your fastest: Breda at \(Fmt.hhmm(ic2.arrival)).")
+        // then something faster: it switches by itself
+        guard await at(42) else { return }
+        let b300 = bus("demo-300", "300", 105, ride: 16 * 60), ic1 = intercity(105 + 22 * 60)
+        show(b300)
+        let fast = door(b300, ic1)
+        best = fast; others = [door(late, ic2)] + later; updated = Date()
+        tell("Faster now: Bus 300", "Take the bus 300 at \(Fmt.hhmm(b300.departure)) from \(stop): Breda at \(Fmt.hhmm(fast.end)), \(Fmt.mins(ic2.arrival.timeIntervalSince(fast.end))) min sooner. It watches that one for you now.")
+        // the bus is at your stop: it sees you get on, and the ride starts
+        guard await at(106) else { return }
+        seen = Vehicle(tripId: "demo-300", line: "300", isTrain: false)
+        guard await at(113) else { return }
+        trip?.startDemo(from: s, line: "300")
+        close()
+        let n = UNMutableNotificationContent()
+        n.title = "You’re on the bus 300"
+        n.body = "Your trip started by itself (demo)."
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "goboard-demo", content: n, trigger: nil)) { _ in }
     }
 
     // MARK: telling you
@@ -385,8 +474,8 @@ struct GoView: View {
             }
             .accessibilityLabel("Where you’re going: \(destWord). Tap to change.")
             HStack(spacing: 5) {
-                Circle().fill(go.watching ? BoardInk.green : Color.white.opacity(0.4)).frame(width: 7, height: 7)
-                Text(go.watching ? "WATCHING" : "STOPPED").font(BoardInk.sans(10)).tracking(1)
+                Circle().fill(go.demo ? BoardInk.yellow : go.watching ? BoardInk.green : Color.white.opacity(0.4)).frame(width: 7, height: 7)
+                Text(go.demo ? "DEMO" : go.watching ? "WATCHING" : "STOPPED").font(BoardInk.sans(10)).tracking(1)
             }
             .foregroundStyle(.white).padding(.horizontal, 9).padding(.vertical, 8)
             .background(.ultraThinMaterial, in: Capsule())

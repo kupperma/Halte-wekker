@@ -79,6 +79,11 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     @Published private(set) var speed: Double?               // m/s, from GPS
     @Published private(set) var startDistance: Double?       // how far you are from where this leg starts
     @Published private(set) var always = false
+    /// A pretend ride (the demo): it moves along by itself, without your GPS.
+    @Published private(set) var demo = false
+    private var demoTask: Task<Void, Never>?
+    private var guessDirection = true            // on launch (and back after a while): where you are decides the direction
+    private var awaySince: Date?
 
     let sound = AlarmSound()
     let music = NowPlaying()
@@ -126,6 +131,21 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     func pick(_ d: Direction) {
         direction = d
         UserDefaults.standard.set(d.rawValue, forKey: "dir"); UserDefaults.standard.set(Date(), forKey: "dirAt")
+        UserDefaults.standard.set(Date(), forKey: "dirPickedAt")
+    }
+
+    /// When the app opens (or comes back after half an hour): in Veghel you're going to Breda, in Breda you're going home.
+    /// Somewhere else it keeps what it had. A direction you just picked yourself (in the last 20 minutes) stays.
+    func guessFromPlace(_ l: CLLocation) {
+        guard guessDirection, !isRiding, l.horizontalAccuracy >= 0, l.horizontalAccuracy < 1500, l.timestamp.timeIntervalSinceNow > -600 else { return }
+        guessDirection = false
+        if let at = UserDefaults.standard.object(forKey: "dirPickedAt") as? Date, Date().timeIntervalSince(at) < 20 * 60 { return }
+        func near(_ p: Place, _ m: Double) -> Bool { l.distance(from: CLLocation(latitude: p.coordinate.latitude, longitude: p.coordinate.longitude)) < m }
+        let d: Direction? = near(.veghel, 5000) ? .toSchool : (near(.breda, 6000) || near(.buas, 6000)) ? .home : nil
+        guard let d, d != direction else { return }
+        direction = d
+        UserDefaults.standard.set(d.rawValue, forKey: "dir"); UserDefaults.standard.set(Date(), forKey: "dirAt")
+        toast = d == .toSchool ? "You’re in Veghel, so it’s set to going to Breda." : "You’re in Breda, so it’s set to going home."
     }
     /// After 3 hours the direction follows the clock again.
     private func followClock() {
@@ -157,6 +177,9 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         music.onChange = { [weak self] in self?.pushActivity(force: true) }
         LineWatchStore.shared.onChange = { [weak self] in self?.updateKeepAlive() }
         GoStore.shared.trip = self
+        NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.awaySince = Date() }
+        }
         AlarmControl.stop = { [weak self] in self?.stopAlarm() }
         // "Stop alarm" right on the alarm notification.
         let stop = UNNotificationAction(identifier: "STOP", title: "Stop alarm", options: [])
@@ -254,6 +277,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
 
     func endTrip() {
         detectTask?.cancel(); detectTask = nil
+        demoTask?.cancel(); demoTask = nil; demo = false
         setBackup(0)
         sound.endTrip()
         music.stop()
@@ -299,6 +323,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     /// When the app comes back to the screen: start the Live Activity if a trip started by itself in the background.
     func appBecameActive() {
         always = location.authorizationStatus == .authorizedAlways
+        if let a = awaySince, Date().timeIntervalSince(a) > 30 * 60 { guessDirection = true }
+        awaySince = nil
         followClock()
         if isRiding && activity == nil { startActivity() }
     }
@@ -307,7 +333,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
 
     nonisolated func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let loc = locations.last else { return }
-        Task { @MainActor in self.handle(loc) }
+        Task { @MainActor in if !self.demo { self.handle(loc) } }
     }
 
     nonisolated func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
@@ -379,7 +405,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         c.sound = .default
         c.interruptionLevel = .timeSensitive
         // Using your phone right now? Then you're awake: one notification is enough.
-        if quietWhenInUse && phoneInUse() {
+        if quietWhenInUse && phoneInUse() && !demo {
             c.body += approach ? " Get ready to get off." : ""
             UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "heads-up-\(approach)", content: c, trigger: nil)) { _ in }
             if approach && (ringAtStop || forceArrival) { phase = .awake; pushActivity(force: true); WatchStore.shared.showNext() } else { legDone() }
@@ -396,6 +422,41 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     private func phoneInUse() -> Bool {
         guard UIApplication.shared.isProtectedDataAvailable else { return false }
         return LAContext().canEvaluatePolicy(.deviceOwnerAuthentication, error: nil)
+    }
+
+    // MARK: the demo
+
+    /// A pretend bus ride from `c`, two and a half minutes long, to try everything at home: the ring with the bus going round,
+    /// the stops, the speed, your song, the alarm at the wake distance and again at the stop, and arriving.
+    func startDemo(from c: CLLocationCoordinate2D?, line: String = "300") {
+        guard phase == .idle else { return }
+        let a = c ?? here ?? Place.veghel.coordinate
+        let k = cos(a.latitude * .pi / 180)
+        let total = 4600.0, secs = 150.0
+        func along(_ m: Double) -> CLLocationCoordinate2D { .init(latitude: a.latitude + m * 0.3 / 110_540, longitude: a.longitude + m * 0.95 / (111_320 * k)) }
+        let names = ["Your stop", "Zijtaart, Kerk", "Erp, Centrum", "Boerdonk, Kerk", "Keldonk, Dorp", "Den Bosch, Centraal Station"]
+        let now = Date()
+        let stops = names.enumerated().map { i, n in
+            TripStop(name: n, coordinate: along(total * Double(i) / Double(names.count - 1)), arrival: now.addingTimeInterval(secs * Double(i) / Double(names.count - 1)))
+        }
+        let end = along(total)
+        let from = Place(key: "demo-from", name: "Your stop", short: "Your stop", ids: ["\(a.latitude),\(a.longitude)"], coordinate: a, spoken: "your stop")
+        let to = Place(key: "demo-to", name: "Den Bosch Centraal", short: "Den Bosch", ids: ["\(end.latitude),\(end.longitude)"], coordinate: end, spoken: "Den Bosch")
+        demo = true
+        start(RoutePlan(id: "demo", name: "Demo ride", station: to, custom: [Leg(mode: .bus, from: from, to: to)]),
+              vehicle: Vehicle(tripId: "demo-\(line)", line: line, isTrain: false), backup: 0, stops: stops)
+        location.stopUpdatingLocation()                     // the pretend ride doesn't use your GPS
+        let t0 = Date()
+        demoTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self, self.demo, self.phase != .idle, self.phase != .finished else { return }
+                let f = min(1.0, Date().timeIntervalSince(t0) / secs)
+                let loc = CLLocation(coordinate: along(total * f), altitude: 0, horizontalAccuracy: 6, verticalAccuracy: 6,
+                                     course: 75, speed: f >= 1 ? 0 : 14 + 4 * sin(f * 14), timestamp: Date())
+                self.handle(loc)
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+        }
     }
 
     // MARK: notifications
@@ -608,7 +669,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
 
     /// Every minute while riding: the vehicle's live times (delays, next stop).
     private func refreshVehicle() async {
-        guard let v = vehicle else { return }
+        guard let v = vehicle, !demo else { return }
         let stops = await Transit.tripStops(v.tripId)
         guard vehicle == v, !stops.isEmpty else { return }
         applyStops(stops)
@@ -794,6 +855,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     // MARK: expected arrival
 
     private func refreshEta(force: Bool) {
+        if demo { arrival = legArrival ?? legTo; return }
         guard force || Date().timeIntervalSince(lastEta) > 120 else { return }
         lastEta = Date()
         let legs = self.legs, i = index, start = legStart, known = legArrival

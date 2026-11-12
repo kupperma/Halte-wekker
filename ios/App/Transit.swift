@@ -340,6 +340,7 @@ enum Transit {
 
     /// A bus or train's whole trip with its live times and the road it takes, for the live map.
     static func liveTrip(_ tripId: String) async -> LiveTrip? {
+        if Demo.isDemo(tripId) { return await Demo.liveTrip(tripId) }
         guard let json = try? await get("/v5/trip", [.init(name: "tripId", value: tripId)]) as? [String: Any],
               let legs = json["legs"] as? [[String: Any]], !legs.isEmpty else { return nil }
         var stops: [LiveTrip.Stop] = [], path: [CLLocationCoordinate2D] = [], live = false, line = "", head = ""
