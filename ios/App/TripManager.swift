@@ -18,7 +18,9 @@ struct Vehicle: Equatable {
 final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
     enum Phase: Equatable { case idle, sleeping, awake, alarm(approach: Bool), transfer, finished }
 
-    @Published var direction: Direction = Calendar.current.component(.hour, from: Date()) < 12 ? .toSchool : .home
+    /// A direction you picked yourself sticks for 3 hours, then it follows the clock again.
+    @Published private(set) var direction: Direction = TripManager.savedDirection()
+    @Published var toast: String?
     @Published private(set) var phase: Phase = .idle
     @Published private(set) var route: RoutePlan?
     @Published private(set) var legs: [Leg] = []
@@ -44,6 +46,16 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
         didSet { UserDefaults.standard.set(autoStart, forKey: "autoStart"); updateWatching() }
     }
     @Published var soundKind: AlarmSound.Kind { didSet { sound.kind = soundKind } }
+    @Published var pauseMusic: Bool = UserDefaults.standard.bool(forKey: "pauseMusic") {
+        didSet { UserDefaults.standard.set(pauseMusic, forKey: "pauseMusic"); sound.pauseMusic = pauseMusic }
+    }
+    @Published var autoHome: Bool = UserDefaults.standard.object(forKey: "autoHome") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(autoHome, forKey: "autoHome"); updateWatching() }
+    }
+    /// Wake distance per stop, once you've picked one ("bus:ht" → 2.5).
+    @Published private(set) var kmMem: [String: Double] = UserDefaults.standard.dictionary(forKey: "kmMem") as? [String: Double] ?? [:]
+    @Published private(set) var backupAt: Date?
+    @Published private(set) var lastScore: ScoreResult?
     @Published private(set) var always = false
 
     let sound = AlarmSound()
@@ -59,11 +71,43 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
     private var detectTask: Task<Void, Never>?
     private var watchLeft: (place: Place, at: Date)?      // auto-start: which station you just left
     private var maxDistance: Double?                      // furthest from the stop on this leg, for progress without times
+    private var tripStart: Date?
+    private var startedAtLeg = 0
+    private var backupTask: Task<Void, Never>?
+    private var lastWatchCheck = Date.distantPast
     private let arriveM = 450.0
 
     var leg: Leg? { index < legs.count ? legs[index] : nil }
-    var wakeKm: Double { leg?.mode == .bus ? busKm : trainKm }
-    var finalName: String { direction == .home ? "Home" : "Breda" }
+    var wakeKm: Double { leg.map(km(for:)) ?? busKm }
+    var finalName: String { route?.single != nil ? (leg?.to.short ?? "") : direction == .home ? "Home" : "Breda" }
+    func km(for l: Leg) -> Double { kmMem["\(l.mode.rawValue):\(l.to.key)"] ?? (l.mode == .bus ? busKm : trainKm) }
+    var here: CLLocationCoordinate2D? { location.location?.coordinate }
+
+    private static func savedDirection() -> Direction {
+        let d = UserDefaults.standard
+        if let at = d.object(forKey: "dirAt") as? Date, Date().timeIntervalSince(at) < 3 * 3600, let raw = d.string(forKey: "dir"), let dir = Direction(rawValue: raw) { return dir }
+        return Calendar.current.component(.hour, from: Date()) < 12 ? .toSchool : .home
+    }
+    /// You tapped the big button.
+    func pick(_ d: Direction) {
+        direction = d
+        UserDefaults.standard.set(d.rawValue, forKey: "dir"); UserDefaults.standard.set(Date(), forKey: "dirAt")
+    }
+    /// After 3 hours the direction follows the clock again.
+    private func followClock() {
+        guard !isRiding else { return }
+        let d = Self.savedDirection()
+        if d != direction { direction = d }
+    }
+
+    /// Reaching BUas switches to going home, once a day.
+    func maybeAutoHome(_ l: CLLocation) {
+        let today = Fmt.ymd.string(from: Date())
+        guard autoHome, direction == .toSchool, !isRiding, UserDefaults.standard.string(forKey: "autoHomeDay") != today, NearMe.atSchool(l) else { return }
+        UserDefaults.standard.set(today, forKey: "autoHomeDay")
+        pick(.home)
+        toast = "You’re at BUas, so it switched to Home. Tap the big button to switch back."
+    }
     var isRiding: Bool { phase != .idle }
 
     override init() {
@@ -76,16 +120,32 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
         location.pausesLocationUpdatesAutomatically = false
         always = location.authorizationStatus == .authorizedAlways
         music.onChange = { [weak self] in self?.pushActivity(force: true) }
+        sound.pauseMusic = pauseMusic
+        WatchStore.shared.holdAlerts = { [weak self] in self?.phase == .sleeping }
+        WatchStore.shared.chime = { [weak self] in
+            guard let self else { return }
+            self.sound.play(preview: self.soundKind)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.2) { [weak self] in
+                guard let self, WatchStore.shared.alert != nil else { return }
+                self.sound.play(preview: self.soundKind)
+            }
+        }
         updateWatching()
     }
 
     // MARK: trip flow
 
-    func start(_ r: RoutePlan, at legIndex: Int = 0, vehicle v: Vehicle? = nil, auto: Bool = false) {
+    func start(_ r: RoutePlan, at legIndex: Int = 0, vehicle v: Vehicle? = nil, auto: Bool = false, kms: [Double]? = nil, backup: Int = 0) {
         route = r
         legs = r.legs(direction)
         index = min(legIndex, legs.count - 1)
         autoStarted = auto
+        if let kms {
+            for (l, k) in zip(legs, kms) { kmMem["\(l.mode.rawValue):\(l.to.key)"] = k }
+            UserDefaults.standard.set(kmMem, forKey: "kmMem")
+        }
+        tripStart = Date(); startedAtLeg = index; lastScore = nil
+        setBackup(backup)
         sound.startTrip()
         music.start()
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
@@ -111,12 +171,13 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
         sound.stop()
         UNUserNotificationCenter.current().removeAllDeliveredNotifications()
         guard case .alarm(let approach) = phase else { return }
-        if approach && (ringAtStop || forceArrival) { phase = .awake; pushActivity(force: true) } else { legDone() }
+        if approach && (ringAtStop || forceArrival) { phase = .awake; pushActivity(force: true); WatchStore.shared.showNext() } else { legDone() }
     }
 
     /// You're at the end of a leg (by GPS, by the alarm, or "I'm off").
     func legDone() {
         sound.stop()
+        setBackup(0)
         arrivedAt = leg?.to.short
         if index + 1 < legs.count {
             phase = .transfer
@@ -125,20 +186,26 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
         } else {
             phase = .finished
             location.stopUpdatingLocation()
+            if let r = route, r.single == nil, startedAtLeg == 0, let s = tripStart {
+                lastScore = ScoreBook.shared.log(route: r, home: direction == .home, start: s)
+            }
         }
         pushActivity(force: true)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { WatchStore.shared.showNext() }
     }
 
-    func nextLeg(vehicle v: Vehicle? = nil) {
+    func nextLeg(vehicle v: Vehicle? = nil, backup: Int = 0) {
         guard index + 1 < legs.count else { return }
         index += 1
         sound.startTrip()
+        setBackup(backup)
         beginLeg(vehicle: v)
         pushActivity(force: true)
     }
 
     func endTrip() {
         detectTask?.cancel(); detectTask = nil
+        setBackup(0)
         sound.endTrip()
         music.stop()
         location.stopUpdatingLocation()
@@ -153,6 +220,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
     /// When the app comes back to the screen: start the Live Activity if a trip started by itself in the background.
     func appBecameActive() {
         always = location.authorizationStatus == .authorizedAlways
+        followClock()
         if isRiding && activity == nil { startActivity() }
     }
 
@@ -176,6 +244,11 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
         Task { @MainActor in self.leftRegion(region.identifier) }
     }
 
+    nonisolated func locationManager(_ manager: CLLocationManager, didEnterRegion region: CLRegion) {
+        guard region.identifier == "school" else { return }
+        Task { @MainActor in self.maybeAutoHome(CLLocation(latitude: Place.buas.coordinate.latitude, longitude: Place.buas.coordinate.longitude)) }
+    }
+
     private func handle(_ loc: CLLocation) {
         samples.append(loc)
         samples.removeAll { $0.timestamp < Date().addingTimeInterval(-240) }
@@ -192,6 +265,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
         }
         refreshEta(force: false)
         pushActivity(force: false)
+        if Date().timeIntervalSince(lastWatchCheck) > 60 { lastWatchCheck = Date(); Task { await WatchStore.shared.check() } }
     }
 
     // MARK: alarm + announcement
@@ -205,6 +279,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
     }
 
     private func ring(approach: Bool) {
+        setBackup(0)
         phase = .alarm(approach: approach)
         sound.ring(announcement: announcement(approach: approach))
         let c = UNMutableNotificationContent()
@@ -220,6 +295,29 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
         let text = announce ? "This is a test. Attention please. We are now arriving at Breda station." : nil
         sound.ring(announcement: text)
         DispatchQueue.main.asyncAfter(deadline: .now() + 14) { [weak self] in if self?.phase == .idle { self?.sound.stop() } }
+    }
+
+    // MARK: backup alarm
+
+    /// Rings after this many minutes even if GPS drops out (0 = off).
+    private func setBackup(_ minutes: Int) {
+        backupTask?.cancel(); backupTask = nil; backupAt = nil
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: ["backup"])
+        guard minutes > 0 else { return }
+        backupAt = Date().addingTimeInterval(Double(minutes) * 60)
+        backupTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(minutes) * 60_000_000_000)
+            guard let self, !Task.isCancelled, self.phase == .sleeping else { return }
+            self.ring(approach: true)
+        }
+        // A notification as well, in case iOS stops the app.
+        let c = UNMutableNotificationContent()
+        c.title = "Wake up"
+        c.body = "Your backup alarm: \(leg?.to.short ?? "your stop") should be close."
+        c.sound = .default
+        c.interruptionLevel = .timeSensitive
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "backup", content: c,
+                                                                     trigger: UNTimeIntervalNotificationTrigger(timeInterval: Double(minutes) * 60, repeats: false))) { _ in }
     }
 
     // MARK: which bus or train you're on
@@ -294,11 +392,17 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
     /// Watches your stations with region monitoring (cheap): full GPS only switches on once you leave one.
     private func updateWatching() {
         for r in location.monitoredRegions { location.stopMonitoring(for: r) }
-        guard autoStart else { return }
+        guard autoStart || autoHome else { return }
         if location.authorizationStatus != .authorizedAlways {
-            if location.authorizationStatus == .authorizedWhenInUse { location.requestAlwaysAuthorization() }
+            if autoStart && location.authorizationStatus == .authorizedWhenInUse { location.requestAlwaysAuthorization() }
             return
         }
+        if autoHome {
+            let r = CLCircularRegion(center: Place.buas.coordinate, radius: NearMe.schoolRadius, identifier: "school")
+            r.notifyOnEntry = true; r.notifyOnExit = false
+            location.startMonitoring(for: r)
+        }
+        guard autoStart else { return }
         for p in Place.all where p != .buas {
             let r = CLCircularRegion(center: p.coordinate, radius: p == .veghel ? 350 : 300, identifier: p.key)
             r.notifyOnExit = true; r.notifyOnEntry = false
@@ -462,6 +566,18 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
         guard force || (key != lastActivityKey && Date().timeIntervalSince(lastActivity) > 8) else { return }
         lastActivity = Date(); lastActivityKey = key
         Task { await activity.update(ActivityContent(state: s, staleDate: nil)) }
+    }
+
+    /// Settings → Reset everything.
+    func resetAll() {
+        if isRiding { endTrip() }
+        let d = UserDefaults.standard
+        for k in ["busKm", "trainKm", "ringAtStop", "announce", "movingStation", "autoStart", "sound", "pauseMusic", "autoHome", "kmMem", "dir", "dirAt", "autoHomeDay"] { d.removeObject(forKey: k) }
+        busKm = 2; trainKm = 5; ringAtStop = true; announce = true; movingStation = true; autoStart = true
+        soundKind = .steam; pauseMusic = false; autoHome = true; kmMem = [:]; lastScore = nil
+        direction = Self.savedDirection()
+        Ratings.shared.reset(); ScoreBook.shared.reset(); WatchStore.shared.reset(); StopsStore.shared.reset()
+        music.disconnectSpotify(); music.source = .off
     }
 
     /// Settings → "Preview on the lock screen": a made-up trip for a minute, so you can see how it looks.

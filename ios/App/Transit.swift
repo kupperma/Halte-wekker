@@ -19,6 +19,9 @@ struct Ride: Identifiable, Hashable {
     let live: Bool
     let cancelled: Bool
     let walkBefore: Int         // minutes of walking before this ride
+    var num: String = ""        // the train number ("3561"), for NS
+    var headsign: String = ""
+    var plannedPlatform: String? = nil
     var delay: Int { live ? Int((departure.timeIntervalSince(scheduledDeparture) / 60).rounded()) : 0 }
     var rideMinutes: Int { Fmt.mins(arrival.timeIntervalSince(departure)) }
     var badge: String { isTrain ? line : "BUS \(line)" }
@@ -33,6 +36,14 @@ struct DoorTrip: Identifiable, Hashable {
     let start: Date
     let end: Date
     var first: Ride { rides[0] }
+    var last: Ride { rides[rides.count - 1] }
+    var changes: [String] { rides.dropFirst().map { Fmt.place($0.fromStop) } }
+    /// On board, with the wait at a change: first departure to last arrival.
+    var rideMinutes: Double { last.arrival.timeIntervalSince(first.departure) / 60 }
+    var scheduledMinutes: Double { last.scheduledArrival.timeIntervalSince(first.scheduledDeparture) / 60 }
+    var walkAfter: Int { max(0, Fmt.mins(end.timeIntervalSince(last.arrival))) }
+    /// "24 min ride", "1 h 05 min incl. change"
+    var rideLabel: String { "\(Fmt.rideText(rideMinutes)) \(rides.count > 1 ? "incl. change" : "ride")" }
     var via: String? { rides.map { Fmt.place($0.toStop) }.first { $0 == "Den Bosch" || $0 == "Eindhoven" } }
 }
 
@@ -110,6 +121,27 @@ enum Transit {
         return try JSONSerialization.jsonObject(with: data)
     }
 
+    static func text(_ a: Any?) -> String {
+        if let s = a as? String { return s }
+        if let n = a as? NSNumber { return n.stringValue }
+        return ""
+    }
+
+    struct StopHit: Identifiable, Hashable { let id: String; let name: String; let town: String; let lat: Double; let lon: Double }
+
+    /// Stop search, closest to Veghel first.
+    static func findStops(_ q: String) async -> [StopHit] {
+        let items: [URLQueryItem] = [.init(name: "text", value: q), .init(name: "type", value: "STOP"), .init(name: "numResults", value: "12"),
+                                     .init(name: "place", value: "\(Place.veghel.coordinate.latitude),\(Place.veghel.coordinate.longitude)")]
+        guard let list = try? await get("/v1/geocode", items) as? [[String: Any]] else { return [] }
+        return list.compactMap { m in
+            guard let id = m["id"] as? String, let name = m["name"] as? String, let la = m["lat"] as? Double, let lo = m["lon"] as? Double else { return nil }
+            let areas = (m["areas"] as? [[String: Any]]) ?? []
+            let a = areas.first { ($0["default"] as? Bool) == true } ?? areas.first { ($0["matched"] as? Bool) == true } ?? areas.first
+            return StopHit(id: id, name: name, town: (a?["name"] as? String) ?? "", lat: la, lon: lo)
+        }
+    }
+
     static func trainLabel(_ n: String) -> String {
         let l = n.lowercased()
         if l.contains("intercity direct") { return "ICD" }
@@ -137,7 +169,9 @@ enum Transit {
                               fromStop: (from["name"] as? String) ?? "", fromId: (from["stopId"] as? String) ?? ((from["name"] as? String) ?? ""),
                               toStop: (to["name"] as? String) ?? "",
                               platform: (from["track"] as? String) ?? (from["scheduledTrack"] as? String),
-                              live: (l["realTime"] as? Bool) ?? false, cancelled: (l["cancelled"] as? Bool) ?? false, walkBefore: walk))
+                              live: (l["realTime"] as? Bool) ?? false, cancelled: (l["cancelled"] as? Bool) ?? false, walkBefore: walk,
+                              num: Self.text(l["tripShortName"]), headsign: (l["headsign"] as? String) ?? "",
+                              plannedPlatform: (from["scheduledTrack"] as? String) ?? (from["track"] as? String)))
         }
         guard !rides.isEmpty, let s = date(it["startTime"]), let e = date(it["endTime"]) else { return nil }
         return DoorTrip(rides: rides, start: s, end: e)
@@ -261,6 +295,19 @@ final class Ratings {
     private var best: [String: Double]
     private let key = "bestTimes"
     private init() { best = UserDefaults.standard.dictionary(forKey: "bestTimes") as? [String: Double] ?? [:] }
+
+    /// Remember the fastest timetabled time for a stretch, without grading anything.
+    func learn(key k: String, minutes: Double) {
+        guard minutes > 0, best[k] == nil || minutes < best[k]! - 0.05 else { return }
+        best[k] = (minutes * 10).rounded() / 10
+        UserDefaults.standard.set(best, forKey: key)
+    }
+    /// The fastest ride between two of your places ("c:ht>bd"), for the trip score.
+    func learn(_ from: Place, _ to: Place, _ trips: [DoorTrip]) {
+        for t in trips where !t.first.cancelled { learn(key: "c:\(from.key)>\(to.key)", minutes: t.scheduledMinutes) }
+    }
+    func best(_ k: String) -> Double? { best[k] }
+    func reset() { best = [:]; UserDefaults.standard.removeObject(forKey: key) }
 
     func grade(key k: String, minutes: Double, scheduled: Double, cancelled: Bool) -> String? {
         guard !cancelled, minutes > 0 else { return nil }

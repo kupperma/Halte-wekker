@@ -29,6 +29,10 @@ struct Place: Hashable {
                             ids: ["51.5907,4.7932"],
                             coordinate: .init(latitude: 51.5907, longitude: 4.7932), spoken: "Breda University")
     static let all: [Place] = [.veghel, .denBosch, .eindhoven, .breda, .buas]
+    /// Where you are now, as a place to plan from.
+    static func here(_ c: CLLocationCoordinate2D) -> Place {
+        Place(key: "here", name: "Where you are", short: "Here", ids: ["\(c.latitude),\(c.longitude)"], coordinate: c, spoken: "here")
+    }
 }
 
 enum Mode: String, Codable {
@@ -56,6 +60,11 @@ struct RoutePlan: Identifiable, Hashable {
     let id: String
     let name: String
     let station: Place
+    var single: Leg? = nil          // "Wake me at a single stop": one leg, no route
+
+    static func stop(_ p: Place, mode: Mode, from: Place) -> RoutePlan {
+        RoutePlan(id: "stop-\(p.key)", name: p.name, station: p, single: Leg(mode: mode, from: from, to: p))
+    }
 
     static let all = [
         RoutePlan(id: "via-denbosch", name: "Via Den Bosch", station: .denBosch),
@@ -64,6 +73,7 @@ struct RoutePlan: Identifiable, Hashable {
     static func via(_ station: Place) -> RoutePlan? { all.first { $0.station == station } }
 
     func legs(_ dir: Direction) -> [Leg] {
+        if let single { return [single] }
         switch dir {
         case .toSchool:
             return [Leg(mode: .bus, from: .veghel, to: station), Leg(mode: .train, from: station, to: .breda)]
@@ -90,6 +100,28 @@ enum Fmt {
         return f
     }()
     static func hhmm(_ d: Date) -> String { time.string(from: d) }
+    /// "24 min", "1 h 05 min"
+    static func rideText(_ m: Double) -> String {
+        let n = max(1, Int(m.rounded()))
+        return n >= 60 ? "\(n / 60) h \(String(format: "%02d", n % 60)) min" : "\(n) min"
+    }
+    /// "2 km", "500 m"
+    static func km(_ k: Double) -> String {
+        if k < 1 { return "\(Int((k * 1000).rounded())) m" }
+        let r = (k * 10).rounded() / 10
+        return r == r.rounded() ? "\(Int(r)) km" : String(format: "%.1f km", r)
+    }
+    static let ymd: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; f.timeZone = TimeZone(identifier: "Europe/Amsterdam"); f.locale = Locale(identifier: "en_US_POSIX"); return f
+    }()
+    /// "Today 08:21", "Yesterday 17:40", "Mon 10 Nov 08:21"
+    static func when(_ d: Date) -> String {
+        let cal = Calendar.current
+        let day = cal.isDateInToday(d) ? "Today" : cal.isDateInYesterday(d) ? "Yesterday" : {
+            let f = DateFormatter(); f.locale = Locale(identifier: "en_GB"); f.dateFormat = "EEE d MMM"; return f.string(from: d)
+        }()
+        return "\(day) \(hhmm(d))"
+    }
     static func mins(_ s: TimeInterval) -> Int { max(0, Int((s / 60).rounded())) }
     /// "’s-Hertogenbosch, Centraal Station" → "Den Bosch"; "Breda, Nassausingel" → "Nassausingel"
     static func place(_ n: String) -> String {

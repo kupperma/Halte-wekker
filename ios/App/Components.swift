@@ -149,6 +149,7 @@ struct PassSection: View {
     var tag: String? = nil
     var gone = false
     let pal: HWPalette
+    var extra: AnyView? = nil           // e.g. the train's class diagram
     var body: some View {
         HStack(spacing: 0) {
             RatingBar(grade: grade, pal: pal).frame(width: 4).clipShape(Capsule()).padding(.vertical, 8)
@@ -166,6 +167,7 @@ struct PassSection: View {
                     ForEach(lines) { l in
                         Text(l.text).font(HWFont.body(11, bold: l.warn)).foregroundStyle(l.warn ? HWPalette.warn : HWPalette.ink.opacity(0.75))
                     }
+                    if let extra { extra.padding(.top, 2) }
                 }
                 Spacer(minLength: 0)
             }

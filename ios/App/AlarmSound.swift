@@ -25,6 +25,8 @@ final class AlarmSound: NSObject, AVSpeechSynthesizerDelegate {
         didSet { UserDefaults.standard.set(kind.rawValue, forKey: "sound"); alarm = nil }
     }
 
+    /// "Pause it": the alarm stops your music instead of playing over it (louder; press play afterwards).
+    var pauseMusic = false
     private var alarm: AVAudioPlayer?
     private var jingle: AVAudioPlayer?
     private var silent: AVAudioPlayer?
@@ -54,7 +56,7 @@ final class AlarmSound: NSObject, AVSpeechSynthesizerDelegate {
     func ring(announcement: String?) {
         stop()
         let s = AVAudioSession.sharedInstance()
-        try? s.setCategory(.playback, mode: .spokenAudio, options: [.mixWithOthers, .duckOthers])
+        try? s.setCategory(.playback, mode: .spokenAudio, options: pauseMusic ? [] : [.mixWithOthers, .duckOthers])
         try? s.setActive(true)
         vibrate()
         guard let text = announcement, !text.isEmpty else { startLoop(); return }
@@ -93,7 +95,17 @@ final class AlarmSound: NSObject, AVSpeechSynthesizerDelegate {
         speech.stopSpeaking(at: .immediate)
         jingle?.stop(); alarm?.stop()
         buzz?.invalidate(); buzz = nil
-        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.mixWithOthers])
+        let s = AVAudioSession.sharedInstance()
+        if pauseMusic && s.category == .playback && !s.categoryOptions.contains(.mixWithOthers) {
+            // Give the music its turn back (Spotify and Apple Music can pick up again).
+            silent?.pause()
+            try? s.setActive(false, options: [.notifyOthersOnDeactivation])
+            try? s.setCategory(.playback, mode: .default, options: [.mixWithOthers])
+            try? s.setActive(true)
+            silent?.play()
+        } else {
+            try? s.setCategory(.playback, mode: .default, options: [.mixWithOthers])
+        }
     }
 
     func play(preview k: Kind) {
