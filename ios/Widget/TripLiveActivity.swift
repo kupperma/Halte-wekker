@@ -79,6 +79,7 @@ struct LockScreenTrip: View {
                 Spacer(minLength: 4)
                 if let a = s.arrival {
                     Text("\(s.finalName.uppercased()) \(hhmm.string(from: a))").font(HWFont.display(13)).foregroundStyle(HWPalette.ink).lineLimit(1)
+                        .fixedSize().layoutPriority(2)
                 }
             }
             HStack(alignment: .lastTextBaseline, spacing: 6) {
@@ -133,18 +134,27 @@ struct TripLiveActivity: Widget {
         } dynamicIsland: { ctx in
             let s = ctx.state, p = pal(s)
             return DynamicIsland {
+                // The regions beside the camera are narrow: short, and allowed to shrink a little.
                 DynamicIslandExpandedRegion(.leading) {
-                    Label(s.distanceText, systemImage: s.isTrain ? "tram.fill" : "bus.fill")
-                        .font(HWFont.display(16)).foregroundStyle(accent(s))
+                    HStack(spacing: 5) {
+                        Image(systemName: s.isTrain ? "tram.fill" : "bus.fill").font(.system(size: 15, weight: .semibold))
+                        Text(s.distanceText).font(HWFont.display(16)).lineLimit(1).minimumScaleFactor(0.7)
+                    }
+                    .foregroundStyle(accent(s)).padding(.leading, 6)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    Text("\(s.finalName) \(s.arrival.map { hhmm.string(from: $0) } ?? "")").font(HWFont.display(16)).foregroundStyle(HWPalette.ink)
+                    VStack(alignment: .trailing, spacing: 0) {
+                        Text(s.arrival.map { hhmm.string(from: $0) } ?? "–").font(HWFont.display(16)).foregroundStyle(HWPalette.ink)
+                            .lineLimit(1).minimumScaleFactor(0.7)
+                        Text(s.finalName.uppercased()).font(HWFont.body(8)).tracking(1).foregroundStyle(HWPalette.muted).lineLimit(1)
+                    }
+                    .padding(.trailing, 6)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
                     VStack(alignment: .leading, spacing: 5) {
                         HStack {
-                            Text(s.legTitle).font(HWFont.display(17)).foregroundStyle(HWPalette.ink).lineLimit(1)
-                            Spacer()
+                            Text(s.legTitle).font(HWFont.display(17)).foregroundStyle(HWPalette.ink).lineLimit(1).minimumScaleFactor(0.75)
+                            Spacer(minLength: 4)
                             Countdown(to: s.legTo ?? s.arrival).font(HWFont.body(12, bold: true)).foregroundStyle(p.accent).frame(maxWidth: 70, alignment: .trailing)
                         }
                         MetroTrack(progress: s.progress, home: s.goingHome).frame(height: 18).id(s.stopName)
