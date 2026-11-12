@@ -203,11 +203,6 @@ struct HomeView: View {
             try? await Task.sleep(nanoseconds: 280_000_000)          // the map comes down, the sheets go up
             guard stage == .leaving else { return }
             withAnimation(.spring(response: 0.45, dampingFraction: 0.9)) { stage = .station }
-            if s == .planned && planner.trip == nil && planner.arrive == nil {
-                planByArrival = true
-                try? await Task.sleep(nanoseconds: 400_000_000)
-                planning = true
-            }
         }
     }
 
@@ -387,7 +382,6 @@ struct HomeView: View {
         picked = nil
         if s == .more { open.insert("scores") }
         withAnimation(.easeInOut(duration: 0.2)) { section = s }
-        if s == .planned && planner.trip == nil && planner.arrive == nil { planByArrival = true; planning = true }
     }
 
     // Tapping a line opens its page on the planner and starts tracking it.

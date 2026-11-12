@@ -358,6 +358,44 @@ enum WakeAlarm {
         return "notifications"
     }
 
+    /// Whether iOS lets it set alarms, in words.
+    static var permission: (ok: Bool, text: String) {
+        #if canImport(AlarmKit)
+        if #available(iOS 26.0, *) {
+            switch AlarmManager.shared.authorizationState {
+            case .authorized: return (true, "Alarms are allowed")
+            case .denied: return (false, "Alarms aren’t allowed: turn them on in Settings › Haltewekker")
+            default: return (false, "It hasn’t asked to set alarms yet")
+            }
+        }
+        #endif
+        return (false, "Real alarms need iOS 26: it uses loud notifications instead")
+    }
+
+    /// The alarms iOS has set for the app right now (to check they're really there).
+    static func setOnPhone() -> [Date] {
+        #if canImport(AlarmKit)
+        if #available(iOS 26.0, *), let list = try? AlarmManager.shared.alarms {
+            return list.compactMap { a -> Date? in
+                if case .fixed(let d)? = a.schedule { return d }
+                return nil
+            }
+            .filter { $0 > Date() }.sorted()
+        }
+        #endif
+        return []
+    }
+
+    /// A test: the same kind of alarm, ringing in a minute. Returns when it rings, or nil if it couldn't be set.
+    static func test() async -> Date? {
+        let at = Date().addingTimeInterval(60)
+        let old = UserDefaults.standard.string(forKey: "school.testId")
+        cancel(old, day: "test")
+        let id = await schedule(at: at, day: "test", title: "Test alarm", body: "Your school alarm works")
+        UserDefaults.standard.set(id, forKey: "school.testId")
+        return id == nil ? nil : at
+    }
+
     /// Take a day's alarm away (only ever called for one that hasn't rung).
     static func cancel(_ id: String?, day: String) {
         UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: (0..<3).map { "wake-\(day)-\($0)" })
@@ -407,6 +445,7 @@ struct SchoolAlarmSection: View {
                         }
                     }
                     if let note = school.note { Text(note).font(HWFont.body(12)).foregroundStyle(Paper.late) }
+                    AlarmCheck()
                     if !school.realAlarm {
                         Text("On this iPhone it wakes you with loud notifications (they stay quiet on silent). With iOS 26 it’s a real alarm, like the Clock app’s.")
                             .font(HWFont.body(11.5)).foregroundStyle(Paper.muted)
@@ -489,6 +528,7 @@ struct SchoolAlarmCard: View {
                     Text(school.note ?? "Planning the trip…").font(BoardInk.sans(12.5)).foregroundStyle(Paper.muted)
                 }
                 weekList
+                AlarmCheck(compact: true)
                 Button(action: setUp) {
                     Text("School alarm settings").font(BoardInk.sans(12)).foregroundStyle(Paper.navy).underline()
                 }
@@ -558,5 +598,49 @@ struct SchoolAlarmCard: View {
             Text(k).font(BoardInk.sans(10)).tracking(1.4).foregroundStyle(Paper.muted)
             Text(v).font(HWFont.display(big ? 32 : 22)).foregroundStyle(big ? Paper.navy : Paper.ink).monospacedDigit()
         }
+    }
+}
+
+/// Is the alarm working? Whether iOS allows it, the alarms iOS really has set, and a test that rings in a minute.
+struct AlarmCheck: View {
+    var compact = false
+    @State private var testAt: Date?
+    @State private var failed = false
+    @State private var onPhone: [Date] = []
+    var body: some View {
+        let perm = WakeAlarm.permission
+        VStack(alignment: .leading, spacing: 6) {
+            Label(perm.text, systemImage: perm.ok ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                .font(HWFont.body(12, bold: true)).foregroundStyle(perm.ok ? Paper.ok : Paper.late)
+            if !perm.ok, let url = URL(string: UIApplication.openSettingsURLString) {
+                Link("Open Settings", destination: url).font(HWFont.body(12, bold: true)).foregroundStyle(Paper.navy)
+            }
+            if !onPhone.isEmpty {
+                Text("Set on this iPhone: " + onPhone.prefix(7).map { "\(SchoolAlarm.shortDay($0)) \(Fmt.hhmm($0))" }.joined(separator: " · "))
+                    .font(HWFont.body(11.5)).foregroundStyle(Paper.muted).fixedSize(horizontal: false, vertical: true)
+            } else if perm.ok && !compact {
+                Text("No alarms set on this iPhone yet.").font(HWFont.body(11.5)).foregroundStyle(Paper.muted)
+            }
+            Button {
+                Task {
+                    testAt = await WakeAlarm.test()
+                    failed = testAt == nil
+                    onPhone = WakeAlarm.setOnPhone()
+                }
+            } label: {
+                Label("Test the alarm: it rings in 1 minute", systemImage: "alarm.waves.left.and.right.fill")
+                    .font(HWFont.body(13, bold: true)).foregroundStyle(.white)
+                    .frame(maxWidth: .infinity).padding(.vertical, 10).background(Paper.navy, in: RoundedRectangle(cornerRadius: 6))
+            }
+            .buttonStyle(.plain)
+            if let t = testAt {
+                Text("Test alarm set for \(Fmt.hhmm(t)). Lock your phone (put it on silent too, if you like) and wait: it should ring like a Clock alarm.")
+                    .font(HWFont.body(11.5)).foregroundStyle(Paper.ok).fixedSize(horizontal: false, vertical: true)
+            } else if failed {
+                Text("Couldn’t set the test alarm. Check that alarms are allowed for Haltewekker in Settings.")
+                    .font(HWFont.body(11.5)).foregroundStyle(Paper.late).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .onAppear { onPhone = WakeAlarm.setOnPhone() }
     }
 }
