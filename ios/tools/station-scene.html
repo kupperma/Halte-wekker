@@ -743,11 +743,274 @@ function camAt(u){
   const yaw=CM.yaw+(CS.yaw-CM.yaw)*ty,pitch=CM.pitch+(CS.pitch-CM.pitch)*ty;
   cam.position.copy(p);cam.lookAt(p.clone().add(new T.Vector3(Math.sin(yaw)*Math.cos(pitch),Math.sin(pitch),-Math.cos(yaw)*Math.cos(pitch))));
 }
+/* ---------- The boards on the wall, a few steps from the map ---------- */
+// A slim amber LED strip with the trains, and under it the blue journey planner (buses, your trip, the rest).
+// The app writes the live trains and your trip on them when you walk up; in the videos they show a sample.
+/* ---------- Mockups: three ways the departure boards could look, and the page you get when you tap a line ---------- */
+const SANS='Helvetica Neue, Helvetica, Arial, sans-serif',MONO='"DejaVu Sans Mono", "Courier Prime", monospace';
+const mk=(w,h,draw)=>{const c=document.createElement('canvas');c.width=w;c.height=h;draw(c.getContext('2d'),w,h);const t=new T.CanvasTexture(c);t.anisotropy=8;return t;};
+const face=(w,h,map,x,y,z,basic=true)=>{const m=basic?new T.MeshBasicMaterial({map}):new T.MeshStandardMaterial({map,roughness:.6});const o=new T.Mesh(new T.PlaneGeometry(w,h),m);o.rotation.y=Math.PI/2;o.position.set(x,y,z);return o;};
+const box=(w,h,d,c,x,y,z,o={})=>new T.Mesh(new T.BoxGeometry(d,h,w),mat(c,o)).translateX(x).translateY(y).translateZ(z);
+const rr=(x,a,b,w,h,r)=>{x.beginPath();x.roundRect(a,b,w,h,r);};
+// sample data, a weekday morning going to Breda
+const BUS_STOPS=[
+  {stop:'Veghel, Busstation · stop B',walk:'6 mins',rows:[['306','Den Bosch','08:44','','gone'],['305','Eindhoven','08:36','','cancel'],['306','Den Bosch','08:51','08:53',''],['305','Eindhoven','09:06','',''],['306','Den Bosch','09:21','','']]},
+  {stop:'Veghel, Rembrandtlaan',walk:'4 mins',rows:[['306','Den Bosch','08:58','',''],['306','Den Bosch','09:28','','']]}];
+const BUAS=[['1','Nassausingel','10:13','',''],['4','Haagse Beemden','10:16','','']];
+const TRAINS=[['08:31','IC','Breda','Tilburg · Gilze-Rijen','3','','gone'],['08:46','SPR','Breda','Boxtel · Tilburg Reeshof','7','','cancel'],['09:01','IC','Breda','Tilburg','5','',''],
+  ['09:13','SPR','Breda','Boxtel · Oisterwijk','7','09:16',''],['09:31','IC','Breda','Tilburg','5','',''],['09:42','IC','Breda','Tilburg · from Eindhoven','2','',''],['09:43','SPR','Breda','Boxtel · Oisterwijk','7','',''],
+  ['10:01','IC','Breda','Tilburg','5','',''],['10:13','SPR','Breda','Boxtel','7','','']];
+const dueIn=t=>{const [h,m]=t.split(':').map(Number);return (h*60+m)-(8*60+48);};
+
+// ---- an amber dot-matrix panel: text is set in a tiny bitmap, then every lit pixel becomes an LED
+function ledPanel(x,W,H,cols,rows,draw){
+  const o=document.createElement('canvas');o.width=cols;o.height=rows;const q=o.getContext('2d');q.fillStyle='#000';q.fillRect(0,0,cols,rows);q.textBaseline='top';draw(q);
+  const px=q.getImageData(0,0,cols,rows).data,p=W/cols;x.fillStyle='#07070a';x.fillRect(0,0,W,H);
+  for(let j=0;j<rows;j++)for(let i=0;i<cols;i++){const k=(j*cols+i)*4;x.fillStyle='rgba(255,150,40,.06)';x.beginPath();x.arc((i+.5)*p,(j+.5)*p,p*.34,0,7);x.fill();}
+  x.save();x.shadowColor='rgba(255,170,50,.9)';x.shadowBlur=p*1.6;
+  for(let j=0;j<rows;j++)for(let i=0;i<cols;i++){const k=(j*cols+i)*4,v=Math.max(px[k],px[k+1],px[k+2]);if(v<90) continue;x.fillStyle=`rgb(${px[k]},${px[k+1]},${px[k+2]})`;x.beginPath();x.arc((i+.5)*p,(j+.5)*p,p*.4,0,7);x.fill();}
+  x.restore();}
+const AMB='#ffb43a',AMBD='#8a5a1a';
+function ledTrains(x,W,H){ledPanel(x,W,H,362,186,q=>{
+  const page=(ox,list,n,of)=>{q.font='bold 8px '+MONO;q.fillStyle=AMBD;q.fillText('Time',ox+2,2);q.fillText('Destination',ox+35,2);q.fillText('Plat',ox+114,2);q.fillText('Exp',ox+140,2);
+    list.forEach((t,i)=>{const y=14+i*29,[tm,ln,to,via,pl,exp,kind]=t;q.fillStyle=kind==='gone'?AMBD:AMB;q.font='bold 9px '+MONO;q.fillText(tm,ox+2,y);q.fillText(to+' '+ln,ox+35,y);q.fillText(pl,ox+119,y);
+      q.font='bold 8px '+MONO;q.fillText(kind==='cancel'?'Cancel':kind==='gone'?'Gone':exp?exp:'On time',ox+140,y+1);
+      q.font='bold 7px '+MONO;q.fillStyle=kind==='gone'?AMBD:'#d08a2a';q.fillText('via '+via,ox+35,y+12);});
+    q.font='bold 7px '+MONO;q.fillStyle=AMB;q.fillText(`Page ${n} of ${of}`,ox+2,176);q.font='bold 9px '+MONO;q.fillText('08:48:12',ox+128,174);};
+  page(2,TRAINS.slice(0,5),1,2);page(184,TRAINS.slice(5,10),2,2);q.fillStyle='#000';q.fillRect(179,0,3,186);});}
+
+// ---- the blue planner (like a bus station screen): white header bars, stops with walk times, light blue route boxes
+const BLUE1='#1d55c8',BLUE2='#0f3ea8',ROUTE='#5cc6f2';
+function tabs(x,k,w,sel,dark){const t=['FASTEST','ALL LINES','PLANNED','MORE'];x.fillStyle=dark?'#0a2a78':'#0b2f86';x.fillRect(0,0,w,26*k);let tx=10*k;x.font=`700 ${10.5*k}px ${SANS}`;x.textBaseline='middle';
+  t.forEach((s,i)=>{const tw=x.measureText(s).width+16*k;if(i===sel){x.fillStyle='#fff';rr(x,tx,4*k,tw,18*k,3*k);x.fill();x.fillStyle=BLUE2;}else x.fillStyle='rgba(255,255,255,.8)';x.fillText(s,tx+8*k,13.5*k);tx+=tw+5*k;});
+  x.font=`700 ${11*k}px ${SANS}`;x.fillStyle='#fff';x.textAlign='right';x.fillText('08:48',w-10*k,13.5*k);x.textAlign='left';}
+function headBar(x,k,w,y,t,sub){x.fillStyle='#e9eef7';x.fillRect(6*k,y,(w-12)*k,19*k);x.fillStyle='#10275e';x.font=`700 ${11.5*k}px ${SANS}`;x.textBaseline='middle';x.fillText(t,12*k,y+10*k);
+  if(sub){x.font=`${9.5*k}px ${SANS}`;x.fillStyle='#45608f';x.textAlign='right';x.fillText(sub,(w-12)*k,y+10*k);x.textAlign='left';}}
+function colLabels(x,k,y,cols){x.font=`700 ${8*k}px ${SANS}`;x.fillStyle='rgba(255,255,255,.72)';x.textBaseline='middle';cols.forEach(([t,c,al])=>{x.textAlign=al||'left';x.fillText(t,c*k,y);});x.textAlign='left';}
+function stopTitle(x,k,y,t){x.fillStyle='#f5c400';x.beginPath();x.arc(14*k,y,6*k,0,7);x.fill();x.fillStyle='#10275e';x.font=`700 ${7*k}px ${SANS}`;x.textAlign='center';x.fillText('B',14*k,y+.5*k);x.textAlign='left';
+  x.fillStyle='#fff';x.font=`700 ${11*k}px ${SANS}`;x.textBaseline='middle';x.fillText(t,24*k,y);}
+function busRow(x,k,w,y,r,walk){const [ln,to,tm,exp,kind]=r;x.globalAlpha=kind==='gone'?.45:1;x.textBaseline='middle';
+  if(walk){x.font=`700 ${9*k}px ${SANS}`;x.fillStyle='#fff';x.fillText(walk,10*k,y);}
+  x.fillStyle=ROUTE;rr(x,58*k,y-8*k,34*k,16*k,2*k);x.fill();x.fillStyle='#0b2a6a';x.font=`700 ${11*k}px ${SANS}`;x.textAlign='center';x.fillText(ln,75*k,y+.5*k);x.textAlign='left';
+  if(kind==='cancel'){x.fillStyle='#fff';x.fillRect(100*k,y-8*k,170*k,16*k);x.fillStyle='#10275e';x.font=`700 ${10*k}px ${SANS}`;x.fillText('Cancelled · rijdt niet  ('+to+')',106*k,y+.5*k);
+    x.fillStyle='#fff';x.font=`700 ${11*k}px ${SANS}`;x.textAlign='right';x.fillText('×'+tm,(w-10)*k,y+.5*k);x.textAlign='left';x.globalAlpha=1;x.fillStyle='rgba(255,255,255,.12)';x.fillRect(10*k,y+11*k,(w-20)*k,1*k);return;}
+  x.fillStyle='#fff';x.font=`700 ${12*k}px ${SANS}`;x.fillText(to,100*k,y+.5*k);
+  const d=dueIn(exp||tm);x.textAlign='right';x.font=`700 ${12*k}px ${SANS}`;x.fillText(kind==='gone'?'left':d<=0?'now':String(d),262*k,y+.5*k);
+  if(exp){x.fillStyle='#fff';rr(x,(w-46)*k,y-8*k,38*k,16*k,2*k);x.fill();x.fillStyle='#10275e';x.font=`700 ${10.5*k}px ${SANS}`;x.fillText(exp,(w-10)*k,y+.5*k);
+    x.fillStyle='rgba(255,255,255,.7)';x.font=`${9*k}px ${SANS}`;x.fillText(tm,(w-50)*k,y+.5*k);}
+  else{x.fillStyle='#fff';x.font=`700 ${11*k}px ${SANS}`;x.fillText(tm,(w-10)*k,y+.5*k);}
+  x.textAlign='left';x.globalAlpha=1;x.fillStyle='rgba(255,255,255,.12)';x.fillRect(10*k,y+11*k,(w-20)*k,1*k);}
+function blueBg(x,W,H){const g=x.createLinearGradient(0,0,0,H);g.addColorStop(0,BLUE1);g.addColorStop(1,BLUE2);x.fillStyle=g;x.fillRect(0,0,W,H);}
+function busSections(x,k,w,y0){let y=y0;headBar(x,k,w,y,'Local bus services','Veghel');y+=30*k;
+  BUS_STOPS.forEach(s=>{stopTitle(x,k,y,s.stop);y+=15*k;colLabels(x,k,y,[['Walk time',10],['Route',58],['Destination',100],['Due',262,'right'],['Time',336,'right']]);y+=15*k;
+    s.rows.forEach((r,i)=>{busRow(x,k,346,y,r,i===0?s.walk:'');y+=24*k;});y+=6*k;});
+  return y;}
+function plannerA(x,W,H){const k=W/346;blueBg(x,W,H);tabs(x,k,W,1);let y=busSections(x,k,W/k,34*k);
+  headBar(x,k,W/k,y,'Breda station → BUas','bus, 7 min');y+=30*k;stopTitle(x,k,y,'Breda, Centraal Station · B');y+=15*k;
+  colLabels(x,k,y,[['Walk time',10],['Route',58],['Destination',100],['Due',262,'right'],['Time',336,'right']]);y+=15*k;BUAS.forEach((r,i)=>{busRow(x,k,346,y,r,i?'':'3 mins');y+=24*k;});
+  x.fillStyle='rgba(255,255,255,.7)';x.font=`${8.5*k}px ${SANS}`;x.fillText('Trains are on the board above. Tap any line for more.',10*k,H-10*k);}
+function trainRowBlue(x,k,w,y,t){const [tm,ln,to,via,pl,exp,kind]=t;x.globalAlpha=kind==='gone'?.45:1;x.textBaseline='middle';
+  x.font=`700 ${9*k}px ${SANS}`;x.fillStyle='#fff';x.fillText('Platform '+pl,10*k,y);
+  x.fillStyle='#f5c400';rr(x,58*k,y-8*k,34*k,16*k,2*k);x.fill();x.fillStyle='#1a1a1a';x.font=`700 ${10*k}px ${SANS}`;x.textAlign='center';x.fillText(ln,75*k,y+.5*k);x.textAlign='left';
+  if(kind==='cancel'){x.fillStyle='#fff';x.fillRect(100*k,y-8*k,w*k-110*k,16*k);x.fillStyle='#10275e';x.font=`700 ${10*k}px ${SANS}`;x.fillText('Cancelled · rijdt niet   ('+to+')',106*k,y+.5*k);x.globalAlpha=1;return;}
+  x.fillStyle='#fff';x.font=`700 ${12*k}px ${SANS}`;x.fillText(to,100*k,y-2*k);x.font=`${8*k}px ${SANS}`;x.fillStyle='rgba(255,255,255,.75)';x.fillText('via '+via,100*k,y+8*k);
+  const d=dueIn(exp||tm);x.textAlign='right';x.fillStyle='#fff';x.font=`700 ${12*k}px ${SANS}`;x.fillText(kind==='gone'?'left':String(d),262*k,y+.5*k);
+  if(exp){x.fillStyle='#fff';rr(x,(w-46)*k,y-8*k,38*k,16*k,2*k);x.fill();x.fillStyle='#10275e';x.font=`700 ${10.5*k}px ${SANS}`;x.fillText(exp,(w-10)*k,y+.5*k);}else{x.font=`700 ${11*k}px ${SANS}`;x.fillText(tm,(w-10)*k,y+.5*k);}
+  x.textAlign='left';x.globalAlpha=1;x.fillStyle='rgba(255,255,255,.12)';x.fillRect(10*k,y+13*k,w*k-20*k,1*k);}
+function plannerB(x,W,H){const k=W/346;blueBg(x,W,H);tabs(x,k,W,1);let y=busSections(x,k,346,34*k);
+  headBar(x,k,346,y,'Train services','Den Bosch → Breda');y+=30*k;colLabels(x,k,y,[['Walk time',10],['Line',58],['Destination',100],['Due',262,'right'],['Time',336,'right']]);y+=16*k;
+  TRAINS.slice(0,6).forEach(t=>{trainRowBlue(x,k,346,y,t);y+=28*k;});
+  x.fillStyle='rgba(255,255,255,.7)';x.font=`${8.5*k}px ${SANS}`;x.fillText('Scroll for more · tap any line for more',10*k,H-9*k);}
+
+// ---- a DB-style board: navy, one timeline with buses and trains, the new time in a white box, cancelled as a white band
+function dbBoard(x,W,H){const k=W/346;const g=x.createLinearGradient(0,0,0,H);g.addColorStop(0,'#16306b');g.addColorStop(1,'#0e214e');x.fillStyle=g;x.fillRect(0,0,W,H);
+  x.textBaseline='middle';x.strokeStyle='#fff';x.lineWidth=1.6*k;x.beginPath();x.arc(18*k,20*k,8*k,0,7);x.stroke();x.beginPath();x.moveTo(18*k,20*k);x.lineTo(18*k,15*k);x.moveTo(18*k,20*k);x.lineTo(22*k,22*k);x.stroke();
+  x.fillStyle='#fff';x.font=`700 ${17*k}px ${SANS}`;x.fillText('08:48',32*k,20*k);x.font=`700 ${12*k}px ${SANS}`;x.fillText('Vertrek',92*k,15*k);x.font=`${9*k}px ${SANS}`;x.fillStyle='rgba(255,255,255,.75)';x.fillText('Departures · your trip to Breda',92*k,27*k);
+  const t=['FASTEST','ALL LINES','PLANNED','MORE'];let tx=10*k;x.font=`700 ${9.5*k}px ${SANS}`;t.forEach((s,i)=>{const tw=x.measureText(s).width+14*k;if(i===1){x.fillStyle='#fff';rr(x,tx,40*k,tw,17*k,8*k);x.fill();x.fillStyle='#16306b';}else{x.strokeStyle='rgba(255,255,255,.5)';x.lineWidth=1*k;rr(x,tx,40*k,tw,17*k,8*k);x.stroke();x.fillStyle='#fff';}x.fillText(s,tx+7*k,48.5*k);tx+=tw+5*k;});
+  x.fillStyle='rgba(255,255,255,.6)';x.font=`700 ${8*k}px ${SANS}`;x.fillText('Time',10*k,68*k);x.fillText('Line',72*k,68*k);x.fillText('Destination',138*k,68*k);x.textAlign='right';x.fillText('Pl.',336*k,68*k);x.textAlign='left';
+  const rows=[['08:31','IC','Breda','Den Bosch · via Tilburg','3','','gone','t'],['08:36','Bus 305','Eindhoven','Veghel Busstation','B','','cancel','b'],['08:44','Bus 306','Den Bosch','Veghel Busstation','B','','gone','b'],
+    ['08:51','Bus 306','Den Bosch','Veghel Busstation · 6 min walk','B','08:53','','b'],['08:58','Bus 306','Den Bosch','Veghel Rembrandtlaan · 4 min walk','A','','','b'],['09:01','IC','Breda','Den Bosch · via Tilburg','5','','','t'],
+    ['09:06','Bus 305','Eindhoven','Veghel Busstation','B','','','b'],['09:13','SPR','Breda','Den Bosch · via Boxtel, Oisterwijk','7','09:16','','s'],['09:21','Bus 306','Den Bosch','Veghel Busstation','B','','','b'],
+    ['09:31','IC','Breda','Den Bosch · via Tilburg','5','','','t'],['09:42','IC','Breda','Eindhoven · via Tilburg','2','','','t'],['10:13','Bus 1','Nassausingel','Breda CS · for BUas','B','','','b']];
+  let y=88*k;rows.forEach(([tm,ln,to,from,pl,exp,kind,ty])=>{x.globalAlpha=kind==='gone'?.5:1;
+    x.fillStyle='rgba(255,255,255,.14)';x.fillRect(8*k,y+18*k,330*k,1*k);
+    x.fillStyle='#fff';x.font=`700 ${12.5*k}px ${SANS}`;x.fillText((kind==='cancel'?'×':'')+tm,10*k,y);
+    if(exp){x.fillStyle='#fff';rr(x,10*k,y+7*k,34*k,13*k,2*k);x.fill();x.fillStyle='#16306b';x.font=`700 ${9.5*k}px ${SANS}`;x.fillText(exp,13*k,y+13.5*k);}
+    // the line: buses in a slate box, intercity in a white box, sprinter in a green pill (like the S-Bahn)
+    x.font=`700 ${9.5*k}px ${SANS}`;const lw=x.measureText(ln).width+12*k;
+    if(ty==='s'){x.fillStyle='#2f9e5b';rr(x,72*k,y-8*k,lw,16*k,8*k);x.fill();x.fillStyle='#fff';}else if(ty==='t'){x.fillStyle='#fff';rr(x,72*k,y-8*k,lw,16*k,2*k);x.fill();x.fillStyle='#16306b';}else{x.fillStyle='#3e5d97';rr(x,72*k,y-8*k,lw,16*k,2*k);x.fill();x.fillStyle='#fff';}
+    x.fillText(ln,78*k,y+.5*k);
+    if(kind==='cancel'){x.fillStyle='#f2f4f8';x.fillRect(132*k,y-9*k,192*k,26*k);x.fillStyle='#16306b';x.font=`700 ${11*k}px ${SANS}`;x.fillText('Cancelled · rijdt niet',138*k,y);x.font=`${8.5*k}px ${SANS}`;x.fillText(to+' · from '+from,138*k,y+11*k);}
+    else{x.fillStyle='#fff';x.font=`700 ${12.5*k}px ${SANS}`;x.fillText(to,138*k,y);x.font=`${8.5*k}px ${SANS}`;x.fillStyle='rgba(255,255,255,.78)';x.fillText(from,138*k,y+11*k);}
+    x.fillStyle='#fff';x.font=`700 ${12*k}px ${SANS}`;x.textAlign='right';x.fillText(pl,336*k,y);x.textAlign='left';x.globalAlpha=1;y+=37*k;});
+  x.fillStyle='rgba(255,255,255,.65)';x.font=`${8.5*k}px ${SANS}`;x.fillText('Earlier ones at the top · tap any line for more',10*k,H-9*k);}
+
+// ---- the page you get when you tap a line (a train here): classes, how busy, where to stand, and it's being tracked
+function coaches(x,k,y,style){const C=[[2,0],[2,0],[1,2],[2,0],[2,0],[1,2]],w=48*k,h=22*k;let cx=14*k;
+  x.textBaseline='middle';x.textAlign='center';
+  C.forEach(([a,b],i)=>{const front=i===C.length-1;const fill=style==='led'?'#2a1a06':style==='db'?'#24407e':'#2e66d8';x.fillStyle=fill;rr(x,cx,y,w,h,[4*k,front?14*k:4*k,front?14*k:4*k,4*k]);x.fill();
+    x.strokeStyle=style==='led'?AMB:'#fff';x.lineWidth=1.2*k;x.stroke();
+    if(a===1){x.fillStyle='#f5c400';x.fillRect(cx+3*k,y+3*k,w/2-4*k,h-6*k);x.fillStyle='#1a1a1a';x.font=`700 ${10*k}px ${SANS}`;x.fillText('1',cx+w/4+1*k,y+h/2+.5*k);x.fillStyle=style==='led'?AMB:'#fff';x.fillText('2',cx+w*.75,y+h/2+.5*k);}
+    else{x.fillStyle=style==='led'?AMB:'#fff';x.font=`700 ${10*k}px ${SANS}`;x.fillText('2',cx+w/2,y+h/2+.5*k);}
+    // how busy each coach is expected to be
+    const lv=[3,2,1,2,2,1][i];for(let p=0;p<3;p++){x.fillStyle=p<lv?(lv===3?'#ff6b5a':style==='led'?AMB:'#fff'):'rgba(255,255,255,.25)';x.beginPath();x.arc(cx+w/2+(p-1)*8*k,y+h+8*k,2.6*k,0,7);x.fill();}
+    cx+=w+4*k;});
+  x.textAlign='left';
+  x.fillStyle=style==='led'?AMB:'#fff';x.font=`700 ${9*k}px ${SANS}`;['A','B','C','D'].forEach((s,i)=>{x.fillText(s,(24+i*80)*k,y+h+24*k);});x.fillStyle='rgba(255,255,255,.55)';x.fillRect(14*k,y+h+17*k,312*k,1*k);}
+function detailPage(x,W,H,style){const k=W/346;const fg=style==='led'?AMB:'#fff',soft=style==='led'?'#d08a2a':'rgba(255,255,255,.78)';
+  if(style==='db'){const g=x.createLinearGradient(0,0,0,H);g.addColorStop(0,'#16306b');g.addColorStop(1,'#0e214e');x.fillStyle=g;x.fillRect(0,0,W,H);}else blueBg(x,W,H);
+  x.textBaseline='middle';
+  // back and tracking
+  x.fillStyle='rgba(255,255,255,.14)';rr(x,10*k,10*k,62*k,20*k,10*k);x.fill();x.fillStyle='#fff';x.font=`700 ${10*k}px ${SANS}`;x.fillText('‹  Board',18*k,20.5*k);
+  x.fillStyle='#2fd27a';rr(x,(346-130)*k,10*k,120*k,20*k,10*k);x.fill();x.fillStyle='#062a16';x.beginPath();x.arc((346-118)*k,20*k,3.5*k,0,7);x.fill();x.font=`700 ${10*k}px ${SANS}`;x.fillText('TRACKING',(346-110)*k,20.5*k);
+  // the train
+  x.fillStyle='#fff';rr(x,10*k,42*k,40*k,22*k,2*k);x.fill();x.fillStyle='#16306b';x.font=`700 ${13*k}px ${SANS}`;x.textAlign='center';x.fillText('IC',30*k,53.5*k);x.textAlign='left';
+  x.fillStyle='#fff';x.font=`700 ${22*k}px ${SANS}`;x.fillText('Breda',58*k,50*k);x.font=`${10*k}px ${SANS}`;x.fillStyle=soft;x.fillText('Intercity 3561 · via Tilburg, Gilze-Rijen',58*k,66*k);
+  x.fillStyle='#fff';x.font=`700 ${30*k}px ${SANS}`;x.fillText('09:01',10*k,100*k);x.font=`700 ${11*k}px ${SANS}`;x.fillStyle='#2fd27a';x.fillText('On time',104*k,94*k);x.fillStyle=soft;x.font=`${10*k}px ${SANS}`;x.fillText('from Den Bosch · leaves in 13 min',104*k,108*k);
+  x.textAlign='right';x.fillStyle='#fff';x.font=`700 ${22*k}px ${SANS}`;x.fillText('5',336*k,98*k);x.font=`${8*k}px ${SANS}`;x.fillStyle=soft;x.fillText('PLATFORM',336*k,112*k);x.textAlign='left';
+  const bar=(y,t,sub)=>{if(style==='db'){x.fillStyle='rgba(255,255,255,.12)';x.fillRect(6*k,y,334*k,19*k);x.fillStyle='#fff';}else{x.fillStyle='#e9eef7';x.fillRect(6*k,y,334*k,19*k);x.fillStyle='#10275e';}
+    x.font=`700 ${11*k}px ${SANS}`;x.fillText(t,12*k,y+10*k);if(sub){x.textAlign='right';x.font=`${9*k}px ${SANS}`;x.fillText(sub,334*k,y+10*k);x.textAlign='left';}};
+  bar(126*k,'The train','6 coaches · 162 m');coaches(x,k,154*k,style);
+  x.fillStyle='#fff';x.font=`${10*k}px ${SANS}`;x.fillText('1st class in coaches 3 and 6. Quietest at the back (C).',12*k,226*k);x.fillText('Stand at A–C on platform 5: the front stops at D.',12*k,241*k);
+  bar(258*k,'How busy','NS forecast');
+  x.fillStyle='#fff';x.font=`700 ${14*k}px ${SANS}`;x.fillText('Busy',12*k,292*k);[0,1,2].forEach(p=>{x.fillStyle=p<2?'#fff':'rgba(255,255,255,.3)';x.beginPath();x.arc((62+p*14)*k,286*k,4*k,0,7);x.fill();x.fillRect((58+p*14)*k,291*k,8*k,7*k);});
+  x.fillStyle=soft;x.font=`${10*k}px ${SANS}`;x.fillText('The 09:13 Sprinter is quieter, but gets you to Breda 9 min later.',12*k,310*k);
+  bar(326*k,'Stops','arrives 09:38');let y=354*k;
+  if(H/W<1.5){x.fillStyle='#fff';x.font=`${10.5*k}px ${SANS}`;x.fillText('Den Bosch 09:01 → Tilburg 09:16 → Gilze-Rijen 09:24',12*k,y);x.fillText('→ Breda 09:38 (platform 6)',12*k,y+15*k);y=9999;}
+  if(y<9999)[['09:01','Den Bosch','5'],['09:16','Tilburg','2'],['09:24','Gilze-Rijen',''],['09:38','Breda','6']].forEach(([t,s,p],i,a)=>{
+    x.fillStyle='#fff';x.font=`700 ${11*k}px ${SANS}`;x.fillText(t,12*k,y);x.beginPath();x.arc(62*k,y,4*k,0,7);x.fill();if(i<a.length-1) x.fillRect(61*k,y,2*k,22*k);x.font=`${11*k}px ${SANS}`;x.fillText(s,74*k,y);if(p){x.textAlign='right';x.fillText('platform '+p,336*k,y);x.textAlign='left';}y+=22*k;});
+  x.fillStyle='rgba(47,210,122,.16)';rr(x,8*k,H-54*k,330*k,40*k,6*k);x.fill();x.fillStyle='#fff';x.font=`700 ${10.5*k}px ${SANS}`;x.fillText('Watching this train for you',16*k,H-42*k);
+  x.font=`${9.5*k}px ${SANS}`;x.fillStyle=soft;x.fillText('You get a note if the platform changes or it runs late.',16*k,H-28*k);x.fillText('It stops by itself once you’re on board.',16*k,H-17*k);}
+// on the LED board, the train you tapped is lit up
+function ledTrainsPicked(x,W,H){ledTrains(x,W,H);const p=W/362;x.strokeStyle='#fff';x.lineWidth=p*1.2;x.strokeRect(1*p,(14+2*29-3)*p,178*p,25*p);}
+
+// ---- build each design on the wall a few steps from the map
+const DES={};
+function design(v){
+  if(DES[v]) return DES[v];const g=new T.Group();scene.add(g);const S2={};
+  if(v==='A'){
+    g.add(box(1.345,.815,.08,0x0b0c10,-3.035,2.8125,4.2,{metalness:.4,roughness:.5}));
+    g.add(face(1.305,.0836,mk(1305,84,(x,w,h)=>{x.fillStyle='#1f4fa0';x.fillRect(0,0,w,h);x.fillStyle='#5f8fd8';x.fillRect(0,0,w,6);x.fillStyle='#fff';x.font=`700 46px ${SANS}`;x.textBaseline='middle';x.fillText('Departures',22,46);x.textAlign='right';x.fillText('Trains to Breda',w-22,46);}),-2.992,3.1458,4.2));
+    S2.led=face(1.305,.6724,mk(1305,673,ledTrains),-2.992,2.7678,4.2);g.add(S2.led);
+    g.add(box(1.29,1.76,.07,0xd9dce1,-3.03,1.51,4.2,{metalness:.2,roughness:.45}));g.add(box(1.255,1.705,.072,0x111318,-3.028,1.511,4.2));
+    S2.scr=face(1.2366,1.674,mk(1000,1354,plannerA),-2.992,1.511,4.2);g.add(S2.scr);
+    S2.cam=new T.Vector3(-.195,2.05,4.2);
+    S2.detail=()=>{S2.scr.material.map=mk(1000,1354,(x,w,h)=>detailPage(x,w,h,'blue'));S2.led.material.map=mk(1305,673,ledTrainsPicked);};
+  }else{
+    if(v==='B'){g.add(box(1.32,4.0,.08,0xe7e9ec,-3.04,2.75,4.2,{metalness:.15,roughness:.4}));}else{g.add(box(1.32,2.07,.09,0x2a2e36,-3.04,1.8285,4.2,{metalness:.5,roughness:.4}));g.add(box(1.32,.05,.1,0x3a3f49,-3.035,2.88,4.2));}
+    g.add(box(1.235,1.985,.085,0x0c0d11,-3.032,1.8285,4.2));
+    S2.scr=face(1.2,1.949,mk(1000,1624,v==='B'?plannerB:dbBoard),-2.988,1.8285,4.2);g.add(S2.scr);
+    S2.cam=new T.Vector3(-.216,2.05,4.2);
+    S2.detail=()=>{S2.scr.material.map=mk(1000,1624,(x,w,h)=>detailPage(x,w,h,v==='B'?'blue':'db'));};
+  }
+  // the light the screens throw on the wall
+  const glow=mk(128,128,(x)=>{const gr=x.createRadialGradient(64,64,10,64,64,64);gr.addColorStop(0,'rgba(255,255,255,.9)');gr.addColorStop(1,'rgba(255,255,255,0)');x.fillStyle=gr;x.fillRect(0,0,128,128);});
+  const gp=new T.Mesh(new T.PlaneGeometry(2.6,3.2),new T.MeshBasicMaterial({map:glow,color:v==='C'?0x5a74c0:0x4f7ae0,transparent:true,opacity:.16,blending:T.AdditiveBlending,depthWrite:false}));gp.rotation.y=Math.PI/2;gp.position.set(-3.105,1.9,4.2);g.add(gp);
+  S2.g=g;DES[v]=S2;return S2;}
+window.renderMock=(v,detail,mix)=>{if(!mapTex){mapTex=[paintMap(false),paintMap(true)];decorate();}
+  light(mix||0);posterM.map=mapTex[0];posterM.needsUpdate=true;train.position.z=zAt(12);extrasAt(12);
+  Object.keys(DES).forEach(k=>DES[k].g.visible=false);const d=design(v);d.g.visible=true;if(detail) d.detail();
+  cam.position.copy(d.cam);cam.lookAt(d.cam.clone().add(new T.Vector3(-1,0,0)));r.render(scene,cam);return r.domElement.toDataURL('image/jpeg',0.92);};
+
+/* ---------- Three takes on design A: the amber LED board for trains on the wall, the blue planner under it ---------- */
+const NEXT=[['Tilburg','09:01','5'],['Tilburg Univ.','09:13','7'],['Gilze-Rijen','09:01','5'],['Breda','09:01','5'],['BUas (bus 1)','10:13','B']];
+function ledRow(q,ox,y,t,w){const [tm,ln,to,via,pl,exp,kind]=t;q.fillStyle=kind==='gone'?AMBD:AMB;q.font='bold 9px '+MONO;q.fillText(tm,ox+2,y);q.fillText(to+' '+ln,ox+35,y);q.fillText(pl,ox+w-58,y);
+  q.font='bold 8px '+MONO;q.fillText(kind==='cancel'?'Cancel':kind==='gone'?'Gone':exp?exp:'On time',ox+w-38,y+1);q.font='bold 7px '+MONO;q.fillStyle=kind==='gone'?AMBD:'#d08a2a';q.fillText('via '+via,ox+35,y+12);}
+function ledHead(q,ox,w){q.font='bold 8px '+MONO;q.fillStyle=AMBD;q.fillText('Time',ox+2,2);q.fillText('Destination',ox+35,2);q.fillText('Plat',ox+w-63,2);q.fillText('Exp',ox+w-38,2);}
+// A1: one departures page and the "next fastest to" column
+function ledA1(x,W,H){ledPanel(x,W,H,362,186,q=>{const w=220;ledHead(q,2,w);TRAINS.slice(0,6).forEach((t,i)=>ledRow(q,2,13+i*26,t,w));
+  q.font='bold 7px '+MONO;q.fillStyle=AMB;q.fillText('Page 1 of 2',4,177);q.font='bold 9px '+MONO;q.fillText('08:48:12',w-48,175);
+  q.fillStyle='#000';q.fillRect(224,0,3,186);q.font='bold 8px '+MONO;q.fillStyle=AMBD;q.fillText('To',232,2);q.fillText('Time',308,2);q.fillText('Pl',346,2);
+  NEXT.forEach(([to,tm,pl],i)=>{q.font='bold 9px '+MONO;q.fillStyle=AMB;q.fillText(to,232,15+i*20);q.fillText(tm,306,15+i*20);q.fillText(pl,348,15+i*20);});
+  q.font='bold 7px '+MONO;q.fillStyle='#d08a2a';q.fillText('from Den Bosch',232,122);q.fillText('fastest way there,',232,134);q.fillText('changes included',232,146);});}
+// A2: a taller board with three pages
+function ledA2(x,W,H){ledPanel(x,W,H,362,280,q=>{const w=118;[0,1,2].forEach(p=>{const ox=2+p*121;q.font='bold 8px '+MONO;q.fillStyle=AMBD;q.fillText('Time Destination',ox+2,2);
+    TRAINS.slice(p*3,p*3+3).forEach((t,i)=>{const [tm,ln,to,via,pl,exp,kind]=t,y=16+i*80;q.fillStyle=kind==='gone'?AMBD:AMB;q.font='bold 9px '+MONO;q.fillText(tm,ox+2,y);q.fillText(to,ox+34,y);q.fillText(ln,ox+34,y+12);
+      q.font='bold 7px '+MONO;q.fillStyle=kind==='gone'?AMBD:'#d08a2a';via.split(' · ').forEach((v,j)=>q.fillText(v,ox+34,y+25+j*10));
+      q.font='bold 8px '+MONO;q.fillStyle=kind==='gone'?AMBD:AMB;q.fillText('Plat '+pl,ox+2,y+48);q.fillText(kind==='cancel'?'Cancelled':kind==='gone'?'Departed':exp?'Exp '+exp:'On time',ox+50,y+48);});
+    q.font='bold 7px '+MONO;q.fillStyle=AMB;q.fillText(`Page ${p+1} of 3`,ox+2,268);if(p===2){q.font='bold 9px '+MONO;q.fillText('08:48:12',ox+68,266);}if(p<2){q.fillStyle='#000';q.fillRect(ox+119,0,3,280);}});});}
+// A3: a slim strip, one line per train
+function ledA3(x,W,H){ledPanel(x,W,H,362,95,q=>{q.font='bold 8px '+MONO;q.fillStyle=AMBD;q.fillText('Time',4,2);q.fillText('Destination',38,2);q.fillText('Via',120,2);q.fillText('Plat',276,2);q.fillText('Exp',306,2);
+  TRAINS.slice(0,6).forEach((t,i)=>{const [tm,ln,to,via,pl,exp,kind]=t,y=14+i*12;q.fillStyle=kind==='gone'?AMBD:AMB;q.font='bold 9px '+MONO;q.fillText(tm,4,y);q.fillText(to+' '+ln,38,y);
+    q.font='bold 8px '+MONO;q.fillStyle=kind==='gone'?AMBD:'#d08a2a';q.fillText(via.split(' · ').slice(0,2).join(', '),120,y+1);q.fillStyle=kind==='gone'?AMBD:AMB;q.font='bold 9px '+MONO;q.fillText(pl,282,y);
+    q.font='bold 8px '+MONO;q.fillText(kind==='cancel'?'Cancelled':kind==='gone'?'Departed':exp?exp:'On time',306,y+1);});
+});}
+function stripA(w,h,left,right){return mk(w,h,(x,W,H)=>{x.fillStyle='#1f4fa0';x.fillRect(0,0,W,H);x.fillStyle='#5f8fd8';x.fillRect(0,0,W,Math.max(4,H*.07));x.fillStyle='#fff';x.font=`700 ${Math.round(H*.55)}px ${SANS}`;x.textBaseline='middle';x.fillText(left,22,H*.56);
+  if(right){const [t,at]=right;x.textAlign='left';x.fillText(t,W*at,H*.56);}});}
+// the planner, compact (A2) and tall with "your trip" on top (A3)
+function plannerCompact(x,W,H){const k=W/346;blueBg(x,W,H);tabs(x,k,W,1);let y=34*k;headBar(x,k,346,y,'Local bus services','Veghel');y+=30*k;
+  const s=BUS_STOPS[0];stopTitle(x,k,y,s.stop);y+=15*k;colLabels(x,k,y,[['Walk time',10],['Route',58],['Destination',100],['Due',262,'right'],['Time',336,'right']]);y+=15*k;s.rows.forEach((r,i)=>{busRow(x,k,346,y,r,i===0?s.walk:'');y+=23*k;});
+  x.fillStyle='rgba(255,255,255,.7)';x.font=`${8.5*k}px ${SANS}`;x.fillText('Scroll for Rembrandtlaan and Breda → BUas · tap any line',10*k,H-9*k);}
+function tripCard(x,k,y){x.fillStyle='#fff';rr(x,6*k,y,334*k,74*k,5*k);x.fill();x.fillStyle='#10275e';x.font=`700 ${11*k}px ${SANS}`;x.textBaseline='middle';x.fillText('Your trip · fastest',14*k,y+12*k);
+  x.textAlign='right';x.fillText('at BUas 10:20',332*k,y+12*k);x.textAlign='left';
+  const legs=[['306','#5cc6f2','08:51','Den Bosch'],['IC','#f5c400','09:31','Breda'],['1','#5cc6f2','10:13','BUas']];let cx=14*k;
+  legs.forEach(([ln,c,tm,to],i)=>{x.fillStyle=c;rr(x,cx,y+28*k,30*k,16*k,2*k);x.fill();x.fillStyle='#10275e';x.font=`700 ${10*k}px ${SANS}`;x.textAlign='center';x.fillText(ln,cx+15*k,y+36.5*k);x.textAlign='left';
+    x.font=`700 ${12*k}px ${SANS}`;x.fillText(tm,cx+35*k,y+33*k);x.font=`${9*k}px ${SANS}`;x.fillStyle='#45608f';x.fillText('to '+to,cx+35*k,y+46*k);x.fillStyle='#10275e';
+    if(i<2){x.fillStyle='#9fb1d6';x.fillRect(cx+86*k,y+36*k,14*k,2*k);}cx+=108*k;});
+  x.fillStyle='#2f9e5b';rr(x,14*k,y+56*k,316*k,13*k,3*k);x.fill();x.fillStyle='#fff';x.font=`700 ${8.5*k}px ${SANS}`;x.fillText('WAKE ME UP · VIA DEN BOSCH',20*k,y+63*k);}
+function plannerTall(x,W,H){const k=W/346;blueBg(x,W,H);tabs(x,k,W,1);let y=34*k;tripCard(x,k,y);y+=84*k;y=busSections(x,k,346,y);
+  headBar(x,k,346,y,'Breda station → BUas','bus, 7 min');y+=30*k;stopTitle(x,k,y,'Breda, Centraal Station · B');y+=15*k;
+  colLabels(x,k,y,[['Walk time',10],['Route',58],['Destination',100],['Due',262,'right'],['Time',336,'right']]);y+=15*k;BUAS.forEach((r,i)=>{busRow(x,k,346,y,r,i?'':'3 mins');y+=24*k;});
+  x.fillStyle='rgba(255,255,255,.7)';x.font=`${8.5*k}px ${SANS}`;x.fillText('Trains are on the board above. Tap any line for more.',10*k,H-9*k);}
+// lay out a variant on the wall from where things sit on screen (fractions of the picture), seen from 2.8 m
+const CAMA=new T.Vector3(-.195,2.05,4.2),FH=2.978,FW=1.374,yf=f=>2.05+(.5-f)*FH;
+function designA(v){const key='A'+v;if(DES[key]) return DES[key];const g=new T.Group();scene.add(g);const S2={cam:CAMA,g};
+  const L={1:{h:[.118,.146],led:[.146,.372],pl:[.40,.962],cols:186,draw:ledA1,plan:plannerA,strip:['Departures',['Next fastest to',.63]]},
+           2:{h:[.118,.142],led:[.142,.50],pl:[.525,.962],cols:280,draw:ledA2,plan:plannerCompact,strip:['Departures',['Trains to Breda',.66]]},
+           3:{h:[.118,.140],led:[.140,.255],pl:[.28,.962],cols:95,draw:ledA3,plan:plannerTall,strip:['Departures',['Trains',.78]]}}[v];
+  const span=a=>[yf(a[0]),yf(a[1])],mid=a=>(yf(a[0])+yf(a[1]))/2,ht=a=>yf(a[0])-yf(a[1]);
+  const lw=.95*FW,pw=.90*FW;
+  g.add(box(lw+.04,ht([L.h[0],L.led[1]])+.04,.08,0x0b0c10,-3.035,mid([L.h[0],L.led[1]]),4.2,{metalness:.4,roughness:.5}));
+  const sh=ht(L.h);g.add(face(lw,sh,stripA(1305,Math.round(1305*sh/lw),L.strip[0],L.strip[1]),-2.992,mid(L.h),4.2));
+  const lh=ht(L.led),lpx=Math.round(1305*lh/lw);S2.led=face(lw,lh,mk(1305,lpx,L.draw),-2.992,mid(L.led),4.2);g.add(S2.led);
+  const ph=ht(L.pl),ppx=Math.round(1000*ph/pw);
+  g.add(box(pw+.05,ph+.09,.07,0xd9dce1,-3.03,mid(L.pl),4.2,{metalness:.2,roughness:.45}));g.add(box(pw+.018,ph+.03,.072,0x111318,-3.028,mid(L.pl),4.2));
+  S2.scr=face(pw,ph,mk(1000,ppx,L.plan),-2.992,mid(L.pl),4.2);g.add(S2.scr);
+  S2.detail=()=>{S2.scr.material.map=mk(1000,ppx,(x,w,h)=>v==='2'?detailCompact(x,w,h):detailPage(x,w,h,'blue'));
+    S2.led.material.map=mk(1305,lpx,(x,w,h)=>{L.draw(x,w,h);const p=w/362,y=v==='1'?13+2*26-3:v==='3'?14+2*12-2:16+2*80-3;x.strokeStyle='#fff';x.lineWidth=p*1.2;x.strokeRect(1*p,y*p,(v==='1'?220:v==='2'?118:358)*p,(v==='1'?24:v==='3'?12:58)*p);});};
+  const glow=mk(128,128,(x)=>{const gr=x.createRadialGradient(64,64,10,64,64,64);gr.addColorStop(0,'rgba(255,255,255,.9)');gr.addColorStop(1,'rgba(255,255,255,0)');x.fillStyle=gr;x.fillRect(0,0,128,128);});
+  const gp=new T.Mesh(new T.PlaneGeometry(2.6,3.2),new T.MeshBasicMaterial({map:glow,color:0x4f7ae0,transparent:true,opacity:.16,blending:T.AdditiveBlending,depthWrite:false}));gp.rotation.y=Math.PI/2;gp.position.set(-3.105,1.9,4.2);g.add(gp);
+  DES[key]=S2;return S2;}
+// a short page for the small planner: the train, its coaches and that it's tracked
+function detailCompact(x,W,H){const k=W/346;blueBg(x,W,H);x.textBaseline='middle';
+  x.fillStyle='rgba(255,255,255,.14)';rr(x,10*k,8*k,62*k,18*k,9*k);x.fill();x.fillStyle='#fff';x.font=`700 ${10*k}px ${SANS}`;x.fillText('‹  Board',18*k,17.5*k);
+  x.fillStyle='#2fd27a';rr(x,(346-130)*k,8*k,120*k,18*k,9*k);x.fill();x.fillStyle='#062a16';x.font=`700 ${10*k}px ${SANS}`;x.fillText('●  TRACKING',(346-118)*k,17.5*k);
+  x.fillStyle='#fff';rr(x,10*k,36*k,34*k,18*k,2*k);x.fill();x.fillStyle='#16306b';x.font=`700 ${11*k}px ${SANS}`;x.textAlign='center';x.fillText('IC',27*k,45.5*k);x.textAlign='left';
+  x.fillStyle='#fff';x.font=`700 ${18*k}px ${SANS}`;x.fillText('09:01 Breda',52*k,45*k);x.font=`${9.5*k}px ${SANS}`;x.fillStyle='rgba(255,255,255,.8)';x.fillText('On time · platform 5 · busy · 1st class in coaches 3 and 6',10*k,66*k);
+  coaches(x,k,80*k,'blue');x.fillStyle='#fff';x.font=`${9.5*k}px ${SANS}`;x.fillText('Stand at A–C. Quietest at the back. Arrives 09:38.',12*k,148*k);
+  x.fillStyle='rgba(47,210,122,.16)';rr(x,8*k,H-34*k,330*k,26*k,5*k);x.fill();x.fillStyle='#fff';x.font=`700 ${9.5*k}px ${SANS}`;x.fillText('Watching it: you hear if the platform changes or it runs late.',16*k,H-21*k);}
+window.renderMockA=(v,detail,mix)=>{if(!mapTex){mapTex=[paintMap(false),paintMap(true)];decorate();}
+  light(mix||0);posterM.map=mapTex[0];posterM.needsUpdate=true;train.position.z=zAt(12);extrasAt(12);
+  Object.keys(DES).forEach(k=>DES[k].g.visible=false);const d=designA(v);d.g.visible=true;if(detail) d.detail();
+  cam.position.copy(d.cam);cam.lookAt(d.cam.clone().add(new T.Vector3(-1,0,0)));r.render(scene,cam);return r.domElement.toDataURL('image/jpeg',0.92);};
+
+let boardBuilt=false;
+function buildBoard(){if(boardBuilt) return;boardBuilt=true;designA('3').g.visible=true;}
+const BX=-2.992,BZ=4.2;
+
+/* ---------- The walk: from the map, back and a look down the platform, then over to the board ---------- */
+const CB={p:CAMA.clone(),yaw:-Math.PI/2,pitch:0};     // face to face with the boards, 2.8 m from the wall
+const CG={p:new T.Vector3(.35,2.1,2.7)};{const d=new T.Vector3(2.3,1.5,-30).sub(CG.p).normalize();CG.yaw=Math.atan2(d.x,-d.z);CG.pitch=Math.asin(d.y);}
+const sm=u=>{u=Math.min(1,Math.max(0,u));return u*u*(3-2*u);};
+function camWalk(u){
+  let p,yaw,pitch,step;
+  if(u<.5){const e=sm(u/.5);p=CM.p.clone().lerp(CG.p,e);const ty=sm((u-.04)/.44);yaw=CM.yaw+(CG.yaw-CM.yaw)*ty;pitch=CM.pitch+(CG.pitch-CM.pitch)*ty;step=Math.sin(u/.5*Math.PI);}
+  else{const e=sm((u-.5)/.5);p=CG.p.clone().lerp(CB.p,e);const ty=sm((u-.52)/.44);yaw=CG.yaw+(CB.yaw-CG.yaw)*ty;pitch=CG.pitch+(CB.pitch-CG.pitch)*ty;step=Math.sin((u-.5)/.5*Math.PI);}
+  p.y+=Math.sin(u*Math.PI*8)*.012*step;                                    // a little bob as you walk
+  cam.position.copy(p);cam.lookAt(p.clone().add(new T.Vector3(Math.sin(yaw)*Math.cos(pitch),Math.sin(pitch),-Math.cos(yaw)*Math.cos(pitch))));
+}
+// Where the board's screen sits on screen at the end of the walk (0…1 of the picture), for the app to write on it.
+window.boardScreenRect=()=>{camWalk(1);cam.updateMatrixWorld();const L=[[.118,.255,.95],[.28,.962,.90]];
+  return L.map(([f0,f1,fw])=>{const y0=yf(f0),y1=yf(f1),w=fw*FW;const pts=[[-1,y0],[1,y0],[-1,y1],[1,y1]].map(([s2,y])=>new T.Vector3(BX,y,BZ+s2*w/2).project(cam));
+    const xs=pts.map(p=>(p.x+1)/2),ys=pts.map(p=>(1-p.y)/2);return {x0:Math.min(...xs),x1:Math.max(...xs),y0:Math.min(...ys),y1:Math.max(...ys)};});};
+
 // Where the map sits on screen in the first frame (0…1 of the picture), for the app to put its own map there.
 window.posterRect=()=>{camAt(0);cam.updateMatrixWorld();const pts=[[-1,-1],[1,-1],[-1,1],[1,1]].map(([s,t])=>new T.Vector3(PX0+.04,PY+t*PH/2,PZ+s*PW/2).project(cam));
   const xs=pts.map(p=>(p.x+1)/2),ys=pts.map(p=>(1-p.y)/2);return {x0:Math.min(...xs),x1:Math.max(...xs),y0:Math.min(...ys),y1:Math.max(...ys)};};
 window.peekLift=(t,c)=>{if(!mapTex) mapTex=[paintMap(false),paintMap(true)];light(0);extrasAt(t);c=c||[.2,1.7,-4.9,-3,1.4,-4.9];cam.position.set(c[0],c[1],c[2]);cam.lookAt(c[3],c[4],c[5]);r.render(scene,cam);return r.domElement.toDataURL('image/jpeg',0.9);};
-window.renderMove=(u,mix)=>{if(!mapTex){mapTex=[paintMap(false),paintMap(true)];decorate();}light(mix);posterM.map=mapTex[mix>.5?1:0];posterM.needsUpdate=true;train.position.z=zAt(0);extrasAt(-1.6+u*1.6);camAt(u);r.render(scene,cam);return r.domElement.toDataURL('image/jpeg',0.9);};
+window.renderMove=(u,mix)=>{if(!mapTex){mapTex=[paintMap(false),paintMap(true)];decorate();buildBoard();
+  window.stationBoard([{line:'306',to:'Den Bosch',time:'08:51',note:'+2'},{line:'IC',to:'Breda',time:'09:31',note:''},{line:'1',to:'Nassausingel',time:'10:13',note:''}]);}
+  light(mix);posterM.map=mapTex[mix>.5?1:0];posterM.needsUpdate=true;train.position.z=zAt(12);extrasAt(9.8+u*2.2);camWalk(u);r.render(scene,cam);return r.domElement.toDataURL('image/jpeg',0.9);};
 // Deterministic train position for a time t (seconds) in the 30 s loop.
 function zAt(t){let acc=0;for(const p of plan){if(t<acc+p.d){const u=(t-acc)/p.d;return p.from+(p.to-p.from)*p.ease(u);}acc+=p.d;}return plan[0].from;}
 window.renderFrame=(t,mix)=>{light(mix);train.position.z=zAt(t%30);extrasAt(t);r.render(scene,cam);return r.domElement.toDataURL('image/jpeg',0.9);};

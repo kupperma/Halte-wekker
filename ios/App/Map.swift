@@ -85,38 +85,34 @@ struct TransferBoard: View {
 
 // MARK: the stage behind it all
 
-struct HomeStage<Menu: View>: View {
+struct HomeStage<Menu: View, Boards: View>: View {
     let home: Bool
     let stage: StageMode
-    let moving: Bool
     let moveToken: Int
-    let loopToken: Int
-    var board: [BoardLine] = []
     let menu: Menu
+    let boards: (CGRect, CGRect) -> Boards
 
-    init(home: Bool, stage: StageMode, moving: Bool, moveToken: Int, loopToken: Int, board: [BoardLine] = [], @ViewBuilder menu: () -> Menu) {
-        self.home = home; self.stage = stage; self.moving = moving; self.moveToken = moveToken; self.loopToken = loopToken
-        self.board = board; self.menu = menu()
+    /// `boards` gets where the LED strip and the planner are on screen, and draws on them.
+    init(home: Bool, stage: StageMode, moveToken: Int, @ViewBuilder menu: () -> Menu, @ViewBuilder boards: @escaping (CGRect, CGRect) -> Boards) {
+        self.home = home; self.stage = stage; self.moveToken = moveToken; self.menu = menu(); self.boards = boards
     }
 
     var body: some View {
         // Everything is laid out in one frame: the whole screen, with the picture placed by MapSpot.picture.
-        // (Each layer gets that exact rectangle, so the app's map can't drift off the one in the video.)
+        // (Each layer gets that exact rectangle, so what the app draws can't drift off the boards and the map in the video.)
         GeometryReader { g in
             let v = MapSpot.picture(in: g.size)
             ZStack(alignment: .topLeading) {
                 HWPalette.bg
-                // the platform
+                // at the boards on the wall
                 ForEach([false, true], id: \.self) { h in
-                    Group {
-                        if moving { StationVideo(name: h ? "station-home" : "station-out", playing: h == home && stage != .map, restart: loopToken) }
-                        else { still(h ? "still-home" : "still-out") }
-                    }
-                    .frame(width: v.width, height: v.height).position(x: v.midX, y: v.midY)
-                    .opacity(h == home ? 1 : 0)
+                    still(h ? "board-home" : "board-out")
+                        .frame(width: v.width, height: v.height).position(x: v.midX, y: v.midY)
+                        .opacity(stage == .station && h == home ? 1 : 0)
                 }
-                .animation(.easeInOut(duration: 0.8), value: home)
-                // stepping back from the wall (or towards it)
+                .animation(.easeOut(duration: 0.3), value: stage)
+                .animation(.easeInOut(duration: 0.6), value: home)
+                // the walk from the map to the boards (or back)
                 OneShotVideo(name: "move-\(home ? "home" : "out")\(stage == .returning ? "-back" : "")", token: moveToken)
                     .frame(width: v.width, height: v.height).position(x: v.midX, y: v.midY)
                     .opacity(stage == .leaving || stage == .returning ? 1 : 0)
@@ -129,28 +125,14 @@ struct HomeStage<Menu: View>: View {
                 }
                 .animation(.easeOut(duration: 0.45), value: stage)
                 .animation(.easeInOut(duration: 0.6), value: home)
-                // the station's mood, once you've stepped back
-                ZStack {
-                    Color.black.opacity(0.38)
-                    RadialGradient(colors: [.clear, .black.opacity(0.6)], center: .init(x: 0.5, y: 0.3), startRadius: 120, endRadius: 520)
-                }
-                .frame(width: g.size.width, height: g.size.height)
-                .opacity(stage == .station || stage == .leaving ? 1 : 0)
-                .animation(.easeInOut(duration: 1.5), value: stage)
-                // your next transfers on the board over the platform
-                if !board.isEmpty {
-                    let b = BoardSpot.rect(in: g.size)
-                    TransferBoard(rows: board)
-                        .scaleEffect(b.width / BoardSpot.design.width, anchor: .topLeading)
-                        .frame(width: b.width, height: b.height, alignment: .topLeading)
-                        .position(x: b.midX, y: b.midY)
-                        .brightness(-0.12)                 // under the station's dimmer light
-                        .opacity(stage == .station ? 1 : 0)
-                        .animation(.easeInOut(duration: 0.5), value: stage)
-                }
                 FilmGrain().frame(width: g.size.width, height: g.size.height).clipped()
-                // the app's own map, exactly over the one on the wall (it goes the moment you step back,
-                // so you never see the two maps at once)
+                // the live trains and your trip, written on the boards (gone the moment you walk away)
+                boards(WallBoards.rect(WallBoards.led, in: g.size), WallBoards.rect(WallBoards.planner, in: g.size))
+                    .frame(width: g.size.width, height: g.size.height)
+                    .opacity(stage == .station ? 1 : 0)
+                    .allowsHitTesting(stage == .station)
+                    .animation(stage == .station ? .easeOut(duration: 0.3) : nil, value: stage)
+                // the app's own map, exactly over the one on the wall
                 let r = MapSpot.rect(in: g.size)
                 menu
                     .scaleEffect(r.width / MapSpot.design.width, anchor: .topLeading)

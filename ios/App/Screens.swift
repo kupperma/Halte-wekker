@@ -49,13 +49,14 @@ struct HomeView: View {
     @State private var section: HomeSection = .fastest
     @State private var moveToken = 0
     @State private var loopToken = 0
+    @State private var picked: BoardPick?            // the line you tapped on a board
 
     var body: some View {
         ZStack(alignment: .top) {
             Color.clear
-            // stepped back: the station, with the part you picked
+            // at the boards: back to the map, the direction, settings (what you picked is on the boards themselves)
             if stage == .station {
-                sectionView.transition(.move(edge: .bottom).combined(with: .opacity))
+                topBar.transition(.opacity)
             }
             if let t = trip.toast {
                 ToastView(text: t, pal: pal)
@@ -72,9 +73,11 @@ struct HomeView: View {
         // The station and the map on the wall fill the whole screen behind; the screen's own buttons stay clear of
         // the clock and the Dynamic Island. (Taps that miss them reach the map.)
         .background {
-            HomeStage(home: home, stage: stage, moving: trip.movingStation && scene == .active, moveToken: moveToken, loopToken: loopToken, board: boardLines) {
+            HomeStage(home: home, stage: stage, moveToken: moveToken) {
                 MetroMapMenu(home: home, fastest: fastestSub, lines: linesSub, planned: plannedSub, via: live.next.first?.via,
                              open: { go($0) }, toggle: { toggleDirection() }, settings: { settings = true })
+            } boards: { led, plan in
+                wallBoards(led, plan)
             }
         }
         .animation(.easeInOut(duration: 0.3), value: trip.toast)
@@ -104,15 +107,16 @@ struct HomeView: View {
 
     // MARK: map ⇄ station
 
-    /// Pick a line on the map: step back from the wall and turn to the platform.
+    /// Pick a line on the map: step back from the wall, look down the platform, and walk over to the boards.
     private func go(_ s: HomeSection) {
         guard stage == .map else { return }
         section = s
+        picked = nil
         if s == .more { open.insert("scores") }
         moveToken += 1; loopToken += 1
         withAnimation(.easeOut(duration: 0.15)) { stage = .leaving }
         Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 1_450_000_000)
+            try? await Task.sleep(nanoseconds: 2_200_000_000)        // the walk takes 2.2 s
             guard stage == .leaving else { return }
             withAnimation(.spring(response: 0.45, dampingFraction: 0.9)) { stage = .station }
             if s == .planned && planner.trip == nil {
@@ -122,13 +126,13 @@ struct HomeView: View {
         }
     }
 
-    /// Back to the map: walk up to the wall again.
+    /// Back to the map: walk back over to the wall.
     private func backToMap() {
         guard stage == .station else { return }
         moveToken += 1
         withAnimation(.easeIn(duration: 0.2)) { stage = .returning }
         Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 1_600_000_000)
+            try? await Task.sleep(nanoseconds: 2_200_000_000)
             guard stage == .returning else { return }
             withAnimation(.easeOut(duration: 0.3)) { stage = .map }
         }
@@ -165,52 +169,215 @@ struct HomeView: View {
         return "\(t.dayLabel) · \(t.out ? "arrive Breda" : "leave Breda") \(t.time)"
     }
 
-    // MARK: on the platform
+    // MARK: at the boards
 
-    private var sectionView: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                Button(action: backToMap) {
-                    HStack(spacing: 5) {
-                        Image(systemName: "chevron.left").font(.system(size: 12, weight: .bold))
-                        Text("MAP").font(HWFont.display(13)).tracking(1.4)
-                    }
-                    .foregroundStyle(pal.brass).padding(.horizontal, 12).padding(.vertical, 8)
-                    .background(Color.black.opacity(0.6), in: Capsule()).overlay(Capsule().stroke(pal.brass, lineWidth: 1.2))
+    private var topBar: some View {
+        HStack(spacing: 10) {
+            Button(action: backToMap) {
+                HStack(spacing: 5) {
+                    Image(systemName: "chevron.left").font(.system(size: 12, weight: .bold))
+                    Text("MAP").font(HWFont.display(13)).tracking(1.4)
                 }
-                .buttonStyle(.plain).accessibilityLabel("Back to the map")
-                Text(section.title).font(HWFont.display(21)).foregroundStyle(HWPalette.ink).lineLimit(1).minimumScaleFactor(0.8)
-                Spacer(minLength: 4)
-                Button(action: toggleDirection) {
-                    HStack(spacing: 5) {
-                        Text(trip.direction.word).font(HWFont.display(13)).tracking(1.6)
-                        Image(systemName: "arrow.up.arrow.down").font(.system(size: 11, weight: .bold))
-                    }
-                    .foregroundStyle(pal.accent).padding(.horizontal, 10).padding(.vertical, 8)
-                    .background(Color.black.opacity(0.6), in: Capsule()).overlay(Capsule().stroke(pal.brass, lineWidth: 1.2))
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(home ? "Going home. Tap to switch to going to Breda." : "Going to Breda. Tap to switch to going home.")
-                Button { settings = true } label: {
-                    Image(systemName: "gearshape").font(.system(size: 14, weight: .semibold)).foregroundStyle(pal.brass)
-                        .frame(width: 34, height: 34).background(Color.black.opacity(0.6), in: Circle()).overlay(Circle().stroke(pal.brass, lineWidth: 1.2))
-                }
-                .buttonStyle(.plain).accessibilityLabel("Settings")
+                .foregroundStyle(pal.brass).padding(.horizontal, 12).padding(.vertical, 8)
+                .background(Color.black.opacity(0.6), in: Capsule()).overlay(Capsule().stroke(pal.brass, lineWidth: 1.2))
             }
-            .padding(.horizontal, 18).padding(.top, 4).padding(.bottom, 8)
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    switch section {
-                    case .fastest: fastestContent
-                    case .lines: linesContent
-                    case .planned: plannedContent
-                    case .more: moreContent
-                    }
+            .buttonStyle(.plain).accessibilityLabel("Back to the map")
+            Spacer(minLength: 4)
+            Button(action: toggleDirection) {
+                HStack(spacing: 5) {
+                    Text(trip.direction.word).font(HWFont.display(13)).tracking(1.6)
+                    Image(systemName: "arrow.up.arrow.down").font(.system(size: 11, weight: .bold))
                 }
-                .padding(.horizontal, 18).padding(.top, 14).padding(.bottom, 40)
+                .foregroundStyle(pal.accent).padding(.horizontal, 10).padding(.vertical, 8)
+                .background(Color.black.opacity(0.6), in: Capsule()).overlay(Capsule().stroke(pal.brass, lineWidth: 1.2))
             }
-            .scrollIndicators(.hidden)
+            .buttonStyle(.plain)
+            .accessibilityLabel(home ? "Going home. Tap to switch to going to Breda." : "Going to Breda. Tap to switch to going home.")
+            Button { settings = true } label: {
+                Image(systemName: "gearshape").font(.system(size: 14, weight: .semibold)).foregroundStyle(pal.brass)
+                    .frame(width: 34, height: 34).background(Color.black.opacity(0.6), in: Circle()).overlay(Circle().stroke(pal.brass, lineWidth: 1.2))
+            }
+            .buttonStyle(.plain).accessibilityLabel("Settings")
         }
+        .padding(.horizontal, 18).padding(.top, 4)
+    }
+
+    /// What the app writes on the two screens on the wall: the trains on the LED strip, the rest on the planner.
+    private func wallBoards(_ led: CGRect, _ plan: CGRect) -> some View {
+        ZStack(alignment: .topLeading) {
+            LEDStrip(title: home ? "Trains home" : "Trains to Breda", rows: ledRows, tap: tapTrain)
+                .frame(width: led.width, height: led.height)
+                .position(x: led.midX, y: led.midY)
+            PlannerScreen(section: section, pick: pickSection) { plannerContent }
+                .frame(width: plan.width, height: plan.height)
+                .position(x: plan.midX, y: plan.midY)
+        }
+    }
+
+    /// The trains for the LED strip: the last few that left (dimmed) and the next ones.
+    private var ledRows: [LEDTrain] {
+        let now = Date(), since = now.addingTimeInterval(-20 * 60)
+        let list = live.trains.filter { $0.trip.first.departure > since || $0.trip.first.scheduledDeparture > since }.prefix(12)
+        return list.map { p in
+            let f = p.trip.first, info = ns.rail(f)
+            let cancelled = f.cancelled || info?.cancelled == true
+            let gone = !cancelled && f.departure < now.addingTimeInterval(-60)
+            let status = cancelled ? "Cancelled" : gone ? "Departed" : (f.live && f.delay >= 1) ? Fmt.hhmm(f.departure) : f.live ? "On time" : "Planned"
+            let to = f.headsign.isEmpty ? p.to.short : Fmt.place(f.headsign)
+            let via = "from \(p.from.short)" + (p.trip.changes.isEmpty ? "" : ", change \(p.trip.changes.joined(separator: ", "))")
+            let track = (info?.track ?? f.platform ?? "") + (info?.trackChanged == true ? "!" : "")
+            var isPicked = false
+            if case .train(let t) = picked, t.id == p.id { isPicked = true }
+            return LEDTrain(id: p.id, time: Fmt.hhmm(f.scheduledDeparture), to: "\(to) \(f.line)", via: via, platform: track,
+                            status: status, gone: gone, picked: isPicked)
+        }
+    }
+
+    private func pickSection(_ s: HomeSection) {
+        picked = nil
+        if s == .more { open.insert("scores") }
+        withAnimation(.easeInOut(duration: 0.2)) { section = s }
+        if s == .planned && planner.trip == nil { planning = true }
+    }
+
+    // Tapping a line opens its page on the planner and starts tracking it.
+    private func tapTrain(_ id: String) {
+        guard let p = live.trains.first(where: { $0.id == id }) else { return }
+        withAnimation(.easeInOut(duration: 0.2)) { picked = .train(p) }
+        if !watch.isWatched(p.trip.first, from: p.from) { _ = watch.toggle(p.trip, from: p.from, to: p.to) }
+    }
+    private func tapBus(_ d: BoardDeparture) {
+        withAnimation(.easeInOut(duration: 0.2)) { picked = .bus(d) }
+        if !lines.isWatched(stopId: d.stopId, line: d.line, headsign: d.headsign) {
+            lines.toggle(stopId: d.stopId, stopName: d.stopName, line: d.line, headsign: d.headsign, tripId: d.tripId, delay: d.live ? d.delay : nil)
+        }
+    }
+    private func tapBusTrip(_ p: PanelTrip) {
+        withAnimation(.easeInOut(duration: 0.2)) { picked = .busTrip(p) }
+        let f = p.trip.first
+        if !lines.isWatched(stopId: f.fromId, line: f.line, headsign: f.headsign) {
+            lines.toggle(stopId: f.fromId, stopName: f.fromStop, line: f.line, headsign: f.headsign, tripId: f.tripId, delay: f.live ? f.delay : nil)
+        }
+    }
+
+    @ViewBuilder private var plannerContent: some View {
+        if let p = picked {
+            pickedPage(p)
+        } else {
+            switch section {
+            case .fastest: fastestContent
+            case .lines: boardLinesContent
+            case .planned: plannedContent
+            case .more: moreContent
+            }
+        }
+    }
+
+    @ViewBuilder private func pickedPage(_ p: BoardPick) -> some View {
+        switch p {
+        case .train(let t):
+            let f = t.trip.first
+            TrainPage(p: t, info: ns.rail(f), tracked: watch.isWatched(f, from: t.from), nsMissing: ns.available == false, pal: pal,
+                      back: { withAnimation(.easeInOut(duration: 0.2)) { picked = nil } },
+                      track: { _ = watch.toggle(t.trip, from: t.from, to: t.to) })
+        case .bus(let d):
+            let ride = live.boardRides["\(d.stopId)|\(d.tripId)"]
+            BusPage(line: d.line, to: d.headsign, stop: d.stopName, time: d.cancelled ? d.scheduled : d.time, scheduled: d.scheduled,
+                    live: d.live, cancelled: d.cancelled, status: BoardRow.status(d),
+                    ride: ride.map { "\(Fmt.rideText($0.minutes)) ride to \($0.station) station, arrives \(Fmt.hhmm($0.arrival))" },
+                    tracked: lines.isWatched(stopId: d.stopId, line: d.line, headsign: d.headsign),
+                    back: { withAnimation(.easeInOut(duration: 0.2)) { picked = nil } },
+                    track: { lines.toggle(stopId: d.stopId, stopName: d.stopName, line: d.line, headsign: d.headsign, tripId: d.tripId, delay: d.live ? d.delay : nil) })
+        case .busTrip(let t):
+            let f = t.trip.first
+            BusPage(line: f.line, to: f.headsign.isEmpty ? Fmt.place(t.trip.last.toStop) : f.headsign, stop: Fmt.place(f.fromStop),
+                    time: f.departure, scheduled: f.scheduledDeparture, live: f.live, cancelled: f.cancelled, status: RideText.status(f, nil).text,
+                    ride: "\(t.trip.rideLabel) · arrives \(Fmt.place(t.trip.last.toStop)) \(Fmt.hhmm(t.trip.last.arrival))",
+                    tracked: lines.isWatched(stopId: f.fromId, line: f.line, headsign: f.headsign),
+                    back: { withAnimation(.easeInOut(duration: 0.2)) { picked = nil } },
+                    track: { lines.toggle(stopId: f.fromId, stopName: f.fromStop, line: f.line, headsign: f.headsign, tripId: f.tripId, delay: f.live ? f.delay : nil) })
+        }
+    }
+
+    /// "All lines" on the planner: your trip, then the buses (the trains are on the LED strip above).
+    @ViewBuilder private var boardLinesContent: some View {
+        if let t = live.next[safe: live.pick] ?? live.next.first {
+            let r = t.via.flatMap { via in RoutePlan.all.first(where: { $0.station.short == via }) }
+            PlannerTripCard(trip: t, home: home, wakeTitle: r.map { "Wake me up · via \($0.station.short)" }) {
+                if let r { trip.start(r) }
+            }
+        } else {
+            Text(live.nextError ?? "Finding your next connection…").font(BoardInk.sans(12, .regular)).foregroundStyle(Color.white.opacity(0.85))
+        }
+        ForEach(panelOrder.filter(shown).filter { $0 != "train" }, id: \.self) { p in busPanel(p) }
+        Button(live.showEarlier ? "Hide earlier ones" : "Show more earlier ones") { withAnimation { live.showEarlier.toggle() } }
+            .font(BoardInk.sans(12, .semibold)).foregroundStyle(.white)
+        WatchingCard(pal: pal)
+        nearToggle
+        nearNote
+        if trip.locationDenied {
+            Text("Location is off for Haltewekker. Turn it on in Settings → Privacy → Location Services, or it can’t wake you.")
+                .font(HWFont.body(12, bold: true)).foregroundStyle(HWPalette.warn)
+        }
+        Text("Tap any bus or train for more: it’s tracked for you from then on. Live times from Transitous, map data © OpenStreetMap contributors.")
+            .font(BoardInk.sans(9.5, .regular)).foregroundStyle(Color.white.opacity(0.65))
+    }
+
+    @ViewBuilder private func busPanel(_ p: String) -> some View {
+        switch p {
+        case "board": veghelBuses
+        case "buas": tripBuses(home ? "Bus to Breda station" : "Breda station → BUas", live.buas)
+        default: tripBuses("Bus to Veghel", live.toVeghel)
+        }
+    }
+
+    /// The buses from the Veghel stops, stop by stop.
+    @ViewBuilder private var veghelBuses: some View {
+        let list = live.boardShown
+        let names = list.map(\.stopName).reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
+        PlannerBar(title: "Local bus services", sub: "Change stops") { liveSettings = true }
+        if list.isEmpty {
+            Text(live.panelsUpdated == nil ? "Loading…" : "No buses coming up right now.").font(BoardInk.sans(12, .regular)).foregroundStyle(Color.white.opacity(0.85))
+        }
+        ForEach(names, id: \.self) { name in
+            PlannerStop(name: name)
+            PlannerColumns()
+            ForEach(list.filter { $0.stopName == name }) { d in
+                let ride = live.boardRides["\(d.stopId)|\(d.tripId)"]
+                PlannerBusRow(line: d.line, to: d.headsign, time: d.cancelled ? d.scheduled : d.time, scheduled: d.scheduled, live: d.live, cancelled: d.cancelled,
+                              note: ride.map { "\(Fmt.rideText($0.minutes)) to \($0.station) station, arrives \(Fmt.hhmm($0.arrival))" },
+                              watched: lines.isWatched(stopId: d.stopId, line: d.line, headsign: d.headsign), picked: picked == .bus(d)) { tapBus(d) }
+            }
+        }
+    }
+
+    /// Buses from one of the other lists (Breda station to BUas, or to Veghel), with the last few that left.
+    @ViewBuilder private func tripBuses(_ title: String, _ all: [PanelTrip]) -> some View {
+        let since = Date().addingTimeInterval(live.showEarlier ? -30 * 60 : -10 * 60)
+        let list = Array(all.filter { $0.trip.first.departure > since && nearOK($0) }.prefix(8))
+        PlannerBar(title: title, sub: list.first.map { "from \(Fmt.place($0.trip.first.fromStop))" })
+        if list.isEmpty {
+            Text(live.panelsUpdated == nil ? "Loading…" : "Nothing coming up right now.").font(BoardInk.sans(12, .regular)).foregroundStyle(Color.white.opacity(0.85))
+        } else {
+            PlannerColumns()
+            ForEach(list) { p in
+                let f = p.trip.first
+                PlannerBusRow(line: f.line, to: f.headsign.isEmpty ? Fmt.place(p.trip.last.toStop) : f.headsign, time: f.departure, scheduled: f.scheduledDeparture,
+                              live: f.live, cancelled: f.cancelled, note: "\(p.trip.rideLabel) · arrives \(Fmt.hhmm(p.trip.last.arrival))",
+                              watched: lines.isWatched(stopId: f.fromId, line: f.line, headsign: f.headsign), picked: picked == .busTrip(p)) { tapBusTrip(p) }
+            }
+        }
+    }
+
+    private var nearToggle: some View {
+        Button { near.on.toggle() } label: {
+            Label("Near me", systemImage: near.on ? "location.fill" : "location")
+                .font(BoardInk.sans(12)).foregroundStyle(near.on ? BoardInk.navy : Color.white)
+                .padding(.horizontal, 10).padding(.vertical, 6)
+                .background(near.on ? Color.white : Color.white.opacity(0.14), in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(near.on ? .isSelected : [])
     }
 
     @ViewBuilder private var fastestContent: some View {
