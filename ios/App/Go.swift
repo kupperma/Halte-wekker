@@ -120,7 +120,7 @@ final class GoStore: ObservableObject {
         let now = Date()
         if now.timeIntervalSince(since) > Self.maxHours * 3600 {
             stopWatching()
-            tell("Stopped watching", "After \(Int(Self.maxHours)) hours it stops by itself. Open Fastest trip again when you need it.", sound: false)
+            tell("Stopped watching", "After \(Int(Self.maxHours)) hours · open Fastest trip again when you need it", kind: "info", sound: false)
             return
         }
         let target = CLLocation(latitude: dest.coordinate.latitude, longitude: dest.coordinate.longitude)
@@ -168,7 +168,7 @@ final class GoStore: ObservableObject {
         timeToGo(p)
         if let m = missed, now.timeIntervalSince(m.at) >= 120, trip?.phase == .idle {
             missed = nil
-            tell("The \(Self.what(m.trip.first)) has left", "Next: the \(Self.what(p.first)) at \(Fmt.hhmm(p.first.departure)) from \(Fmt.place(p.first.fromStop)). \(d.short) at \(Fmt.hhmm(p.end)).")
+            tell("\(Self.title(m.trip.first)) has left", "Next: \(Self.what(p.first)) at \(Fmt.hhmm(p.first.departure)) from \(Fmt.place(p.first.fromStop)) · \(d.short) \(Fmt.hhmm(p.end))", kind: "late")
         }
     }
 
@@ -184,7 +184,7 @@ final class GoStore: ObservableObject {
     /// The fastest way changed: say why, and that it's watching the new one now.
     private func switched(from old: DoorTrip, to new: DoorTrip, found: [DoorTrip]) async {
         let now = Date(), f = new.first
-        let take = "the \(Self.what(f)) at \(Fmt.hhmm(f.departure)) from \(Fmt.place(f.fromStop))"
+        let take = "\(Self.what(f)) at \(Fmt.hhmm(f.departure)) from \(Fmt.place(f.fromStop))"
         if old.first.departure < now.addingTimeInterval(-20) {
             if missed == nil { missed = (old, now) }         // wait a little: you may be on it
             return
@@ -193,13 +193,13 @@ final class GoStore: ObservableObject {
         let cancelled = await Self.isCancelled(o)
         guard watching else { return }
         if cancelled {
-            tell("\(Self.title(o)) at \(Fmt.hhmm(o.scheduledDeparture)) is cancelled", "Take \(take) instead. \(dest.short) at \(Fmt.hhmm(new.end)).")
+            tell("\(Self.title(o)) at \(Fmt.hhmm(o.scheduledDeparture)) is cancelled", "Take \(take) instead · \(dest.short) \(Fmt.hhmm(new.end))", kind: "cancelled")
         } else if old.start < now.addingTimeInterval(-90) {
-            tell("Too late for the \(Self.what(o))", "Take \(take) instead. \(dest.short) at \(Fmt.hhmm(new.end)).")
+            tell("Too late for \(Self.what(o))", "Take \(take) instead · \(dest.short) \(Fmt.hhmm(new.end))", kind: "late")
         } else {
             let oldNow = found.filter { $0.first.tripId == o.tripId }.min(by: { $0.end < $1.end }) ?? old
             let gain = Fmt.mins(oldNow.end.timeIntervalSince(new.end))
-            tell("Faster now: \(Self.title(f))", "Take \(take): \(dest.short) at \(Fmt.hhmm(new.end))\(gain >= 1 ? ", \(gain) min sooner" : ""). It watches that one for you now.")
+            tell("Faster: \(Self.title(f)) at \(Fmt.hhmm(f.departure))", "\(dest.short) \(Fmt.hhmm(new.end))\(gain >= 1 ? ", \(gain) min sooner" : "") · leave by \(Fmt.hhmm(new.start)) · from \(Fmt.place(f.fromStop))", kind: "faster")
         }
     }
 
@@ -212,18 +212,18 @@ final class GoStore: ObservableObject {
                 told[f.tripId] = dl
                 toldEnd = p.end
                 if dl >= 1 {
-                    tell("\(Self.title(f)) is \(dl) min late", "It leaves \(Fmt.hhmm(f.departure)) instead of \(Fmt.hhmm(f.scheduledDeparture)). Still your fastest: \(dest.short) at \(Fmt.hhmm(p.end)).")
+                    tell("\(Self.title(f)) is \(dl) min late", "Leaves \(Fmt.hhmm(f.departure)) instead of \(Fmt.hhmm(f.scheduledDeparture)) · still your fastest, \(dest.short) \(Fmt.hhmm(p.end))", kind: "late")
                 } else if dl <= -1 {
-                    tell("\(Self.title(f)) leaves \(-dl) min early", "It leaves \(Fmt.hhmm(f.departure)), not \(Fmt.hhmm(f.scheduledDeparture)). Be at \(Fmt.place(f.fromStop)) in time.")
+                    tell("\(Self.title(f)) leaves \(-dl) min early", "Leaves \(Fmt.hhmm(f.departure)) instead of \(Fmt.hhmm(f.scheduledDeparture)) · be at \(Fmt.place(f.fromStop)) in time", kind: "late")
                 } else {
-                    tell("\(Self.title(f)) is on time again", "It leaves \(Fmt.hhmm(f.departure)) as planned. \(dest.short) at \(Fmt.hhmm(p.end)).", sound: false)
+                    tell("\(Self.title(f)) is on time again", "Leaves \(Fmt.hhmm(f.departure)) · \(dest.short) \(Fmt.hhmm(p.end))", kind: "ok", sound: false)
                 }
                 return
             }
         }
         if let e = toldEnd, abs(p.end.timeIntervalSince(e)) >= 180 {
             toldEnd = p.end
-            tell("\(dest.short) at \(Fmt.hhmm(p.end)) now", "Instead of \(Fmt.hhmm(e)). Still the fastest way: the \(Self.what(f)) at \(Fmt.hhmm(f.departure)).", sound: false)
+            tell("\(dest.short) at \(Fmt.hhmm(p.end)) now", "Was \(Fmt.hhmm(e)) · still take \(Self.what(f)) at \(Fmt.hhmm(f.departure))", kind: "info", sound: false)
         }
     }
 
@@ -232,7 +232,7 @@ final class GoStore: ObservableObject {
         let f = p.first, now = Date()
         guard f.walkBefore >= 2, !toldGo.contains(f.tripId), p.start <= now.addingTimeInterval(60) else { return }
         toldGo.insert(f.tripId)
-        tell("Time to go", "\(f.walkBefore) min walk to \(Fmt.place(f.fromStop)) for the \(Self.what(f)) at \(Fmt.hhmm(f.departure)).")
+        tell("Time to go", "\(f.walkBefore) min walk to \(Fmt.place(f.fromStop)) · \(Self.what(f)) leaves \(Fmt.hhmm(f.departure))", kind: "go")
     }
 
     private static func isCancelled(_ r: Ride) async -> Bool {
@@ -344,20 +344,20 @@ final class GoStore: ObservableObject {
         show(b306)
         best = door(b306, ic2); others = later; updated = Date()
         guard await at(10) else { return }
-        tell("Time to go", "\(walk) min walk to \(stop) for the bus 306 at \(Fmt.hhmm(b306.departure)).")
+        tell("Time to go", "\(walk) min walk to \(stop) · bus 306 leaves \(Fmt.hhmm(b306.departure))", kind: "go")
         // it runs late (still your fastest)
         guard await at(25) else { return }
         let late = bus("demo-306", "306", 150 + 180, planned: 150)
         show(late)
         best = door(late, ic2); updated = Date()
-        tell("Bus 306 is 3 min late", "It leaves \(Fmt.hhmm(late.departure)) instead of \(Fmt.hhmm(late.scheduledDeparture)). Still your fastest: Breda at \(Fmt.hhmm(ic2.arrival)).")
+        tell("Bus 306 is 3 min late", "Leaves \(Fmt.hhmm(late.departure)) instead of \(Fmt.hhmm(late.scheduledDeparture)) · still your fastest, Breda \(Fmt.hhmm(ic2.arrival))", kind: "late")
         // then something faster: it switches by itself
         guard await at(42) else { return }
         let b300 = bus("demo-300", "300", 105, ride: 16 * 60), ic1 = intercity(105 + 22 * 60)
         show(b300)
         let fast = door(b300, ic1)
         best = fast; others = [door(late, ic2)] + later; updated = Date()
-        tell("Faster now: Bus 300", "Take the bus 300 at \(Fmt.hhmm(b300.departure)) from \(stop): Breda at \(Fmt.hhmm(fast.end)), \(Fmt.mins(ic2.arrival.timeIntervalSince(fast.end))) min sooner. It watches that one for you now.")
+        tell("Faster: Bus 300 at \(Fmt.hhmm(b300.departure))", "Breda \(Fmt.hhmm(fast.end)), \(Fmt.mins(ic2.arrival.timeIntervalSince(fast.end))) min sooner · leave by \(Fmt.hhmm(fast.start)) · from \(stop)", kind: "faster")
         // the bus is at your stop: it sees you get on, and the ride starts
         guard await at(106) else { return }
         seen = Vehicle(tripId: "demo-300", line: "300", isTrain: false)
@@ -372,13 +372,14 @@ final class GoStore: ObservableObject {
 
     // MARK: telling you
 
-    private func tell(_ title: String, _ body: String, sound: Bool = true) {
-        notes.insert(Note(at: Date(), text: "\(title). \(body)"), at: 0)
+    private func tell(_ title: String, _ body: String, kind: String = "info", sound: Bool = true) {
+        notes.insert(Note(at: Date(), text: "\(title) · \(body)"), at: 0)
         if notes.count > 5 { notes.removeLast(notes.count - 5) }
         clearPosted()                                     // only the newest stays on your lock screen
         let c = UNMutableNotificationContent()
         c.title = title; c.body = body
         c.threadIdentifier = "go"
+        c.userInfo = ["kind": kind]
         if sound { c.sound = .default; c.interruptionLevel = .timeSensitive }
         let id = "go-\(Int(Date().timeIntervalSince1970))-\(notes.count)"
         posted.append(id)

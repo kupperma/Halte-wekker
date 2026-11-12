@@ -5,6 +5,7 @@ struct RootView: View {
     @EnvironmentObject var trip: TripManager
     @EnvironmentObject var watch: WatchStore
     @EnvironmentObject var go: GoStore
+    @ObservedObject private var notices = Notices.shared
     @State private var browsing = false         // at a change: looking at the map and the boards for a bit
     var body: some View {
         Group {
@@ -29,6 +30,16 @@ struct RootView: View {
             }
         }
         .animation(.easeInOut(duration: 0.25), value: watch.alert)
+        // notifications pop up inside the app too, while it's open
+        .overlay(alignment: .top) {
+            if let n = notices.current {
+                NoticeBanner(notice: n) { notices.dismiss() }
+                    .padding(.horizontal, 10).padding(.top, 6)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .id(n.id)
+                    .zIndex(10)
+            }
+        }
         .preferredColorScheme(.dark)
     }
 }

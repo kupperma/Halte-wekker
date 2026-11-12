@@ -470,10 +470,15 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         }
     }
 
-    /// With the app open: the alarm and platform alerts are already on screen; show the rest as banners.
+    /// With the app open: the alarm and platform alerts are already on screen; the rest pop up inside the app (with their
+    /// sound), and stay in the notification list.
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler done: @escaping (UNNotificationPresentationOptions) -> Void) {
         let id = notification.request.identifier
-        done(id == "alarm" || id.hasPrefix("platform-") ? [] : [.banner, .list, .sound])
+        let c = notification.request.content
+        let title = c.title, body = c.body, kind = Notices.kind(of: c.title, c.userInfo)
+        if id == "alarm" || id.hasPrefix("platform-") { done([]); return }
+        Task { @MainActor in Notices.shared.show(title: title, body: body, kind: kind) }
+        done([.list, .sound])
     }
 
     func testAlarm() {
