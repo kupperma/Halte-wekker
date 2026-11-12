@@ -566,6 +566,7 @@ struct TrainPage: View {
     let tracked: Bool
     let nsMissing: Bool
     let pal: HWPalette
+    var walk: (() -> Void)? = nil       // the way to the station on foot
     let back: () -> Void
     let track: () -> Void
 
@@ -597,6 +598,7 @@ struct TrainPage: View {
                     Text("PLATFORM").font(BoardInk.sans(8, .regular)).foregroundStyle(Color.white.opacity(0.75))
                 }
             }
+            if let walk { WalkButton(title: "Show the way to the station", go: walk) }
             RankBlock(rank: RankInfo.of(p.trip), cancelled: gone)
             PlannerBar(title: "The train", sub: info?.size.map { "\($0.cars) coaches" })
             if let s = info?.size {
@@ -638,6 +640,7 @@ struct BusPage: View {
     let ride: String?
     var rank: RankInfo? = nil
     var train = false
+    var walk: (() -> Void)? = nil       // the way to the stop on foot
     let tracked: Bool
     let back: () -> Void
     let track: () -> Void
@@ -664,6 +667,7 @@ struct BusPage: View {
                     Text(leaves(time)).font(BoardInk.sans(11, .regular)).foregroundStyle(Color.white.opacity(0.8))
                 }
             }
+            if let walk { WalkButton(title: "Show the way to the stop", go: walk) }
             if let rank { RankBlock(rank: rank, cancelled: cancelled) }
             if let ride {
                 PlannerBar(title: "Your ride")

@@ -52,6 +52,7 @@ struct HomeView: View {
     @State private var picked: BoardPick?            // the line you tapped on a board
     @State private var choosingDestination = false
     @State private var nearShift: [String: Int] = [:]     // how far back or forward you've gone at each stop near you
+    @State private var walkTo: WalkTarget?                 // the walk to a stop, on a map
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -85,6 +86,7 @@ struct HomeView: View {
         .animation(.easeInOut(duration: 0.3), value: trip.toast)
         .onChange(of: stage) { _, s in Handoff.fromBoards = s == .station }
         .onChange(of: near.position?.coordinate.latitude) { _, _ in Task { await live.refresh(trip.direction, at: near.position) } }
+        .sheet(item: $walkTo) { WalkMapSheet(target: $0).presentationDetents([.large]) }
         .sheet(isPresented: $choosingDestination) {
             DestinationSheet { d in
                 live.go(to: d)
@@ -335,7 +337,7 @@ struct HomeView: View {
         case .train(let t):
             let f = t.trip.first
             TrainPage(p: t, info: ns.rail(f), tracked: watch.isWatched(f, from: t.from), nsMissing: ns.available == false, pal: pal,
-                      back: { withAnimation(.easeInOut(duration: 0.2)) { picked = nil } },
+                      walk: walkAction(f), back: { withAnimation(.easeInOut(duration: 0.2)) { picked = nil } },
                       track: { _ = watch.toggle(t.trip, from: t.from, to: t.to) })
         case .bus(let d):
             let ride = live.boardRides["\(d.stopId)|\(d.tripId)"]
@@ -345,6 +347,8 @@ struct HomeView: View {
                     ride: ride.map { "\(Fmt.rideText($0.minutes)) ride to \($0.station) station, arrives \(Fmt.hhmm($0.arrival))" },
                     rank: ride.map { RankInfo(grade: d.cancelled ? nil : $0.grade, minutes: $0.minutes, best: $0.best, stretch: "\(Fmt.place(d.stopName)) → \($0.station)") },
                     train: isTrain,
+                    walk: live.nearStops.first(where: { $0.id == d.stopId }).map { s in { walkTo = WalkTarget(name: Fmt.place(d.stopName), lat: s.lat, lon: s.lon, rail: isTrain,
+                        catchText: "the \(isTrain ? Transit.trainLabel(d.line) : d.line) to \(Fmt.place(d.headsign)) at \(Fmt.hhmm(d.time))", leaves: d.time) } },
                     tracked: lines.isWatched(stopId: d.stopId, line: d.line, headsign: d.headsign),
                     back: { withAnimation(.easeInOut(duration: 0.2)) { picked = nil } },
                     track: { lines.toggle(stopId: d.stopId, stopName: d.stopName, line: d.line, headsign: d.headsign, tripId: d.tripId, delay: d.live ? d.delay : nil) })
@@ -354,19 +358,21 @@ struct HomeView: View {
                     time: f.departure, scheduled: f.scheduledDeparture, live: f.live, cancelled: f.cancelled, status: RideText.status(f, nil).text,
                     ride: "\(t.trip.rideLabel) · arrives \(Fmt.place(t.trip.last.toStop)) \(Fmt.hhmm(t.trip.last.arrival))",
                     rank: RankInfo.of(t.trip),
+                    walk: walkAction(f),
                     tracked: lines.isWatched(stopId: f.fromId, line: f.line, headsign: f.headsign),
                     back: { withAnimation(.easeInOut(duration: 0.2)) { picked = nil } },
                     track: { lines.toggle(stopId: f.fromId, stopName: f.fromStop, line: f.line, headsign: f.headsign, tripId: f.tripId, delay: f.live ? f.delay : nil) })
         case .ride(let r):
             if r.isTrain, let pt = trainTrip(r) {
                 TrainPage(p: pt, info: ns.rail(r), tracked: watch.isWatched(r, from: pt.from), nsMissing: ns.available == false, pal: pal,
-                          back: { withAnimation(.easeInOut(duration: 0.2)) { picked = nil } },
+                          walk: walkAction(r), back: { withAnimation(.easeInOut(duration: 0.2)) { picked = nil } },
                           track: { _ = watch.toggle(pt.trip, from: pt.from, to: pt.to) })
             } else {
                 BusPage(line: r.line, to: r.headsign.isEmpty ? Fmt.place(r.toStop) : r.headsign, stop: Fmt.place(r.fromStop),
                         time: r.departure, scheduled: r.scheduledDeparture, live: r.live, cancelled: r.cancelled, status: RideText.status(r, ns.rail(r)).text,
                         ride: "\(r.rideMinutes) min ride · arrives \(Fmt.place(r.toStop)) \(Fmt.hhmm(r.arrival))",
                         rank: RankInfo.of(r),
+                        walk: walkAction(r),
                         tracked: lines.isWatched(stopId: r.fromId, line: r.line, headsign: r.headsign),
                         back: { withAnimation(.easeInOut(duration: 0.2)) { picked = nil } },
                         track: { lines.toggle(stopId: r.fromId, stopName: r.fromStop, line: r.line, headsign: r.headsign, tripId: r.tripId, delay: r.live ? r.delay : nil) })
@@ -468,9 +474,14 @@ struct HomeView: View {
                             title: live.here == nil ? "Your trip · fastest" : "Your trip · from here") {
                 if let r { trip.start(r) }
             }
-            if t.first.walkBefore > 0 {
-                Label("First a \(t.first.walkBefore) min walk to \(Fmt.place(t.first.fromStop))", systemImage: "figure.walk")
-                    .font(BoardInk.sans(11.5, .semibold)).foregroundStyle(Color.white.opacity(0.85))
+            if t.first.walkBefore > 0 || walkTarget(t.first) != nil {
+                HStack(spacing: 8) {
+                    Label(t.first.walkBefore > 0 ? "First a \(t.first.walkBefore) min walk to \(Fmt.place(t.first.fromStop))" : "Your stop: \(Fmt.place(t.first.fromStop))",
+                          systemImage: "figure.walk")
+                        .font(BoardInk.sans(11.5, .semibold)).foregroundStyle(Color.white.opacity(0.85))
+                    Spacer(minLength: 4)
+                    if let w = walkTarget(t.first) { WalkButton { walkTo = w } }
+                }
             }
         } else {
             Text(live.nextError ?? "Finding the fastest way to \(dest)…").font(BoardInk.sans(12, .regular)).foregroundStyle(Color.white.opacity(0.85))
@@ -503,7 +514,20 @@ struct HomeView: View {
             let firstNext = all.firstIndex { ($0.cancelled ? $0.scheduled : $0.time) > Date().addingTimeInterval(-60) } ?? all.count
             let start = min(max(0, firstNext - 2 + (nearShift[name] ?? 0)), max(0, all.count - 6))
             let rows = Array(all.dropFirst(start).prefix(6))
-            PlannerStop(name: "\(Fmt.place(name)) · \(Fmt.distance(here.map(\.meters).min() ?? 0))", rail: isRail)
+            HStack(spacing: 6) {
+                PlannerStop(name: "\(Fmt.place(name)) · \(Fmt.distance(here.map(\.meters).min() ?? 0))", rail: isRail)
+                Spacer(minLength: 4)
+                if let s = here.min(by: { $0.meters < $1.meters }) {
+                    // to catch the one that's part of your trip, or else the next one
+                    let soon = all.filter { !$0.cancelled && $0.time > Date() }
+                    let c = soon.first(where: { mine.contains($0.tripId) }) ?? soon.first
+                    WalkButton {
+                        walkTo = WalkTarget(name: Fmt.place(name), lat: s.lat, lon: s.lon, rail: isRail,
+                                            catchText: c.map { "the \(isRail ? Transit.trainLabel($0.line) : $0.line) to \(Fmt.place($0.headsign)) at \(Fmt.hhmm($0.time))" },
+                                            leaves: c?.time)
+                    }
+                }
+            }
             if rows.isEmpty {
                 Text("Nothing leaving here soon.").font(BoardInk.sans(11, .regular)).foregroundStyle(Color.white.opacity(0.75))
             } else {
@@ -523,6 +547,14 @@ struct HomeView: View {
             }
         }
     }
+
+    /// The walk to where a ride leaves from (to catch that ride), if we know where its stop is.
+    private func walkTarget(_ r: Ride) -> WalkTarget? {
+        guard let a = r.fromLat, let o = r.fromLon else { return nil }
+        return WalkTarget(name: Fmt.place(r.fromStop), lat: a, lon: o, rail: r.isTrain,
+                          catchText: "the \(r.line) to \(Fmt.place(r.headsign.isEmpty ? r.toStop : r.headsign)) at \(Fmt.hhmm(r.departure))", leaves: r.departure)
+    }
+    private func walkAction(_ r: Ride) -> (() -> Void)? { walkTarget(r).map { w in { walkTo = w } } }
 
     private func shiftButton(_ t: String, enabled: Bool, _ go: @escaping () -> Void) -> some View {
         Button { withAnimation(.easeInOut(duration: 0.2)) { go() } } label: {
@@ -1027,6 +1059,7 @@ struct RideView: View {
     @Environment(\.scenePhase) private var scene
     @State private var earlier = false
     @State private var panning = Handoff.fromBoards       // started at the boards: turn round to the platform first
+    @State private var walkTo: WalkTarget?
     @State private var loopRestart = 0
     var pal: HWPalette { .of(home: trip.direction == .home) }
     var body: some View {
@@ -1055,6 +1088,7 @@ struct RideView: View {
             .padding(22)
         }
         .environment(\.seeThrough, true)
+        .sheet(item: $walkTo) { WalkMapSheet(target: $0).presentationDetents([.large]) }
         .animation(.easeInOut(duration: 0.4), value: trip.waitingToBoard)
         .onAppear {
             music.setFast(scene == .active)
@@ -1107,6 +1141,13 @@ struct RideView: View {
         Text(boardingTitle).font(HWFont.display(26)).foregroundStyle(HWPalette.ink)
         Text("It notices which one you get on by itself: your GPS against the live position of every \(rail ? "train" : "bus") nearby. Or tap the one you’re on.")
             .font(HWFont.body(12)).foregroundStyle(HWPalette.muted).padding(.top, 4)
+        if let l = trip.leg {
+            WalkButton(title: "Show the way to \(l.from.short)") {
+                walkTo = WalkTarget(name: l.from.short, lat: l.from.coordinate.latitude, lon: l.from.coordinate.longitude, rail: rail,
+                                    catchText: list.first.map { "the \($0.trip.first.line) at \(Fmt.hhmm($0.trip.first.departure))" }, leaves: list.first?.trip.first.departure)
+            }
+            .padding(.top, 8)
+        }
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 HStack {
