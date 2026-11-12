@@ -52,20 +52,7 @@ struct HomeView: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            HomeStage(home: home, stage: stage, moving: trip.movingStation && scene == .active, moveToken: moveToken, loopToken: loopToken, board: boardLines)
-            // face to face with the map on the wall
-            GeometryReader { g in
-                let r = MapSpot.rect(in: g.size)
-                MetroMapMenu(home: home, fastest: fastestSub, lines: linesSub, planned: plannedSub, via: live.next.first?.via,
-                             open: { go($0) }, toggle: { toggleDirection() }, settings: { settings = true })
-                    .scaleEffect(r.width / MapSpot.design.width, anchor: .topLeading)
-                    .frame(width: r.width, height: r.height, alignment: .topLeading)
-                    .position(x: r.midX, y: r.midY)
-            }
-            .ignoresSafeArea()
-            .opacity(stage == .map ? 1 : 0)
-            .allowsHitTesting(stage == .map)
-            .animation(.easeOut(duration: stage == .map ? 0.3 : 0.15), value: stage)
+            Color.clear
             // stepped back: the station, with the part you picked
             if stage == .station {
                 sectionView.transition(.move(edge: .bottom).combined(with: .opacity))
@@ -79,6 +66,15 @@ struct HomeView: View {
                         try? await Task.sleep(nanoseconds: 7_000_000_000)
                         if trip.toast == t { withAnimation { trip.toast = nil } }
                     }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        // The station and the map on the wall fill the whole screen behind; the screen's own buttons stay clear of
+        // the clock and the Dynamic Island. (Taps that miss them reach the map.)
+        .background {
+            HomeStage(home: home, stage: stage, moving: trip.movingStation && scene == .active, moveToken: moveToken, loopToken: loopToken, board: boardLines) {
+                MetroMapMenu(home: home, fastest: fastestSub, lines: linesSub, planned: plannedSub, via: live.next.first?.via,
+                             open: { go($0) }, toggle: { toggleDirection() }, settings: { settings = true })
             }
         }
         .animation(.easeInOut(duration: 0.3), value: trip.toast)
@@ -211,7 +207,7 @@ struct HomeView: View {
                     case .more: moreContent
                     }
                 }
-                .padding(.horizontal, 18).padding(.top, 70).padding(.bottom, 40)
+                .padding(.horizontal, 18).padding(.top, 14).padding(.bottom, 40)
             }
             .scrollIndicators(.hidden)
         }

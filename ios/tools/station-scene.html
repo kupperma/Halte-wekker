@@ -718,7 +718,7 @@ function decorate(){
     x.fillStyle='#1d1d1b';x.font=`17px ${SANS}`;['4,012 umbrellas','317 left gloves','1 trombone','Ask at the','service desk'].forEach((l,i)=>x.fillText(l,w/2,112+i*42));worn(x,w,h,41);}),.32,.44,-.3,2.32);
   // stickers on the frame and the wall around it
   const sticker=(draw,w,h,z,y,rot,x)=>{const t=ctex(128,Math.round(128*h/w),(c,cw,ch)=>{c.clearRect(0,0,cw,ch);draw(c,cw,ch);});const o=onWall(t,w,h,z,y,x);o.rotation.z=rot||0;return o;};
-  sticker((c,w,h)=>{c.fillStyle='#1d4f9a';c.beginPath();c.arc(w/2,h/2,w/2-4,0,7);c.fill();c.strokeStyle='#fff';c.lineWidth=6;c.stroke();c.fillStyle='#fff';c.font=`700 44px ${SANS}`;c.textAlign='center';c.textBaseline='middle';c.fillText('HW',w/2,h/2+2);},.085,.085,1.98,1.52,.2,-2.99);
+  sticker((c,w,h)=>{c.fillStyle='#1d4f9a';c.beginPath();c.arc(w/2,h/2,w/2-4,0,7);c.fill();c.strokeStyle='#fff';c.lineWidth=6;c.stroke();c.fillStyle='#fff';c.font=`700 44px ${SANS}`;c.textAlign='center';c.textBaseline='middle';c.fillText('HW',w/2,h/2+2);},.085,.085,1.93,1.355,.2,-2.99);   // on the wall just below the map's corner, clear of the map
   sticker((c,w,h)=>{c.fillStyle='#f6d02e';c.beginPath();c.arc(w/2,h/2,w/2-4,0,7);c.fill();c.fillStyle='#1d1d1b';c.beginPath();c.arc(w*.36,h*.4,7,0,7);c.arc(w*.64,h*.4,7,0,7);c.fill();c.lineWidth=7;c.strokeStyle='#1d1d1b';c.beginPath();c.arc(w/2,h*.52,26,.3,2.84);c.stroke();},.075,.075,1.2325,2.7355,-.3,-2.978);
   // (that one is stuck on the glass over the map's corner, in front of the map; flat-lit like the map, so the app's copy of it matches)
   {const o=scene.children[scene.children.length-1];o.material=new T.MeshBasicMaterial({map:o.material.map,transparent:true});}
