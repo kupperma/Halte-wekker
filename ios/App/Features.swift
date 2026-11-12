@@ -55,7 +55,7 @@ struct CrowdIcons: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(["", "Quiet", "Busy", "Very busy"][min(3, max(0, level))])
     }
-    private var color: Color { level >= 3 ? HWPalette.stamp : level == 2 ? HWPalette.warn : HWPalette.ok }
+    private var color: Color { level >= 3 ? HWPalette.stamp : level == 2 ? Paper.late : Paper.ok }
 }
 
 /// The train along the platform: each unit, its 1st class part (yellow), the platform letters and which way it leaves.
@@ -132,7 +132,7 @@ struct TrainExtras: View {
     var body: some View {
         if let s = info?.size {
             VStack(alignment: .leading, spacing: 4) {
-                Text(s.text).font(HWFont.body(11, bold: s.warn)).foregroundStyle(s.warn ? HWPalette.warn : Paper.ink.opacity(0.75))
+                Text(s.text).font(HWFont.body(11, bold: s.warn)).foregroundStyle(s.warn ? Paper.late : Paper.ink.opacity(0.75))
                 if let l = s.layout { ConsistView(layout: l, pal: pal) }
             }
             .padding(.top, 2)
@@ -164,7 +164,7 @@ struct PlatformAlertView: View {
             LinearGradient(colors: [Color(hex: 0x2A1208), Color(hex: 0x0A0605)], startPoint: .top, endPoint: .bottom).ignoresSafeArea()
             VStack(alignment: .leading, spacing: 12) {
                 Spacer()
-                Text(alert.cancelled ? "TRAIN CANCELLED" : "PLATFORM CHANGE").font(HWFont.body(12, bold: true)).tracking(2).foregroundStyle(HWPalette.warn)
+                Text(alert.cancelled ? "TRAIN CANCELLED" : "PLATFORM CHANGE").font(HWFont.body(12, bold: true)).tracking(2).foregroundStyle(Paper.late)
                 if alert.cancelled {
                     Text("Cancelled").font(HWFont.display(54)).foregroundStyle(Paper.ink)
                 } else {
@@ -204,7 +204,7 @@ struct PlanSheet: View {
                 } footer: {
                     Text("Use the time of your friend’s train. The app finds that train, \(out ? "the bus from Veghel that gets you there in time and the bus to BUas after it" : "the bus from BUas to catch it and the bus to Veghel after it").")
                 }
-                if let error { Section { Text(error).foregroundStyle(HWPalette.warn) } }
+                if let error { Section { Text(error).foregroundStyle(Paper.late) } }
                 Section {
                     Button("Find this trip") {
                         if let e = planner.set(out: out, time: time, tomorrow: tomorrow) { error = e } else { dismiss() }
@@ -320,7 +320,7 @@ struct PlannedPass: View {
         }
         if planner.inexact {
             Text("No train \(t.out ? "arrives in" : "leaves") Breda at exactly \(t.time). This is the closest one.")
-                .font(HWFont.body(12, bold: true)).foregroundStyle(HWPalette.warn).frame(maxWidth: .infinity, alignment: .leading)
+                .font(HWFont.body(12, bold: true)).foregroundStyle(Paper.late).frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 12).padding(.top, 8)
         }
         RouteStrip(stops: stops, grades: legs.map(\.grade), pal: pal).padding(.top, 12)
@@ -438,7 +438,7 @@ struct LeaderboardView: View {
                     .buttonStyle(.plain).accessibilityLabel("Remove this trip")
                 }
                 .padding(.vertical, 4)
-                Rectangle().fill(.white.opacity(0.06)).frame(height: 1)
+                Rectangle().fill(Paper.rule).frame(height: 1)
             }
             Text("Time from starting the alarm until you reach your last stop, so waiting at the change counts. 500 means as fast as that route gets.")
                 .font(HWFont.body(11)).foregroundStyle(Paper.muted)
@@ -557,7 +557,7 @@ struct StopsList: View {
                 Image(systemName: "bell.and.waves.left.and.right").foregroundStyle(pal.deep)
             }
         }
-        .overlay(alignment: .top) { Rectangle().fill(.white.opacity(0.06)).frame(height: 1) }
+        .overlay(alignment: .top) { Rectangle().fill(Paper.rule).frame(height: 1) }
     }
 }
 
@@ -599,7 +599,7 @@ struct StopSheet: View {
                                     if !h.town.isEmpty { Text(h.town).font(HWFont.body(11)).foregroundStyle(Paper.muted) }
                                 }
                                 Spacer()
-                                if stopId == h.id { Image(systemName: "checkmark").foregroundStyle(HWPalette.ok) }
+                                if stopId == h.id { Image(systemName: "checkmark").foregroundStyle(Paper.ok) }
                             }
                         }
                     }
@@ -774,24 +774,20 @@ struct BoardRow: View {
     var body: some View {
         let gone = !d.cancelled && d.time < Date().addingTimeInterval(-60)
         HStack(alignment: .top, spacing: 10) {
-            Text(d.line).font(HWFont.display(13)).foregroundStyle(Paper.ink).frame(width: 44).padding(.vertical, 4)
-                .overlay(RoundedRectangle(cornerRadius: 2).stroke(Paper.ink, lineWidth: 1.5))
+            LineBullet(line: d.line, grade: d.cancelled ? nil : ride?.grade, height: 24, minWidth: 44, font: 13)
             VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    if let g = ride?.grade, !d.cancelled { Coin(grade: g, size: 22) }
-                    Text(d.headsign).font(HWFont.display(16)).foregroundStyle(Paper.ink)
-                }
+                Text(d.headsign).font(HWFont.display(16)).foregroundStyle(Paper.ink)
                 if watched { SmallTag(text: "WATCHING", icon: "bell.fill", pal: pal) }
                 Text([stopLabel, Self.status(d)].compactMap { $0 }.joined(separator: " · "))
                     .font(HWFont.body(12, bold: d.live || d.cancelled))
-                    .foregroundStyle(d.delay != 0 || d.cancelled ? HWPalette.warn : d.live ? HWPalette.ok : Paper.muted)
+                    .foregroundStyle(d.delay != 0 || d.cancelled ? Paper.late : d.live ? Paper.ok : Paper.muted)
                 if let r = ride, !d.cancelled {
                     Text("\(Fmt.rideText(r.minutes)) ride to \(r.station) station, arrives \(Fmt.hhmm(r.arrival))").font(HWFont.body(12)).foregroundStyle(Paper.ink.opacity(0.8))
                 }
             }
             Spacer(minLength: 4)
             VStack(alignment: .trailing, spacing: 2) {
-                Text(Fmt.hhmm(d.cancelled ? d.scheduled : d.time)).font(HWFont.display(23)).foregroundStyle(d.cancelled ? HWPalette.warn : pal.deep).strikethrough(d.cancelled)
+                Text(Fmt.hhmm(d.cancelled ? d.scheduled : d.time)).font(HWFont.display(23)).foregroundStyle(d.cancelled ? Paper.late : pal.deep).strikethrough(d.cancelled)
                 Text(Self.when(d)).font(HWFont.body(12)).foregroundStyle(Paper.muted)
                 if let onBell {
                     Button(action: onBell) {
@@ -885,7 +881,7 @@ struct WatchingCard: View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(HWFont.display(15)).foregroundStyle(Paper.ink)
-                Text(sub).font(HWFont.body(12, bold: warn)).foregroundStyle(warn ? HWPalette.warn : HWPalette.ok)
+                Text(sub).font(HWFont.body(12, bold: warn)).foregroundStyle(warn ? Paper.late : Paper.ok)
             }
             Spacer()
             Button("Stop", action: stop).font(HWFont.body(12, bold: true)).foregroundStyle(pal.deep)
@@ -920,7 +916,7 @@ struct TipsList: View {
                 "Run the test alarm once, in Settings.",
             ], id: \.self) { t in
                 HStack(alignment: .top, spacing: 8) {
-                    Image(systemName: "checkmark").font(.system(size: 11, weight: .bold)).foregroundStyle(HWPalette.ok).padding(.top, 2)
+                    Image(systemName: "checkmark").font(.system(size: 11, weight: .bold)).foregroundStyle(Paper.ok).padding(.top, 2)
                     Text(t).font(HWFont.body(12)).foregroundStyle(Paper.ink.opacity(0.85))
                 }
             }

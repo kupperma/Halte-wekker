@@ -693,7 +693,7 @@ struct HomeView: View {
         nearNote
         if trip.locationDenied {
             Text("Location is off for Haltewekker. Turn it on in Settings → Privacy → Location Services, or it can’t wake you.")
-                .font(HWFont.body(12, bold: true)).foregroundStyle(HWPalette.warn)
+                .font(HWFont.body(12, bold: true)).foregroundStyle(Paper.late)
         }
         Text("Tap any bus or train for more: it’s tracked for you from then on. Live times from Transitous, map data © OpenStreetMap contributors.")
             .font(BoardInk.sans(9.5, .regular)).foregroundStyle(Paper.ink.opacity(0.65))
@@ -803,7 +803,7 @@ struct HomeView: View {
         ForEach(panelOrder.filter(shown), id: \.self) { p in panel(p) }
         if trip.locationDenied {
             Text("Location is off for Haltewekker. Turn it on in Settings → Privacy → Location Services, or it can’t wake you.")
-                .font(HWFont.body(12, bold: true)).foregroundStyle(HWPalette.warn)
+                .font(HWFont.body(12, bold: true)).foregroundStyle(Paper.late)
         }
         Text("Live times from Transitous, map data © OpenStreetMap contributors.").font(HWFont.body(10)).foregroundStyle(Paper.muted)
     }
@@ -881,7 +881,7 @@ struct HomeView: View {
                     .padding(.vertical, 12).padding(.horizontal, 6).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                if r.id != RoutePlan.all.last?.id { Rectangle().fill(.white.opacity(0.07)).frame(height: 1) }
+                if r.id != RoutePlan.all.last?.id { Rectangle().fill(Paper.rule).frame(height: 1) }
             }
         }
         .brass(pal, pad: 14)
@@ -1002,7 +1002,7 @@ struct HomeView: View {
         .brass(pal, pad: 14)
     }
 
-    private var divider: some View { Rectangle().fill(.white.opacity(0.06)).frame(height: 1) }
+    private var divider: some View { Rectangle().fill(Paper.rule).frame(height: 1) }
 
     @ViewBuilder private func panel(_ p: String) -> some View {
         switch p {
@@ -1166,7 +1166,7 @@ struct TripRow: View {
                         if watched { SmallTag(text: "WATCHING", icon: "bell.fill", pal: pal) }
                     }
                 }
-                Text(st.text).font(HWFont.body(12, bold: r.live)).foregroundStyle(st.warn ? HWPalette.warn : st.ok ? HWPalette.ok : Paper.muted)
+                Text(st.text).font(HWFont.body(12, bold: r.live)).foregroundStyle(st.warn ? Paper.late : st.ok ? Paper.ok : Paper.muted)
                 Text(extra ?? "\(trip.rideLabel) · arrives \(Fmt.hhmm(showWalk ? trip.end : last.arrival))")
                     .font(HWFont.body(12)).foregroundStyle(Paper.ink.opacity(0.8))
                 if r.isTrain { TrainExtras(info: info, pal: pal) }
@@ -1277,17 +1277,24 @@ struct RideView: View {
                     : d.time > now.addingTimeInterval(-90) || (d.cancelled && d.scheduled > now.addingTimeInterval(-15 * 60))
         }.prefix(earlier ? 14 : 9))
         let mine = planner.chosen?.tripIds ?? []
-        legKicker.padding(.top, 18)
-        Text("WAITING TO BOARD").font(HWFont.body(11)).tracking(1.8).foregroundStyle(Paper.ink.opacity(0.75)).padding(.top, 8)
-        Text(boardingTitle).font(HWFont.display(26)).foregroundStyle(Paper.ink)
+        // the same band as the ride: what you're waiting for, then how it works
+        PaperBand(home: trip.direction == .home) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(trip.legs.count > 1 ? "LEG \(trip.index + 1) OF \(trip.legs.count) · WAITING TO BOARD" : "WAITING TO BOARD")
+                    .font(HWFont.body(10, bold: true)).tracking(1.6).opacity(0.85)
+                Text(boardingTitle).font(HWFont.display(21)).lineLimit(1).minimumScaleFactor(0.6)
+            }
+        }
+        sheetInfo
         Text("It notices which one you get on by itself: your GPS against the live position of every \(rail ? "train" : "bus") nearby. Or tap the one you’re on.")
-            .font(HWFont.body(12)).foregroundStyle(Paper.muted).padding(.top, 4)
+            .font(HWFont.body(12)).foregroundStyle(Paper.muted).fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 16).padding(.top, 6)
         if let l = trip.leg {
             WalkButton(title: "Show the way to \(l.from.short)") {
                 walkTo = WalkTarget(name: l.from.short, lat: l.from.coordinate.latitude, lon: l.from.coordinate.longitude, rail: rail,
                                     catchText: list.first.map { "the \($0.trip.first.line) at \(Fmt.hhmm($0.trip.first.departure))" }, leaves: list.first?.trip.first.departure)
             }
-            .padding(.top, 8)
+            .padding(.horizontal, 16).padding(.top, 8)
         }
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
@@ -1309,7 +1316,7 @@ struct RideView: View {
                         }
                         .onTapGesture { if !d.cancelled { trip.choose(board: d) } }
                         .accessibilityAction(named: "I’m on this one") { if !d.cancelled { trip.choose(board: d) } }
-                        Rectangle().fill(.white.opacity(0.06)).frame(height: 1)
+                        Rectangle().fill(Paper.rule).frame(height: 1)
                     }
                 } else {
                 ForEach(list) { p in
@@ -1322,7 +1329,7 @@ struct RideView: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityHint("Tap if you’re on this one")
-                    Rectangle().fill(.white.opacity(0.06)).frame(height: 1)
+                    Rectangle().fill(Paper.rule).frame(height: 1)
                 }
                 }
                 if !rail { Text("Tap the bell to get told when a bus runs late, leaves early or is cancelled.").font(HWFont.body(11)).foregroundStyle(Paper.muted).padding(.top, 6) }
@@ -1330,7 +1337,7 @@ struct RideView: View {
             }
         }
         .brass(pal, pad: 14)
-        .padding(.top, 12).padding(.bottom, 12)
+        .padding(.horizontal, 12).padding(.top, 12).padding(.bottom, 12)
     }
 
     // MARK: on board
@@ -1860,7 +1867,7 @@ struct SettingsView: View {
                     }
                     if music.source == .spotify { spotifyRows }
                     if music.source == .appleMusic && !music.appleMusicAllowed {
-                        Text("Let Haltewekker see Apple Music: iPhone Settings → Apps → Haltewekker → Media & Apple Music.").font(HWFont.body(12)).foregroundStyle(HWPalette.warn)
+                        Text("Let Haltewekker see Apple Music: iPhone Settings → Apps → Haltewekker → Media & Apple Music.").font(HWFont.body(12)).foregroundStyle(Paper.late)
                     }
                     if let s = music.song {
                         Label("\(s.title)\(s.artist.isEmpty ? "" : " · \(s.artist)")", systemImage: s.playing ? "music.note" : "pause.fill").font(HWFont.body(13))
@@ -1894,7 +1901,7 @@ struct SettingsView: View {
     }
     @ViewBuilder private var spotifyRows: some View {
         if music.spotifyConnected {
-            Label("Spotify is connected", systemImage: "checkmark.circle.fill").foregroundStyle(HWPalette.ok)
+            Label("Spotify is connected", systemImage: "checkmark.circle.fill").foregroundStyle(Paper.ok)
             Button("Check what’s playing") { music.checkOnce() }.foregroundStyle(pal.deep)
             Button("Disconnect Spotify", role: .destructive) { music.disconnectSpotify() }
         } else {
@@ -1918,7 +1925,7 @@ struct SettingsView: View {
                 .foregroundStyle(pal.deep)
                 .disabled(music.clientId.trimmingCharacters(in: .whitespacesAndNewlines).count < 20 || music.busy)
         }
-        if let e = music.spotifyError { Text(e).font(HWFont.body(12)).foregroundStyle(HWPalette.warn) }
+        if let e = music.spotifyError { Text(e).font(HWFont.body(12)).foregroundStyle(Paper.late) }
     }
 
     private func connectSpotify() async {

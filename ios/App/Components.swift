@@ -162,7 +162,7 @@ struct PassSection: View {
                         Text(to).font(HWFont.display(15)).foregroundStyle(HWPalette.ink).lineLimit(2)
                     }
                     ForEach(lines) { l in
-                        Text(l.text).font(HWFont.body(11, bold: l.warn)).foregroundStyle(l.warn ? HWPalette.warn : HWPalette.ink.opacity(0.75))
+                        Text(l.text).font(HWFont.body(11, bold: l.warn)).foregroundStyle(l.warn ? Paper.late : HWPalette.ink.opacity(0.75))
                     }
                     if let extra { extra.padding(.top, 2) }
                 }
