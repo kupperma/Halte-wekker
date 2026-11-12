@@ -131,8 +131,9 @@ struct WalkButton: View {
     let go: () -> Void
     var body: some View {
         Button(action: go) {
-            Label(title, systemImage: icon).font(BoardInk.sans(11)).foregroundStyle(BoardInk.navy)
-                .padding(.horizontal, 10).padding(.vertical, 5).background(Color.white, in: Capsule())
+            Label(title, systemImage: icon).font(BoardInk.sans(11)).foregroundStyle(Paper.navy)
+                .padding(.horizontal, 10).padding(.vertical, 5).background(Paper.navy.opacity(0.08), in: Capsule())
+                .overlay(Capsule().stroke(Paper.navy.opacity(0.35), lineWidth: 1))
         }
         .buttonStyle(.plain)
     }

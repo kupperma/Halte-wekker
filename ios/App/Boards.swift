@@ -392,8 +392,8 @@ struct PlannerBusRow: View {
                     if late {
                         HStack(spacing: 4) {
                             Text(Fmt.hhmm(scheduled)).font(BoardInk.sans(10, .regular)).foregroundStyle(Paper.ink.opacity(0.7))
-                            Text(Fmt.hhmm(time)).font(BoardInk.sans(12)).foregroundStyle(BoardInk.navy)
-                                .padding(.horizontal, 4).padding(.vertical, 1).background(Color.white, in: RoundedRectangle(cornerRadius: 2))
+                            Text(Fmt.hhmm(time)).font(BoardInk.sans(12)).foregroundStyle(Paper.late)
+                                .padding(.horizontal, 4).padding(.vertical, 1).background(Paper.late.opacity(0.12), in: RoundedRectangle(cornerRadius: 2))
                         }
                         .frame(width: 76, alignment: .trailing)
                     } else {
@@ -458,7 +458,8 @@ struct PlannerTripCard: View {
             }
         }
         .padding(10)
-        .background(Color.white, in: RoundedRectangle(cornerRadius: 6))
+        .background(Paper.card, in: RoundedRectangle(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Paper.edge, lineWidth: 1))
     }
 }
 
@@ -487,8 +488,8 @@ struct PlannerRideRow: View {
                     if late {
                         HStack(spacing: 4) {
                             Text(Fmt.hhmm(ride.scheduledDeparture)).font(BoardInk.sans(10, .regular)).foregroundStyle(Paper.ink.opacity(0.7))
-                            Text(Fmt.hhmm(ride.departure)).font(BoardInk.sans(13)).foregroundStyle(BoardInk.navy)
-                                .padding(.horizontal, 4).padding(.vertical, 1).background(Color.white, in: RoundedRectangle(cornerRadius: 2))
+                            Text(Fmt.hhmm(ride.departure)).font(BoardInk.sans(13)).foregroundStyle(Paper.late)
+                                .padding(.horizontal, 4).padding(.vertical, 1).background(Paper.late.opacity(0.12), in: RoundedRectangle(cornerRadius: 2))
                         }
                     } else {
                         Text(Fmt.hhmm(gone ? ride.scheduledDeparture : ride.departure)).font(BoardInk.sans(15)).foregroundStyle(Paper.ink).strikethrough(gone)
@@ -569,8 +570,7 @@ struct TrainPage: View {
         VStack(alignment: .leading, spacing: 10) {
             PageTop(tracked: tracked, back: back, track: track)
             HStack(spacing: 8) {
-                Text(f.line).font(BoardInk.sans(14)).foregroundStyle(BoardInk.navy).lineLimit(1)
-                    .frame(minWidth: 38).padding(.vertical, 3).padding(.horizontal, 4).background(Color.white, in: RoundedRectangle(cornerRadius: 2))
+                LineBullet(line: f.line, train: true, height: 26, minWidth: 42, font: 14)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(f.headsign.isEmpty ? p.to.short : Fmt.place(f.headsign)).font(BoardInk.sans(22)).foregroundStyle(Paper.ink).lineLimit(1).minimumScaleFactor(0.6)
                     Text("\(f.num.isEmpty ? f.name : "\(f.name) \(f.num)") · from \(p.from.short)").font(BoardInk.sans(11, .regular))

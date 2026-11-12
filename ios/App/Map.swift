@@ -103,16 +103,17 @@ struct HomeStage<Menu: View, Boards: View>: View {
         // (Each layer gets that exact rectangle, so what the app draws can't drift off the boards and the map in the video.)
         GeometryReader { g in
             let v = MapSpot.picture(in: g.size)
-            // the two sheets on the wall: the trains at the top, the boards under it
-            let top = g.safeAreaInsets.top + 58
-            let led = CGRect(x: 12, y: top, width: g.size.width - 24, height: 252)
-            let plan = CGRect(x: 12, y: led.maxY + 18, width: g.size.width - 24, height: max(200, g.size.height - led.maxY - 18 - g.safeAreaInsets.bottom - 4))
+            // the two sheets on the wall: the trains at the top, the boards under it, both clear of the clock and the buttons
+            let ins = ScreenInsets.now
+            let top = ins.top + 60
+            let led = CGRect(x: 12, y: top, width: g.size.width - 24, height: 236)
+            let plan = CGRect(x: 12, y: led.maxY + 20, width: g.size.width - 24, height: max(200, g.size.height - led.maxY - 20 - ins.bottom - 2))
             let away = stage != .map
             ZStack(alignment: .topLeading) {
                 HWPalette.bg
                 // the blue wall, with the sheets pinned on it
                 WallBackground().frame(width: g.size.width, height: g.size.height)
-                WallSticker(text: "306 ♥", angle: 9).position(x: g.size.width - 52, y: led.maxY + 8)
+                WallSticker(text: "306 ♥", angle: -7).position(x: g.size.width / 2 + 6, y: led.maxY + 10)
                     .opacity(stage == .station ? 1 : 0)
                 // face to face with the map
                 ForEach([false, true], id: \.self) { h in

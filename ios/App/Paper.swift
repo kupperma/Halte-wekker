@@ -4,7 +4,7 @@ import SwiftUI
 /// the map's wear (stains, smudges, a coffee ring), navy header bands, tape, stickers, and the lines in the map's colours.
 enum Paper {
     static let paper = Color(hex: 0xF7F5EF)
-    static let card = Color.white                  // a box on the paper
+    static let card = Color(hex: 0xEEE9DC)         // a box on the paper: the paper a shade deeper (white stood out)
     static let ink = Color(hex: 0x1D1D1B)
     static let muted = Color(hex: 0x6B6B6B)
     static let soft = Color(hex: 0x8A877F)
@@ -143,6 +143,7 @@ struct LineBullet: View {
             .overlay(alignment: .topTrailing) {
                 if let grade { Coin(grade: grade, size: max(13, height * 0.62)).offset(x: 6, y: -6) }
             }
+            .padding(.trailing, grade == nil ? 0 : 6).padding(.top, grade == nil ? 0 : 4)
             .accessibilityLabel("\(train ? "" : "Bus ")\(line)\(grade.map { ", rank \($0)" } ?? "")")
     }
 }
@@ -233,6 +234,7 @@ struct PaperTrainSheet: View {
             }
             .padding(.horizontal, 14).padding(.top, 2).padding(.bottom, 6)
         }
+        .frame(maxHeight: .infinity, alignment: .top)
         .paperSheet()
     }
 
@@ -249,7 +251,7 @@ struct PaperTrainSheet: View {
         let ok = r.status == "On time"
         let bad = r.status == "Cancelled" || r.platform.hasSuffix("!")
         return HStack(spacing: 9) {
-            Text(r.time).font(.system(size: 14, weight: .heavy)).monospacedDigit().frame(width: 42, alignment: .leading)
+            Text(r.time).font(.system(size: 14, weight: .heavy)).monospacedDigit().lineLimit(1).fixedSize().frame(width: 46, alignment: .leading)
             LineBullet(line: line.isEmpty ? "IC" : line, train: true, height: 19, minWidth: 32, font: 11)
             VStack(alignment: .leading, spacing: 1) {
                 Text(dest).font(.system(size: 13.5, weight: .bold)).lineLimit(1).minimumScaleFactor(0.7)
@@ -282,4 +284,13 @@ struct PaperTrainSheet: View {
 extension HWPalette {
     /// The palette's colour on paper: navy going to Breda, oxblood going home (its light accent is for dark screens).
     var deep: Color { band == HWPalette.home.band ? Paper.oxblood : Paper.navy }
+}
+
+/// The phone's safe area (the clock and the Dynamic Island at the top, the home bar at the bottom), for screens drawn
+/// edge to edge, where SwiftUI reports none.
+enum ScreenInsets {
+    static var now: UIEdgeInsets {
+        let w = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.flatMap(\.windows).first { $0.isKeyWindow }
+        return w?.safeAreaInsets ?? UIEdgeInsets(top: 59, left: 0, bottom: 34, right: 0)
+    }
 }
