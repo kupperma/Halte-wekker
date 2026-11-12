@@ -55,6 +55,10 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     @Published var quietWhenInUse: Bool = UserDefaults.standard.object(forKey: "quietWhenInUse") as? Bool ?? true {
         didSet { UserDefaults.standard.set(quietWhenInUse, forKey: "quietWhenInUse") }
     }
+    /// The backup alarm on every leg: it also rings after this many minutes, even if GPS drops out (0: off). In Settings.
+    @Published var backupMinutes: Int = UserDefaults.standard.integer(forKey: "backupMinutes") {
+        didSet { UserDefaults.standard.set(backupMinutes, forKey: "backupMinutes") }
+    }
     @Published var autoHome: Bool = UserDefaults.standard.object(forKey: "autoHome") as? Bool ?? true {
         didSet { UserDefaults.standard.set(autoHome, forKey: "autoHome"); updateWatching() }
     }
@@ -167,7 +171,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
 
     // MARK: trip flow
 
-    func start(_ r: RoutePlan, at legIndex: Int = 0, vehicle v: Vehicle? = nil, auto: Bool = false, kms: [Double]? = nil, backup: Int = 0, stops: [TripStop]? = nil) {
+    func start(_ r: RoutePlan, at legIndex: Int = 0, vehicle v: Vehicle? = nil, auto: Bool = false, kms: [Double]? = nil, backup: Int? = nil, stops: [TripStop]? = nil) {
         route = r
         legs = r.legs(direction)
         index = min(legIndex, legs.count - 1)
@@ -177,7 +181,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             UserDefaults.standard.set(kmMem, forKey: "kmMem")
         }
         tripStart = Date(); startedAtLeg = index; lastScore = nil
-        setBackup(backup)
+        setBackup(backup ?? backupMinutes)
         sound.startTrip()
         music.start()
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
@@ -233,11 +237,11 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { WatchStore.shared.showNext() }
     }
 
-    func nextLeg(vehicle v: Vehicle? = nil, backup: Int = 0, stops: [TripStop]? = nil) {
+    func nextLeg(vehicle v: Vehicle? = nil, backup: Int? = nil, stops: [TripStop]? = nil) {
         guard index + 1 < legs.count else { return }
         index += 1
         sound.startTrip()
-        setBackup(backup)
+        setBackup(backup ?? backupMinutes)
         beginLeg(vehicle: v, stops: stops)
         pushActivity(force: true)
     }
@@ -854,7 +858,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     func resetAll() {
         if isRiding { endTrip() }
         let d = UserDefaults.standard
-        for k in ["busKm", "trainKm", "ringAtStop", "announce", "movingStation", "autoStart", "sound", "pauseMusic", "autoHome", "kmMem", "dir", "dirAt", "autoHomeDay", "quietWhenInUse"] { d.removeObject(forKey: k) }
+        for k in ["busKm", "trainKm", "ringAtStop", "announce", "movingStation", "autoStart", "sound", "pauseMusic", "autoHome", "kmMem", "dir", "dirAt", "autoHomeDay", "quietWhenInUse", "backupMinutes"] { d.removeObject(forKey: k) }
         busKm = 2; trainKm = 5; ringAtStop = true; announce = true; movingStation = true; autoStart = true
         soundKind = .steam; pauseMusic = false; autoHome = true; quietWhenInUse = true; kmMem = [:]; lastScore = nil
         direction = Self.savedDirection()

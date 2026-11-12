@@ -460,7 +460,6 @@ struct StartSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var kms: [Double] = []
     @State private var mode: Mode = .train
-    @State private var backup = 0
 
     private var legs: [Leg] {
         if let r = req.route { return r.legs(trip.direction) }
@@ -484,15 +483,6 @@ struct StartSheet: View {
                         Stepper("Ring \(Fmt.km(k)) before the stop", value: km(i, l), in: 0.5...(l.mode == .bus ? 10 : 15), step: 0.5)
                         Text("That’s roughly \(RideText.roughly(km: k, mode: l.mode)) before you arrive.").font(HWFont.body(12)).foregroundStyle(HWPalette.muted)
                     }
-                }
-                Section {
-                    Picker("Backup alarm", selection: $backup) {
-                        Text("Off").tag(0)
-                        ForEach([10, 15, 20, 25, 30, 40, 50, 60, 75, 90], id: \.self) { m in Text("After \(m) min").tag(m) }
-                    }
-                } footer: {
-                    Text(legs.count > 1 ? "For the first leg. It rings after this time even if GPS drops out. You can set a new one at your transfer."
-                                        : "It rings after this time even if GPS drops out. Pick a bit longer than the ride.")
                 }
                 Section {
                     Button("Start sleeping") { go() }.font(HWFont.display(17)).foregroundStyle(pal.accent)
@@ -520,10 +510,10 @@ struct StartSheet: View {
     }
 
     private func go() {
-        if let r = req.route { trip.start(r, kms: kms, backup: backup) }
+        if let r = req.route { trip.start(r, kms: kms) }
         else if let p = req.stop {
             StopsStore.shared.setMode(mode, for: p)
-            trip.start(.stop(p, mode: mode, from: .here(trip.here ?? p.coordinate)), kms: kms, backup: backup)
+            trip.start(.stop(p, mode: mode, from: .here(trip.here ?? p.coordinate)), kms: kms)
         }
         dismiss()
     }

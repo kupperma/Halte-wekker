@@ -1424,7 +1424,6 @@ struct ArrivalView: View {
     @EnvironmentObject var trip: TripManager
     @State private var spin = 0.0
     @State private var burst = false
-    @State private var backup = 0
     var pal: HWPalette { .of(home: trip.direction == .home) }
     private var nextLeg: Leg? { trip.phase == .transfer ? trip.legs[safe: trip.index + 1] : nil }
     var body: some View {
@@ -1439,7 +1438,7 @@ struct ArrivalView: View {
             .safeAreaInset(edge: .bottom) {
                 VStack(spacing: 10) {
                     if nextLeg != nil {
-                        BandButton(title: "Start next leg", pal: pal) { trip.nextLeg(backup: backup) }
+                        BandButton(title: "Start next leg", pal: pal) { trip.nextLeg() }
                         Button("End trip here") { trip.endTrip() }.font(HWFont.display(15)).foregroundStyle(HWPalette.muted).frame(maxWidth: .infinity)
                     } else {
                         BandButton(title: "Done", pal: pal) { trip.endTrip() }
@@ -1510,16 +1509,6 @@ struct ArrivalView: View {
             } else {
                 Text("\(n.mode.title) to \(n.to.short)").font(BoardInk.sans(17)).foregroundStyle(.white)
             }
-            HStack {
-                Text("Backup alarm").font(BoardInk.sans(13)).foregroundStyle(.white)
-                Spacer()
-                Picker("Backup alarm", selection: $backup) {
-                    Text("Off").tag(0)
-                    ForEach([10, 15, 20, 25, 30, 40, 50, 60, 75, 90], id: \.self) { m in Text("After \(m) min").tag(m) }
-                }
-                .pickerStyle(.menu).tint(.white).font(BoardInk.sans(13))
-            }
-            .padding(.top, 2)
             Text("It starts by itself once you’re on board.").font(BoardInk.sans(10.5, .regular)).foregroundStyle(Color.white.opacity(0.65))
         }
         .padding(12)
@@ -1574,6 +1563,14 @@ struct SettingsView: View {
                     Text(trip.pauseMusic ? "The loudest option: your music stops while it rings. To start it again, press play on your earbuds."
                                          : "The alarm plays over your music, a little louder than it.").font(HWFont.body(12)).foregroundStyle(HWPalette.muted)
                 } header: { Text("Alarm") } footer: { Text("The alarm also rings in silent mode. Keep the volume up or wear earbuds. You can stop it from the lock screen: tap Stop alarm on the trip, or on the notification.") }
+                Section {
+                    Picker("Backup alarm", selection: $trip.backupMinutes) {
+                        Text("Off").tag(0)
+                        ForEach([10, 15, 20, 25, 30, 40, 50, 60, 75, 90], id: \.self) { m in Text("After \(m) min").tag(m) }
+                    }
+                } header: { Text("Backup alarm") } footer: {
+                    Text("On every leg it also rings after this time, even if GPS drops out. Pick a bit longer than your longest ride.")
+                }
                 Section {
                     Picker("Show music from", selection: $music.source) {
                         ForEach(MusicSource.allCases) { m in Text(m.title).tag(m) }
