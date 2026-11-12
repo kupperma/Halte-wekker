@@ -49,7 +49,7 @@ struct CrowdIcons: View {
         HStack(spacing: 1) {
             ForEach(1...3, id: \.self) { i in
                 Image(systemName: "person.fill").font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(i <= level ? color : HWPalette.muted.opacity(0.3))
+                    .foregroundStyle(i <= level ? color : Paper.muted.opacity(0.3))
             }
         }
         .accessibilityElement(children: .ignore)
@@ -72,17 +72,17 @@ struct ConsistView: View {
                         unit(u, w).offset(x: x0 + u.x * w)
                     }
                     if let d = layout.dir {
-                        Text(d == "right" ? "▶" : "◀").font(.system(size: 9)).foregroundStyle(pal.brass)
+                        Text(d == "right" ? "▶" : "◀").font(.system(size: 9)).foregroundStyle(pal.deep)
                             .offset(x: d == "right" ? x0 + w + 3 : 0, y: 3)
                     }
                     ForEach(layout.letters, id: \.self) { l in
-                        Text(l.letter).font(HWFont.body(9, bold: true)).foregroundStyle(HWPalette.muted)
+                        Text(l.letter).font(HWFont.body(9, bold: true)).foregroundStyle(Paper.muted)
                             .position(x: x0 + l.x * w, y: 27)
                     }
                 }
             }
             .frame(height: layout.letters.isEmpty ? 18 : 33)
-            if let t = layout.firstClassText { Text(t).font(HWFont.body(11)).foregroundStyle(HWPalette.ink.opacity(0.8)) }
+            if let t = layout.firstClassText { Text(t).font(HWFont.body(11)).foregroundStyle(Paper.ink.opacity(0.8)) }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(layout.firstClassText ?? "Train layout")
@@ -104,16 +104,16 @@ struct ConsistView: View {
                     .offset(x: (z.a - u.x) / u.w * w)
                 }
                 if let g = gap(u), (g.1 - g.0) / u.w > 0.12 {
-                    Text("2").font(HWFont.body(10, bold: true)).foregroundStyle(HWPalette.ink.opacity(0.85))
+                    Text("2").font(HWFont.body(10, bold: true)).foregroundStyle(Paper.ink.opacity(0.85))
                         .position(x: ((g.0 + g.1) / 2 - u.x) / u.w * w, y: 9)
                 }
             } else {
-                Text("?").font(HWFont.body(10, bold: true)).foregroundStyle(HWPalette.muted).frame(width: w, height: 18)
+                Text("?").font(HWFont.body(10, bold: true)).foregroundStyle(Paper.muted).frame(width: w, height: 18)
             }
         }
         .frame(width: w, height: 18, alignment: .topLeading)
         .clipShape(RoundedRectangle(cornerRadius: 3))
-        .overlay(RoundedRectangle(cornerRadius: 3).stroke(HWPalette.ink.opacity(0.7), lineWidth: 1))
+        .overlay(RoundedRectangle(cornerRadius: 3).stroke(Paper.ink.opacity(0.7), lineWidth: 1))
     }
 
     /// The longest 2nd class stretch, so the "2" isn't hidden behind the yellow.
@@ -132,7 +132,7 @@ struct TrainExtras: View {
     var body: some View {
         if let s = info?.size {
             VStack(alignment: .leading, spacing: 4) {
-                Text(s.text).font(HWFont.body(11, bold: s.warn)).foregroundStyle(s.warn ? HWPalette.warn : HWPalette.ink.opacity(0.75))
+                Text(s.text).font(HWFont.body(11, bold: s.warn)).foregroundStyle(s.warn ? HWPalette.warn : Paper.ink.opacity(0.75))
                 if let l = s.layout { ConsistView(layout: l, pal: pal) }
             }
             .padding(.top, 2)
@@ -166,14 +166,14 @@ struct PlatformAlertView: View {
                 Spacer()
                 Text(alert.cancelled ? "TRAIN CANCELLED" : "PLATFORM CHANGE").font(HWFont.body(12, bold: true)).tracking(2).foregroundStyle(HWPalette.warn)
                 if alert.cancelled {
-                    Text("Cancelled").font(HWFont.display(54)).foregroundStyle(HWPalette.ink)
+                    Text("Cancelled").font(HWFont.display(54)).foregroundStyle(Paper.ink)
                 } else {
-                    Text("Platform \(alert.now)").font(HWFont.display(54)).foregroundStyle(HWPalette.ink).minimumScaleFactor(0.6)
-                    Text("was platform \(alert.was)").font(HWFont.display(20)).foregroundStyle(HWPalette.muted).strikethrough()
+                    Text("Platform \(alert.now)").font(HWFont.display(54)).foregroundStyle(Paper.ink).minimumScaleFactor(0.6)
+                    Text("was platform \(alert.was)").font(HWFont.display(20)).foregroundStyle(Paper.muted).strikethrough()
                 }
                 Text(alert.cancelled ? "Your \(alert.label) from \(alert.from) has been cancelled. Check the train list for the next one."
                                      : "Your \(alert.label) now leaves \(alert.from) from platform \(alert.now) instead of \(alert.was).")
-                    .font(HWFont.body(15)).foregroundStyle(HWPalette.ink.opacity(0.85))
+                    .font(HWFont.body(15)).foregroundStyle(Paper.ink.opacity(0.85))
                 Spacer()
                 BandButton(title: "OK, got it", pal: pal, action: ok)
             }
@@ -209,12 +209,12 @@ struct PlanSheet: View {
                     Button("Find this trip") {
                         if let e = planner.set(out: out, time: time, tomorrow: tomorrow) { error = e } else { dismiss() }
                     }
-                    .foregroundStyle(pal.accent)
+                    .foregroundStyle(pal.deep)
                     if planner.trip != nil { Button("Remove the trip", role: .destructive) { planner.clear(); dismiss() } }
                 }
             }
             .scrollContentBackground(.hidden)
-            .background(LinearGradient(colors: [BoardInk.blueTop, BoardInk.blueBottom], startPoint: .top, endPoint: .bottom).ignoresSafeArea())
+            .background(PaperFill().ignoresSafeArea()).preferredColorScheme(.light)
             .font(HWFont.body(15)).tint(pal.band)
             .navigationTitle("Plan by train time")
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
@@ -258,9 +258,9 @@ struct PlannedPass: View {
             VStack(alignment: .leading, spacing: 10) {
                 VStack(spacing: 0) {
                     HStack {
-                        Text("BOARDING PASS").font(HWFont.display(13)).tracking(2).foregroundStyle(pal.brass)
+                        Text("BOARDING PASS").font(HWFont.display(13)).tracking(2).foregroundStyle(pal.deep)
                         Spacer()
-                        Button("Change", action: edit).font(HWFont.body(12, bold: true)).foregroundStyle(pal.accent)
+                        Button("Change", action: edit).font(HWFont.body(12, bold: true)).foregroundStyle(pal.deep)
                     }
                     .padding(.horizontal, 12).padding(.top, 9).padding(.bottom, 7)
                     Rectangle().fill(pal.line).frame(height: 1)
@@ -268,7 +268,7 @@ struct PlannedPass: View {
                         content(op, t, pal)
                     } else {
                         sub(t, right: "", pal)
-                        Text(planner.error ?? "Finding your train and buses…").font(HWFont.body(13)).foregroundStyle(HWPalette.muted)
+                        Text(planner.error ?? "Finding your train and buses…").font(HWFont.body(13)).foregroundStyle(Paper.muted)
                             .frame(maxWidth: .infinity, alignment: .leading).padding(14)
                     }
                 }
@@ -279,7 +279,7 @@ struct PlannedPass: View {
                 if let u = planner.updated {
                     let watched = planner.chosen.map { watch.isWatched($0.train.first, from: $0.from) } ?? false
                     Text("Updated at \(Fmt.hhmm(u)).\((t.when?.timeIntervalSinceNow ?? 0) > 4 * 3600 ? " Live delays show up a few hours before." : "")\(watched ? " You get an alarm if this train changes platform or is cancelled." : "")")
-                        .font(HWFont.body(11)).foregroundStyle(HWPalette.muted)
+                        .font(HWFont.body(11)).foregroundStyle(Paper.muted)
                 }
             }
         }
@@ -291,7 +291,7 @@ struct PlannedPass: View {
             Spacer()
             Text(right.uppercased())
         }
-        .font(HWFont.body(11)).tracking(0.8).foregroundStyle(HWPalette.ink.opacity(0.8)).padding(.horizontal, 12).padding(.top, 6)
+        .font(HWFont.body(11)).tracking(0.8).foregroundStyle(Paper.ink.opacity(0.8)).padding(.horizontal, 12).padding(.top, 6)
     }
 
     @ViewBuilder
@@ -306,9 +306,9 @@ struct PlannedPass: View {
                         Button { planner.pick = i } label: {
                             Text("\(x.train.first.name.isEmpty ? "Train" : x.train.first.name) \(t.out ? "from \(x.from.short)" : "to \(x.to.short)")")
                                 .font(HWFont.body(12, bold: true))
-                                .foregroundStyle(i == planner.pick ? Color(hex: 0x14121A) : HWPalette.ink)
+                                .foregroundStyle(i == planner.pick ? Color(hex: 0x14121A) : Paper.ink)
                                 .padding(.horizontal, 10).padding(.vertical, 6)
-                                .background(i == planner.pick ? HWPalette.ink : .clear)
+                                .background(i == planner.pick ? Paper.ink : .clear)
                                 .overlay(Rectangle().stroke(pal.line, lineWidth: 1))
                         }
                         .buttonStyle(.plain)
@@ -334,7 +334,7 @@ struct PlannedPass: View {
             Spacer()
             if watch.isWatched(op.train.first, from: op.from) { Label("Watching \(op.train.first.line)", systemImage: "bell.fill") }
         }
-        .font(HWFont.body(11)).foregroundStyle(HWPalette.ink.opacity(0.85))
+        .font(HWFont.body(11)).foregroundStyle(Paper.ink.opacity(0.85))
         .padding(.horizontal, 12).padding(.vertical, 7)
         .overlay(alignment: .top) { DottedLine(vertical: false).stroke(pal.line, style: StrokeStyle(lineWidth: 1.5, dash: [4, 3])).frame(height: 1.5) }
     }
@@ -400,8 +400,8 @@ struct ScoreCard: View {
                 Coin(grade: e.grade, size: 54, pal: pal)
             }
             Text("\(Int(e.mins.rounded())) min\(e.est ? ". Your next trips on this route are compared with this one." : ". The fastest possible is about \(e.ref) min.")")
-                .font(HWFont.body(13)).foregroundStyle(HWPalette.ink.opacity(0.85))
-            if let f = result.flag { Text(f).font(HWFont.display(16)).foregroundStyle(pal.accent) }
+                .font(HWFont.body(13)).foregroundStyle(Paper.ink.opacity(0.85))
+            if let f = result.flag { Text(f).font(HWFont.display(16)).foregroundStyle(pal.deep) }
         }
     }
 }
@@ -420,20 +420,20 @@ struct LeaderboardView: View {
             Picker("When", selection: $week) { Text("This week").tag(true); Text("All time").tag(false) }.pickerStyle(.segmented)
             if list.isEmpty {
                 Text(all.isEmpty ? "No trips yet. Start the alarm under “Wake me up” and ride to your last stop. Each trip gets a score out of 500 here." : "No trips this week yet.")
-                    .font(HWFont.body(12)).foregroundStyle(HWPalette.muted)
+                    .font(HWFont.body(12)).foregroundStyle(Paper.muted)
             }
             ForEach(Array(list.enumerated()), id: \.element.id) { i, t in
                 HStack(spacing: 10) {
-                    Text("\(i + 1)").font(HWFont.display(16)).foregroundStyle(HWPalette.muted).frame(width: 22)
+                    Text("\(i + 1)").font(HWFont.display(16)).foregroundStyle(Paper.muted).frame(width: 22)
                     Coin(grade: t.grade, size: 26, pal: pal)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("\(Int(t.mins.rounded())) min · \(t.score)/500").font(HWFont.display(15)).foregroundStyle(HWPalette.ink)
-                        Text("\(Fmt.when(t.at)) · \(t.route)").font(HWFont.body(11)).foregroundStyle(HWPalette.muted)
+                        Text("\(Int(t.mins.rounded())) min · \(t.score)/500").font(HWFont.display(15)).foregroundStyle(Paper.ink)
+                        Text("\(Fmt.when(t.at)) · \(t.route)").font(HWFont.body(11)).foregroundStyle(Paper.muted)
                     }
                     Spacer(minLength: 4)
                     if t.id == best?.id { SmallTag(text: "BEST", pal: pal) }
                     Button { withAnimation { scores.remove(t.id) } } label: {
-                        Image(systemName: "xmark").font(.system(size: 11, weight: .bold)).foregroundStyle(HWPalette.muted).frame(width: 28, height: 28)
+                        Image(systemName: "xmark").font(.system(size: 11, weight: .bold)).foregroundStyle(Paper.muted).frame(width: 28, height: 28)
                     }
                     .buttonStyle(.plain).accessibilityLabel("Remove this trip")
                 }
@@ -441,7 +441,7 @@ struct LeaderboardView: View {
                 Rectangle().fill(.white.opacity(0.06)).frame(height: 1)
             }
             Text("Time from starting the alarm until you reach your last stop, so waiting at the change counts. 500 means as fast as that route gets.")
-                .font(HWFont.body(11)).foregroundStyle(HWPalette.muted)
+                .font(HWFont.body(11)).foregroundStyle(Paper.muted)
         }
     }
 }
@@ -481,16 +481,16 @@ struct StartSheet: View {
                     Section(req.stop == nil ? "\(l.mode.title) to \(l.to.name)" : "Wake me") {
                         let k = kms[safe: i] ?? trip.km(for: l)
                         Stepper("Ring \(Fmt.km(k)) before the stop", value: km(i, l), in: 0.5...(l.mode == .bus ? 10 : 15), step: 0.5)
-                        Text("That’s roughly \(RideText.roughly(km: k, mode: l.mode)) before you arrive.").font(HWFont.body(12)).foregroundStyle(HWPalette.muted)
+                        Text("That’s roughly \(RideText.roughly(km: k, mode: l.mode)) before you arrive.").font(HWFont.body(12)).foregroundStyle(Paper.muted)
                     }
                 }
                 Section {
-                    Button("Start sleeping") { go() }.font(HWFont.display(17)).foregroundStyle(pal.accent)
+                    Button("Start sleeping") { go() }.font(HWFont.display(17)).foregroundStyle(pal.deep)
                     Button("Cancel", role: .cancel) { dismiss() }
                 }
             }
             .scrollContentBackground(.hidden)
-            .background(LinearGradient(colors: [BoardInk.blueTop, BoardInk.blueBottom], startPoint: .top, endPoint: .bottom).ignoresSafeArea())
+            .background(PaperFill().ignoresSafeArea()).preferredColorScheme(.light)
             .font(HWFont.body(15)).tint(pal.band)
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
@@ -529,9 +529,9 @@ struct StopsList: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text("For trips without a route.").font(HWFont.body(12)).foregroundStyle(HWPalette.muted)
+                Text("For trips without a route.").font(HWFont.body(12)).foregroundStyle(Paper.muted)
                 Spacer()
-                Button("Add a stop") { edit(nil) }.font(HWFont.body(12, bold: true)).foregroundStyle(pal.accent)
+                Button("Add a stop") { edit(nil) }.font(HWFont.body(12, bold: true)).foregroundStyle(pal.deep)
             }
             .padding(.vertical, 8)
             ForEach(Place.all, id: \.key) { p in
@@ -544,17 +544,17 @@ struct StopsList: View {
         HStack {
             Button(action: tap) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(name).font(HWFont.display(16)).foregroundStyle(HWPalette.ink)
-                    if let sub { Text(sub).font(HWFont.body(11)).foregroundStyle(HWPalette.muted) }
+                    Text(name).font(HWFont.display(16)).foregroundStyle(Paper.ink)
+                    if let sub { Text(sub).font(HWFont.body(11)).foregroundStyle(Paper.muted) }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 10).contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             if let e = editable {
-                Button { edit(e) } label: { Image(systemName: "pencil").foregroundStyle(pal.brass).frame(width: 36, height: 36) }
+                Button { edit(e) } label: { Image(systemName: "pencil").foregroundStyle(pal.deep).frame(width: 36, height: 36) }
                     .buttonStyle(.plain).accessibilityLabel("Edit \(name)")
             } else {
-                Image(systemName: "bell.and.waves.left.and.right").foregroundStyle(pal.brass)
+                Image(systemName: "bell.and.waves.left.and.right").foregroundStyle(pal.deep)
             }
         }
         .overlay(alignment: .top) { Rectangle().fill(.white.opacity(0.06)).frame(height: 1) }
@@ -595,8 +595,8 @@ struct StopSheet: View {
                         } label: {
                             HStack {
                                 VStack(alignment: .leading) {
-                                    Text(h.name).foregroundStyle(HWPalette.ink)
-                                    if !h.town.isEmpty { Text(h.town).font(HWFont.body(11)).foregroundStyle(HWPalette.muted) }
+                                    Text(h.name).foregroundStyle(Paper.ink)
+                                    if !h.town.isEmpty { Text(h.town).font(HWFont.body(11)).foregroundStyle(Paper.muted) }
                                 }
                                 Spacer()
                                 if stopId == h.id { Image(systemName: "checkmark").foregroundStyle(HWPalette.ok) }
@@ -668,8 +668,8 @@ struct LiveSettingsSheet: View {
                                 hits = []; query = ""
                             } label: {
                                 VStack(alignment: .leading) {
-                                    Text(h.name).foregroundStyle(HWPalette.ink)
-                                    if !h.town.isEmpty { Text(h.town).font(HWFont.body(11)).foregroundStyle(HWPalette.muted) }
+                                    Text(h.name).foregroundStyle(Paper.ink)
+                                    if !h.town.isEmpty { Text(h.town).font(HWFont.body(11)).foregroundStyle(Paper.muted) }
                                 }
                             }
                         }
@@ -722,7 +722,7 @@ struct TransferList: View {
             PlannerBar(title: "Next \(what) to \(dest)", sub: updated.map { "updated \(Fmt.hhmm($0))" })
             if list.isEmpty {
                 Text(error ?? (updated == nil ? "Looking up the next \(what)…" : "No \(what) to \(dest) coming up."))
-                    .font(BoardInk.sans(12, .regular)).foregroundStyle(Color.white.opacity(0.85)).padding(.vertical, 6)
+                    .font(BoardInk.sans(12, .regular)).foregroundStyle(Paper.ink.opacity(0.85)).padding(.vertical, 6)
             } else {
                 PlannerColumns()
             }
@@ -738,8 +738,8 @@ struct TransferList: View {
                 }
             }
             Button(earlier ? "Hide earlier ones" : "Show earlier ones") { withAnimation { earlier.toggle() } }
-                .font(BoardInk.sans(12, .semibold)).foregroundStyle(.white).padding(.top, 4)
-            if mode == .train { Text("Tap a train to be told if its platform changes or it runs late.").font(BoardInk.sans(10, .regular)).foregroundStyle(Color.white.opacity(0.65)) }
+                .font(BoardInk.sans(12, .semibold)).foregroundStyle(Paper.ink).padding(.top, 4)
+            if mode == .train { Text("Tap a train to be told if its platform changes or it runs late.").font(BoardInk.sans(10, .regular)).foregroundStyle(Paper.ink.opacity(0.65)) }
         }
     }
 }
@@ -774,28 +774,28 @@ struct BoardRow: View {
     var body: some View {
         let gone = !d.cancelled && d.time < Date().addingTimeInterval(-60)
         HStack(alignment: .top, spacing: 10) {
-            Text(d.line).font(HWFont.display(13)).foregroundStyle(HWPalette.ink).frame(width: 44).padding(.vertical, 4)
-                .overlay(RoundedRectangle(cornerRadius: 2).stroke(HWPalette.ink, lineWidth: 1.5))
+            Text(d.line).font(HWFont.display(13)).foregroundStyle(Paper.ink).frame(width: 44).padding(.vertical, 4)
+                .overlay(RoundedRectangle(cornerRadius: 2).stroke(Paper.ink, lineWidth: 1.5))
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     if let g = ride?.grade, !d.cancelled { Coin(grade: g, size: 22) }
-                    Text(d.headsign).font(HWFont.display(16)).foregroundStyle(HWPalette.ink)
+                    Text(d.headsign).font(HWFont.display(16)).foregroundStyle(Paper.ink)
                 }
                 if watched { SmallTag(text: "WATCHING", icon: "bell.fill", pal: pal) }
                 Text([stopLabel, Self.status(d)].compactMap { $0 }.joined(separator: " · "))
                     .font(HWFont.body(12, bold: d.live || d.cancelled))
-                    .foregroundStyle(d.delay != 0 || d.cancelled ? HWPalette.warn : d.live ? HWPalette.ok : HWPalette.muted)
+                    .foregroundStyle(d.delay != 0 || d.cancelled ? HWPalette.warn : d.live ? HWPalette.ok : Paper.muted)
                 if let r = ride, !d.cancelled {
-                    Text("\(Fmt.rideText(r.minutes)) ride to \(r.station) station, arrives \(Fmt.hhmm(r.arrival))").font(HWFont.body(12)).foregroundStyle(HWPalette.ink.opacity(0.8))
+                    Text("\(Fmt.rideText(r.minutes)) ride to \(r.station) station, arrives \(Fmt.hhmm(r.arrival))").font(HWFont.body(12)).foregroundStyle(Paper.ink.opacity(0.8))
                 }
             }
             Spacer(minLength: 4)
             VStack(alignment: .trailing, spacing: 2) {
-                Text(Fmt.hhmm(d.cancelled ? d.scheduled : d.time)).font(HWFont.display(23)).foregroundStyle(d.cancelled ? HWPalette.warn : pal.accent).strikethrough(d.cancelled)
-                Text(Self.when(d)).font(HWFont.body(12)).foregroundStyle(HWPalette.muted)
+                Text(Fmt.hhmm(d.cancelled ? d.scheduled : d.time)).font(HWFont.display(23)).foregroundStyle(d.cancelled ? HWPalette.warn : pal.deep).strikethrough(d.cancelled)
+                Text(Self.when(d)).font(HWFont.body(12)).foregroundStyle(Paper.muted)
                 if let onBell {
                     Button(action: onBell) {
-                        Image(systemName: watched ? "bell.fill" : "bell").font(.system(size: 15, weight: .semibold)).foregroundStyle(watched ? pal.accent : pal.brass)
+                        Image(systemName: watched ? "bell.fill" : "bell").font(.system(size: 15, weight: .semibold)).foregroundStyle(watched ? pal.deep : pal.deep)
                             .frame(width: 36, height: 30)
                     }
                     .buttonStyle(.plain)
@@ -822,8 +822,8 @@ struct WatchingCard: View {
         } else if !lines.watches.isEmpty || !manual.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                    Image(systemName: "bell.badge.fill").foregroundStyle(pal.accent)
-                    Text("Watching").font(HWFont.display(18)).foregroundStyle(HWPalette.ink)
+                    Image(systemName: "bell.badge.fill").foregroundStyle(pal.deep)
+                    Text("Watching").font(HWFont.display(18)).foregroundStyle(Paper.ink)
                     Spacer()
                 }
                 ForEach(lines.watches) { w in
@@ -835,7 +835,7 @@ struct WatchingCard: View {
                         warn: w.cancelled) { trains.remove(w.key) }
                 }
                 Text("You get a notification when it runs late, leaves early, changes platform or is cancelled. Bus lines stop by themselves once you’re on board.")
-                    .font(HWFont.body(11)).foregroundStyle(HWPalette.muted)
+                    .font(HWFont.body(11)).foregroundStyle(Paper.muted)
             }
             .brass(pal, pad: 14)
         }
@@ -855,27 +855,26 @@ struct WatchingCard: View {
                          warn: w.cancelled) { trains.remove(w.key) }
             }
             Text("You get a notification when it runs late, leaves early, changes platform or is cancelled. Bus lines stop by themselves once you’re on board.")
-                .font(BoardInk.sans(9.5, .regular)).foregroundStyle(Color.white.opacity(0.65)).fixedSize(horizontal: false, vertical: true)
+                .font(BoardInk.sans(9.5, .regular)).foregroundStyle(Paper.ink.opacity(0.65)).fixedSize(horizontal: false, vertical: true)
         }
     }
     private func boardRow(line: String, train: Bool, title: String, sub: String, warn: Bool, stop: @escaping () -> Void) -> some View {
         HStack(spacing: 8) {
-            Text(line).font(BoardInk.sans(12)).foregroundStyle(train ? Color(hex: 0x1A1A1A) : BoardInk.navy).lineLimit(1).minimumScaleFactor(0.6)
-                .frame(width: 38, height: 20).background(train ? BoardInk.yellow : BoardInk.route, in: RoundedRectangle(cornerRadius: 2))
+            LineBullet(line: line, train: train, height: 22, minWidth: 38, font: 12)
             VStack(alignment: .leading, spacing: 1) {
-                Text(title).font(BoardInk.sans(13)).foregroundStyle(.white).lineLimit(1).minimumScaleFactor(0.7)
-                Text(sub).font(BoardInk.sans(10.5, warn ? .bold : .regular)).foregroundStyle(warn ? BoardInk.late : BoardInk.green).lineLimit(2)
+                Text(title).font(BoardInk.sans(13)).foregroundStyle(Paper.ink).lineLimit(1).minimumScaleFactor(0.7)
+                Text(sub).font(BoardInk.sans(10.5, warn ? .bold : .regular)).foregroundStyle(warn ? Paper.late : Paper.ok).lineLimit(2)
             }
             Spacer(minLength: 4)
             Button(action: stop) {
-                Text("Stop").font(BoardInk.sans(11)).foregroundStyle(.white)
-                    .padding(.horizontal, 10).padding(.vertical, 5).background(Color.white.opacity(0.16), in: Capsule())
+                Text("Stop").font(BoardInk.sans(11)).foregroundStyle(Paper.ink)
+                    .padding(.horizontal, 10).padding(.vertical, 5).background(Paper.ink.opacity(0.16), in: Capsule())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Stop watching \(title)")
         }
         .padding(.vertical, 4)
-        .overlay(alignment: .bottom) { Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1) }
+        .overlay(alignment: .bottom) { Rectangle().fill(Paper.ink.opacity(0.12)).frame(height: 1) }
     }
     private func trainBadge(_ label: String) -> String {
         let l = label.lowercased()
@@ -885,11 +884,11 @@ struct WatchingCard: View {
     private func row(title: String, sub: String, warn: Bool, stop: @escaping () -> Void) -> some View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(HWFont.display(15)).foregroundStyle(HWPalette.ink)
+                Text(title).font(HWFont.display(15)).foregroundStyle(Paper.ink)
                 Text(sub).font(HWFont.body(12, bold: warn)).foregroundStyle(warn ? HWPalette.warn : HWPalette.ok)
             }
             Spacer()
-            Button("Stop", action: stop).font(HWFont.body(12, bold: true)).foregroundStyle(pal.accent)
+            Button("Stop", action: stop).font(HWFont.body(12, bold: true)).foregroundStyle(pal.deep)
         }
         .padding(.vertical, 4)
     }
@@ -901,10 +900,10 @@ struct ToastView: View {
     let text: String
     let pal: HWPalette
     var body: some View {
-        Text(text).font(HWFont.body(13, bold: true)).foregroundStyle(HWPalette.ink)
+        Text(text).font(HWFont.body(13, bold: true)).foregroundStyle(.white)
             .padding(14).frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(hex: 0x0B2F86).opacity(0.97))
-            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.white.opacity(0.2), lineWidth: 1))
+            .background(Paper.navy.opacity(0.97))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Paper.ink.opacity(0.2), lineWidth: 1))
             .clipShape(RoundedRectangle(cornerRadius: 6))
             .shadow(color: .black.opacity(0.5), radius: 12, y: 6)
             .padding(.horizontal, 18)
@@ -922,7 +921,7 @@ struct TipsList: View {
             ], id: \.self) { t in
                 HStack(alignment: .top, spacing: 8) {
                     Image(systemName: "checkmark").font(.system(size: 11, weight: .bold)).foregroundStyle(HWPalette.ok).padding(.top, 2)
-                    Text(t).font(HWFont.body(12)).foregroundStyle(HWPalette.ink.opacity(0.85))
+                    Text(t).font(HWFont.body(12)).foregroundStyle(Paper.ink.opacity(0.85))
                 }
             }
         }

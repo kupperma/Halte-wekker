@@ -60,7 +60,7 @@ struct DemoSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("A pretend trip from the bus stop nearest to you. It takes about four minutes, and nothing real is watched. Allow notifications to see them too, and lock your phone now and then to see the lock screen.")
-                        .font(BoardInk.sans(13, .regular)).foregroundStyle(Color.white.opacity(0.9)).fixedSize(horizontal: false, vertical: true)
+                        .font(BoardInk.sans(13, .regular)).foregroundStyle(Paper.ink.opacity(0.9)).fixedSize(horizontal: false, vertical: true)
                     VStack(alignment: .leading, spacing: 0) {
                         PlannerBar(title: "What you’ll see")
                         step(1, "map.fill", "Fastest trip, hands-free", "The big map that follows by itself: you, the dotted walk to your stop, and the bus coming to it.")
@@ -70,11 +70,11 @@ struct DemoSheet: View {
                         step(5, "alarm.fill", "The alarm", "It rings 2 km before the stop and again at the stop. Hold to stop it.")
                         step(6, "checkmark.seal.fill", "You’re there", "And the end of the trip.")
                     }
-                    .background(LinearGradient(colors: [BoardInk.blueTop, BoardInk.blueBottom], startPoint: .top, endPoint: .bottom), in: RoundedRectangle(cornerRadius: 8))
+                    .background(Paper.card, in: RoundedRectangle(cornerRadius: 8)).overlay(RoundedRectangle(cornerRadius: 8).stroke(Paper.edge, lineWidth: 1.2))
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                     Button { go(full: true) } label: {
                         Label("Start the whole demo", systemImage: "play.fill").font(HWFont.display(15)).foregroundStyle(.white)
-                            .frame(maxWidth: .infinity).padding(.vertical, 14).background(Color(hex: 0x2F9E5B), in: RoundedRectangle(cornerRadius: 8))
+                            .frame(maxWidth: .infinity).padding(.vertical, 14).background(Paper.green, in: RoundedRectangle(cornerRadius: 8))
                     }
                     .buttonStyle(.plain)
                     Button { go(full: false) } label: {
@@ -83,17 +83,17 @@ struct DemoSheet: View {
                     }
                     .buttonStyle(.plain)
                     Text("Stop it any time with MAP at the top, or Hold to end trip. Skip the waiting on the Fastest trip screen with “I’m on it”.")
-                        .font(BoardInk.sans(11, .regular)).foregroundStyle(Color.white.opacity(0.7)).fixedSize(horizontal: false, vertical: true)
+                        .font(BoardInk.sans(11, .regular)).foregroundStyle(Paper.ink.opacity(0.7)).fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(16)
             }
-            .background(Color(hex: 0x0B1A44).ignoresSafeArea())
+            .background(PaperFill().ignoresSafeArea())
             .navigationTitle("Try it at home")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
             .onAppear { near.locate(force: true, ask: true) }
         }
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(.light)
     }
 
     private func step(_ n: Int, _ icon: String, _ title: String, _ text: String) -> some View {
@@ -101,12 +101,12 @@ struct DemoSheet: View {
             Image(systemName: icon).font(.system(size: 13, weight: .bold)).foregroundStyle(BoardInk.navy)
                 .frame(width: 28, height: 28).background(BoardInk.yellow, in: RoundedRectangle(cornerRadius: 6))
             VStack(alignment: .leading, spacing: 2) {
-                Text("\(n). \(title)").font(BoardInk.sans(14)).foregroundStyle(.white)
-                Text(text).font(BoardInk.sans(11.5, .regular)).foregroundStyle(Color.white.opacity(0.85)).fixedSize(horizontal: false, vertical: true)
+                Text("\(n). \(title)").font(BoardInk.sans(14)).foregroundStyle(Paper.ink)
+                Text(text).font(BoardInk.sans(11.5, .regular)).foregroundStyle(Paper.ink.opacity(0.85)).fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(.horizontal, 10).padding(.vertical, 8)
-        .overlay(alignment: .bottom) { Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1) }
+        .overlay(alignment: .bottom) { Rectangle().fill(Paper.ink.opacity(0.12)).frame(height: 1) }
     }
 
     private func go(full: Bool) {

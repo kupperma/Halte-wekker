@@ -422,7 +422,7 @@ struct GoView: View {
                       top: g.safeAreaInsets.top + bar, bottom: g.safeAreaInsets.top + bar + window)
                     .ignoresSafeArea()
                 // a little shade under the buttons, so they read on any map
-                LinearGradient(colors: [.black.opacity(0.55), .clear], startPoint: .top, endPoint: .bottom)
+                LinearGradient(colors: [.black.opacity(0.22), .clear], startPoint: .top, endPoint: .bottom)
                     .frame(height: g.safeAreaInsets.top + bar + 30).ignoresSafeArea(edges: .top).allowsHitTesting(false)
                 // the cards scroll under the buttons at the top (and above the one at the bottom), fading out smoothly
                 ScrollView(showsIndicators: false) {
@@ -448,7 +448,7 @@ struct GoView: View {
                 }
             }
         }
-        .environment(\.colorScheme, .dark)
+        .environment(\.colorScheme, .light)
         .sheet(item: $walkTo) { WalkMapSheet(target: $0).presentationDetents([.large]) }
         .sheet(item: $liveTrack) { LiveBusSheet(target: $0).presentationDetents([.large]) }
         .sheet(isPresented: $choosing) {
@@ -469,8 +469,8 @@ struct GoView: View {
                     Image(systemName: "chevron.left").font(.system(size: 12, weight: .bold))
                     Text("MAP").font(HWFont.display(13)).tracking(1.4)
                 }
-                .foregroundStyle(.white).padding(.horizontal, 12).padding(.vertical, 8)
-                .background(.ultraThinMaterial, in: Capsule()).overlay(Capsule().stroke(Color.white.opacity(0.22), lineWidth: 1))
+                .foregroundStyle(Paper.ink).padding(.horizontal, 12).padding(.vertical, 8)
+                .background(Paper.paper, in: Capsule()).shadow(color: .black.opacity(0.3), radius: 5, y: 3)
             }
             .buttonStyle(.plain).accessibilityLabel("Back to the map. This stops the watching.")
             Spacer(minLength: 4)
@@ -490,16 +490,16 @@ struct GoView: View {
                     Text(goingHome ? "HOME" : "TO \(destWord.uppercased())").font(HWFont.display(13)).tracking(1.2).lineLimit(1).minimumScaleFactor(0.7).frame(maxWidth: 170)
                     Image(systemName: "chevron.down").font(.system(size: 10, weight: .bold))
                 }
-                .foregroundStyle(.white).padding(.horizontal, 10).padding(.vertical, 8)
-                .background(.ultraThinMaterial, in: Capsule()).overlay(Capsule().stroke(Color.white.opacity(0.22), lineWidth: 1))
+                .foregroundStyle(Paper.ink).padding(.horizontal, 10).padding(.vertical, 8)
+                .background(Paper.paper, in: Capsule()).shadow(color: .black.opacity(0.3), radius: 5, y: 3)
             }
             .accessibilityLabel("Where you’re going: \(destWord). Tap to change.")
             HStack(spacing: 5) {
-                Circle().fill(go.demo ? BoardInk.yellow : go.watching ? BoardInk.green : Color.white.opacity(0.4)).frame(width: 7, height: 7)
+                Circle().fill(go.demo ? BoardInk.yellow : go.watching ? Paper.ok : Paper.ink.opacity(0.4)).frame(width: 7, height: 7)
                 Text(go.demo ? "DEMO" : go.watching ? "WATCHING" : "STOPPED").font(BoardInk.sans(10)).tracking(1)
             }
-            .foregroundStyle(.white).padding(.horizontal, 9).padding(.vertical, 8)
-            .background(.ultraThinMaterial, in: Capsule())
+            .foregroundStyle(Paper.ink).padding(.horizontal, 9).padding(.vertical, 8)
+            .background(Paper.paper, in: Capsule()).shadow(color: .black.opacity(0.3), radius: 5, y: 3)
             .accessibilityElement(children: .combine)
         }
         .padding(.horizontal, 12)
@@ -519,7 +519,6 @@ struct GoView: View {
         } else if let t = go.best {
             nextCard(t)
             howToGetThere(t)
-            if t.rides.count > 1 { thenCard(t) }
             watchingCard(t)
             if !go.others.isEmpty { compareCard(t) }
         } else {
@@ -529,8 +528,8 @@ struct GoView: View {
         }
         if !go.watching && !go.arrived {
             Button { go.again() } label: {
-                Label("Watch again", systemImage: "bell.badge").font(BoardInk.sans(14)).foregroundStyle(.white)
-                    .frame(maxWidth: .infinity).padding(.vertical, 11).background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+                Label("Watch again", systemImage: "bell.badge").font(BoardInk.sans(14)).foregroundStyle(Paper.ink)
+                    .frame(maxWidth: .infinity).padding(.vertical, 11).background(Paper.paper, in: RoundedRectangle(cornerRadius: 6)).shadow(color: .black.opacity(0.3), radius: 5, y: 3)
             }
             .buttonStyle(.plain)
         }
@@ -539,10 +538,10 @@ struct GoView: View {
     private func message(icon: String, title: String, text: String, spinner: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
-                if spinner { ProgressView().tint(.white) } else { Image(systemName: icon).font(.system(size: 20, weight: .bold)).foregroundStyle(BoardInk.yellow) }
-                Text(title).font(BoardInk.sans(18)).foregroundStyle(.white)
+                if spinner { ProgressView().tint(Paper.ink) } else { Image(systemName: icon).font(.system(size: 20, weight: .bold)).foregroundStyle(Paper.navy) }
+                Text(title).font(BoardInk.sans(18)).foregroundStyle(Paper.ink)
             }
-            Text(text).font(BoardInk.sans(13, .regular)).foregroundStyle(Color.white.opacity(0.85)).fixedSize(horizontal: false, vertical: true)
+            Text(text).font(BoardInk.sans(13, .regular)).foregroundStyle(Paper.ink.opacity(0.85)).fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
@@ -552,9 +551,9 @@ struct GoView: View {
     /// A small heading inside a card.
     private func kicker(_ t: String, _ sub: String? = nil) -> some View {
         HStack {
-            Text(t.uppercased()).font(BoardInk.sans(10.5)).tracking(1.6).foregroundStyle(Color.white.opacity(0.7))
+            Text(t.uppercased()).font(BoardInk.sans(10.5)).tracking(1.6).foregroundStyle(Paper.ink.opacity(0.7))
             Spacer(minLength: 4)
-            if let sub { Text(sub).font(BoardInk.sans(11, .semibold)).foregroundStyle(Color.white.opacity(0.85)) }
+            if let sub { Text(sub).font(BoardInk.sans(11, .semibold)).foregroundStyle(Paper.ink.opacity(0.85)) }
         }
     }
 
@@ -571,46 +570,55 @@ struct GoView: View {
         let mins = Fmt.mins(t.end.timeIntervalSinceNow)
         let changes = t.rides.count > 1 ? " · \(t.rides.count - 1) change\(t.rides.count > 2 ? "s" : "")" : ""
         return VStack(alignment: .leading, spacing: 10) {
-            // where it gets you, and when
-            VStack(alignment: .leading, spacing: 1) {
-                Text(goingHome ? "Fastest way home" : "Fastest way to \(destWord)").font(BoardInk.sans(10.5)).tracking(1.6).textCase(.uppercase).foregroundStyle(Color.white.opacity(0.7))
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text("\(destWord) at \(Fmt.hhmm(t.end))").font(HWFont.display(28)).foregroundStyle(.white).lineLimit(1).minimumScaleFactor(0.6)
-                    Spacer(minLength: 4)
-                    Text("\(Fmt.rideText(Double(mins)))\(changes)").font(BoardInk.sans(12, .semibold)).foregroundStyle(Color.white.opacity(0.85)).lineLimit(1)
+            // where it gets you, and when (and when to set off)
+            PaperBand(home: trip.direction == .home) {
+                HStack(alignment: .bottom) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(goingHome ? "Fastest way home" : "Fastest way to \(destWord)").font(BoardInk.sans(10)).tracking(1.6).textCase(.uppercase).opacity(0.85)
+                        Text("\(destWord) at \(Fmt.hhmm(t.end))").font(HWFont.display(26)).lineLimit(1).minimumScaleFactor(0.6)
+                        Text("\(Fmt.rideText(Double(mins)))\(changes)").font(BoardInk.sans(11, .medium)).opacity(0.85)
+                    }
+                    Spacer(minLength: 6)
+                    VStack(alignment: .trailing, spacing: 0) {
+                        Text("leave by").font(BoardInk.sans(10.5)).opacity(0.8)
+                        Text(Fmt.hhmm(t.start)).font(HWFont.display(26)).foregroundStyle(Paper.yellow).monospacedDigit()
+                    }
                 }
             }
-            Rectangle().fill(Color.white.opacity(0.14)).frame(height: 1)
+            .padding(.horizontal, -14).padding(.top, -14)
             kicker("Take next")
             HStack(alignment: .center, spacing: 12) {
-                Text(f.line).font(BoardInk.sans(22)).lineLimit(1).minimumScaleFactor(0.5)
-                    .foregroundStyle(f.isTrain ? Color(hex: 0x1A1A1A) : (g.map { RatingStyle.ink($0) } ?? BoardInk.navy))
-                    .frame(width: 62, height: 44)
-                    .background(f.isTrain ? AnyShapeStyle(BoardInk.yellow) : (g.map { RatingStyle.fill($0) } ?? AnyShapeStyle(BoardInk.route)), in: RoundedRectangle(cornerRadius: 6))
+                LineBullet(line: f.line, train: f.isTrain, grade: g, height: 44, minWidth: 62, font: 22)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(GoStore.title(f)).font(BoardInk.sans(17)).foregroundStyle(.white).lineLimit(1)
-                    Text("to \(toName)").font(BoardInk.sans(13, .regular)).foregroundStyle(Color.white.opacity(0.9)).lineLimit(1).minimumScaleFactor(0.7)
-                    Text(fromLine).font(BoardInk.sans(11.5, .regular)).foregroundStyle(Color.white.opacity(0.75)).lineLimit(1).minimumScaleFactor(0.7)
+                    Text(GoStore.title(f)).font(BoardInk.sans(17)).foregroundStyle(Paper.ink).lineLimit(1)
+                    Text("to \(toName)").font(BoardInk.sans(13, .regular)).foregroundStyle(Paper.ink.opacity(0.9)).lineLimit(1).minimumScaleFactor(0.7)
+                    Text(fromLine).font(BoardInk.sans(11.5, .regular)).foregroundStyle(Paper.muted).lineLimit(1).minimumScaleFactor(0.7)
                 }
                 Spacer(minLength: 4)
                 VStack(alignment: .trailing, spacing: 2) {
-                    Text(Fmt.hhmm(f.cancelled ? f.scheduledDeparture : f.departure)).font(HWFont.display(28)).foregroundStyle(.white).monospacedDigit()
+                    Text(Fmt.hhmm(f.cancelled ? f.scheduledDeparture : f.departure)).font(HWFont.display(28)).foregroundStyle(Paper.ink).monospacedDigit()
                     TimelineView(.periodic(from: .now, by: 15)) { _ in
                         let m = Int((f.departure.timeIntervalSinceNow / 60).rounded(.down))
-                        Text(m <= 0 ? "now" : "in \(m) min").font(BoardInk.sans(12)).foregroundStyle(m <= 2 ? BoardInk.late : Color.white.opacity(0.85))
+                        Text(m <= 0 ? "now" : "in \(m) min").font(BoardInk.sans(12)).foregroundStyle(m <= 2 ? Paper.late : Paper.muted)
                     }
                 }
             }
             HStack(spacing: 6) {
-                Circle().fill(st.warn ? BoardInk.late : st.ok ? BoardInk.green : Color.white.opacity(0.6)).frame(width: 7, height: 7)
-                Text(st.text).font(BoardInk.sans(12)).foregroundStyle(st.warn ? BoardInk.late : st.ok ? BoardInk.green : Color.white.opacity(0.85)).lineLimit(2)
+                Circle().fill(st.warn ? Paper.late : st.ok ? Paper.ok : Paper.ink.opacity(0.6)).frame(width: 7, height: 7)
+                Text(st.text).font(BoardInk.sans(12)).foregroundStyle(st.warn ? Paper.late : st.ok ? Paper.ok : Paper.ink.opacity(0.85)).lineLimit(2)
                 Spacer(minLength: 4)
                 Button { liveTrack = LiveTrackTarget(tripId: f.tripId, line: f.line, headsign: f.headsign.isEmpty ? Fmt.place(f.toStop) : f.headsign,
                                                      stopName: f.fromStop, time: f.departure, rail: f.isTrain) } label: {
-                    Label("Its whole route", systemImage: "point.topleft.down.to.point.bottomright.curvepath").font(BoardInk.sans(11)).foregroundStyle(.white)
-                        .padding(.horizontal, 10).padding(.vertical, 5).background(Color.white.opacity(0.16), in: Capsule())
+                    Label("Its whole route", systemImage: "point.topleft.down.to.point.bottomright.curvepath").font(BoardInk.sans(11)).foregroundStyle(Paper.navy)
+                        .padding(.horizontal, 10).padding(.vertical, 5).background(Paper.navy.opacity(0.1), in: Capsule())
                 }
                 .buttonStyle(.plain)
+            }
+            Rectangle().fill(Paper.rule).frame(height: 1)
+            kicker("Your trip")
+            TripLine(trip: t, others: go.others, dest: destWord) { r in
+                liveTrack = LiveTrackTarget(tripId: r.tripId, line: r.line, headsign: r.headsign.isEmpty ? Fmt.place(r.toStop) : r.headsign,
+                                            stopName: r.fromStop, time: r.departure, rail: r.isTrain)
             }
         }
         .padding(14)
@@ -627,11 +635,11 @@ struct GoView: View {
             let away = go.here.map { $0.distance(from: CLLocation(latitude: a, longitude: o)) } ?? 9999
             if f.walkBefore == 0 && away < 120 {
                 HStack(spacing: 10) {
-                    Image(systemName: "mappin.and.ellipse").font(.system(size: 18, weight: .bold)).foregroundStyle(BoardInk.yellow)
+                    Image(systemName: "mappin.and.ellipse").font(.system(size: 18, weight: .bold)).foregroundStyle(Paper.navy)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("You’re at the stop").font(BoardInk.sans(15)).foregroundStyle(.white)
+                        Text("You’re at the stop").font(BoardInk.sans(15)).foregroundStyle(Paper.ink)
                         Text("Wait here for the \(GoStore.what(f)): you can see it coming on the map. It notices by itself when you get on.")
-                            .font(BoardInk.sans(12, .regular)).foregroundStyle(Color.white.opacity(0.85)).fixedSize(horizontal: false, vertical: true)
+                            .font(BoardInk.sans(12, .regular)).foregroundStyle(Paper.ink.opacity(0.85)).fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading).padding(14).glass()
@@ -640,9 +648,9 @@ struct GoView: View {
                     TimelineView(.periodic(from: .now, by: 10)) { _ in leaveRing(t) }
                     VStack(alignment: .leading, spacing: 3) {
                         Text(f.walkBefore > 0 ? "\(f.walkBefore) min walk to \(Fmt.place(f.fromStop))" : "Get to \(Fmt.place(f.fromStop))")
-                            .font(BoardInk.sans(15)).foregroundStyle(.white).lineLimit(2).minimumScaleFactor(0.8)
-                        Text(leaveText(t)).font(BoardInk.sans(12)).foregroundStyle(t.start <= Date().addingTimeInterval(60) ? BoardInk.late : BoardInk.green)
-                        Text("Follow the dotted line on the map.").font(BoardInk.sans(11, .regular)).foregroundStyle(Color.white.opacity(0.75))
+                            .font(BoardInk.sans(15)).foregroundStyle(Paper.ink).lineLimit(2).minimumScaleFactor(0.8)
+                        Text(leaveText(t)).font(BoardInk.sans(12)).foregroundStyle(t.start <= Date().addingTimeInterval(60) ? Paper.late : Paper.ok)
+                        Text("Follow the dotted line on the map.").font(BoardInk.sans(11, .regular)).foregroundStyle(Paper.ink.opacity(0.75))
                     }
                     Spacer(minLength: 0)
                     Button { walkTo = target } label: {
@@ -650,7 +658,7 @@ struct GoView: View {
                             Image(systemName: "arrow.triangle.turn.up.right.diamond.fill").font(.system(size: 18, weight: .semibold))
                             Text("Turns").font(BoardInk.sans(10))
                         }
-                        .foregroundStyle(.white).frame(width: 54, height: 54).background(Color.white.opacity(0.16), in: RoundedRectangle(cornerRadius: 12))
+                        .foregroundStyle(Paper.ink).frame(width: 54, height: 54).background(Paper.ink.opacity(0.16), in: RoundedRectangle(cornerRadius: 12))
                     }
                     .buttonStyle(.plain).accessibilityLabel("The walk, turn by turn")
                 }
@@ -670,15 +678,15 @@ struct GoView: View {
         let m = max(0, Int((s / 60).rounded(.down)))
         let fill = 1 - min(1, max(0, s / (15 * 60)))
         return ZStack {
-            Circle().stroke(Color.white.opacity(0.18), lineWidth: 6)
-            Circle().trim(from: 0, to: fill).stroke(s <= 60 ? BoardInk.late : BoardInk.green, style: StrokeStyle(lineWidth: 6, lineCap: .round)).rotationEffect(.degrees(-90))
+            Circle().stroke(Paper.ink.opacity(0.18), lineWidth: 6)
+            Circle().trim(from: 0, to: fill).stroke(s <= 60 ? Paper.late : Paper.ok, style: StrokeStyle(lineWidth: 6, lineCap: .round)).rotationEffect(.degrees(-90))
             VStack(spacing: -2) {
                 if s <= 60 {
-                    Image(systemName: "figure.walk").font(.system(size: 20, weight: .bold)).foregroundStyle(.white)
-                    Text("GO").font(BoardInk.sans(10)).foregroundStyle(.white)
+                    Image(systemName: "figure.walk").font(.system(size: 20, weight: .bold)).foregroundStyle(Paper.ink)
+                    Text("GO").font(BoardInk.sans(10)).foregroundStyle(Paper.ink)
                 } else {
-                    Text("\(m)").font(HWFont.display(24)).foregroundStyle(.white).monospacedDigit()
-                    Text("MIN").font(BoardInk.sans(9)).foregroundStyle(Color.white.opacity(0.8))
+                    Text("\(m)").font(HWFont.display(24)).foregroundStyle(Paper.ink).monospacedDigit()
+                    Text("MIN").font(BoardInk.sans(9)).foregroundStyle(Paper.ink.opacity(0.8))
                 }
             }
         }
@@ -696,7 +704,7 @@ struct GoView: View {
                 let prev = t.rides[i - 1]
                 let ch = Fmt.mins(ride.departure.timeIntervalSince(prev.arrival))
                 Label("\(ch) min to change at \(Fmt.place(prev.toStop))\(ride.walkBefore > 0 ? ", \(ride.walkBefore) min walk" : "")", systemImage: "arrow.triangle.swap")
-                    .font(BoardInk.sans(10.5, .semibold)).foregroundStyle(ch - ride.walkBefore < 2 ? BoardInk.late : Color.white.opacity(0.8))
+                    .font(BoardInk.sans(10.5, .semibold)).foregroundStyle(ch - ride.walkBefore < 2 ? Paper.late : Paper.ink.opacity(0.8))
                     .padding(.top, 4)
                 PlannerRideRow(ride: ride, info: ns.rail(ride), picked: false) {
                     liveTrack = LiveTrackTarget(tripId: ride.tripId, line: ride.line, headsign: ride.headsign.isEmpty ? Fmt.place(ride.toStop) : ride.headsign,
@@ -704,7 +712,7 @@ struct GoView: View {
                 }
             }
             if t.walkAfter > 0 {
-                Label("\(t.walkAfter) min walk to \(destWord)", systemImage: "figure.walk").font(BoardInk.sans(11, .semibold)).foregroundStyle(Color.white.opacity(0.8))
+                Label("\(t.walkAfter) min walk to \(destWord)", systemImage: "figure.walk").font(BoardInk.sans(11, .semibold)).foregroundStyle(Paper.ink.opacity(0.8))
             }
         }
         .padding(14)
@@ -716,26 +724,26 @@ struct GoView: View {
     private func watchingCard(_ t: DoorTrip) -> some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 8) {
-                Image(systemName: go.watching ? "bell.and.waves.left.and.right.fill" : "bell.slash.fill").foregroundStyle(go.watching ? BoardInk.yellow : Color.white.opacity(0.6))
+                Image(systemName: go.watching ? "bell.and.waves.left.and.right.fill" : "bell.slash.fill").foregroundStyle(go.watching ? Paper.late : Paper.ink.opacity(0.6))
                     .symbolEffect(.pulse, isActive: go.watching)
-                Text(go.watching ? "Watching the \(GoStore.what(t.first)) for you" : "Not watching any more").font(BoardInk.sans(14)).foregroundStyle(.white)
+                Text(go.watching ? "Watching the \(GoStore.what(t.first)) for you" : "Not watching any more").font(BoardInk.sans(14)).foregroundStyle(Paper.ink)
             }
             if let v = go.seen {
                 Label("Looks like you’re on the \(v.title)… checking.", systemImage: v.isTrain ? "tram.fill" : "bus.fill")
-                    .font(BoardInk.sans(12)).foregroundStyle(BoardInk.green)
+                    .font(BoardInk.sans(12)).foregroundStyle(Paper.ok)
             }
             if go.watching {
                 Text("You get a notification if it runs late or leaves early, or if something faster comes up: then it watches that one instead. Once you’re on board, your trip starts by itself.")
-                    .font(BoardInk.sans(11.5, .regular)).foregroundStyle(Color.white.opacity(0.85)).fixedSize(horizontal: false, vertical: true)
+                    .font(BoardInk.sans(11.5, .regular)).foregroundStyle(Paper.ink.opacity(0.85)).fixedSize(horizontal: false, vertical: true)
             }
             ForEach(go.notes) { n in
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(Fmt.hhmm(n.at)).font(BoardInk.sans(11)).foregroundStyle(BoardInk.yellow).monospacedDigit()
-                    Text(n.text).font(BoardInk.sans(11.5, .regular)).foregroundStyle(.white).fixedSize(horizontal: false, vertical: true)
+                    Text(Fmt.hhmm(n.at)).font(BoardInk.sans(11)).foregroundStyle(Paper.navy).monospacedDigit()
+                    Text(n.text).font(BoardInk.sans(11.5, .regular)).foregroundStyle(Paper.ink).fixedSize(horizontal: false, vertical: true)
                 }
             }
             if let u = go.updated {
-                Text("Checked at \(Fmt.hhmm(u)). It stops when you leave this screen.").font(BoardInk.sans(10, .regular)).foregroundStyle(Color.white.opacity(0.6))
+                Text("Checked at \(Fmt.hhmm(u)). It stops when you leave this screen.").font(BoardInk.sans(10, .regular)).foregroundStyle(Paper.ink.opacity(0.6))
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -755,7 +763,7 @@ struct GoView: View {
                 Text("TRIP").frame(width: 64, alignment: .trailing)
                 Text("THERE").frame(width: 62, alignment: .trailing)
             }
-            .font(BoardInk.sans(9)).tracking(1).foregroundStyle(Color.white.opacity(0.55)).padding(.bottom, 2)
+            .font(BoardInk.sans(9)).tracking(1).foregroundStyle(Paper.ink.opacity(0.55)).padding(.bottom, 2)
             compareRow(best, best)
             ForEach(go.others) { o in compareRow(o, best) }
         }
@@ -769,31 +777,29 @@ struct GoView: View {
         let changes = o.rides.count - 1
         return VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
-                Text(Fmt.hhmm(o.start)).font(BoardInk.sans(14)).foregroundStyle(.white).monospacedDigit().frame(width: 50, alignment: .leading)
+                Text(Fmt.hhmm(o.start)).font(BoardInk.sans(14)).foregroundStyle(Paper.ink).monospacedDigit().frame(width: 50, alignment: .leading)
                 HStack(spacing: 3) {
                     ForEach(Array(o.rides.enumerated()), id: \.offset) { _, r in
-                        Text(r.line).font(BoardInk.sans(10.5)).lineLimit(1).foregroundStyle(r.isTrain ? Color(hex: 0x1A1A1A) : BoardInk.navy)
-                            .padding(.horizontal, 5).frame(height: 17)
-                            .background(r.isTrain ? BoardInk.yellow : BoardInk.route, in: RoundedRectangle(cornerRadius: 3))
+                        LineBullet(line: r.line, train: r.isTrain, height: 18, minWidth: 26, font: 10.5)
                     }
                 }
                 Spacer(minLength: 4)
-                Text(Fmt.rideText(o.end.timeIntervalSince(o.start) / 60)).font(BoardInk.sans(12, .semibold)).foregroundStyle(Color.white.opacity(0.9))
+                Text(Fmt.rideText(o.end.timeIntervalSince(o.start) / 60)).font(BoardInk.sans(12, .semibold)).foregroundStyle(Paper.ink.opacity(0.9))
                     .lineLimit(1).minimumScaleFactor(0.7).frame(width: 64, alignment: .trailing)
-                Text(Fmt.hhmm(o.end)).font(BoardInk.sans(14)).foregroundStyle(.white).monospacedDigit().frame(width: 62, alignment: .trailing)
+                Text(Fmt.hhmm(o.end)).font(BoardInk.sans(14)).foregroundStyle(Paper.ink).monospacedDigit().frame(width: 62, alignment: .trailing)
             }
             HStack(spacing: 6) {
                 Text("\(GoStore.what(o.first)) \(Fmt.hhmm(o.first.departure)) from \(Fmt.place(o.first.fromStop))\(changes > 0 ? " · \(changes) change\(changes > 1 ? "s" : "")" : "")")
-                    .font(BoardInk.sans(10.5, .regular)).foregroundStyle(Color.white.opacity(0.7)).lineLimit(1).minimumScaleFactor(0.7)
+                    .font(BoardInk.sans(10.5, .regular)).foregroundStyle(Paper.ink.opacity(0.7)).lineLimit(1).minimumScaleFactor(0.7)
                 Spacer(minLength: 4)
                 Text(fastest ? "fastest" : later == 0 ? "same time" : "+\(later) min")
-                    .font(BoardInk.sans(11)).foregroundStyle(fastest ? BoardInk.navy : later == 0 ? .white : Color(hex: 0x2A1A00))
+                    .font(BoardInk.sans(11)).foregroundStyle(!fastest && later == 0 ? Paper.ink : .white)
                     .padding(.horizontal, 7).padding(.vertical, 2)
-                    .background(fastest ? BoardInk.green : later == 0 ? Color.white.opacity(0.2) : BoardInk.late, in: Capsule())
+                    .background(fastest ? Paper.ok : later == 0 ? Paper.ink.opacity(0.2) : Paper.late, in: Capsule())
             }
         }
         .padding(.vertical, 8)
-        .overlay(alignment: .bottom) { Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1) }
+        .overlay(alignment: .bottom) { Rectangle().fill(Paper.ink.opacity(0.12)).frame(height: 1) }
         .accessibilityElement(children: .combine)
     }
 
@@ -810,8 +816,8 @@ struct GoView: View {
                     Text("I’M ON IT · START NOW").font(HWFont.display(14)).tracking(0.8)
                 }
                 .foregroundStyle(.white).frame(maxWidth: .infinity).padding(.vertical, 13)
-                .background(Color(hex: 0x2F9E5B).opacity(0.92), in: RoundedRectangle(cornerRadius: 14))
-                .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.2), lineWidth: 1))
+                .background(Paper.green.opacity(0.92), in: RoundedRectangle(cornerRadius: 14))
+                .overlay(RoundedRectangle(cornerRadius: 14).stroke(Paper.ink.opacity(0.2), lineWidth: 1))
             }
             .buttonStyle(.plain)
             .padding(.horizontal, 12).padding(.bottom, 6)
@@ -821,11 +827,12 @@ struct GoView: View {
 }
 
 extension View {
-    /// The see-through card of the Go screen: frosted glass over the map.
-    func glass(_ radius: CGFloat = 18) -> some View {
-        background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: radius))
-            .background(Color.black.opacity(0.18), in: RoundedRectangle(cornerRadius: radius))
-            .overlay(RoundedRectangle(cornerRadius: radius).stroke(Color.white.opacity(0.16), lineWidth: 1))
+    /// A card on the Go screen: paper over the map, with its edge and a shadow.
+    func glass(_ radius: CGFloat = 4) -> some View {
+        background(PaperFill(), in: RoundedRectangle(cornerRadius: radius))
+            .overlay(RoundedRectangle(cornerRadius: radius).stroke(Paper.edge, lineWidth: 1))
+            .compositingGroup()
+            .shadow(color: .black.opacity(0.3), radius: 8, y: 5)
     }
 }
 
@@ -853,6 +860,14 @@ struct GoMap: View {
             Map(position: $camera, interactionModes: []) { content(tl.date) }
                 .mapStyle(.standard(emphasis: .muted, pointsOfInterest: .excludingAll))
         }
+        // a wash of the map's paper over it, and its wear
+        .overlay {
+            ZStack {
+                Color(hex: 0xEADCBB).opacity(0.22)
+                if let g = Paper.grime { Image(uiImage: g).resizable().opacity(0.3) }
+            }
+            .allowsHitTesting(false)
+        }
         .background { GeometryReader { g in Color.clear.onAppear { size = g.size }.onChange(of: g.size) { _, s in size = s } } }
         .onAppear { hereNow = here }
         .onChange(of: here?.timestamp) { _, _ in hereNow = here }
@@ -869,7 +884,7 @@ struct GoMap: View {
     @MapContentBuilder private func content(_ now: Date) -> some MapContent {
         UserAnnotation()
         if let walk {
-            MapPolyline(walk.polyline).stroke(Color.white, style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round, dash: [0.5, 11]))
+            MapPolyline(walk.polyline).stroke(Paper.ink, style: StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round, dash: [0.5, 10]))
         }
         if let t = trip, let m = mine, let r = ride {
             let w = t.position(now)
@@ -878,11 +893,11 @@ struct GoMap: View {
             let rest = t.road(from: me, to: t.metres(ofStop: t.stops.count - 1))
             if rest.count > 1 {
                 MapPolyline(coordinates: rest)
-                    .stroke((r.isTrain ? BoardInk.yellow : BoardInk.route).opacity(0.35), style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
+                    .stroke(Paper.line(r.line, train: r.isTrain).opacity(0.35), style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
             }
             if w.metres < me - 5 {
                 MapPolyline(coordinates: t.road(from: w.metres, to: me))
-                    .stroke(r.isTrain ? BoardInk.yellow : BoardInk.route, style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
+                    .stroke(Paper.line(r.line, train: r.isTrain), style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
             }
             if !w.done && w.metres <= me + 30 {
                 Annotation("", coordinate: t.coordinate(atMetres: w.metres), anchor: .center) {
@@ -890,9 +905,9 @@ struct GoMap: View {
                         Image(systemName: r.isTrain ? "tram.fill" : "bus.fill").font(.system(size: 12, weight: .bold))
                         Text(r.line).font(BoardInk.sans(13))
                     }
-                    .foregroundStyle(r.isTrain ? Color(hex: 0x1A1A1A) : BoardInk.navy)
+                    .foregroundStyle(.white)
                     .padding(.horizontal, 8).padding(.vertical, 5)
-                    .background(r.isTrain ? BoardInk.yellow : BoardInk.route, in: RoundedRectangle(cornerRadius: 7))
+                    .background(Paper.line(r.line, train: r.isTrain), in: RoundedRectangle(cornerRadius: 7))
                     .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.white, lineWidth: 2))
                     .shadow(color: .black.opacity(0.45), radius: 4, y: 2)
                 }
@@ -905,10 +920,10 @@ struct GoMap: View {
                         Image(systemName: r.isTrain ? "tram.fill" : "bus.fill").font(.system(size: 11, weight: .bold))
                         Text("\(r.line) · \(Fmt.hhmm(r.departure))").font(BoardInk.sans(12))
                     }
-                    .foregroundStyle(BoardInk.navy).padding(.horizontal, 8).padding(.vertical, 5)
-                    .background(Color.white, in: RoundedRectangle(cornerRadius: 7))
-                    Image(systemName: "triangle.fill").font(.system(size: 9)).foregroundStyle(.white).rotationEffect(.degrees(180)).offset(y: -2)
-                    Circle().fill(BoardInk.yellow).frame(width: 12, height: 12).overlay(Circle().stroke(BoardInk.navy, lineWidth: 2))
+                    .foregroundStyle(.white).padding(.horizontal, 8).padding(.vertical, 5)
+                    .background(Paper.navy, in: RoundedRectangle(cornerRadius: 4))
+                    Image(systemName: "triangle.fill").font(.system(size: 9)).foregroundStyle(Paper.navy).rotationEffect(.degrees(180)).offset(y: -2)
+                    Circle().fill(Color.white).frame(width: 14, height: 14).overlay(Circle().stroke(Paper.ink, lineWidth: 3.5))
                 }
                 .shadow(color: .black.opacity(0.4), radius: 4, y: 2)
             }
@@ -978,5 +993,149 @@ struct GoMap: View {
         let scale = h / winH                                       // map points per screen point
         let rect = MKMapRect(x: box.midX - w / 2, y: box.midY - h / 2 - top * scale, width: w, height: size.height * scale)
         if animated { withAnimation(.easeInOut(duration: 1.2)) { camera = .rect(rect) } } else { camera = .rect(rect) }
+    }
+}
+
+// MARK: the trip as a metro line
+
+/// Your trip drawn as a metro line, top to bottom: you, the walk (dotted), each ride in its line's colour with its bullet,
+/// a white station at every stop where you get on or change, and your destination in yellow. Another bus or train that
+/// leaves at another time but still gets you onto the same train after it branches off beside the line and joins it there.
+struct TripLine: View {
+    let trip: DoorTrip
+    let others: [DoorTrip]
+    let dest: String
+    var tap: (Ride) -> Void = { _ in }
+
+    private struct Stop { let name: String; let time: Date; let sub: String; var end = false }
+    private struct Seg { let ride: Ride?; let height: CGFloat }
+    private struct Branch { let from: Int; let to: Int; let color: Color; let label: String }
+
+    private let lineX: CGFloat = 34, stopH: CGFloat = 46
+
+    /// The stations and the pieces of line between them (seg i joins stop i and stop i + 1).
+    private var layout: (stops: [Stop], segs: [Seg], boardAt: [String: Int]) {
+        var stops: [Stop] = [], segs: [Seg] = [], boardAt: [String: Int] = [:]
+        let f = trip.first
+        if f.walkBefore > 0 {
+            stops.append(Stop(name: "You", time: trip.start, sub: "leave by · \(f.walkBefore) min walk"))
+            segs.append(Seg(ride: nil, height: 26))
+        }
+        for (i, r) in trip.rides.enumerated() {
+            let what = r.isTrain ? (r.name.isEmpty ? "Train" : r.name) : "Bus \(r.line)"
+            let plat = (r.platform ?? "").isEmpty ? "" : " · platform \(r.platform!)"
+            var sub = "\(what)\(plat)"
+            if i > 0 {
+                let p = trip.rides[i - 1]
+                let ch = Fmt.mins(r.departure.timeIntervalSince(p.arrival))
+                sub = "arrive \(Fmt.hhmm(p.arrival)) · \(ch) min to change\(r.walkBefore > 0 ? ", \(r.walkBefore) min walk" : "") · \(what)\(plat)"
+            }
+            boardAt[r.tripId] = stops.count
+            stops.append(Stop(name: Fmt.place(r.fromStop), time: r.departure, sub: sub))
+            segs.append(Seg(ride: r, height: 62))
+        }
+        if trip.walkAfter > 0 {
+            stops.append(Stop(name: Fmt.place(trip.last.toStop), time: trip.last.arrival, sub: "then \(trip.walkAfter) min walk"))
+            segs.append(Seg(ride: nil, height: 24))
+        }
+        stops.append(Stop(name: dest, time: trip.end, sub: "you’re there", end: true))
+        return (stops, segs, boardAt)
+    }
+
+    /// Other ways that join this trip on one of its later rides: they branch off at the top and join at that station.
+    private func branches(_ boardAt: [String: Int]) -> [Branch] {
+        var out: [Branch] = []
+        for o in others where o.first.tripId != trip.first.tripId {
+            guard let k = o.rides.indices.dropFirst().first(where: { boardAt[o.rides[$0].tripId] != nil && boardAt[o.rides[$0].tripId]! > 0 }),
+                  let join = boardAt[o.rides[k].tripId] else { continue }
+            let firstPart = o.rides[..<k]
+            let lines = firstPart.map { $0.isTrain ? ($0.name.isEmpty ? $0.line : $0.name) : $0.line }.joined(separator: " + ")
+            let shift = Int((o.start.timeIntervalSince(trip.start) / 60).rounded())
+            let same = o.rides[k]
+            let onto = same.isTrain ? (same.name.isEmpty ? "train" : same.name) : "bus \(same.line)"
+            let when = shift == 0 ? "leave at the same time" : shift > 0 ? "leave \(shift) min later" : "leave \(-shift) min earlier"
+            out.append(Branch(from: 0, to: join, color: Paper.line(o.first.line, train: o.first.isTrain),
+                              label: "or \(lines) at \(Fmt.hhmm(o.first.departure)) · same \(onto) · \(when)"))
+            if out.count == 2 { break }
+        }
+        return out
+    }
+
+    var body: some View {
+        let l = layout
+        let bs = branches(l.boardAt)
+        // the centre of each station, top to bottom
+        var ys: [CGFloat] = [stopH / 2]
+        for (i, s) in l.segs.enumerated() where i < l.stops.count - 1 { ys.append(ys[i] + stopH / 2 + s.height + stopH / 2) }
+        let height = (ys.last ?? 0) + stopH / 2
+        return ZStack(alignment: .topLeading) {
+            Canvas { ctx, size in
+                // the branches first, beside the line on the left, fainter
+                for (n, b) in bs.enumerated() where b.to < ys.count {
+                    let x = lineX - 20 - CGFloat(n) * 9, y0 = ys[b.from], y1 = ys[b.to]
+                    var p = Path()
+                    p.move(to: CGPoint(x: lineX, y: y0))
+                    p.addQuadCurve(to: CGPoint(x: x, y: y0 + 26), control: CGPoint(x: x, y: y0))
+                    p.addLine(to: CGPoint(x: x, y: y1 - 26))
+                    p.addQuadCurve(to: CGPoint(x: lineX, y: y1), control: CGPoint(x: x, y: y1))
+                    ctx.stroke(p, with: .color(b.color.opacity(0.55)), style: StrokeStyle(lineWidth: 5, lineCap: .round))
+                }
+                // the line itself
+                for (i, s) in l.segs.enumerated() where i + 1 < ys.count {
+                    var p = Path(); p.move(to: CGPoint(x: lineX, y: ys[i])); p.addLine(to: CGPoint(x: lineX, y: ys[i + 1]))
+                    if let r = s.ride {
+                        ctx.stroke(p, with: .color(Paper.line(r.line, train: r.isTrain)), style: StrokeStyle(lineWidth: 9, lineCap: .round))
+                    } else {
+                        ctx.stroke(p, with: .color(Paper.soft), style: StrokeStyle(lineWidth: 6, lineCap: .round, dash: [0.5, 9]))
+                    }
+                }
+                // the stations
+                for (i, s) in l.stops.enumerated() where i < ys.count {
+                    let r: CGFloat = s.end ? 11 : 9
+                    let c = CGRect(x: lineX - r, y: ys[i] - r, width: 2 * r, height: 2 * r)
+                    ctx.fill(Path(ellipseIn: c), with: .color(s.end ? Paper.yellow : .white))
+                    ctx.stroke(Path(ellipseIn: c), with: .color(Paper.ink), lineWidth: 4)
+                }
+            }
+            .frame(height: height)
+            // names, times and what you take
+            ForEach(Array(l.stops.enumerated()), id: \.offset) { i, s in
+                if i < ys.count {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(s.name).font(.system(size: s.end ? 17 : 15.5, weight: .heavy)).foregroundStyle(Paper.ink).lineLimit(1).minimumScaleFactor(0.7)
+                            Text(s.sub).font(.system(size: 11)).foregroundStyle(Paper.muted).lineLimit(2).minimumScaleFactor(0.8)
+                        }
+                        Spacer(minLength: 4)
+                        Text(Fmt.hhmm(s.time)).font(.system(size: s.end ? 17 : 15.5, weight: .heavy)).foregroundStyle(Paper.ink).monospacedDigit()
+                    }
+                    .frame(height: stopH, alignment: .center)
+                    .padding(.leading, lineX + 22)
+                    .offset(y: ys[i] - stopH / 2)
+                }
+            }
+            // each ride's bullet on its piece of line; tap it for where that bus or train is
+            ForEach(Array(l.segs.enumerated()), id: \.offset) { i, s in
+                if let r = s.ride, i + 1 < ys.count {
+                    Button { tap(r) } label: { LineBullet(line: r.line, train: r.isTrain, height: 20, minWidth: 36, font: 11) }
+                        .buttonStyle(.plain)
+                        .position(x: lineX, y: (ys[i] + ys[i + 1]) / 2)
+                }
+            }
+            // what the branches mean, in the space beside the line where they run
+            ForEach(Array(bs.enumerated()), id: \.offset) { n, b in
+                if b.to < ys.count, b.to >= 1 {
+                    let mid = (ys[b.to - 1] + ys[b.to]) / 2 + CGFloat(n) * 16
+                    Text(b.label).font(.system(size: 10.5, weight: .bold)).foregroundStyle(b.color)
+                        .lineLimit(1).minimumScaleFactor(0.6)
+                        .padding(.leading, lineX + 26).padding(.trailing, 4)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .offset(y: mid - 8)
+                }
+            }
+        }
+        .frame(height: height, alignment: .top)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(l.stops.map { "\($0.name) \(Fmt.hhmm($0.time))" }.joined(separator: ", then "))
     }
 }

@@ -70,7 +70,7 @@ struct LiveAllSheet: View {
                 }
             }
         }
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(.light)
     }
 
     private var regionKey: String {
@@ -91,10 +91,10 @@ struct LiveAllSheet: View {
             Image(systemName: v.isTrain ? "tram.fill" : "bus.fill").font(.system(size: 9, weight: .bold))
             Text(v.line).font(BoardInk.sans(11)).lineLimit(1)
         }
-        .foregroundStyle(v.isTrain ? Color(hex: 0x1A1A1A) : BoardInk.navy)
+        .foregroundStyle(.white)
         .padding(.horizontal, 6).padding(.vertical, 3)
-        .background(v.isTrain ? BoardInk.yellow : BoardInk.route, in: RoundedRectangle(cornerRadius: 5))
-        .overlay(RoundedRectangle(cornerRadius: 5).stroke(picked == v.id ? Color.white : Color.white.opacity(0.7), lineWidth: picked == v.id ? 2.5 : 1))
+        .background(Paper.line(v.line, train: v.isTrain), in: RoundedRectangle(cornerRadius: 5))
+        .overlay(RoundedRectangle(cornerRadius: 5).stroke(picked == v.id ? Paper.ink : Color.white, lineWidth: picked == v.id ? 2.5 : 1.5))
         .shadow(color: .black.opacity(0.35), radius: 3, y: 1)
     }
 
@@ -102,25 +102,24 @@ struct LiveAllSheet: View {
         VStack(alignment: .leading, spacing: 5) {
             if let p = picked, let v = vs.first(where: { $0.id == p }) {
                 HStack(spacing: 8) {
-                    Text(v.line).font(BoardInk.sans(14)).foregroundStyle(v.isTrain ? Color(hex: 0x1A1A1A) : BoardInk.navy)
-                        .padding(.horizontal, 8).padding(.vertical, 3).background(v.isTrain ? BoardInk.yellow : BoardInk.route, in: RoundedRectangle(cornerRadius: 3))
-                    Text(v.isTrain ? (v.line == "IC" ? "Intercity" : v.line == "SPR" ? "Sprinter" : "Train") : "Bus").font(BoardInk.sans(15)).foregroundStyle(.white)
+                    LineBullet(line: v.line, train: v.isTrain, height: 24, minWidth: 38, font: 14)
+                    Text(v.isTrain ? (v.line == "IC" ? "Intercity" : v.line == "SPR" ? "Sprinter" : "Train") : "Bus").font(BoardInk.sans(15)).foregroundStyle(Paper.ink)
                     Spacer()
-                    Button { picked = nil } label: { Image(systemName: "xmark").font(.system(size: 12, weight: .bold)).foregroundStyle(.white) }.buttonStyle(.plain)
+                    Button { picked = nil } label: { Image(systemName: "xmark").font(.system(size: 12, weight: .bold)).foregroundStyle(Paper.ink) }.buttonStyle(.plain)
                 }
-                Text("\(Fmt.place(v.from)) → \(Fmt.place(v.to))").font(BoardInk.sans(13, .regular)).foregroundStyle(.white)
-                Text("At \(Fmt.place(v.to)) \(Fmt.hhmm(v.arrival))").font(BoardInk.sans(12, .regular)).foregroundStyle(Color.white.opacity(0.8))
+                Text("\(Fmt.place(v.from)) → \(Fmt.place(v.to))").font(BoardInk.sans(13, .regular)).foregroundStyle(Paper.ink)
+                Text("At \(Fmt.place(v.to)) \(Fmt.hhmm(v.arrival))").font(BoardInk.sans(12, .regular)).foregroundStyle(Paper.ink.opacity(0.8))
             } else {
                 let buses = vs.filter { !$0.isTrain }.count, trains = vs.count - buses
                 Text(loading ? "Finding everything that’s moving…" : "\(buses) bus\(buses == 1 ? "" : "es") and \(trains) train\(trains == 1 ? "" : "s") moving here")
-                    .font(BoardInk.sans(14)).foregroundStyle(.white)
+                    .font(BoardInk.sans(14)).foregroundStyle(Paper.ink)
                 Text("Live positions, worked out from their live times. Tap one to see where it’s going; move the map to look elsewhere.")
-                    .font(BoardInk.sans(11, .regular)).foregroundStyle(Color.white.opacity(0.75)).fixedSize(horizontal: false, vertical: true)
+                    .font(BoardInk.sans(11, .regular)).foregroundStyle(Paper.ink.opacity(0.75)).fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(LinearGradient(colors: [BoardInk.blueTop, BoardInk.blueBottom], startPoint: .top, endPoint: .bottom).opacity(0.94), in: RoundedRectangle(cornerRadius: 10))
+        .background(PaperFill().opacity(0.97), in: RoundedRectangle(cornerRadius: 10)).overlay(RoundedRectangle(cornerRadius: 10).stroke(Paper.edge, lineWidth: 1))
         .padding(10)
     }
 }

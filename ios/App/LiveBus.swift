@@ -113,19 +113,19 @@ struct LiveBusSheet: View {
                     info(tl.date)
                 }
             }
-            .background(LinearGradient(colors: [BoardInk.blueTop, BoardInk.blueBottom], startPoint: .top, endPoint: .bottom).ignoresSafeArea())
+            .background(PaperFill().ignoresSafeArea())
             .navigationTitle("\(target.rail ? "" : "Bus ")\(target.line) live")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
             .task { await run() }
         }
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(.light)
     }
 
     @MapContentBuilder private func content(_ now: Date) -> some MapContent {
         UserAnnotation()
         if let trip {
-            MapPolyline(coordinates: trip.path).stroke(BoardInk.route.opacity(0.9), style: StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round))
+            MapPolyline(coordinates: trip.path).stroke(Paper.line(target.line, train: target.rail).opacity(0.9), style: StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round))
             ForEach(Array(trip.stops.enumerated()), id: \.offset) { i, s in
                 Annotation(i == mine ? "Your stop" : "", coordinate: s.coordinate, anchor: .center) {
                     Circle().fill(i == mine ? BoardInk.yellow : Color.white)
@@ -138,9 +138,9 @@ struct LiveBusSheet: View {
                     Image(systemName: target.rail ? "tram.fill" : "bus.fill").font(.system(size: 12, weight: .bold))
                     Text(target.line).font(BoardInk.sans(13))
                 }
-                .foregroundStyle(target.rail ? Color(hex: 0x1A1A1A) : BoardInk.navy)
+                .foregroundStyle(.white)
                 .padding(.horizontal, 8).padding(.vertical, 5)
-                .background(target.rail ? BoardInk.yellow : BoardInk.route, in: RoundedRectangle(cornerRadius: 6))
+                .background(Paper.line(target.line, train: target.rail), in: RoundedRectangle(cornerRadius: 6))
                 .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.white, lineWidth: 2))
                 .shadow(color: .black.opacity(0.4), radius: 4, y: 2)
             }
@@ -156,45 +156,44 @@ struct LiveBusSheet: View {
     @ViewBuilder private func info(_ now: Date) -> some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 8) {
-                Text(target.line).font(BoardInk.sans(14)).foregroundStyle(target.rail ? Color(hex: 0x1A1A1A) : BoardInk.navy)
-                    .padding(.horizontal, 8).padding(.vertical, 3).background(target.rail ? BoardInk.yellow : BoardInk.route, in: RoundedRectangle(cornerRadius: 3))
-                Text("to \(Fmt.place(target.headsign))").font(BoardInk.sans(17)).foregroundStyle(.white).lineLimit(1).minimumScaleFactor(0.7)
+                LineBullet(line: target.line, train: target.rail, height: 24, minWidth: 38, font: 14)
+                Text("to \(Fmt.place(target.headsign))").font(BoardInk.sans(17)).foregroundStyle(Paper.ink).lineLimit(1).minimumScaleFactor(0.7)
             }
             if let trip {
                 let w = trip.position(now)
-                Text(status(trip, w, now)).font(BoardInk.sans(15)).foregroundStyle(.white).fixedSize(horizontal: false, vertical: true)
+                Text(status(trip, w, now)).font(BoardInk.sans(15)).foregroundStyle(Paper.ink).fixedSize(horizontal: false, vertical: true)
                 if let m = mine, let a = trip.arrival(m), w.metres <= trip.metres(ofStop: m) + 20, !w.done {
                     let mins = Int((a.timeIntervalSince(now) / 60).rounded())
                     let late = trip.stops[m].scheduled.map { Int((a.timeIntervalSince($0) / 60).rounded()) } ?? 0
                     Text("At \(Fmt.place(trip.stops[m].name)) \(Fmt.hhmm(a))\(mins > 0 ? " · in \(mins) min" : "")\(late >= 1 ? " · \(late) min late" : late <= -1 ? " · \(-late) min early" : " · on time")")
-                        .font(BoardInk.sans(13)).foregroundStyle(late >= 1 ? BoardInk.late : BoardInk.green)
+                        .font(BoardInk.sans(13)).foregroundStyle(late >= 1 ? Paper.late : Paper.ok)
                 }
                 if w.started, !w.done, !w.atStop {
                     Text("Next stop: \(Fmt.place(trip.stops[w.next].name))\(trip.arrival(w.next).map { " · \(Fmt.hhmm($0))" } ?? "")")
-                        .font(BoardInk.sans(12, .regular)).foregroundStyle(Color.white.opacity(0.85))
+                        .font(BoardInk.sans(12, .regular)).foregroundStyle(Paper.ink.opacity(0.85))
                 }
                 Text(trip.live ? "Live times\(updated.map { ", updated \(Fmt.hhmm($0))" } ?? ""). Its position is worked out from them." : "No live times for this one: its position follows the timetable.")
-                    .font(BoardInk.sans(10, .regular)).foregroundStyle(Color.white.opacity(0.65))
+                    .font(BoardInk.sans(10, .regular)).foregroundStyle(Paper.ink.opacity(0.65))
                 HStack(spacing: 8) {
                     Button { follow.toggle(); if !follow { fit(trip, now) } } label: {
                         Label(follow ? "Following it" : "Follow it", systemImage: follow ? "location.fill" : "location")
                             .font(BoardInk.sans(13)).foregroundStyle(follow ? BoardInk.navy : Color.white)
                             .frame(maxWidth: .infinity).padding(.vertical, 9)
-                            .background(follow ? Color.white : Color.white.opacity(0.14), in: RoundedRectangle(cornerRadius: 6))
+                            .background(follow ? Color.white : Paper.ink.opacity(0.14), in: RoundedRectangle(cornerRadius: 6))
                     }
                     .buttonStyle(.plain)
                     Button { follow = false; fit(trip, now) } label: {
                         Label("It and your stop", systemImage: "arrow.up.left.and.arrow.down.right")
-                            .font(BoardInk.sans(13)).foregroundStyle(.white)
+                            .font(BoardInk.sans(13)).foregroundStyle(Paper.ink)
                             .frame(maxWidth: .infinity).padding(.vertical, 9)
-                            .background(Color.white.opacity(0.14), in: RoundedRectangle(cornerRadius: 6))
+                            .background(Paper.ink.opacity(0.14), in: RoundedRectangle(cornerRadius: 6))
                     }
                     .buttonStyle(.plain)
                 }
             } else if failed {
-                Text("Couldn’t find where this one is right now.").font(BoardInk.sans(13, .regular)).foregroundStyle(Color.white.opacity(0.85))
+                Text("Couldn’t find where this one is right now.").font(BoardInk.sans(13, .regular)).foregroundStyle(Paper.ink.opacity(0.85))
             } else {
-                HStack(spacing: 8) { ProgressView(); Text("Finding it…").font(BoardInk.sans(13, .regular)).foregroundStyle(Color.white.opacity(0.85)) }
+                HStack(spacing: 8) { ProgressView(); Text("Finding it…").font(BoardInk.sans(13, .regular)).foregroundStyle(Paper.ink.opacity(0.85)) }
             }
         }
         .padding(14)

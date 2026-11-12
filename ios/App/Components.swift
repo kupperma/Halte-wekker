@@ -20,14 +20,9 @@ struct BrassFrame: ViewModifier {
     func body(content: Content) -> some View {
         content
             .padding(pad)
-            // a panel like the station's planner screen: deep blue, a thin light edge (it was brass and engraved paper)
-            .background(
-                LinearGradient(colors: [Color(hex: 0x163F9E), Color(hex: 0x0C2C7A)], startPoint: .top, endPoint: .bottom)
-                    .opacity(seeThrough ? 0.78 : 1)
-            )
-            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.white.opacity(0.16), lineWidth: 1).allowsHitTesting(false))
-            .clipShape(RoundedRectangle(cornerRadius: 6))
-            .shadow(color: .black.opacity(0.45), radius: 12, y: 8)
+            // a white box on the paper, with the paper's thin edge (it was brass, then the planner's blue)
+            .background(Paper.card.opacity(seeThrough ? 0.92 : 1), in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Paper.edge, lineWidth: 1.2).allowsHitTesting(false))
     }
 }
 
@@ -286,7 +281,7 @@ struct BandButton: View {
             // the green button of the planner
             Text(title.uppercased()).font(HWFont.display(15)).tracking(0.8).foregroundStyle(.white)
                 .frame(maxWidth: .infinity).padding(.vertical, 14)
-                .background(Color(hex: 0x2F9E5B), in: RoundedRectangle(cornerRadius: 6))
+                .background(Paper.green, in: RoundedRectangle(cornerRadius: 6))
         }
         .buttonStyle(.plain)
     }

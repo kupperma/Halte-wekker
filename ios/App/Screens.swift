@@ -52,7 +52,7 @@ struct ChangeBar: View {
                     .padding(.horizontal, 10).padding(.vertical, 6).background(Color.white, in: Capsule())
             }
             .padding(.horizontal, 14).padding(.vertical, 10)
-            .background(Color(hex: 0x2F9E5B), in: RoundedRectangle(cornerRadius: 10))
+            .background(Paper.green, in: RoundedRectangle(cornerRadius: 10))
             .shadow(color: .black.opacity(0.4), radius: 8, y: 4)
             .padding(.horizontal, 12).padding(.bottom, 4)
         }
@@ -119,6 +119,8 @@ struct HomeView: View {
         .background {
             HomeStage(home: home, stage: stage, moveToken: moveToken) {
                 MetroMapMenu(home: home, fastest: fastestSub, lines: linesSub, planned: plannedSub, via: live.next.first?.via,
+                             custom: live.custom?.short, trip: live.custom == nil ? nil : (live.next[safe: live.pick] ?? live.next.first),
+                             others: Array(live.next.prefix(3)),
                              open: { go($0) }, toggle: { toggleDirection() }, settings: { settings = true })
             } boards: { led, plan in
                 wallBoards(led, plan)
@@ -179,7 +181,7 @@ struct HomeView: View {
         moveToken += 1; loopToken += 1
         withAnimation(.easeOut(duration: 0.15)) { stage = .leaving }
         Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 1_600_000_000)        // the walk takes 1.6 s
+            try? await Task.sleep(nanoseconds: 280_000_000)          // the map comes down, the sheets go up
             guard stage == .leaving else { return }
             withAnimation(.spring(response: 0.45, dampingFraction: 0.9)) { stage = .station }
             if s == .planned && planner.trip == nil {
@@ -200,7 +202,7 @@ struct HomeView: View {
         moveToken += 1
         withAnimation(.easeIn(duration: 0.2)) { stage = .returning }
         Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 1_600_000_000)
+            try? await Task.sleep(nanoseconds: 250_000_000)
             guard stage == .returning else { return }
             withAnimation(.easeOut(duration: 0.3)) { stage = .map }
         }
@@ -246,8 +248,8 @@ struct HomeView: View {
                     Image(systemName: "chevron.left").font(.system(size: 12, weight: .bold))
                     Text("MAP").font(HWFont.display(13)).tracking(1.4)
                 }
-                .foregroundStyle(.white).padding(.horizontal, 12).padding(.vertical, 8)
-                .background(BoardInk.band.opacity(0.92), in: Capsule()).overlay(Capsule().stroke(Color.white.opacity(0.22), lineWidth: 1))
+                .foregroundStyle(Paper.ink).padding(.horizontal, 12).padding(.vertical, 8)
+                .background(Paper.paper, in: Capsule()).shadow(color: .black.opacity(0.35), radius: 5, y: 3)
             }
             .buttonStyle(.plain).accessibilityLabel("Back to the map")
             Spacer(minLength: 4)
@@ -269,18 +271,18 @@ struct HomeView: View {
                         .lineLimit(1).minimumScaleFactor(0.7).frame(maxWidth: 150)
                     Image(systemName: "chevron.down").font(.system(size: 10, weight: .bold))
                 }
-                .foregroundStyle(.white).padding(.horizontal, 10).padding(.vertical, 8)
-                .background(BoardInk.band.opacity(0.92), in: Capsule()).overlay(Capsule().stroke(Color.white.opacity(0.22), lineWidth: 1))
+                .foregroundStyle(Paper.ink).padding(.horizontal, 10).padding(.vertical, 8)
+                .background(Paper.paper, in: Capsule()).shadow(color: .black.opacity(0.35), radius: 5, y: 3)
             }
             .accessibilityLabel("Where you’re going: \(live.custom?.short ?? (home ? "home" : "school")). Tap to change.")
             Button { showMoving = true } label: {
-                Image(systemName: "map.fill").font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
-                    .frame(width: 34, height: 34).background(BoardInk.band.opacity(0.92), in: Circle()).overlay(Circle().stroke(Color.white.opacity(0.22), lineWidth: 1))
+                Image(systemName: "map.fill").font(.system(size: 13, weight: .semibold)).foregroundStyle(Paper.ink)
+                    .frame(width: 34, height: 34).background(Paper.paper, in: Circle()).shadow(color: .black.opacity(0.35), radius: 5, y: 3)
             }
             .buttonStyle(.plain).accessibilityLabel("Everything moving near you, on a map")
             Button { settings = true } label: {
-                Image(systemName: "gearshape").font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
-                    .frame(width: 34, height: 34).background(BoardInk.band.opacity(0.92), in: Circle()).overlay(Circle().stroke(Color.white.opacity(0.22), lineWidth: 1))
+                Image(systemName: "gearshape").font(.system(size: 14, weight: .semibold)).foregroundStyle(Paper.ink)
+                    .frame(width: 34, height: 34).background(Paper.paper, in: Circle()).shadow(color: .black.opacity(0.35), radius: 5, y: 3)
             }
             .buttonStyle(.plain).accessibilityLabel("Settings")
         }
@@ -290,8 +292,9 @@ struct HomeView: View {
     /// What the app writes on the two screens on the wall: the trains on the LED strip, the rest on the planner.
     private func wallBoards(_ led: CGRect, _ plan: CGRect) -> some View {
         ZStack(alignment: .topLeading) {
-            LEDStrip(title: ledTitle, rows: live.anywhere ? nearLedRows : ledRows, tap: live.anywhere ? tapNearTrain : tapTrain)
-                .frame(width: led.width, height: led.height)
+            PaperTrainSheet(title: ledTitle, sub: live.anywhere ? "Departures near you · tap one for its page" : "Departures · tap one for its page", home: home,
+                            rows: live.anywhere ? nearLedRows : ledRows, tap: live.anywhere ? tapNearTrain : tapTrain)
+                .frame(width: led.width, height: led.height, alignment: .top)
                 .position(x: led.midX, y: led.midY)
             PlannerScreen(section: section, pick: pickSection) { plannerContent }
                 .frame(width: plan.width, height: plan.height)
@@ -474,21 +477,21 @@ struct HomeView: View {
                     Image(systemName: "chevron.right").font(.system(size: 11, weight: .bold))
                 }
                 .foregroundStyle(.white).padding(.horizontal, 10).padding(.vertical, 8)
-                .background(Color(hex: 0x2F9E5B), in: RoundedRectangle(cornerRadius: 4))
+                .background(Paper.green, in: RoundedRectangle(cornerRadius: 4))
             }
             .buttonStyle(.plain)
         }
         if live.next.isEmpty {
-            Text(live.nextError ?? "Finding your next connections…").font(BoardInk.sans(12, .regular)).foregroundStyle(Color.white.opacity(0.85))
+            Text(live.nextError ?? "Finding your next connections…").font(BoardInk.sans(12, .regular)).foregroundStyle(Paper.ink.opacity(0.85))
         } else {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 5) {
                     ForEach(Array(live.next.enumerated()), id: \.offset) { i, o in
                         Button { withAnimation(.easeInOut(duration: 0.2)) { live.pick = i } } label: {
                             Text(Fmt.hhmm(o.first.departure)).font(BoardInk.sans(13))
-                                .foregroundStyle(i == live.pick ? BoardInk.blueBottom : Color.white)
+                                .foregroundStyle(i == live.pick ? Color.white : Paper.ink)
                                 .padding(.horizontal, 10).padding(.vertical, 5)
-                                .background(i == live.pick ? Color.white : Color.white.opacity(0.14), in: RoundedRectangle(cornerRadius: 4))
+                                .background(i == live.pick ? Paper.navy : Paper.ink.opacity(0.08), in: RoundedRectangle(cornerRadius: 4))
                         }
                         .buttonStyle(.plain)
                         .accessibilityAddTraits(i == live.pick ? .isSelected : [])
@@ -505,14 +508,14 @@ struct HomeView: View {
                         let prev = t.rides[i - 1]
                         let ch = Fmt.mins(ride.departure.timeIntervalSince(prev.arrival))
                         Label("\(ch) min to change at \(Fmt.place(prev.toStop))\(ride.walkBefore > 0 ? ", \(ride.walkBefore) min walk" : "")", systemImage: "arrow.triangle.swap")
-                            .font(BoardInk.sans(10.5, .semibold)).foregroundStyle(ch - ride.walkBefore < 2 ? BoardInk.late : Color.white.opacity(0.8))
+                            .font(BoardInk.sans(10.5, .semibold)).foregroundStyle(ch - ride.walkBefore < 2 ? Paper.late : Paper.ink.opacity(0.8))
                     }
                     PlannerRideRow(ride: ride, info: ns.rail(ride), picked: picked == .ride(ride)) { tapRide(ride) }
                 }
                 if let r {
                     Button { if live.anywhere { wake(t) } else { trip.start(r) } } label: {
                         Text(live.anywhere ? "WAKE ME UP · TO \(r.station.short.uppercased())" : "WAKE ME UP · VIA \(r.station.short.uppercased())").font(BoardInk.sans(12)).tracking(0.6).foregroundStyle(.white)
-                            .frame(maxWidth: .infinity).padding(.vertical, 9).background(Color(hex: 0x2F9E5B), in: RoundedRectangle(cornerRadius: 4))
+                            .frame(maxWidth: .infinity).padding(.vertical, 9).background(Paper.green, in: RoundedRectangle(cornerRadius: 4))
                     }
                     .buttonStyle(.plain)
                 }
@@ -525,15 +528,15 @@ struct HomeView: View {
             Button { startReq = StartRequest(route: r) } label: {
                 HStack(spacing: 8) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(r.name).font(BoardInk.sans(14)).foregroundStyle(.white)
+                        Text(r.name).font(BoardInk.sans(14)).foregroundStyle(Paper.ink)
                         Text(r.legs(trip.direction).map { "\($0.mode.title) to \($0.to.short)" }.joined(separator: " — "))
-                            .font(BoardInk.sans(10.5, .regular)).foregroundStyle(Color.white.opacity(0.75))
+                            .font(BoardInk.sans(10.5, .regular)).foregroundStyle(Paper.ink.opacity(0.75))
                     }
                     Spacer(minLength: 4)
-                    Image(systemName: "bell.and.waves.left.and.right").foregroundStyle(BoardInk.yellow)
+                    Image(systemName: "bell.and.waves.left.and.right").foregroundStyle(Paper.navy)
                 }
                 .padding(.vertical, 7)
-                .overlay(alignment: .bottom) { Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1) }
+                .overlay(alignment: .bottom) { Rectangle().fill(Paper.ink.opacity(0.12)).frame(height: 1) }
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -555,27 +558,27 @@ struct HomeView: View {
             }
             if let ob = live.onBoard, t.first.tripId == ob.vehicle.tripId {
                 Label("You’re on the \(ob.vehicle.title) to \(ob.to): stay on until \(Fmt.place(t.first.toStop))", systemImage: ob.vehicle.isTrain ? "tram.fill" : "bus.fill")
-                    .font(BoardInk.sans(11.5, .semibold)).foregroundStyle(Color.white.opacity(0.9))
+                    .font(BoardInk.sans(11.5, .semibold)).foregroundStyle(Paper.ink.opacity(0.9))
             } else if let ob = live.onBoard {
                 Label("You’re on the \(ob.vehicle.title): get off at \(ob.next) and change there", systemImage: ob.vehicle.isTrain ? "tram.fill" : "bus.fill")
-                    .font(BoardInk.sans(11.5, .semibold)).foregroundStyle(Color.white.opacity(0.9))
+                    .font(BoardInk.sans(11.5, .semibold)).foregroundStyle(Paper.ink.opacity(0.9))
             } else if t.first.walkBefore > 0 || walkTarget(t.first) != nil {
                 HStack(spacing: 8) {
                     Label(t.first.walkBefore > 0 ? "First a \(t.first.walkBefore) min walk to \(Fmt.place(t.first.fromStop))" : "Your stop: \(Fmt.place(t.first.fromStop))",
                           systemImage: "figure.walk")
-                        .font(BoardInk.sans(11.5, .semibold)).foregroundStyle(Color.white.opacity(0.85))
+                        .font(BoardInk.sans(11.5, .semibold)).foregroundStyle(Paper.ink.opacity(0.85))
                     Spacer(minLength: 4)
                     if let w = walkTarget(t.first) { WalkButton { walkTo = w } }
                 }
             }
         } else {
-            Text(live.nextError ?? "Finding the fastest way to \(dest)…").font(BoardInk.sans(12, .regular)).foregroundStyle(Color.white.opacity(0.85))
+            Text(live.nextError ?? "Finding the fastest way to \(dest)…").font(BoardInk.sans(12, .regular)).foregroundStyle(Paper.ink.opacity(0.85))
         }
         nearYou
         RankLegend()
         WatchingCard(pal: pal, board: true)
         Text("The trips and stops follow where you are. Pick where you’re going with the button at the top. Tap any line for more: it’s tracked for you from then on.")
-            .font(BoardInk.sans(9.5, .regular)).foregroundStyle(Color.white.opacity(0.65))
+            .font(BoardInk.sans(9.5, .regular)).foregroundStyle(Paper.ink.opacity(0.65))
     }
 
     /// The stops around you: the nearest bus stops (both sides) and the nearest station, with what leaves next.
@@ -591,7 +594,7 @@ struct HomeView: View {
         PlannerBar(title: "Near you", sub: live.here == nil ? nil : "from where you are")
         if live.nearStops.isEmpty {
             Text(live.here == nil ? "Turn location on for Haltewekker to see the stops around you." : "Looking for the stops around you…")
-                .font(BoardInk.sans(12, .regular)).foregroundStyle(Color.white.opacity(0.85))
+                .font(BoardInk.sans(12, .regular)).foregroundStyle(Paper.ink.opacity(0.85))
         }
         ForEach(names, id: \.self) { name in
             let here = live.nearStops.filter { $0.name == name }
@@ -617,7 +620,7 @@ struct HomeView: View {
                 }
             }
             if rows.isEmpty {
-                Text("Nothing leaving here soon.").font(BoardInk.sans(11, .regular)).foregroundStyle(Color.white.opacity(0.75))
+                Text("Nothing leaving here soon.").font(BoardInk.sans(11, .regular)).foregroundStyle(Paper.ink.opacity(0.75))
             } else {
                 HStack(spacing: 6) {
                     shiftButton("‹ Earlier", enabled: start > 0) { nearShift[name] = (nearShift[name] ?? 0) - 3 }
@@ -665,8 +668,8 @@ struct HomeView: View {
 
     private func shiftButton(_ t: String, enabled: Bool, _ go: @escaping () -> Void) -> some View {
         Button { withAnimation(.easeInOut(duration: 0.2)) { go() } } label: {
-            Text(t).font(BoardInk.sans(11)).foregroundStyle(.white)
-                .padding(.horizontal, 10).padding(.vertical, 4).background(Color.white.opacity(0.14), in: Capsule())
+            Text(t).font(BoardInk.sans(11)).foregroundStyle(Paper.ink)
+                .padding(.horizontal, 10).padding(.vertical, 4).background(Paper.ink.opacity(0.14), in: Capsule())
         }
         .buttonStyle(.plain).disabled(!enabled).opacity(enabled ? 1 : 0.35)
     }
@@ -679,11 +682,11 @@ struct HomeView: View {
                 if let r { trip.start(r) }
             }
         } else {
-            Text(live.nextError ?? "Finding your next connection…").font(BoardInk.sans(12, .regular)).foregroundStyle(Color.white.opacity(0.85))
+            Text(live.nextError ?? "Finding your next connection…").font(BoardInk.sans(12, .regular)).foregroundStyle(Paper.ink.opacity(0.85))
         }
         ForEach(panelOrder.filter(shown).filter { $0 != "train" }, id: \.self) { p in busPanel(p) }
         Button(live.showEarlier ? "Hide earlier ones" : "Show more earlier ones") { withAnimation { live.showEarlier.toggle() } }
-            .font(BoardInk.sans(12, .semibold)).foregroundStyle(.white)
+            .font(BoardInk.sans(12, .semibold)).foregroundStyle(Paper.ink)
         RankLegend()
         WatchingCard(pal: pal, board: true)
         nearToggle
@@ -693,7 +696,7 @@ struct HomeView: View {
                 .font(HWFont.body(12, bold: true)).foregroundStyle(HWPalette.warn)
         }
         Text("Tap any bus or train for more: it’s tracked for you from then on. Live times from Transitous, map data © OpenStreetMap contributors.")
-            .font(BoardInk.sans(9.5, .regular)).foregroundStyle(Color.white.opacity(0.65))
+            .font(BoardInk.sans(9.5, .regular)).foregroundStyle(Paper.ink.opacity(0.65))
     }
 
     @ViewBuilder private func busPanel(_ p: String) -> some View {
@@ -710,7 +713,7 @@ struct HomeView: View {
         let names = list.map(\.stopName).reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
         PlannerBar(title: "Local bus services", sub: "Change stops") { liveSettings = true }
         if list.isEmpty {
-            Text(live.panelsUpdated == nil ? "Loading…" : "No buses coming up right now.").font(BoardInk.sans(12, .regular)).foregroundStyle(Color.white.opacity(0.85))
+            Text(live.panelsUpdated == nil ? "Loading…" : "No buses coming up right now.").font(BoardInk.sans(12, .regular)).foregroundStyle(Paper.ink.opacity(0.85))
         }
         ForEach(names, id: \.self) { name in
             PlannerStop(name: name)
@@ -744,9 +747,9 @@ struct HomeView: View {
                               live: r.live, cancelled: r.cancelled, grade: r.grade, note: "\(r.rideMinutes) min ride · arrives \(Fmt.hhmm(r.arrival))",
                               heading: Heading.of(r), watched: lines.isWatched(stopId: r.fromId, line: r.line, headsign: r.headsign), picked: picked == .ride(r)) { tapRide(r) }
             }
-            Text("From your next trips; the full list comes in on the next refresh.").font(BoardInk.sans(9.5, .regular)).foregroundStyle(Color.white.opacity(0.65))
+            Text("From your next trips; the full list comes in on the next refresh.").font(BoardInk.sans(9.5, .regular)).foregroundStyle(Paper.ink.opacity(0.65))
         } else if list.isEmpty {
-            Text(live.panelsUpdated == nil ? "Loading…" : "Nothing coming up right now.").font(BoardInk.sans(12, .regular)).foregroundStyle(Color.white.opacity(0.85))
+            Text(live.panelsUpdated == nil ? "Loading…" : "Nothing coming up right now.").font(BoardInk.sans(12, .regular)).foregroundStyle(Paper.ink.opacity(0.85))
         } else {
             PlannerColumns()
             ForEach(list) { p in
@@ -763,7 +766,7 @@ struct HomeView: View {
             Label("Near me", systemImage: near.on ? "location.fill" : "location")
                 .font(BoardInk.sans(12)).foregroundStyle(near.on ? BoardInk.navy : Color.white)
                 .padding(.horizontal, 10).padding(.vertical, 6)
-                .background(near.on ? Color.white : Color.white.opacity(0.14), in: Capsule())
+                .background(near.on ? Color.white : Paper.ink.opacity(0.14), in: Capsule())
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(near.on ? .isSelected : [])
@@ -783,10 +786,10 @@ struct HomeView: View {
             Spacer()
             Button { near.on.toggle() } label: {
                 Label("Near me", systemImage: near.on ? "location.fill" : "location")
-                    .font(HWFont.body(12, bold: true)).foregroundStyle(near.on ? Color(hex: 0x0B0D14) : pal.accent)
+                    .font(HWFont.body(12, bold: true)).foregroundStyle(near.on ? Color(hex: 0x0B0D14) : pal.deep)
                     .padding(.horizontal, 10).padding(.vertical, 6)
                     .background(near.on ? pal.band : Color.black.opacity(0.5), in: Capsule())
-                    .overlay(Capsule().stroke(pal.brass, lineWidth: 1))
+                    .overlay(Capsule().stroke(pal.deep, lineWidth: 1))
             }
             .buttonStyle(.plain)
             .accessibilityAddTraits(near.on ? .isSelected : [])
@@ -795,14 +798,14 @@ struct HomeView: View {
         HStack(spacing: 6) {
             ForEach(["S", "A", "B", "C"], id: \.self) { Coin(grade: $0, size: 22) }
             Text("How fast each bus or train gets you there, compared with the fastest on that route. Delays count.")
-                .font(HWFont.body(12)).foregroundStyle(HWPalette.muted)
+                .font(HWFont.body(12)).foregroundStyle(Paper.muted)
         }
         ForEach(panelOrder.filter(shown), id: \.self) { p in panel(p) }
         if trip.locationDenied {
             Text("Location is off for Haltewekker. Turn it on in Settings → Privacy → Location Services, or it can’t wake you.")
                 .font(HWFont.body(12, bold: true)).foregroundStyle(HWPalette.warn)
         }
-        Text("Live times from Transitous, map data © OpenStreetMap contributors.").font(HWFont.body(10)).foregroundStyle(HWPalette.muted)
+        Text("Live times from Transitous, map data © OpenStreetMap contributors.").font(HWFont.body(10)).foregroundStyle(Paper.muted)
     }
 
     @ViewBuilder private var plannedContent: some View {
@@ -814,7 +817,7 @@ struct HomeView: View {
         } else {
             planButton
             Text("Pick the time of your friend’s train, today or tomorrow. You get a boarding pass with the bus before it and the bus after it, and an alarm if the train changes platform or runs late.")
-                .font(HWFont.body(12)).foregroundStyle(HWPalette.ink.opacity(0.85))
+                .font(HWFont.body(12)).foregroundStyle(Paper.ink.opacity(0.85))
         }
         WatchingCard(pal: pal, board: true)
     }
@@ -825,11 +828,11 @@ struct HomeView: View {
                 Image(systemName: "play.fill").font(.system(size: 14, weight: .semibold)).foregroundStyle(BoardInk.navy)
                     .frame(width: 32, height: 32).background(BoardInk.yellow, in: RoundedRectangle(cornerRadius: 6))
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Try it at home").font(HWFont.display(17)).foregroundStyle(HWPalette.ink)
-                    Text("A pretend trip: Fastest trip, the ride, the alarm.").font(HWFont.body(12)).foregroundStyle(HWPalette.muted)
+                    Text("Try it at home").font(HWFont.display(17)).foregroundStyle(Paper.ink)
+                    Text("A pretend trip: Fastest trip, the ride, the alarm.").font(HWFont.body(12)).foregroundStyle(Paper.muted)
                 }
                 Spacer(minLength: 0)
-                Image(systemName: "chevron.right").font(.system(size: 12, weight: .bold)).foregroundStyle(Color.white.opacity(0.8))
+                Image(systemName: "chevron.right").font(.system(size: 12, weight: .bold)).foregroundStyle(Paper.ink.opacity(0.8))
             }
             .contentShape(Rectangle())
             .brass(pal, pad: 14)
@@ -840,11 +843,11 @@ struct HomeView: View {
                 Image(systemName: "map.fill").font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
                     .frame(width: 32, height: 32).background(BoardInk.band, in: RoundedRectangle(cornerRadius: 6))
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Everything moving near you").font(HWFont.display(17)).foregroundStyle(HWPalette.ink)
-                    Text("Every bus and train around you, live on a map.").font(HWFont.body(12)).foregroundStyle(HWPalette.muted)
+                    Text("Everything moving near you").font(HWFont.display(17)).foregroundStyle(Paper.ink)
+                    Text("Every bus and train around you, live on a map.").font(HWFont.body(12)).foregroundStyle(Paper.muted)
                 }
                 Spacer(minLength: 0)
-                Image(systemName: "chevron.right").font(.system(size: 12, weight: .bold)).foregroundStyle(Color.white.opacity(0.8))
+                Image(systemName: "chevron.right").font(.system(size: 12, weight: .bold)).foregroundStyle(Paper.ink.opacity(0.8))
             }
             .contentShape(Rectangle())
             .brass(pal, pad: 14)
@@ -858,9 +861,9 @@ struct HomeView: View {
             StopsList(pal: pal, start: { startReq = StartRequest(stop: $0) }, edit: { stopEdit = StopEditRequest(stop: $0) })
         }
         fold("tips", "Before you nap", icon: "moon.zzz.fill", next: "") { TipsList() }
-        Text("The alarm works with your phone’s GPS, so delays and detours don’t throw it off.").font(HWFont.body(11)).foregroundStyle(HWPalette.muted)
+        Text("The alarm works with your phone’s GPS, so delays and detours don’t throw it off.").font(HWFont.body(11)).foregroundStyle(Paper.muted)
         Link("Questions or problems? github.com/kupperma/Halte-wekker", destination: URL(string: "https://github.com/kupperma/Halte-wekker")!)
-            .font(HWFont.body(11, bold: true)).foregroundStyle(pal.accent)
+            .font(HWFont.body(11, bold: true)).foregroundStyle(pal.deep)
     }
 
     private var routesList: some View {
@@ -869,11 +872,11 @@ struct HomeView: View {
                 Button { startReq = StartRequest(route: r) } label: {
                     HStack {
                         VStack(alignment: .leading, spacing: 5) {
-                            Text(r.name).font(HWFont.display(17)).foregroundStyle(HWPalette.ink)
-                            Text(r.legs(trip.direction).map { "\($0.mode.title) to \($0.to.short)" }.joined(separator: " — ")).font(HWFont.body(12)).foregroundStyle(HWPalette.muted)
+                            Text(r.name).font(HWFont.display(17)).foregroundStyle(Paper.ink)
+                            Text(r.legs(trip.direction).map { "\($0.mode.title) to \($0.to.short)" }.joined(separator: " — ")).font(HWFont.body(12)).foregroundStyle(Paper.muted)
                         }
                         Spacer()
-                        Image(systemName: "bell.and.waves.left.and.right").foregroundStyle(pal.brass)
+                        Image(systemName: "bell.and.waves.left.and.right").foregroundStyle(pal.deep)
                     }
                     .padding(.vertical, 12).padding(.horizontal, 6).contentShape(Rectangle())
                 }
@@ -899,7 +902,7 @@ struct HomeView: View {
                 BandButton(title: "Wake me up · via \(via)", pal: pal) { trip.start(r) }
             }
         } else {
-            Text(live.nextError ?? "Finding your next connections…").font(HWFont.body(13)).foregroundStyle(HWPalette.muted)
+            Text(live.nextError ?? "Finding your next connections…").font(HWFont.body(13)).foregroundStyle(Paper.muted)
                 .frame(maxWidth: .infinity, alignment: .leading).brass(pal, pad: 18)
         }
     }
@@ -909,11 +912,11 @@ struct HomeView: View {
             HStack(spacing: 12) {
                 Image(systemName: "tram.fill").font(.system(size: 14, weight: .semibold)).foregroundStyle(.white).frame(width: 32, height: 32).background(BoardInk.band, in: RoundedRectangle(cornerRadius: 6))
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Plan by train time").font(HWFont.display(17)).foregroundStyle(HWPalette.ink)
-                    Text("Pick the train you take with your friend. The buses before and after it are added for you.").font(HWFont.body(12)).foregroundStyle(HWPalette.muted)
+                    Text("Plan by train time").font(HWFont.display(17)).foregroundStyle(Paper.ink)
+                    Text("Pick the train you take with your friend. The buses before and after it are added for you.").font(HWFont.body(12)).foregroundStyle(Paper.muted)
                 }
                 Spacer(minLength: 0)
-                Image(systemName: "chevron.right").font(.system(size: 12, weight: .bold)).foregroundStyle(Color.white.opacity(0.8))
+                Image(systemName: "chevron.right").font(.system(size: 12, weight: .bold)).foregroundStyle(Paper.ink.opacity(0.8))
             }
             .contentShape(Rectangle())
             .brass(pal, pad: 14)
@@ -922,7 +925,7 @@ struct HomeView: View {
     }
 
     private func sectionTitle(_ t: String) -> some View {
-        Text(t).font(HWFont.display(24)).foregroundStyle(HWPalette.ink).padding(.top, 8)
+        Text(t).font(HWFont.display(24)).foregroundStyle(Paper.ink).padding(.top, 8)
     }
 
     // MARK: near me
@@ -960,7 +963,7 @@ struct HomeView: View {
                 } else if let n = near.nearSet {
                     if visible.isEmpty {
                         Text("Near \(names(Array(n))). Nothing \(home ? "home" : "to Breda") leaves from here.")
-                        Button("Switch direction", action: toggleDirection).font(HWFont.body(12, bold: true)).foregroundStyle(pal.accent)
+                        Button("Switch direction", action: toggleDirection).font(HWFont.body(12, bold: true)).foregroundStyle(pal.deep)
                     } else {
                         Text("Showing what leaves near \(names(Array(n.filter { k in visible.contains { panelFrom($0).contains(k) } }))).")
                     }
@@ -968,7 +971,7 @@ struct HomeView: View {
                     Text("You’re not near Veghel, Den Bosch, Eindhoven or Breda, so everything is shown.")
                 }
             }
-            .font(HWFont.body(12)).foregroundStyle(HWPalette.ink.opacity(0.85))
+            .font(HWFont.body(12)).foregroundStyle(Paper.ink.opacity(0.85))
         }
     }
 
@@ -978,10 +981,10 @@ struct HomeView: View {
         Button { withAnimation(.easeInOut(duration: 0.2)) { if open.contains(key) { open.remove(key) } else { open.insert(key) } } } label: {
             HStack(spacing: 10) {
                 Image(systemName: icon).font(.system(size: 14, weight: .semibold)).foregroundStyle(.white).frame(width: 32, height: 32).background(BoardInk.band, in: RoundedRectangle(cornerRadius: 6))
-                Text(title).font(HWFont.display(17)).foregroundStyle(HWPalette.ink)
+                Text(title).font(HWFont.display(17)).foregroundStyle(Paper.ink)
                 Spacer()
-                Text(next).font(HWFont.body(12)).foregroundStyle(pal.accent)
-                Image(systemName: "chevron.down").font(.system(size: 12, weight: .bold)).foregroundStyle(Color.white.opacity(0.8)).rotationEffect(.degrees(open.contains(key) ? 180 : 0))
+                Text(next).font(HWFont.body(12)).foregroundStyle(pal.deep)
+                Image(systemName: "chevron.down").font(.system(size: 12, weight: .bold)).foregroundStyle(Paper.ink.opacity(0.8)).rotationEffect(.degrees(open.contains(key) ? 180 : 0))
             }
             .padding(.vertical, 4).contentShape(Rectangle())
         }
@@ -992,7 +995,7 @@ struct HomeView: View {
         VStack(alignment: .leading, spacing: 0) {
             foldHeader(key, title, icon: icon, next: next)
             if open.contains(key) {
-                Rectangle().fill(Color.white.opacity(0.14)).frame(height: 1).padding(.top, 8)
+                Rectangle().fill(Paper.ink.opacity(0.14)).frame(height: 1).padding(.top, 8)
                 content()
             }
         }
@@ -1049,7 +1052,7 @@ struct HomeView: View {
         let mine = planner.chosen?.tripIds ?? []
         return fold(key, title, icon: icon, next: list.first.map { "\($0.trip.first.line) · \(Fmt.hhmm($0.trip.first.departure))" } ?? "") {
             if list.isEmpty {
-                Text(live.panelsUpdated == nil ? "Loading…" : "Nothing coming up right now.").font(HWFont.body(12)).foregroundStyle(HWPalette.muted).padding(.vertical, 12)
+                Text(live.panelsUpdated == nil ? "Loading…" : "Nothing coming up right now.").font(HWFont.body(12)).foregroundStyle(Paper.muted).padding(.vertical, 12)
             }
             ForEach(list) { p in
                 let t = p.trip, f = t.first, rail = f.isTrain
@@ -1065,19 +1068,19 @@ struct HomeView: View {
                 divider
             }
             Button(live.showEarlier ? "Hide earlier ones" : "Show earlier ones") { withAnimation { live.showEarlier.toggle() } }
-                .font(HWFont.body(12, bold: true)).foregroundStyle(pal.accent).padding(.top, 8)
+                .font(HWFont.body(12, bold: true)).foregroundStyle(pal.deep).padding(.top, 8)
             Text(key == "train" ? trainHint(list) : "Tap a bus to watch its line: you get told when it runs late, leaves early or is cancelled.")
-                .font(HWFont.body(11)).foregroundStyle(HWPalette.muted).padding(.top, 4)
-            if let u = live.panelsUpdated { Text("Updated at \(Fmt.hhmm(u)).").font(HWFont.body(10)).foregroundStyle(HWPalette.muted).padding(.top, 4) }
+                .font(HWFont.body(11)).foregroundStyle(Paper.muted).padding(.top, 4)
+            if let u = live.panelsUpdated { Text("Updated at \(Fmt.hhmm(u)).").font(HWFont.body(10)).foregroundStyle(Paper.muted).padding(.top, 4) }
         }
     }
 
     private func chip(_ label: String, _ on: Bool, _ tap: @escaping () -> Void) -> some View {
         Button(action: tap) {
             Text(label).font(HWFont.body(12, bold: true))
-                .foregroundStyle(on ? Color(hex: 0x14121A) : HWPalette.ink)
+                .foregroundStyle(on ? Color(hex: 0x14121A) : Paper.ink)
                 .padding(.horizontal, 10).padding(.vertical, 6)
-                .background(on ? HWPalette.ink : .clear)
+                .background(on ? Paper.ink : .clear)
                 .overlay(Rectangle().stroke(pal.line, lineWidth: 1))
         }
         .buttonStyle(.plain)
@@ -1089,9 +1092,9 @@ struct HomeView: View {
         let many = stops.boardStops.count > 1
         return fold("board", "Bus in Veghel", icon: "bus.fill", next: list.first.map { "\($0.line) · \(Fmt.hhmm($0.time))" } ?? "") {
             HStack {
-                Text(stops.boardTitle).font(HWFont.body(12)).foregroundStyle(HWPalette.muted)
+                Text(stops.boardTitle).font(HWFont.body(12)).foregroundStyle(Paper.muted)
                 Spacer()
-                Button("Change") { liveSettings = true }.font(HWFont.body(12, bold: true)).foregroundStyle(pal.accent)
+                Button("Change") { liveSettings = true }.font(HWFont.body(12, bold: true)).foregroundStyle(pal.deep)
             }
             .padding(.top, 8)
             ScrollView(.horizontal, showsIndicators: false) {
@@ -1114,7 +1117,7 @@ struct HomeView: View {
                 .padding(.vertical, 8)
             }
             if list.isEmpty {
-                Text(live.panelsUpdated == nil ? "Loading…" : "No buses coming up for this choice right now.").font(HWFont.body(12)).foregroundStyle(HWPalette.muted).padding(.vertical, 12)
+                Text(live.panelsUpdated == nil ? "Loading…" : "No buses coming up for this choice right now.").font(HWFont.body(12)).foregroundStyle(Paper.muted).padding(.vertical, 12)
             }
             ForEach(list) { d in
                 let mine = stops.boardStops.first(where: { $0.id == d.stopId })
@@ -1127,7 +1130,7 @@ struct HomeView: View {
                 divider
             }
             Text("Tap the bell to watch a line: you get told when the next one runs late, leaves early or is cancelled, until you’re on it.")
-                .font(HWFont.body(11)).foregroundStyle(HWPalette.muted).padding(.top, 8)
+                .font(HWFont.body(11)).foregroundStyle(Paper.muted).padding(.top, 8)
         }
     }
 }
@@ -1148,14 +1151,14 @@ struct TripRow: View {
         let gone = r.cancelled || info?.cancelled == true
         HStack(alignment: .top, spacing: 10) {
             VStack(spacing: 5) {
-                Text(r.line).font(HWFont.display(13)).foregroundStyle(HWPalette.ink).frame(width: 44).padding(.vertical, 4)
-                    .overlay(RoundedRectangle(cornerRadius: 2).stroke(HWPalette.ink, lineWidth: 1.5))
+                Text(r.line).font(HWFont.display(13)).foregroundStyle(Paper.ink).frame(width: 44).padding(.vertical, 4)
+                    .overlay(RoundedRectangle(cornerRadius: 2).stroke(Paper.ink, lineWidth: 1.5))
                 if let c = info?.crowd, c > 0 { CrowdIcons(level: c) }
             }
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     Coin(grade: trip.rides.count == 1 ? r.grade : last.grade, size: 22)
-                    Text(head ?? (r.isTrain ? "\(r.name) to \(Fmt.place(last.toStop))" : "From \(Fmt.place(r.fromStop))")).font(HWFont.display(15)).foregroundStyle(HWPalette.ink)
+                    Text(head ?? (r.isTrain ? "\(r.name) to \(Fmt.place(last.toStop))" : "From \(Fmt.place(r.fromStop))")).font(HWFont.display(15)).foregroundStyle(Paper.ink)
                 }
                 if mine || watched {
                     HStack(spacing: 6) {
@@ -1163,15 +1166,15 @@ struct TripRow: View {
                         if watched { SmallTag(text: "WATCHING", icon: "bell.fill", pal: pal) }
                     }
                 }
-                Text(st.text).font(HWFont.body(12, bold: r.live)).foregroundStyle(st.warn ? HWPalette.warn : st.ok ? HWPalette.ok : HWPalette.muted)
+                Text(st.text).font(HWFont.body(12, bold: r.live)).foregroundStyle(st.warn ? HWPalette.warn : st.ok ? HWPalette.ok : Paper.muted)
                 Text(extra ?? "\(trip.rideLabel) · arrives \(Fmt.hhmm(showWalk ? trip.end : last.arrival))")
-                    .font(HWFont.body(12)).foregroundStyle(HWPalette.ink.opacity(0.8))
+                    .font(HWFont.body(12)).foregroundStyle(Paper.ink.opacity(0.8))
                 if r.isTrain { TrainExtras(info: info, pal: pal) }
             }
             Spacer(minLength: 4)
             VStack(alignment: .trailing, spacing: 2) {
-                Text(Fmt.hhmm(r.departure)).font(HWFont.display(23)).foregroundStyle(pal.accent).strikethrough(gone)
-                Text(whenText(r)).font(HWFont.body(12)).foregroundStyle(HWPalette.muted)
+                Text(Fmt.hhmm(r.departure)).font(HWFont.display(23)).foregroundStyle(pal.deep).strikethrough(gone)
+                Text(whenText(r)).font(HWFont.body(12)).foregroundStyle(Paper.muted)
             }
         }
         .padding(.vertical, 10)
@@ -1203,30 +1206,26 @@ struct RideView: View {
     /// The ring as big as the screen allows.
     private var ringSize: CGFloat { min(250, max(170, screenH * 0.31 - (trip.phase == .awake ? 60 : 0) - (music.song == nil ? 0 : 20))) }
     var body: some View {
-        ZStack {
-            // the station shows through: a lighter dim, and the panels are a little see-through
-            StationBackdrop(home: trip.direction == .home, moving: trip.movingStation, dim: 0.42,
-                            pan: panning ? "pan-\(trip.direction == .home ? "home" : "out")" : nil, restart: loopRestart)
-            VStack(alignment: .leading, spacing: 0) {
-                HStack {
-                    Label(trip.accuracy.map { "GPS ±\(Int($0)) m" } ?? "Finding GPS…", systemImage: "location.fill")
-                        .font(HWFont.body(12)).foregroundStyle(HWPalette.ink.opacity(0.8)).padding(.horizontal, 12).padding(.vertical, 7)
-                        .background(.white.opacity(0.07), in: Capsule())
-                    Spacer()
-                    if trip.demo { Text("DEMO").font(HWFont.body(11, bold: true)).tracking(1.4).foregroundStyle(BoardInk.yellow) }
-                    else if trip.autoStarted { Text("STARTED BY ITSELF").font(HWFont.body(10)).tracking(1.2).foregroundStyle(pal.accent) }
+        ZStack(alignment: .topTrailing) {
+            // the blue wall, and the trip on a sheet of paper pinned to it
+            WallBackground()
+            VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 0) {
+                    if trip.waitingToBoard { boarding } else { riding }
                 }
-                if trip.waitingToBoard { boarding } else { riding }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .paperSheet()
                 if trip.phase == .awake {
                     Button { trip.legDone() } label: {
-                        Text("I’M OFF, END THIS LEG").font(HWFont.display(15)).tracking(1.4).foregroundStyle(HWPalette.ink).frame(maxWidth: .infinity).padding(.vertical, 14)
-                            .background(Color(hex: 0x0B2F86).opacity(0.9), in: RoundedRectangle(cornerRadius: 6))
-                            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.white.opacity(0.18), lineWidth: 1))
-                    }.buttonStyle(.plain).padding(.bottom, 8)
+                        Text("I’M OFF, END THIS LEG").font(HWFont.display(15)).tracking(1.4).foregroundStyle(.white).frame(maxWidth: .infinity).padding(.vertical, 14)
+                            .background(Paper.band(home: trip.direction == .home), in: RoundedRectangle(cornerRadius: 6))
+                            .shadow(color: .black.opacity(0.4), radius: 8, y: 5)
+                    }.buttonStyle(.plain)
                 }
                 HoldButton(title: "Hold to end trip", pal: pal) { trip.endTrip() }
             }
-            .padding(22)
+            .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 6)
+            WallSticker(text: "I ♥ BRABANT", fill: Paper.yellow, angle: 9).padding(.top, 4).padding(.trailing, 10)
         }
         .environment(\.seeThrough, true)
         .background { GeometryReader { g in Color.clear.onAppear { screenH = g.size.height }.onChange(of: g.size.height) { _, h in screenH = h } } }
@@ -1256,7 +1255,7 @@ struct RideView: View {
 
     private var legKicker: some View {
         Group {
-            if trip.legs.count > 1 { Text("LEG \(trip.index + 1) OF \(trip.legs.count)").font(HWFont.body(11)).tracking(1.6).foregroundStyle(HWPalette.muted) }
+            if trip.legs.count > 1 { Text("LEG \(trip.index + 1) OF \(trip.legs.count)").font(HWFont.body(11)).tracking(1.6).foregroundStyle(Paper.muted) }
         }
     }
 
@@ -1279,10 +1278,10 @@ struct RideView: View {
         }.prefix(earlier ? 14 : 9))
         let mine = planner.chosen?.tripIds ?? []
         legKicker.padding(.top, 18)
-        Text("WAITING TO BOARD").font(HWFont.body(11)).tracking(1.8).foregroundStyle(HWPalette.ink.opacity(0.75)).padding(.top, 8)
-        Text(boardingTitle).font(HWFont.display(26)).foregroundStyle(HWPalette.ink)
+        Text("WAITING TO BOARD").font(HWFont.body(11)).tracking(1.8).foregroundStyle(Paper.ink.opacity(0.75)).padding(.top, 8)
+        Text(boardingTitle).font(HWFont.display(26)).foregroundStyle(Paper.ink)
         Text("It notices which one you get on by itself: your GPS against the live position of every \(rail ? "train" : "bus") nearby. Or tap the one you’re on.")
-            .font(HWFont.body(12)).foregroundStyle(HWPalette.muted).padding(.top, 4)
+            .font(HWFont.body(12)).foregroundStyle(Paper.muted).padding(.top, 4)
         if let l = trip.leg {
             WalkButton(title: "Show the way to \(l.from.short)") {
                 walkTo = WalkTarget(name: l.from.short, lat: l.from.coordinate.latitude, lon: l.from.coordinate.longitude, rail: rail,
@@ -1295,10 +1294,10 @@ struct RideView: View {
                 HStack {
                     Spacer()
                     Button(earlier ? "Hide earlier ones" : "Show earlier ones") { withAnimation { earlier.toggle() } }
-                        .font(HWFont.body(12, bold: true)).foregroundStyle(pal.accent)
+                        .font(HWFont.body(12, bold: true)).foregroundStyle(pal.deep)
                 }
                 if list.isEmpty && board.isEmpty {
-                    Text(trip.upcomingError ?? "Looking up the next \(rail ? "trains" : "buses")…").font(HWFont.body(12)).foregroundStyle(HWPalette.muted).padding(.vertical, 12)
+                    Text(trip.upcomingError ?? "Looking up the next \(rail ? "trains" : "buses")…").font(HWFont.body(12)).foregroundStyle(Paper.muted).padding(.vertical, 12)
                 }
                 if !rail && !board.isEmpty {
                     ForEach(board) { d in
@@ -1326,8 +1325,8 @@ struct RideView: View {
                     Rectangle().fill(.white.opacity(0.06)).frame(height: 1)
                 }
                 }
-                if !rail { Text("Tap the bell to get told when a bus runs late, leaves early or is cancelled.").font(HWFont.body(11)).foregroundStyle(HWPalette.muted).padding(.top, 6) }
-                if let u = trip.upcomingAt { Text("Updated at \(Fmt.hhmm(u)).").font(HWFont.body(10)).foregroundStyle(HWPalette.muted).padding(.top, 6) }
+                if !rail { Text("Tap the bell to get told when a bus runs late, leaves early or is cancelled.").font(HWFont.body(11)).foregroundStyle(Paper.muted).padding(.top, 6) }
+                if let u = trip.upcomingAt { Text("Updated at \(Fmt.hhmm(u)).").font(HWFont.body(10)).foregroundStyle(Paper.muted).padding(.top, 6) }
             }
         }
         .brass(pal, pad: 14)
@@ -1336,41 +1335,59 @@ struct RideView: View {
 
     // MARK: on board
 
+    /// "LEG 1 OF 3 · YOU'RE ON"
+    private var rideKicker: String {
+        let k = trip.vehicle == nil ? "NOW RIDING" : trip.pickedByHand ? "YOU PICKED" : "YOU’RE ON"
+        return trip.legs.count > 1 ? "LEG \(trip.index + 1) OF \(trip.legs.count) · \(k)" : k
+    }
+
+    /// GPS, and how the trip started.
+    private var sheetInfo: some View {
+        HStack(spacing: 8) {
+            Label(trip.accuracy.map { "GPS ±\(Int($0)) m" } ?? "Finding GPS…", systemImage: "location.fill")
+            Spacer()
+            if trip.demo { Text("DEMO").font(HWFont.body(11, bold: true)).tracking(1.4).foregroundStyle(Paper.late) }
+            else if trip.autoStarted { Text("STARTED BY ITSELF").tracking(1.2).foregroundStyle(Paper.navy) }
+        }
+        .font(HWFont.body(11, bold: true)).foregroundStyle(Paper.muted)
+        .padding(.horizontal, 16).padding(.top, 8)
+    }
+
     @ViewBuilder private var riding: some View {
         let v = trip.vehicle
         let to = trip.leg?.to.short ?? ""
         let eta = trip.legArrival ?? trip.legTo
-        legKicker.padding(.top, 14)
-        Text(v == nil ? "NOW RIDING" : trip.pickedByHand ? "YOU PICKED" : "YOU’RE ON").font(HWFont.body(11)).tracking(1.8).foregroundStyle(HWPalette.ink.opacity(0.75)).padding(.top, 4)
-        HStack(spacing: 8) {
-            if let v {
-                Text(v.line).font(BoardInk.sans(17)).lineLimit(1).minimumScaleFactor(0.6)
-                    .foregroundStyle(v.isTrain ? Color(hex: 0x1A1A1A) : BoardInk.navy)
-                    .padding(.horizontal, 7).frame(minWidth: 40).frame(height: 28)
-                    .background(v.isTrain ? BoardInk.yellow : BoardInk.route, in: RoundedRectangle(cornerRadius: 4))
+        PaperBand(home: trip.direction == .home) {
+            HStack(spacing: 10) {
+                if let v { LineBullet(line: v.line, train: v.isTrain, height: 30, minWidth: 48, font: 16) }
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(rideKicker).font(HWFont.body(10, bold: true)).tracking(1.6).opacity(0.85)
+                    Text(v.map { "\($0.title) to \(to)" } ?? (trip.leg?.title ?? "")).font(HWFont.display(21)).lineLimit(1).minimumScaleFactor(0.6)
+                }
             }
-            Text(v.map { "\($0.title) to \(to)" } ?? (trip.leg?.title ?? "")).font(HWFont.display(24)).foregroundStyle(HWPalette.ink).lineLimit(1).minimumScaleFactor(0.6)
         }
-        if v == nil { Text("Looking for the bus or train you’re on…").font(HWFont.body(12)).foregroundStyle(HWPalette.muted).padding(.top, 2) }
-        Spacer(minLength: 8)
+        sheetInfo
+        if v == nil { Text("Looking for the bus or train you’re on…").font(HWFont.body(12)).foregroundStyle(Paper.muted).padding(.horizontal, 16).padding(.top, 2) }
+        Spacer(minLength: 6)
         // the countdown: a ring that fills up as you go, with your bus or train riding round it
         TimelineView(.periodic(from: .now, by: 2)) { ctx in
-            RideRing(progress: trip.progress(at: ctx.date), stops: trip.stopMarks.map(\.fraction), train: v?.isTrain ?? (trip.leg?.mode == .train), accent: pal.accent, size: ringSize) {
+            RideRing(progress: trip.progress(at: ctx.date), stops: trip.stopMarks.map(\.fraction), train: v?.isTrain ?? (trip.leg?.mode == .train),
+                     accent: v.map { Paper.line($0.line, train: $0.isTrain) } ?? Paper.navy, size: ringSize) {
                 ringCenter(eta: eta, to: to, now: ctx.date)
             }
         }
         .id(trip.index)
         .frame(maxWidth: .infinity)
-        Spacer(minLength: 8)
-        rideStats(eta: eta)
-        if !trip.stopMarks.isEmpty || trip.legTo != nil { stopChips.padding(.top, 10) }
+        Spacer(minLength: 6)
+        rideStats(eta: eta).padding(.horizontal, 14)
+        if !trip.stopMarks.isEmpty || trip.legTo != nil { stopChips.padding(.horizontal, 14).padding(.top, 10) }
         if trip.phase == .awake {
             Text(trip.ringAtStop ? "You’re awake. It rings once more at the stop." : "You’re awake. Get your things ready.")
-                .font(HWFont.body(13, bold: true)).foregroundStyle(pal.accent).frame(maxWidth: .infinity).padding(.top, 8)
+                .font(HWFont.body(13, bold: true)).foregroundStyle(Paper.late).frame(maxWidth: .infinity).padding(.top, 8)
         }
-        if let line = afterLine { Text(line).font(HWFont.body(12)).foregroundStyle(HWPalette.ink.opacity(0.85)).frame(maxWidth: .infinity).multilineTextAlignment(.center).padding(.top, 8) }
-        if let song = music.song { SongPill(song: song, pal: pal).padding(.top, 10) }
-        Spacer(minLength: 8)
+        if let line = afterLine { Text(line).font(HWFont.body(12)).foregroundStyle(Paper.muted).frame(maxWidth: .infinity).multilineTextAlignment(.center).padding(.horizontal, 14).padding(.top, 8) }
+        if let song = music.song { SongPill(song: song, pal: pal).padding(.horizontal, 14).padding(.top, 10) }
+        Spacer(minLength: 10)
     }
 
     /// In the ring: the minutes to your stop (or the distance, before the times are known).
@@ -1378,15 +1395,15 @@ struct RideView: View {
         VStack(spacing: 2) {
             if let eta, eta > now.addingTimeInterval(-120) {
                 let m = Fmt.mins(eta.timeIntervalSince(now))
-                Text("\(m)").font(HWFont.display(ringSize * (m >= 100 ? 0.26 : 0.33))).foregroundStyle(HWPalette.ink).monospacedDigit()
-                    .contentTransition(.numericText()).shadow(color: pal.accent.opacity(0.45), radius: 18)
-                Text("MIN TO \(to.uppercased())").font(HWFont.display(12)).tracking(2).foregroundStyle(pal.accent).lineLimit(1).minimumScaleFactor(0.6)
-                Text("there at \(Fmt.hhmm(eta))").font(HWFont.body(14)).foregroundStyle(HWPalette.ink.opacity(0.9)).padding(.top, 2)
+                Text("\(m)").font(HWFont.display(ringSize * (m >= 100 ? 0.26 : 0.33))).foregroundStyle(Paper.ink).monospacedDigit()
+                    .contentTransition(.numericText())
+                Text("MIN TO \(to.uppercased())").font(HWFont.display(12)).tracking(2).foregroundStyle(pal.deep).lineLimit(1).minimumScaleFactor(0.6)
+                Text("there at \(Fmt.hhmm(eta))").font(HWFont.body(14)).foregroundStyle(Paper.ink.opacity(0.9)).padding(.top, 2)
             } else {
                 let parts = trip.distance.map { Fmt.distanceParts($0) } ?? ("–", "")
-                Text(parts.0).font(HWFont.display(ringSize * 0.28)).foregroundStyle(HWPalette.ink).monospacedDigit()
-                    .contentTransition(.numericText()).shadow(color: pal.accent.opacity(0.45), radius: 18)
-                Text("\(parts.1.uppercased()) TO \(to.uppercased())").font(HWFont.display(12)).tracking(2).foregroundStyle(pal.accent).lineLimit(1).minimumScaleFactor(0.6)
+                Text(parts.0).font(HWFont.display(ringSize * 0.28)).foregroundStyle(Paper.ink).monospacedDigit()
+                    .contentTransition(.numericText())
+                Text("\(parts.1.uppercased()) TO \(to.uppercased())").font(HWFont.display(12)).tracking(2).foregroundStyle(pal.deep).lineLimit(1).minimumScaleFactor(0.6)
             }
         }
         .frame(width: ringSize * 0.72)
@@ -1416,12 +1433,12 @@ struct RideView: View {
 
     private func statTile(_ big: String, _ small: String) -> some View {
         VStack(spacing: 1) {
-            Text(big).font(HWFont.display(19)).foregroundStyle(HWPalette.ink).lineLimit(1).minimumScaleFactor(0.6).monospacedDigit()
-            Text(small).font(HWFont.body(11)).foregroundStyle(HWPalette.muted).lineLimit(1).minimumScaleFactor(0.7)
+            Text(big).font(HWFont.display(19)).foregroundStyle(Paper.ink).lineLimit(1).minimumScaleFactor(0.6).monospacedDigit()
+            Text(small).font(HWFont.body(11)).foregroundStyle(Paper.muted).lineLimit(1).minimumScaleFactor(0.7)
         }
         .frame(maxWidth: .infinity).padding(.vertical, 9).padding(.horizontal, 6)
-        .background(Color.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.white.opacity(0.1), lineWidth: 1))
+        .background(Paper.card, in: RoundedRectangle(cornerRadius: 5))
+        .overlay(RoundedRectangle(cornerRadius: 5).stroke(Paper.edge, lineWidth: 1.2))
     }
 
     /// The stops along the way as chips you can scroll: the next one lit, the ones you passed faded, yours in yellow.
@@ -1435,14 +1452,15 @@ struct RideView: View {
                     ForEach(Array(marks.enumerated()), id: \.offset) { i, m in
                         let passed = (m.time ?? .distantFuture) <= now
                         Text("\(m.name)\(m.time.map { " " + Fmt.hhmm($0) } ?? "")").font(HWFont.body(12, bold: i == next))
-                            .foregroundStyle(i == next ? Color(hex: 0x2A1208) : HWPalette.ink.opacity(passed ? 0.45 : 0.9))
+                            .foregroundStyle(i == next ? Color.white : Paper.ink.opacity(passed ? 0.45 : 0.9))
                             .padding(.horizontal, 10).padding(.vertical, 6)
-                            .background(i == next ? AnyShapeStyle(pal.accent) : AnyShapeStyle(Color.white.opacity(0.1)), in: Capsule())
+                            .background(i == next ? AnyShapeStyle(Paper.line(trip.vehicle?.line ?? "", train: trip.vehicle?.isTrain ?? false)) : AnyShapeStyle(Paper.card), in: RoundedRectangle(cornerRadius: 4))
+                            .overlay(RoundedRectangle(cornerRadius: 4).stroke(i == next ? Color.clear : Paper.edge, lineWidth: 1.2))
                             .id(i)
                     }
                     Text("\(trip.leg?.to.short ?? "")\(trip.legTo.map { " " + Fmt.hhmm($0) } ?? "")").font(HWFont.body(12, bold: true))
-                        .foregroundStyle(Color(hex: 0x2A1A00)).padding(.horizontal, 10).padding(.vertical, 6)
-                        .background(BoardInk.yellow, in: Capsule())
+                        .foregroundStyle(Paper.ink).padding(.horizontal, 10).padding(.vertical, 6)
+                        .background(Paper.yellow, in: RoundedRectangle(cornerRadius: 4))
                 }
             }
             .onAppear { if let next { proxy.scrollTo(max(0, next - 1), anchor: .leading) } }
@@ -1496,7 +1514,7 @@ struct StopLabels: View {
                         Text(Self.short(m.name)).font(HWFont.body(10, bold: true)).lineLimit(1).fixedSize()
                         if let t = m.time { Text(Fmt.hhmm(t)).font(HWFont.body(9)) }
                     }
-                    .foregroundStyle(i == next ? pal.accent : HWPalette.ink.opacity(passed ? 0.4 : 0.85))
+                    .foregroundStyle(i == next ? pal.deep : Paper.ink.opacity(passed ? 0.4 : 0.85))
                     .position(x: Self.x(m, w), y: 13 + CGFloat(rows[i]) * 26)
                 }
             }
@@ -1517,17 +1535,17 @@ struct SongCard: View {
                 if let img = song.image { Image(uiImage: img).resizable().scaledToFill() }
                 else if let u = song.artURL {
                     AsyncImage(url: u) { $0.resizable().scaledToFill() } placeholder: { pal.paper }
-                } else { ZStack { pal.paper; Image(systemName: "music.note").foregroundStyle(pal.brass) } }
+                } else { ZStack { pal.paper; Image(systemName: "music.note").foregroundStyle(pal.deep) } }
             }
             .frame(width: 46, height: 46).clipShape(RoundedRectangle(cornerRadius: 3))
-            .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color.white.opacity(0.3), lineWidth: 1))
+            .overlay(RoundedRectangle(cornerRadius: 3).stroke(Paper.ink.opacity(0.3), lineWidth: 1))
             VStack(alignment: .leading, spacing: 2) {
-                Text("\(song.playing ? "NOW PLAYING" : "PAUSED") · \(song.app.uppercased())").font(HWFont.body(10)).tracking(1.4).foregroundStyle(pal.accent)
-                Text(song.title).font(HWFont.display(16)).foregroundStyle(HWPalette.ink).lineLimit(1)
-                if !song.artist.isEmpty { Text(song.artist).font(HWFont.body(12)).foregroundStyle(HWPalette.muted).lineLimit(1) }
+                Text("\(song.playing ? "NOW PLAYING" : "PAUSED") · \(song.app.uppercased())").font(HWFont.body(10)).tracking(1.4).foregroundStyle(pal.deep)
+                Text(song.title).font(HWFont.display(16)).foregroundStyle(Paper.ink).lineLimit(1)
+                if !song.artist.isEmpty { Text(song.artist).font(HWFont.body(12)).foregroundStyle(Paper.muted).lineLimit(1) }
             }
             Spacer(minLength: 0)
-            Image(systemName: song.playing ? "waveform" : "pause.fill").foregroundStyle(pal.accent)
+            Image(systemName: song.playing ? "waveform" : "pause.fill").foregroundStyle(pal.deep)
                 .symbolEffect(.variableColor.iterative, isActive: song.playing)
         }
         .brass(pal, pad: 12)
@@ -1544,25 +1562,24 @@ struct SongPill: View {
                 if let img = song.image { Image(uiImage: img).resizable().scaledToFill() }
                 else if let u = song.artURL {
                     AsyncImage(url: u) { $0.resizable().scaledToFill() } placeholder: { Color.white.opacity(0.15) }
-                } else { ZStack { Color.white.opacity(0.15); Image(systemName: "music.note").font(.system(size: 22)).foregroundStyle(pal.accent) } }
+                } else { ZStack { Color.white.opacity(0.15); Image(systemName: "music.note").font(.system(size: 22)).foregroundStyle(Paper.yellow) } }
             }
             .frame(width: 64, height: 64).clipShape(RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.3), lineWidth: 1))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Paper.ink.opacity(0.3), lineWidth: 1))
             .shadow(color: .black.opacity(0.35), radius: 6, y: 3)
             VStack(alignment: .leading, spacing: 3) {
-                Text("\(song.playing ? "NOW PLAYING" : "PAUSED") · \(song.app.uppercased())").font(HWFont.body(10, bold: true)).tracking(1.4).foregroundStyle(pal.accent)
-                Text(song.title).font(HWFont.display(19)).foregroundStyle(HWPalette.ink).lineLimit(1).minimumScaleFactor(0.7)
-                if !song.artist.isEmpty { Text(song.artist).font(HWFont.body(14)).foregroundStyle(HWPalette.ink.opacity(0.8)).lineLimit(1) }
+                Text("\(song.playing ? "NOW PLAYING" : "PAUSED") · \(song.app.uppercased())").font(HWFont.body(10, bold: true)).tracking(1.4).foregroundStyle(Paper.yellow)
+                Text(song.title).font(HWFont.display(19)).foregroundStyle(.white).lineLimit(1).minimumScaleFactor(0.7)
+                if !song.artist.isEmpty { Text(song.artist).font(HWFont.body(14)).foregroundStyle(Color.white.opacity(0.8)).lineLimit(1) }
             }
             Spacer(minLength: 4)
-            Image(systemName: song.playing ? "waveform" : "pause.fill").font(.system(size: 20, weight: .semibold)).foregroundStyle(pal.accent)
+            Image(systemName: song.playing ? "waveform" : "pause.fill").font(.system(size: 20, weight: .semibold)).foregroundStyle(Paper.yellow)
                 .symbolEffect(.variableColor.iterative, isActive: song.playing)
                 .padding(.trailing, 6)
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 16))
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.white.opacity(0.12), lineWidth: 1))
+        .background(Paper.navy, in: RoundedRectangle(cornerRadius: 6))
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(song.playing ? "Now playing" : "Paused"): \(song.title)\(song.artist.isEmpty ? "" : " by \(song.artist)")")
     }
@@ -1582,20 +1599,18 @@ struct RideRing<Center: View>: View {
         let line: CGFloat = 14
         let r = (size - line) / 2
         ZStack {
-            Circle().fill(RadialGradient(colors: [Color(hex: 0x1C0F0C).opacity(0.85), Color(hex: 0x0A0606).opacity(0.75)], center: .center, startRadius: 10, endRadius: size / 2))
-                .padding(line)
-            Circle().stroke(Color.white.opacity(0.14), lineWidth: line)
+            // a circle line on the paper: the part you've ridden in the line's colour, the stops as white stations
+            Circle().stroke(Color(hex: 0xE4DFD3), lineWidth: line)
             Circle().trim(from: 0, to: p).stroke(accent, style: StrokeStyle(lineWidth: line, lineCap: .round)).rotationEffect(.degrees(-90))
-                .shadow(color: accent.opacity(0.5), radius: 8)
             ForEach(Array(stops.enumerated()), id: \.offset) { _, f in
-                Circle().fill(f <= p ? Color(hex: 0x2A1208) : Color.white.opacity(0.9)).frame(width: 7, height: 7)
+                Circle().fill(Color.white).frame(width: 12, height: 12).overlay(Circle().stroke(Paper.ink, lineWidth: 3))
                     .offset(y: -r).rotationEffect(.degrees(f * 360))
             }
             // the bus or train, upright, at the end of the filled part
-            Image(systemName: train ? "tram.fill" : "bus.fill").font(.system(size: 15, weight: .bold)).foregroundStyle(Color(hex: 0x2A1208))
-                .frame(width: 34, height: 34).background(Color.white, in: Circle())
-                .overlay(Circle().stroke(accent, lineWidth: 3))
-                .shadow(color: .black.opacity(0.45), radius: 4, y: 2)
+            Image(systemName: train ? "tram.fill" : "bus.fill").font(.system(size: 15, weight: .bold)).foregroundStyle(Paper.ink)
+                .frame(width: 36, height: 36).background(Color.white, in: Circle())
+                .overlay(Circle().stroke(accent, lineWidth: 3.5))
+                .shadow(color: .black.opacity(0.3), radius: 3, y: 2)
                 .rotationEffect(.degrees(-p * 360))
                 .offset(y: -r)
                 .rotationEffect(.degrees(p * 360))
@@ -1616,13 +1631,14 @@ struct HoldButton: View {
     let action: () -> Void
     @State private var progress: CGFloat = 0
     var body: some View {
-        // a navy button like the planner's tabs; it fills up green while you hold it
-        Text(title.uppercased()).font(HWFont.display(15)).tracking(0.8).foregroundStyle(.white)
+        // a paper button pinned under the sheet; it fills up green while you hold it
+        Text(title.uppercased()).font(HWFont.display(15)).tracking(1.2).foregroundStyle(Paper.navy)
             .frame(maxWidth: .infinity).padding(.vertical, 18)
-            .background(alignment: .leading) { GeometryReader { g in Color(hex: 0x2F9E5B).frame(width: g.size.width * progress) } }
-            .background(Color(hex: 0x0B2F86).opacity(0.9))
-            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.white.opacity(0.18), lineWidth: 1))
+            .background(alignment: .leading) { GeometryReader { g in Paper.green.opacity(0.85).frame(width: g.size.width * progress) } }
+            .background(PaperFill())
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Paper.edge, lineWidth: 1))
             .clipShape(RoundedRectangle(cornerRadius: 6))
+            .shadow(color: .black.opacity(0.4), radius: 8, y: 5)
             .onLongPressGesture(minimumDuration: seconds, perform: { progress = 0; action() }, onPressingChanged: { p in
                 withAnimation(p ? .linear(duration: seconds) : .easeOut(duration: 0.2)) { progress = p ? 1 : 0 }
             })
@@ -1639,18 +1655,26 @@ struct AlarmView: View {
     var pal: HWPalette { .of(home: trip.direction == .home) }
     var body: some View {
         ZStack {
-            RadialGradient(colors: [Color(hex: 0x5A2A10), Color(hex: 0x1A0C08)], center: .center, startRadius: 10, endRadius: glow ? 520 : 380).ignoresSafeArea()
-            VStack(alignment: .leading, spacing: 12) {
-                Spacer()
-                Text(approach ? "Wake up" : "Get off now").font(HWFont.display(64)).foregroundStyle(HWPalette.ink)
-                Text(trip.leg?.to.name ?? "").font(HWFont.display(24)).foregroundStyle(HWPalette.ink)
-                Text(approach ? "\(Fmt.distance(trip.distance ?? 0)) to go. Get ready to get off." : "You’re at \(trip.leg?.to.short ?? "your stop").")
-                    .font(HWFont.body(15)).foregroundStyle(HWPalette.ink.opacity(0.85))
-                if let n = trip.nextText { Text(n).font(HWFont.body(13)).foregroundStyle(HWPalette.muted) }
+            WallBackground()
+            VStack(spacing: 14) {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(approach ? "Wake up" : "Get off now").font(HWFont.display(58)).foregroundStyle(.white)
+                        .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16).padding(.vertical, 22)
+                        .background(Color(hex: 0xDA421E).opacity(glow ? 1 : 0.82))
+                        .padding(.horizontal, 6).padding(.top, 6)
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(trip.leg?.to.name ?? "").font(HWFont.display(26)).foregroundStyle(Paper.ink)
+                        Text(approach ? "\(Fmt.distance(trip.distance ?? 0)) to go. Get ready to get off." : "You’re at \(trip.leg?.to.short ?? "your stop").")
+                            .font(HWFont.body(16)).foregroundStyle(Paper.ink.opacity(0.85))
+                        if let n = trip.nextText { Text(n).font(HWFont.body(13)).foregroundStyle(Paper.muted) }
+                    }
+                    .padding(.horizontal, 18).padding(.bottom, 22)
+                }
+                .paperSheet()
                 Spacer()
                 HoldButton(title: "Hold to stop alarm", pal: pal, seconds: 1.2) { trip.stopAlarm() }
             }
-            .padding(24)
+            .padding(.horizontal, 14).padding(.top, 40).padding(.bottom, 8)
         }
         .onAppear { withAnimation(.easeInOut(duration: 1.6).repeatForever()) { glow = true } }
     }
@@ -1667,24 +1691,26 @@ struct ArrivalView: View {
     private var nextLeg: Leg? { trip.phase == .transfer ? trip.legs[safe: trip.index + 1] : nil }
     var body: some View {
         ZStack {
-            RadialGradient(colors: [pal.paper, HWPalette.bg], center: .top, startRadius: 20, endRadius: 600).ignoresSafeArea()
+            WallBackground()
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     if let n = nextLeg { change(n) } else { arrived }
                 }
-                .padding(24)
+                .padding(18)
+                .paperSheet()
+                .padding(.horizontal, 12).padding(.top, 14).padding(.bottom, 10)
             }
             .safeAreaInset(edge: .bottom) {
                 VStack(spacing: 10) {
                     if nextLeg != nil {
                         BandButton(title: "Start next leg", pal: pal) { trip.nextLeg() }
-                        Button("End trip here") { trip.endTrip() }.font(HWFont.display(15)).foregroundStyle(HWPalette.muted).frame(maxWidth: .infinity)
+                        Button("End trip here") { trip.endTrip() }.font(HWFont.display(15)).foregroundStyle(Paper.muted).frame(maxWidth: .infinity)
                     } else {
                         BandButton(title: "Done", pal: pal) { trip.endTrip() }
                     }
                 }
-                .padding(.horizontal, 24).padding(.top, 10).padding(.bottom, 8)
-                .background(LinearGradient(colors: [HWPalette.bg.opacity(0), HWPalette.bg], startPoint: .top, endPoint: .center))
+                .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 8)
+                .background(LinearGradient(colors: [Paper.wallBottom.opacity(0), Paper.wallBottom], startPoint: .top, endPoint: .center))
             }
         }
         .onAppear {
@@ -1702,7 +1728,7 @@ struct ArrivalView: View {
     /// You're there: the zero, a little burst, and how the trip went.
     @ViewBuilder private var arrived: some View {
         ZStack(alignment: .leading) {
-            Text("0").font(HWFont.display(92)).foregroundStyle(HWPalette.ink).shadow(color: pal.accent.opacity(0.5), radius: 24)
+            Text("0").font(HWFont.display(92)).foregroundStyle(Paper.ink)
                 .rotation3DEffect(.degrees(spin), axis: (x: 0, y: 1, z: 0))
             ForEach(0..<16, id: \.self) { i in
                 let a = Double(i) / 16 * 2 * .pi, r = 70.0 + Double((i * 37) % 40)
@@ -1713,8 +1739,8 @@ struct ArrivalView: View {
         }
         .padding(.top, 40)
         Text(trip.route?.isFixed == false ? "You’re at \(trip.arrivedAt ?? trip.route?.station.short ?? "your stop")" : trip.direction == .home ? "You’re home" : "You’re in Breda")
-            .font(HWFont.display(34)).foregroundStyle(HWPalette.ink)
-        Text("Trip finished.").font(HWFont.body(14)).foregroundStyle(HWPalette.muted)
+            .font(HWFont.display(34)).foregroundStyle(Paper.ink)
+        Text("Trip finished.").font(HWFont.body(14)).foregroundStyle(Paper.muted)
         if let s = trip.lastScore { ScoreCard(result: s, pal: pal).frame(maxWidth: .infinity, alignment: .leading).brass(pal, pad: 18) }
     }
 
@@ -1726,15 +1752,15 @@ struct ArrivalView: View {
                     Image(systemName: "chevron.left").font(.system(size: 12, weight: .bold))
                     Text("MAP").font(HWFont.display(13)).tracking(1.4)
                 }
-                .foregroundStyle(.white).padding(.horizontal, 12).padding(.vertical, 8)
-                .background(BoardInk.band.opacity(0.92), in: Capsule()).overlay(Capsule().stroke(Color.white.opacity(0.22), lineWidth: 1))
+                .foregroundStyle(Paper.ink).padding(.horizontal, 12).padding(.vertical, 8)
+                .background(Paper.paper, in: Capsule()).shadow(color: .black.opacity(0.35), radius: 5, y: 3)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Back to the map. Your change stays open.")
         }
         VStack(alignment: .leading, spacing: 4) {
-            Text("YOU’RE AT \((trip.arrivedAt ?? trip.leg?.to.short ?? "").uppercased())").font(BoardInk.sans(12)).tracking(1.6).foregroundStyle(pal.accent)
-            Text("Change at \(trip.leg?.to.short ?? "")").font(BoardInk.sans(30)).foregroundStyle(.white).lineLimit(1).minimumScaleFactor(0.7)
+            Text("YOU’RE AT \((trip.arrivedAt ?? trip.leg?.to.short ?? "").uppercased())").font(BoardInk.sans(12)).tracking(1.6).foregroundStyle(pal.deep)
+            Text("Change at \(trip.leg?.to.short ?? "")").font(BoardInk.sans(30)).foregroundStyle(Paper.ink).lineLimit(1).minimumScaleFactor(0.7)
         }
         .padding(.top, 12)
         VStack(alignment: .leading, spacing: 10) {
@@ -1742,31 +1768,28 @@ struct ArrivalView: View {
             if let r = trip.next {
                 let g = r.isTrain ? nil : r.grade
                 HStack(spacing: 10) {
-                    Text(r.line).font(BoardInk.sans(15)).lineLimit(1).minimumScaleFactor(0.6)
-                        .foregroundStyle(r.isTrain ? Color(hex: 0x1A1A1A) : (g.map { RatingStyle.ink($0) } ?? BoardInk.navy))
-                        .frame(width: 46, height: 26)
-                        .background(r.isTrain ? AnyShapeStyle(BoardInk.yellow) : (g.map { RatingStyle.fill($0) } ?? AnyShapeStyle(BoardInk.route)), in: RoundedRectangle(cornerRadius: 3))
+                    LineBullet(line: r.line, train: r.isTrain, grade: g, height: 28, minWidth: 46, font: 15)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("\(r.isTrain ? r.name : "Bus \(r.line)") to \(n.to.short)").font(BoardInk.sans(17)).foregroundStyle(.white).lineLimit(1).minimumScaleFactor(0.7)
+                        Text("\(r.isTrain ? r.name : "Bus \(r.line)") to \(n.to.short)").font(BoardInk.sans(17)).foregroundStyle(Paper.ink).lineLimit(1).minimumScaleFactor(0.7)
                         Text([r.platform.map { "platform \($0)" }, "\(r.rideMinutes) min ride"].compactMap { $0 }.joined(separator: " · "))
-                            .font(BoardInk.sans(12, .regular)).foregroundStyle(Color.white.opacity(0.8))
+                            .font(BoardInk.sans(12, .regular)).foregroundStyle(Paper.ink.opacity(0.8))
                     }
                     Spacer(minLength: 4)
                     VStack(alignment: .trailing, spacing: 1) {
-                        Text(Fmt.hhmm(r.departure)).font(BoardInk.sans(24)).foregroundStyle(.white)
-                        Text(inMinutes(r.departure)).font(BoardInk.sans(11, .regular)).foregroundStyle(Color.white.opacity(0.8))
+                        Text(Fmt.hhmm(r.departure)).font(BoardInk.sans(24)).foregroundStyle(Paper.ink)
+                        Text(inMinutes(r.departure)).font(BoardInk.sans(11, .regular)).foregroundStyle(Paper.ink.opacity(0.8))
                     }
                 }
             } else {
-                Text("\(n.mode.title) to \(n.to.short)").font(BoardInk.sans(17)).foregroundStyle(.white)
+                Text("\(n.mode.title) to \(n.to.short)").font(BoardInk.sans(17)).foregroundStyle(Paper.ink)
             }
-            Text("It starts by itself once you’re on board.").font(BoardInk.sans(10.5, .regular)).foregroundStyle(Color.white.opacity(0.65))
+            Text("It starts by itself once you’re on board.").font(BoardInk.sans(10.5, .regular)).foregroundStyle(Paper.ink.opacity(0.65))
         }
         .padding(12)
-        .background(LinearGradient(colors: [BoardInk.blueTop, BoardInk.blueBottom], startPoint: .top, endPoint: .bottom), in: RoundedRectangle(cornerRadius: 8))
+        .background(Paper.card, in: RoundedRectangle(cornerRadius: 8)).overlay(RoundedRectangle(cornerRadius: 8).stroke(Paper.edge, lineWidth: 1.2))
         TransferList(all: trip.upcoming, updated: trip.upcomingAt, error: trip.upcomingError, mode: n.mode, dest: n.mode == .train ? n.to.short : "Veghel", pal: pal)
             .padding(12)
-            .background(LinearGradient(colors: [BoardInk.blueTop, BoardInk.blueBottom], startPoint: .top, endPoint: .bottom), in: RoundedRectangle(cornerRadius: 8))
+            .background(Paper.card, in: RoundedRectangle(cornerRadius: 8)).overlay(RoundedRectangle(cornerRadius: 8).stroke(Paper.edge, lineWidth: 1.2))
     }
 
     private func inMinutes(_ d: Date) -> String {
@@ -1794,14 +1817,14 @@ struct SettingsView: View {
                 if let tryDemo, trip.phase == .idle {
                     Section {
                         Button { dismissSettings(); tryDemo() } label: {
-                            Label("Try it at home: a pretend trip", systemImage: "play.circle.fill").foregroundStyle(pal.accent)
+                            Label("Try it at home: a pretend trip", systemImage: "play.circle.fill").foregroundStyle(pal.deep)
                         }
                     } footer: { Text("Fastest trip with the map and notifications, being recognised on the bus, the ride ring, the alarm and arriving, all pretend.") }
                 }
                 Section {
                     Toggle(isOn: $trip.autoStart) { label("Start trips by itself", "Notices when you leave your stop or station on a bus or train, and starts the alarm. Needs location set to Always.") }
                     if trip.autoStart && !trip.always {
-                        Button("Allow location Always") { trip.askForAlways() }.foregroundStyle(pal.accent)
+                        Button("Allow location Always") { trip.askForAlways() }.foregroundStyle(pal.deep)
                     }
                     Toggle(isOn: $trip.announce) { label("Station announcement", "A jingle and a voice that names your stop, before the alarm.") }
                     Toggle(isOn: $trip.quietWhenInUse) { label("Just a notification when I’m on my phone", "If your phone is unlocked and in use when it would ring, you’re awake: you get one notification instead of the alarm. Locked, it rings as usual. (Only with a passcode on your phone.)") }
@@ -1814,14 +1837,14 @@ struct SettingsView: View {
                         ForEach(AlarmSound.Kind.allCases) { k in Text(k.title).tag(k) }
                     }
                     .onChange(of: trip.soundKind) { _, k in trip.sound.play(preview: k) }
-                    Text(trip.soundKind.detail).font(HWFont.body(12)).foregroundStyle(HWPalette.muted)
-                    Button("Test alarm") { trip.testAlarm() }.foregroundStyle(pal.accent)
+                    Text(trip.soundKind.detail).font(HWFont.body(12)).foregroundStyle(Paper.muted)
+                    Button("Test alarm") { trip.testAlarm() }.foregroundStyle(pal.deep)
                     Picker("If music is playing", selection: $trip.pauseMusic) {
                         Text("Keep it playing").tag(false)
                         Text("Pause it").tag(true)
                     }
                     Text(trip.pauseMusic ? "The loudest option: your music stops while it rings. To start it again, press play on your earbuds."
-                                         : "The alarm plays over your music, a little louder than it.").font(HWFont.body(12)).foregroundStyle(HWPalette.muted)
+                                         : "The alarm plays over your music, a little louder than it.").font(HWFont.body(12)).foregroundStyle(Paper.muted)
                 } header: { Text("Alarm") } footer: { Text("The alarm also rings in silent mode. Keep the volume up or wear earbuds. You can stop it from the lock screen: tap Stop alarm on the trip, or on the notification.") }
                 Section {
                     Picker("Backup alarm", selection: $trip.backupMinutes) {
@@ -1843,7 +1866,7 @@ struct SettingsView: View {
                         Label("\(s.title)\(s.artist.isEmpty ? "" : " · \(s.artist)")", systemImage: s.playing ? "music.note" : "pause.fill").font(HWFont.body(13))
                     }
                     Button("Preview on the lock screen") { music.checkOnce(); DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { trip.previewActivity() } }
-                        .foregroundStyle(pal.accent).disabled(trip.isRiding)
+                        .foregroundStyle(pal.deep).disabled(trip.isRiding)
                 } header: { Text("Lock screen") } footer: {
                     Text("During a trip your lock screen shows a little train screen: how far to go, a metro that drives along as you get closer, your arrival time and the song you’re playing. The preview runs for about a minute: lock your phone to see it.")
                 }
@@ -1852,14 +1875,14 @@ struct SettingsView: View {
                     Stepper("Train: \(String(format: "%.1f", trip.trainKm)) km", value: $trip.trainKm, in: 0.5...15, step: 0.5)
                 } header: { Text("Usual wake distance") } footer: { Text("Used until you pick a distance for a stop when you start. After that, it remembers your choice.") }
                 Section("Your stops") {
-                    Button("Live bus times stops and lines") { liveStops = true }.foregroundStyle(pal.accent)
+                    Button("Live bus times stops and lines") { liveStops = true }.foregroundStyle(pal.deep)
                 }
                 Section {
                     Button("Reset everything", role: .destructive) { confirmReset = true }
                 } footer: { Text("Haltewekker \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")") }
             }
             .scrollContentBackground(.hidden)
-            .background(LinearGradient(colors: [BoardInk.blueTop, BoardInk.blueBottom], startPoint: .top, endPoint: .bottom).ignoresSafeArea())
+            .background(PaperFill().ignoresSafeArea()).preferredColorScheme(.light)
             .font(HWFont.body(15))
             .tint(pal.band)
             .navigationTitle("Settings")
@@ -1872,17 +1895,17 @@ struct SettingsView: View {
     @ViewBuilder private var spotifyRows: some View {
         if music.spotifyConnected {
             Label("Spotify is connected", systemImage: "checkmark.circle.fill").foregroundStyle(HWPalette.ok)
-            Button("Check what’s playing") { music.checkOnce() }.foregroundStyle(pal.accent)
+            Button("Check what’s playing") { music.checkOnce() }.foregroundStyle(pal.deep)
             Button("Disconnect Spotify", role: .destructive) { music.disconnectSpotify() }
         } else {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Spotify only tells apps what’s playing if you make a (free) Spotify app for it. Once, on developer.spotify.com with your Premium account:")
                 Text("1. Dashboard → Create app. Tick “Web API”.\n2. Redirect URI: the link below.\n3. Settings → User Management: add your own name and Spotify email.\n4. Copy the Client ID and paste it here.")
             }
-            .font(HWFont.body(12)).foregroundStyle(HWPalette.muted)
+            .font(HWFont.body(12)).foregroundStyle(Paper.muted)
             Button { UIPasteboard.general.string = NowPlaying.redirect } label: { Label("Copy the redirect link", systemImage: "doc.on.doc") }
-                .foregroundStyle(pal.accent)
-            Text(NowPlaying.redirect).font(HWFont.body(11)).foregroundStyle(HWPalette.muted).textSelection(.enabled)
+                .foregroundStyle(pal.deep)
+            Text(NowPlaying.redirect).font(HWFont.body(11)).foregroundStyle(Paper.muted).textSelection(.enabled)
             HStack {
                 TextField("Client ID", text: $music.clientId)
                     .textInputAutocapitalization(.never).autocorrectionDisabled().font(HWFont.body(13))
@@ -1892,7 +1915,7 @@ struct SettingsView: View {
                 .labelStyle(.iconOnly).buttonBorderShape(.capsule)
             }
             Button(music.busy ? "Connecting…" : "Connect Spotify") { Task { await connectSpotify() } }
-                .foregroundStyle(pal.accent)
+                .foregroundStyle(pal.deep)
                 .disabled(music.clientId.trimmingCharacters(in: .whitespacesAndNewlines).count < 20 || music.busy)
         }
         if let e = music.spotifyError { Text(e).font(HWFont.body(12)).foregroundStyle(HWPalette.warn) }
@@ -1911,7 +1934,7 @@ struct SettingsView: View {
     private func label(_ t: String, _ d: String) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(t).font(HWFont.display(16))
-            Text(d).font(HWFont.body(12)).foregroundStyle(HWPalette.muted)
+            Text(d).font(HWFont.body(12)).foregroundStyle(Paper.muted)
         }
     }
 }

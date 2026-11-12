@@ -1,3 +1,4 @@
+import CoreLocation
 import SwiftUI
 
 // The home screen starts face to face with a metro map hanging on the station wall. Pick a line on it and
@@ -102,35 +103,34 @@ struct HomeStage<Menu: View, Boards: View>: View {
         // (Each layer gets that exact rectangle, so what the app draws can't drift off the boards and the map in the video.)
         GeometryReader { g in
             let v = MapSpot.picture(in: g.size)
+            // the two sheets on the wall: the trains at the top, the boards under it
+            let top = g.safeAreaInsets.top + 58
+            let led = CGRect(x: 12, y: top, width: g.size.width - 24, height: 252)
+            let plan = CGRect(x: 12, y: led.maxY + 18, width: g.size.width - 24, height: max(200, g.size.height - led.maxY - 18 - g.safeAreaInsets.bottom - 4))
+            let away = stage != .map
             ZStack(alignment: .topLeading) {
                 HWPalette.bg
-                // at the boards on the wall
-                ForEach([false, true], id: \.self) { h in
-                    still(h ? "board-home" : "board-out")
-                        .frame(width: v.width, height: v.height).position(x: v.midX, y: v.midY)
-                        .opacity(stage == .station && h == home ? 1 : 0)
-                }
-                .animation(.easeOut(duration: 0.3), value: stage)
-                .animation(.easeInOut(duration: 0.6), value: home)
-                // the walk from the map to the boards (or back)
-                OneShotVideo(name: "move-\(home ? "home" : "out")\(stage == .returning ? "-back" : "")", token: moveToken)
-                    .frame(width: v.width, height: v.height).position(x: v.midX, y: v.midY)
-                    .opacity(stage == .leaving || stage == .returning ? 1 : 0)
-                    .animation(.easeOut(duration: stage == .station ? 0.35 : 0.12), value: stage)
+                // the blue wall, with the sheets pinned on it
+                WallBackground().frame(width: g.size.width, height: g.size.height)
+                WallSticker(text: "306 ♥", angle: 9).position(x: g.size.width - 52, y: led.maxY + 8)
+                    .opacity(stage == .station ? 1 : 0)
                 // face to face with the map
                 ForEach([false, true], id: \.self) { h in
                     still(h ? "map-home" : "map-out")
                         .frame(width: v.width, height: v.height).position(x: v.midX, y: v.midY)
                         .opacity(stage == .map && h == home ? 1 : 0)
+                    .scaleEffect(away ? 0.94 : 1)
                 }
-                .animation(.easeOut(duration: 0.45), value: stage)
+                .animation(.easeOut(duration: 0.3), value: stage)
                 .animation(.easeInOut(duration: 0.6), value: home)
-                // the live trains and your trip, written on the boards (gone the moment you walk away)
-                boards(WallBoards.rect(WallBoards.led, in: g.size), WallBoards.rect(WallBoards.planner, in: g.size))
+                // the live trains and your trip, on paper: they drop onto the wall as the map comes down
+                boards(led, plan)
                     .frame(width: g.size.width, height: g.size.height)
                     .opacity(stage == .station ? 1 : 0)
+                    .offset(y: stage == .station ? 0 : -28)
+                    .rotationEffect(.degrees(stage == .station ? 0 : -1.2))
                     .allowsHitTesting(stage == .station)
-                    .animation(stage == .station ? .easeOut(duration: 0.3) : nil, value: stage)
+                    .animation(.spring(response: 0.45, dampingFraction: 0.82), value: stage)
                 // the app's own map, exactly over the one on the wall
                 let r = MapSpot.rect(in: g.size)
                 menu
@@ -246,6 +246,9 @@ struct MetroMapMenu: View {
     let lines: String
     let planned: String
     let via: String?
+    var custom: String? = nil           // somewhere you picked yourself: the map is drawn for that trip
+    var trip: DoorTrip? = nil
+    var others: [DoorTrip] = []
     let open: (HomeSection) -> Void
     let toggle: () -> Void
     let settings: () -> Void
@@ -260,7 +263,8 @@ struct MetroMapMenu: View {
             // the title band, in the colour of where you're going
             accent.frame(width: MapSpot.design.width, height: 64)
             Text("Haltewekker").font(MapInk.sans(24, .bold)).foregroundStyle(.white).offset(x: 20, y: 12)
-            Text("Network map · Veghel ⇄ Breda").font(MapInk.sans(10.5)).foregroundStyle(.white.opacity(0.78)).offset(x: 20, y: 43)
+            Text(custom.map { "Network map · \(trip.map { Fmt.place($0.first.fromStop) } ?? "here") ⇄ \($0)" } ?? "Network map · Veghel ⇄ Breda")
+                .font(MapInk.sans(10.5)).foregroundStyle(.white.opacity(0.78)).lineLimit(1).frame(width: 270, alignment: .leading).offset(x: 20, y: 43)
             Button(action: settings) {
                 Image(systemName: "gearshape").font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
                     .frame(width: 30, height: 30).overlay(Circle().stroke(.white, lineWidth: 1.5))
@@ -268,15 +272,31 @@ struct MetroMapMenu: View {
             .buttonStyle(.plain).offset(x: 299, y: 17).accessibilityLabel("Settings")
             Button(action: toggle) {
                 HStack(spacing: 6) {
-                    directionBadge("TO BREDA", on: !home)
-                    directionBadge("HOME", on: home)
-                    Text("tap to switch").font(MapInk.sans(9.5)).foregroundStyle(MapInk.soft).padding(.leading, 2)
+                    if let c = custom {
+                        directionBadge("TO \(c.uppercased())", on: true)
+                        directionBadge(home ? "TO BREDA" : "HOME", on: false)
+                        Text("made for where you’re going").font(MapInk.sans(9)).foregroundStyle(MapInk.soft).lineLimit(2).frame(width: 80, alignment: .leading)
+                    } else {
+                        directionBadge("TO BREDA", on: !home)
+                        directionBadge("HOME", on: home)
+                        Text("tap to switch").font(MapInk.sans(9.5)).foregroundStyle(MapInk.soft).padding(.leading, 2)
+                    }
                 }
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain).offset(x: 20, y: 72)
             .accessibilityLabel(home ? "Going home. Tap to switch to going to Breda." : "Going to Breda. Tap to switch to going home.")
-            NetworkMap(via: via).offset(x: 14, y: 108)
+            Group {
+                if custom != nil {
+                    if let trip { TripNetworkMap(trip: trip, others: others) }
+                    else {
+                        Text("Drawing the map to \(custom ?? "")…").font(MapInk.sans(12)).foregroundStyle(MapInk.soft).frame(width: 318, height: 220)
+                    }
+                } else {
+                    NetworkMap(via: via)
+                }
+            }
+            .offset(x: 14, y: 108)
             Text("PICK A LINE").font(MapInk.sans(9, .bold)).tracking(0.4).foregroundStyle(MapInk.soft).offset(x: 20, y: 334)
             row(.fastest, letter: "F", fill: Color(hex: 0xF0D722), ink: MapInk.text, sub: fastest, y: 350)
             row(.lines, letter: "A", fill: Color(hex: 0x7DAD4C), ink: .white, sub: lines, y: 408)
@@ -310,7 +330,7 @@ struct MetroMapMenu: View {
     }
 
     private func directionBadge(_ t: String, on: Bool) -> some View {
-        Text(t).font(MapInk.sans(12.5, .bold)).foregroundStyle(on ? .white : MapInk.soft)
+        Text(t).font(MapInk.sans(12.5, .bold)).foregroundStyle(on ? .white : MapInk.soft).lineLimit(1).minimumScaleFactor(0.6).padding(.horizontal, 4)
             .frame(width: 100, height: 28)
             .background(on ? accent : .clear, in: RoundedRectangle(cornerRadius: 4))
             .overlay(RoundedRectangle(cornerRadius: 4).stroke(on ? .clear : Color(hex: 0xB9B5AA), lineWidth: 1.2))
@@ -336,5 +356,109 @@ struct MetroMapMenu: View {
         .buttonStyle(.plain)
         .offset(x: 14, y: y + 2)
         .accessibilityLabel("\(s.title). \(sub)")
+    }
+}
+
+
+// MARK: a network map drawn for any trip
+
+/// The metro map for somewhere you picked yourself, drawn from the trip: the stations where you get on, change and
+/// arrive, joined by each ride in its line's colour, at 45° like the map on the wall (lengths follow the real distance,
+/// squeezed so long rides don't take over). The other ways go fainter beside it, sharing the stations they share.
+struct TripNetworkMap: View {
+    let trip: DoorTrip
+    let others: [DoorTrip]
+
+    private struct Station { let name: String; let c: CLLocationCoordinate2D }
+    private struct Piece { let a: Int; let b: Int; let line: String; let train: Bool; let main: Bool }
+
+    /// Stations (by name) and the rides between them.
+    private var graph: (stations: [Station], pieces: [Piece], dest: Int) {
+        var st: [Station] = [], pieces: [Piece] = []
+        func idx(_ name: String, _ lat: Double?, _ lon: Double?) -> Int? {
+            let n = Fmt.place(name)
+            if let i = st.firstIndex(where: { $0.name == n }) { return i }
+            guard let lat, let lon else { return nil }
+            st.append(Station(name: n, c: .init(latitude: lat, longitude: lon))); return st.count - 1
+        }
+        func add(_ t: DoorTrip, main: Bool) {
+            for r in t.rides {
+                guard let a = idx(r.fromStop, r.fromLat, r.fromLon), let b = idx(r.toStop, r.toLat, r.toLon), a != b else { continue }
+                if !pieces.contains(where: { $0.a == a && $0.b == b && $0.line == r.line }) { pieces.append(Piece(a: a, b: b, line: r.line, train: r.isTrain, main: main)) }
+            }
+        }
+        add(trip, main: true)
+        let dest = idx(trip.last.toStop, trip.last.toLat, trip.last.toLon) ?? max(0, st.count - 1)
+        for o in others.prefix(2) where o.id != trip.id { add(o, main: false) }
+        return (st, pieces, dest)
+    }
+
+    /// Where each station goes: along the main trip first, each step at the nearest 45° to its real direction.
+    private func layout(_ g: (stations: [Station], pieces: [Piece], dest: Int)) -> [CGPoint?] {
+        var pos = [CGPoint?](repeating: nil, count: g.stations.count)
+        guard !g.stations.isEmpty else { return pos }
+        pos[0] = .zero
+        func step(_ a: Int, _ b: Int) -> CGPoint {
+            let p = g.stations[a].c, q = g.stations[b].c
+            let dx = (q.longitude - p.longitude) * 111_320 * cos(p.latitude * .pi / 180), dy = (q.latitude - p.latitude) * 110_540
+            let ang = (atan2(dy, dx) / (.pi / 4)).rounded() * (.pi / 4)
+            let len = sqrt(max(1, hypot(dx, dy)) / 1000)          // km, squeezed
+            return CGPoint(x: cos(ang) * len, y: -sin(ang) * len)
+        }
+        // keep going until every station that can be reached has a place (main pieces first)
+        for _ in 0..<3 {
+            for piece in g.pieces.sorted(by: { $0.main && !$1.main }) {
+                if let pa = pos[piece.a], pos[piece.b] == nil { let d = step(piece.a, piece.b); pos[piece.b] = CGPoint(x: pa.x + d.x, y: pa.y + d.y) }
+                else if let pb = pos[piece.b], pos[piece.a] == nil { let d = step(piece.a, piece.b); pos[piece.a] = CGPoint(x: pb.x - d.x, y: pb.y - d.y) }
+            }
+        }
+        return pos
+    }
+
+    var body: some View {
+        let g = graph
+        let raw = layout(g)
+        let pts = raw.compactMap { $0 }
+        let minX = pts.map(\.x).min() ?? 0, maxX = pts.map(\.x).max() ?? 1
+        let minY = pts.map(\.y).min() ?? 0, maxY = pts.map(\.y).max() ?? 1
+        let W: CGFloat = 318, H: CGFloat = 220, mx: CGFloat = 64, my: CGFloat = 26
+        let sc = min((W - 2 * mx) / max(0.01, maxX - minX), (H - 2 * my) / max(0.01, maxY - minY))
+        let ox = (W - (maxX - minX) * sc) / 2, oy = (H - (maxY - minY) * sc) / 2
+        let at: (Int) -> CGPoint? = { i in raw[i].map { CGPoint(x: ox + ($0.x - minX) * sc, y: oy + ($0.y - minY) * sc) } }
+        return Canvas { ctx, _ in
+            // the other ways first, fainter; then your trip on top
+            for piece in g.pieces.sorted(by: { !$0.main && $1.main }) {
+                guard let a = at(piece.a), let b = at(piece.b) else { continue }
+                var p = Path(); p.move(to: a); p.addLine(to: b)
+                ctx.stroke(p, with: .color(Paper.line(piece.line, train: piece.train).opacity(piece.main ? 1 : 0.45)),
+                           style: StrokeStyle(lineWidth: piece.main ? 7 : 5, lineCap: .round))
+            }
+            // each line's bullet halfway along it
+            for piece in g.pieces {
+                guard let a = at(piece.a), let b = at(piece.b) else { continue }
+                let m = CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2)
+                let w = CGFloat(max(2, piece.line.count)) * 7 + 10
+                let r = CGRect(x: m.x - w / 2, y: m.y - 9, width: w, height: 18)
+                ctx.fill(Path(roundedRect: r, cornerRadius: 3), with: .color(Paper.line(piece.line, train: piece.train).opacity(piece.main ? 1 : 0.7)))
+                ctx.draw(Text(piece.line).font(.system(size: 10.5, weight: .heavy)).foregroundColor(.white), at: m)
+            }
+            // the stations, and their names on the open side
+            for i in g.stations.indices {
+                guard let c = at(i) else { continue }
+                let main = g.pieces.contains { $0.main && ($0.a == i || $0.b == i) }
+                let big = i == 0 || i == g.dest
+                let r: CGFloat = big ? 9 : main ? 7 : 5
+                let e = CGRect(x: c.x - r, y: c.y - r, width: 2 * r, height: 2 * r)
+                ctx.fill(Path(ellipseIn: e), with: .color(i == g.dest ? Paper.yellow : .white))
+                ctx.stroke(Path(ellipseIn: e), with: .color(Paper.ink), lineWidth: big ? 3.5 : 2.5)
+                let right = c.x < W / 2
+                ctx.draw(Text(g.stations[i].name).font(.system(size: big ? 12.5 : main ? 11 : 9.5, weight: big ? .heavy : main ? .bold : .medium))
+                            .foregroundColor(main ? Paper.ink : Paper.muted),
+                         at: CGPoint(x: c.x + (right ? r + 6 : -(r + 6)), y: c.y), anchor: right ? .leading : .trailing)
+            }
+        }
+        .frame(width: W, height: H)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Metro map of your trip: " + trip.rides.map { "\($0.line) from \(Fmt.place($0.fromStop)) to \(Fmt.place($0.toStop))" }.joined(separator: ", then "))
     }
 }

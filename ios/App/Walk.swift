@@ -30,7 +30,7 @@ struct WalkMapSheet: View {
                     Marker(target.name, systemImage: target.rail ? "tram.fill" : "bus.fill", coordinate: target.coordinate)
                         .tint(target.rail ? BoardInk.yellow : BoardInk.route)
                     if let route {
-                        MapPolyline(route.polyline).stroke(BoardInk.blueTop, style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
+                        MapPolyline(route.polyline).stroke(Paper.navy, style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
                     }
                 }
                 .mapStyle(.standard(pointsOfInterest: .including([.publicTransport])))
@@ -41,13 +41,13 @@ struct WalkMapSheet: View {
                 .frame(minHeight: 280)
                 info
             }
-            .background(LinearGradient(colors: [BoardInk.blueTop, BoardInk.blueBottom], startPoint: .top, endPoint: .bottom).ignoresSafeArea())
+            .background(PaperFill().ignoresSafeArea())
             .navigationTitle("Walk to the stop")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
             .task { await findRoute() }
         }
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(.light)
     }
 
     private var info: some View {
@@ -55,16 +55,16 @@ struct WalkMapSheet: View {
             HStack(spacing: 8) {
                 Image(systemName: target.rail ? "tram.fill" : "bus.fill").font(.system(size: 11, weight: .bold)).foregroundStyle(BoardInk.navy)
                     .frame(width: 22, height: 22).background(target.rail ? BoardInk.yellow : BoardInk.route, in: Circle())
-                Text(target.name).font(BoardInk.sans(17)).foregroundStyle(.white).lineLimit(2).minimumScaleFactor(0.8)
+                Text(target.name).font(BoardInk.sans(17)).foregroundStyle(Paper.ink).lineLimit(2).minimumScaleFactor(0.8)
             }
             if let route {
                 let mins = max(1, Int((route.expectedTravelTime / 60).rounded()))
-                Text("\(mins) min walk · \(Fmt.distance(route.distance))").font(BoardInk.sans(15)).foregroundStyle(.white)
+                Text("\(mins) min walk · \(Fmt.distance(route.distance))").font(BoardInk.sans(15)).foregroundStyle(Paper.ink)
                 if let c = target.catchText, let l = target.leaves {
                     let setOff = l.addingTimeInterval(-route.expectedTravelTime - 60)
                     let m = Int((setOff.timeIntervalSinceNow / 60).rounded())
                     Text(m <= 0 ? "Go now to catch \(c)." : "Leave by \(Fmt.hhmm(setOff)) (in \(m) min) to catch \(c).")
-                        .font(BoardInk.sans(13)).foregroundStyle(m <= 0 ? BoardInk.late : BoardInk.green)
+                        .font(BoardInk.sans(13)).foregroundStyle(m <= 0 ? Paper.late : Paper.ok)
                 }
                 let steps = route.steps.filter { !$0.instructions.isEmpty }
                 if !steps.isEmpty {
@@ -72,10 +72,10 @@ struct WalkMapSheet: View {
                         VStack(alignment: .leading, spacing: 6) {
                             ForEach(Array(steps.enumerated()), id: \.offset) { _, s in
                                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                                    Image(systemName: "arrow.turn.up.right").font(.system(size: 10, weight: .bold)).foregroundStyle(Color.white.opacity(0.7))
-                                    Text(s.instructions).font(BoardInk.sans(12, .regular)).foregroundStyle(.white)
+                                    Image(systemName: "arrow.turn.up.right").font(.system(size: 10, weight: .bold)).foregroundStyle(Paper.ink.opacity(0.7))
+                                    Text(s.instructions).font(BoardInk.sans(12, .regular)).foregroundStyle(Paper.ink)
                                     Spacer(minLength: 4)
-                                    if s.distance > 0 { Text(Fmt.distance(s.distance)).font(BoardInk.sans(11, .regular)).foregroundStyle(Color.white.opacity(0.7)) }
+                                    if s.distance > 0 { Text(Fmt.distance(s.distance)).font(BoardInk.sans(11, .regular)).foregroundStyle(Paper.ink.opacity(0.7)) }
                                 }
                             }
                         }
@@ -83,13 +83,13 @@ struct WalkMapSheet: View {
                     .frame(maxHeight: 130)
                 }
             } else if failed {
-                Text("Couldn’t work out the walk from here. Apple Maps can show you the way.").font(BoardInk.sans(12, .regular)).foregroundStyle(Color.white.opacity(0.85))
+                Text("Couldn’t work out the walk from here. Apple Maps can show you the way.").font(BoardInk.sans(12, .regular)).foregroundStyle(Paper.ink.opacity(0.85))
             } else {
-                HStack(spacing: 8) { ProgressView(); Text("Finding the way…").font(BoardInk.sans(12, .regular)).foregroundStyle(Color.white.opacity(0.85)) }
+                HStack(spacing: 8) { ProgressView(); Text("Finding the way…").font(BoardInk.sans(12, .regular)).foregroundStyle(Paper.ink.opacity(0.85)) }
             }
             Button(action: openInMaps) {
                 Label("Walk there with Apple Maps", systemImage: "figure.walk").font(BoardInk.sans(14)).foregroundStyle(.white)
-                    .frame(maxWidth: .infinity).padding(.vertical, 11).background(Color(hex: 0x2F9E5B), in: RoundedRectangle(cornerRadius: 6))
+                    .frame(maxWidth: .infinity).padding(.vertical, 11).background(Paper.green, in: RoundedRectangle(cornerRadius: 6))
             }
             .buttonStyle(.plain)
         }
@@ -151,13 +151,13 @@ struct WalkPreview: View {
             Marker(target.name, systemImage: target.rail ? "tram.fill" : "bus.fill", coordinate: target.coordinate)
                 .tint(target.rail ? BoardInk.yellow : BoardInk.route)
             if let route {
-                MapPolyline(route.polyline).stroke(BoardInk.blueTop, style: StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round))
+                MapPolyline(route.polyline).stroke(Paper.navy, style: StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round))
             }
         }
         .mapStyle(.standard(pointsOfInterest: .excludingAll))
         .frame(height: 150)
         .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.2), lineWidth: 1))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Paper.ink.opacity(0.2), lineWidth: 1))
         .overlay(alignment: .bottomLeading) {
             if let route {
                 Label("\(max(1, Int((route.expectedTravelTime / 60).rounded()))) min · \(Fmt.distance(route.distance))", systemImage: "figure.walk")

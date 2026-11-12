@@ -85,9 +85,9 @@ struct RankBlock: View {
             HStack(alignment: .top, spacing: 10) {
                 Coin(grade: rank.grade, size: 42)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(title).font(BoardInk.sans(15)).foregroundStyle(.white)
-                    Text(meaning).font(BoardInk.sans(11, .regular)).foregroundStyle(Color.white.opacity(0.88)).fixedSize(horizontal: false, vertical: true)
-                    if let n = numbers { Text(n).font(BoardInk.sans(11)).foregroundStyle(.white).fixedSize(horizontal: false, vertical: true) }
+                    Text(title).font(BoardInk.sans(15)).foregroundStyle(Paper.ink)
+                    Text(meaning).font(BoardInk.sans(11, .regular)).foregroundStyle(Paper.ink.opacity(0.88)).fixedSize(horizontal: false, vertical: true)
+                    if let n = numbers { Text(n).font(BoardInk.sans(11)).foregroundStyle(Paper.ink).fixedSize(horizontal: false, vertical: true) }
                 }
             }
         }
@@ -125,7 +125,7 @@ struct RankLegend: View {
                     .frame(width: 20, height: 15).background(RatingStyle.fill(g), in: RoundedRectangle(cornerRadius: 2))
             }
             Text("Route colours are speed ranks: how fast a bus gets you there compared with the fastest on that route. Tap any line for its rank.")
-                .font(BoardInk.sans(9.5, .regular)).foregroundStyle(Color.white.opacity(0.75)).fixedSize(horizontal: false, vertical: true)
+                .font(BoardInk.sans(9.5, .regular)).foregroundStyle(Paper.ink.opacity(0.75)).fixedSize(horizontal: false, vertical: true)
         }
     }
 }
@@ -208,7 +208,7 @@ struct LEDStrip: View {
                     .font(BoardInk.mono(10 * k)).lineLimit(1).minimumScaleFactor(0.6)
                     .foregroundStyle(r.gone ? BoardInk.amberDim : BoardInk.amber)
                     .frame(height: rowH)
-                    .overlay(Rectangle().stroke(Color.white.opacity(r.picked ? 0.9 : 0), lineWidth: 1))
+                    .overlay(Rectangle().stroke(Paper.ink.opacity(r.picked ? 0.9 : 0), lineWidth: 1))
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -254,34 +254,20 @@ struct PlannerScreen<Content: View>: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 4) {
-                ForEach(HomeSection.board) { s in
-                    Button { pick(s) } label: {
-                        Text(s.tab).font(BoardInk.sans(11)).lineLimit(1).minimumScaleFactor(0.7)
-                            .foregroundStyle(s == section ? BoardInk.blueBottom : Color.white.opacity(0.85))
-                            .padding(.horizontal, 7).padding(.vertical, 5)
-                            .background(s == section ? Color.white : Color.clear, in: RoundedRectangle(cornerRadius: 4))
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityAddTraits(s == section ? .isSelected : [])
-                }
-                Spacer(minLength: 2)
+            HStack(spacing: 6) {
+                PaperTabs(section: section, pick: pick)
                 TimelineView(.everyMinute) { tl in
-                    Text(Fmt.hhmm(tl.date)).font(BoardInk.sans(12)).foregroundStyle(.white)
+                    Text(Fmt.hhmm(tl.date)).font(BoardInk.sans(12)).foregroundStyle(Paper.muted)
                 }
             }
-            .padding(.horizontal, 7)
-            .frame(height: 34)
-            .background(BoardInk.band)
+            .padding(.horizontal, 10).padding(.top, 12).padding(.bottom, 6)
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) { content }
-                    .padding(.horizontal, 8).padding(.top, 8).padding(.bottom, 24)
+                    .padding(.horizontal, 10).padding(.top, 4).padding(.bottom, 24)
             }
             .scrollIndicators(.hidden)
         }
-        .background(LinearGradient(colors: [BoardInk.blueTop, BoardInk.blueBottom], startPoint: .top, endPoint: .bottom))
-        .overlay(ScreenGlass().allowsHitTesting(false))
-        .clipped()
+        .paperSheet()
     }
 }
 
@@ -298,7 +284,7 @@ struct ScreenGlass: View {
             }
             RadialGradient(colors: [.clear, .black.opacity(0.28)], center: .center, startRadius: 160, endRadius: 560)
             LinearGradient(stops: [.init(color: .white.opacity(0.08), location: 0), .init(color: .clear, location: 0.38)], startPoint: .topLeading, endPoint: .bottomTrailing)
-            Rectangle().stroke(Color.white.opacity(0.10), lineWidth: 1)
+            Rectangle().stroke(Paper.ink.opacity(0.10), lineWidth: 1)
         }
     }
 }
@@ -320,10 +306,10 @@ struct PlannerBar: View {
                 }
             }
         }
-        .foregroundStyle(BoardInk.navy)
+        .foregroundStyle(.white)
         .padding(.horizontal, 8)
         .frame(height: 24)
-        .background(BoardInk.bar)
+        .background(Paper.navy)
     }
 }
 
@@ -335,7 +321,7 @@ struct PlannerStop: View {
         HStack(spacing: 6) {
             Image(systemName: rail ? "tram.fill" : "bus.fill").font(.system(size: 7, weight: .bold)).foregroundStyle(BoardInk.navy)
                 .frame(width: 15, height: 15).background(BoardInk.yellow, in: Circle())
-            Text(name).font(BoardInk.sans(13)).foregroundStyle(.white).lineLimit(1).minimumScaleFactor(0.8)
+            Text(name).font(BoardInk.sans(13)).foregroundStyle(Paper.ink).lineLimit(1).minimumScaleFactor(0.8)
         }
         .padding(.top, 2)
     }
@@ -350,7 +336,7 @@ struct PlannerColumns: View {
             Text("Due").frame(width: 40, alignment: .trailing)
             Text("Time").frame(width: 76, alignment: .trailing)
         }
-        .font(BoardInk.sans(9.5, .semibold)).foregroundStyle(Color.white.opacity(0.72))
+        .font(BoardInk.sans(9.5, .semibold)).foregroundStyle(Paper.ink.opacity(0.72))
     }
 }
 
@@ -376,52 +362,49 @@ struct PlannerBusRow: View {
         let late = live && !cancelled && abs(time.timeIntervalSince(scheduled)) >= 60
         Button(action: tap) {
             HStack(spacing: 0) {
-                Text(line).font(BoardInk.sans(13)).foregroundStyle(train ? Color(hex: 0x1A1A1A) : (grade.map { RatingStyle.ink($0) } ?? BoardInk.navy))
-                    .lineLimit(1).minimumScaleFactor(0.6)
-                    .frame(width: 38, height: 20)
-                    .background(train ? AnyShapeStyle(BoardInk.yellow) : (grade.map { RatingStyle.fill($0) } ?? AnyShapeStyle(BoardInk.route)), in: RoundedRectangle(cornerRadius: 2))
-                    .padding(.trailing, heading == nil ? 8 : 6)
+                LineBullet(line: line, train: train, grade: grade, height: 22, minWidth: 38, font: 13)
+                    .padding(.trailing, heading == nil ? 9 : 7)
                 if let h = heading {
                     // the way it drives, on a map with north up
-                    Image(systemName: "location.north.fill").font(.system(size: 10, weight: .bold)).foregroundStyle(BoardInk.yellow)
+                    Image(systemName: "location.north.fill").font(.system(size: 10, weight: .bold)).foregroundStyle(Paper.ink)
                         .rotationEffect(.degrees(h.degrees))
-                        .frame(width: 20, height: 20).background(Color.black.opacity(0.28), in: Circle())
-                        .overlay(Circle().stroke(Color.white.opacity(0.25), lineWidth: 1))
+                        .frame(width: 21, height: 21).background(Paper.card, in: Circle())
+                        .overlay(Circle().stroke(Paper.ink, lineWidth: 1.4))
                         .padding(.trailing, 7)
                         .accessibilityLabel("Going \(h.spoken)")
                 }
                 if cancelled {
-                    Text("Cancelled · \(to)").font(BoardInk.sans(12)).foregroundStyle(BoardInk.navy).lineLimit(1).minimumScaleFactor(0.7)
-                        .padding(.horizontal, 6).frame(maxWidth: .infinity, minHeight: 20, alignment: .leading).background(Color.white)
-                    Text("×\(Fmt.hhmm(scheduled))").font(BoardInk.sans(13)).foregroundStyle(.white).frame(width: 76, alignment: .trailing)
+                    Text("Cancelled · \(to)").font(BoardInk.sans(12)).foregroundStyle(Paper.late).lineLimit(1).minimumScaleFactor(0.7)
+                        .padding(.horizontal, 6).frame(maxWidth: .infinity, minHeight: 20, alignment: .leading).background(Paper.late.opacity(0.1))
+                    Text("×\(Fmt.hhmm(scheduled))").font(BoardInk.sans(13)).foregroundStyle(Paper.ink).frame(width: 76, alignment: .trailing)
                 } else {
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(to).font(BoardInk.sans(14)).foregroundStyle(.white).lineLimit(1).minimumScaleFactor(0.7)
+                        Text(to).font(BoardInk.sans(14)).foregroundStyle(Paper.ink).lineLimit(1).minimumScaleFactor(0.7)
                         if let h = heading {
                             Text("\(h.compass)\(h.via.map { " · via \($0)" } ?? "")").font(BoardInk.sans(9.5, .semibold))
-                                .foregroundStyle(BoardInk.yellow.opacity(0.9)).lineLimit(1).minimumScaleFactor(0.8)
+                                .foregroundStyle(Paper.navy).lineLimit(1).minimumScaleFactor(0.8)
                         }
-                        if let note { Text(note).font(BoardInk.sans(9.5, .regular)).foregroundStyle(Color.white.opacity(0.75)).lineLimit(1) }
+                        if let note { Text(note).font(BoardInk.sans(9.5, .regular)).foregroundStyle(Paper.ink.opacity(0.75)).lineLimit(1) }
                     }
                     Spacer(minLength: 4)
-                    if watched { Image(systemName: "bell.fill").font(.system(size: 10, weight: .bold)).foregroundStyle(BoardInk.yellow).padding(.trailing, 4) }
-                    Text(due(gone)).font(BoardInk.sans(14)).foregroundStyle(.white).frame(width: 40, alignment: .trailing)
+                    if watched { Image(systemName: "bell.fill").font(.system(size: 10, weight: .bold)).foregroundStyle(Paper.navy).padding(.trailing, 4) }
+                    Text(due(gone)).font(BoardInk.sans(14)).foregroundStyle(Paper.ink).frame(width: 40, alignment: .trailing)
                     if late {
                         HStack(spacing: 4) {
-                            Text(Fmt.hhmm(scheduled)).font(BoardInk.sans(10, .regular)).foregroundStyle(Color.white.opacity(0.7))
+                            Text(Fmt.hhmm(scheduled)).font(BoardInk.sans(10, .regular)).foregroundStyle(Paper.ink.opacity(0.7))
                             Text(Fmt.hhmm(time)).font(BoardInk.sans(12)).foregroundStyle(BoardInk.navy)
                                 .padding(.horizontal, 4).padding(.vertical, 1).background(Color.white, in: RoundedRectangle(cornerRadius: 2))
                         }
                         .frame(width: 76, alignment: .trailing)
                     } else {
-                        Text(Fmt.hhmm(time)).font(BoardInk.sans(13)).foregroundStyle(.white).frame(width: 76, alignment: .trailing)
+                        Text(Fmt.hhmm(time)).font(BoardInk.sans(13)).foregroundStyle(Paper.ink).frame(width: 76, alignment: .trailing)
                     }
                 }
             }
             .padding(.vertical, 5)
             .opacity(gone ? 0.45 : 1)
-            .overlay(alignment: .bottom) { Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1) }
-            .background(picked ? Color.white.opacity(0.12) : Color.clear)
+            .overlay(alignment: .bottom) { Rectangle().fill(Paper.ink.opacity(0.12)).frame(height: 1) }
+            .background(picked ? Paper.ink.opacity(0.12) : Color.clear)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -457,10 +440,7 @@ struct PlannerTripCard: View {
                     if i > 0 { Rectangle().fill(Color(hex: 0x9FB1D6)).frame(width: 8, height: 2) }
                     HStack(spacing: 4) {
                         let g = r.isTrain ? nil : r.grade          // buses in the colour of their speed rank, trains in yellow
-                        Text(r.line).font(BoardInk.sans(11)).foregroundStyle(r.isTrain ? BoardInk.navy : (g.map { RatingStyle.ink($0) } ?? BoardInk.navy))
-                            .lineLimit(1).minimumScaleFactor(0.6)
-                            .frame(width: 30, height: 17)
-                            .background(r.isTrain ? AnyShapeStyle(BoardInk.yellow) : (g.map { RatingStyle.fill($0) } ?? AnyShapeStyle(BoardInk.route)), in: RoundedRectangle(cornerRadius: 2))
+                        LineBullet(line: r.line, train: r.isTrain, grade: g, height: 18, minWidth: 30, font: 11)
                         VStack(alignment: .leading, spacing: 0) {
                             Text(Fmt.hhmm(r.departure)).font(BoardInk.sans(13)).foregroundStyle(r.cancelled ? HWPalette.stamp : BoardInk.navy).strikethrough(r.cancelled)
                             Text("to \(Fmt.place(r.toStop))").font(BoardInk.sans(9.5, .regular)).foregroundStyle(Color(hex: 0x45608F)).lineLimit(1).minimumScaleFactor(0.7)
@@ -472,7 +452,7 @@ struct PlannerTripCard: View {
             if let wakeTitle {
                 Button(action: wake) {
                     Text(wakeTitle.uppercased()).font(BoardInk.sans(11)).tracking(0.6).foregroundStyle(.white)
-                        .frame(maxWidth: .infinity).padding(.vertical, 7).background(Color(hex: 0x2F9E5B), in: RoundedRectangle(cornerRadius: 4))
+                        .frame(maxWidth: .infinity).padding(.vertical, 7).background(Paper.green, in: RoundedRectangle(cornerRadius: 4))
                 }
                 .buttonStyle(.plain)
             }
@@ -496,32 +476,29 @@ struct PlannerRideRow: View {
         let g = ride.isTrain ? nil : ride.grade
         Button(action: tap) {
             HStack(alignment: .top, spacing: 8) {
-                Text(ride.line).font(BoardInk.sans(13)).lineLimit(1).minimumScaleFactor(0.6)
-                    .foregroundStyle(ride.isTrain ? Color(hex: 0x1A1A1A) : (g.map { RatingStyle.ink($0) } ?? BoardInk.navy))
-                    .frame(width: 38, height: 20)
-                    .background(ride.isTrain ? AnyShapeStyle(BoardInk.yellow) : (g.map { RatingStyle.fill($0) } ?? AnyShapeStyle(BoardInk.route)), in: RoundedRectangle(cornerRadius: 2))
+                LineBullet(line: ride.line, train: ride.isTrain, grade: g, height: 22, minWidth: 38, font: 13)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("to \(Fmt.place(ride.toStop))").font(BoardInk.sans(14)).foregroundStyle(.white).lineLimit(1).minimumScaleFactor(0.7)
-                    Text("from \(Fmt.place(ride.fromStop)) · \(ride.rideMinutes) min ride").font(BoardInk.sans(10, .regular)).foregroundStyle(Color.white.opacity(0.75)).lineLimit(1)
-                    Text(st.text).font(BoardInk.sans(10.5)).foregroundStyle(st.warn ? BoardInk.late : st.ok ? BoardInk.green : Color.white.opacity(0.8)).lineLimit(2)
+                    Text("to \(Fmt.place(ride.toStop))").font(BoardInk.sans(14)).foregroundStyle(Paper.ink).lineLimit(1).minimumScaleFactor(0.7)
+                    Text("from \(Fmt.place(ride.fromStop)) · \(ride.rideMinutes) min ride").font(BoardInk.sans(10, .regular)).foregroundStyle(Paper.ink.opacity(0.75)).lineLimit(1)
+                    Text(st.text).font(BoardInk.sans(10.5)).foregroundStyle(st.warn ? Paper.late : st.ok ? Paper.ok : Paper.ink.opacity(0.8)).lineLimit(2)
                 }
                 Spacer(minLength: 4)
                 VStack(alignment: .trailing, spacing: 3) {
                     if late {
                         HStack(spacing: 4) {
-                            Text(Fmt.hhmm(ride.scheduledDeparture)).font(BoardInk.sans(10, .regular)).foregroundStyle(Color.white.opacity(0.7))
+                            Text(Fmt.hhmm(ride.scheduledDeparture)).font(BoardInk.sans(10, .regular)).foregroundStyle(Paper.ink.opacity(0.7))
                             Text(Fmt.hhmm(ride.departure)).font(BoardInk.sans(13)).foregroundStyle(BoardInk.navy)
                                 .padding(.horizontal, 4).padding(.vertical, 1).background(Color.white, in: RoundedRectangle(cornerRadius: 2))
                         }
                     } else {
-                        Text(Fmt.hhmm(gone ? ride.scheduledDeparture : ride.departure)).font(BoardInk.sans(15)).foregroundStyle(.white).strikethrough(gone)
+                        Text(Fmt.hhmm(gone ? ride.scheduledDeparture : ride.departure)).font(BoardInk.sans(15)).foregroundStyle(Paper.ink).strikethrough(gone)
                     }
-                    Text("→ \(Fmt.hhmm(ride.arrival))").font(BoardInk.sans(10.5, .regular)).foregroundStyle(Color.white.opacity(0.8))
+                    Text("→ \(Fmt.hhmm(ride.arrival))").font(BoardInk.sans(10.5, .regular)).foregroundStyle(Paper.ink.opacity(0.8))
                 }
             }
             .padding(.vertical, 6)
-            .overlay(alignment: .bottom) { Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1) }
-            .background(picked ? Color.white.opacity(0.12) : Color.clear)
+            .overlay(alignment: .bottom) { Rectangle().fill(Paper.ink.opacity(0.12)).frame(height: 1) }
+            .background(picked ? Paper.ink.opacity(0.12) : Color.clear)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -538,8 +515,8 @@ struct PageTop: View {
     var body: some View {
         HStack {
             Button(action: back) {
-                Label("Board", systemImage: "chevron.left").font(BoardInk.sans(12)).foregroundStyle(.white)
-                    .padding(.horizontal, 10).padding(.vertical, 5).background(Color.white.opacity(0.14), in: Capsule())
+                Label("Board", systemImage: "chevron.left").font(BoardInk.sans(12)).foregroundStyle(Paper.ink)
+                    .padding(.horizontal, 10).padding(.vertical, 5).background(Paper.ink.opacity(0.14), in: Capsule())
             }
             .buttonStyle(.plain)
             Spacer()
@@ -550,7 +527,7 @@ struct PageTop: View {
                 }
                 .foregroundStyle(tracked ? Color(hex: 0x062A16) : Color.white)
                 .padding(.horizontal, 12).padding(.vertical, 5)
-                .background(tracked ? BoardInk.green : Color.white.opacity(0.14), in: Capsule())
+                .background(tracked ? Paper.ok : Paper.ink.opacity(0.14), in: Capsule())
             }
             .buttonStyle(.plain)
             .accessibilityLabel(tracked ? "Tracking. Tap to stop." : "Track it")
@@ -566,10 +543,10 @@ struct TrackingNote: View {
             Text(tracked ? "Tracking this for you" : "Not tracked").font(BoardInk.sans(12))
             Text(tracked ? text : "Tap TRACK to get told when something changes.").font(BoardInk.sans(11, .regular)).opacity(0.85)
         }
-        .foregroundStyle(.white)
+        .foregroundStyle(Paper.ink)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(10)
-        .background((tracked ? BoardInk.green : Color.white).opacity(0.16), in: RoundedRectangle(cornerRadius: 6))
+        .background((tracked ? Paper.ok : Color.white).opacity(0.16), in: RoundedRectangle(cornerRadius: 6))
     }
 }
 
@@ -595,22 +572,22 @@ struct TrainPage: View {
                 Text(f.line).font(BoardInk.sans(14)).foregroundStyle(BoardInk.navy).lineLimit(1)
                     .frame(minWidth: 38).padding(.vertical, 3).padding(.horizontal, 4).background(Color.white, in: RoundedRectangle(cornerRadius: 2))
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(f.headsign.isEmpty ? p.to.short : Fmt.place(f.headsign)).font(BoardInk.sans(22)).foregroundStyle(.white).lineLimit(1).minimumScaleFactor(0.6)
+                    Text(f.headsign.isEmpty ? p.to.short : Fmt.place(f.headsign)).font(BoardInk.sans(22)).foregroundStyle(Paper.ink).lineLimit(1).minimumScaleFactor(0.6)
                     Text("\(f.num.isEmpty ? f.name : "\(f.name) \(f.num)") · from \(p.from.short)").font(BoardInk.sans(11, .regular))
-                        .foregroundStyle(Color.white.opacity(0.8)).lineLimit(1)
+                        .foregroundStyle(Paper.ink.opacity(0.8)).lineLimit(1)
                 }
             }
             HStack(alignment: .center, spacing: 10) {
-                Text(Fmt.hhmm(f.departure)).font(BoardInk.sans(32)).foregroundStyle(.white).strikethrough(gone)
+                Text(Fmt.hhmm(f.departure)).font(BoardInk.sans(32)).foregroundStyle(Paper.ink).strikethrough(gone)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(st.text).font(BoardInk.sans(12)).foregroundStyle(st.warn ? BoardInk.late : st.ok ? BoardInk.green : Color.white.opacity(0.85))
+                    Text(st.text).font(BoardInk.sans(12)).foregroundStyle(st.warn ? Paper.late : st.ok ? Paper.ok : Paper.ink.opacity(0.85))
                         .lineLimit(2).minimumScaleFactor(0.8)
-                    Text(leaves(f.departure)).font(BoardInk.sans(11, .regular)).foregroundStyle(Color.white.opacity(0.8))
+                    Text(leaves(f.departure)).font(BoardInk.sans(11, .regular)).foregroundStyle(Paper.ink.opacity(0.8))
                 }
                 Spacer(minLength: 4)
                 VStack(spacing: 0) {
-                    Text(info?.track ?? f.platform ?? "–").font(BoardInk.sans(26)).foregroundStyle(.white)
-                    Text("PLATFORM").font(BoardInk.sans(8, .regular)).foregroundStyle(Color.white.opacity(0.75))
+                    Text(info?.track ?? f.platform ?? "–").font(BoardInk.sans(26)).foregroundStyle(Paper.ink)
+                    Text("PLATFORM").font(BoardInk.sans(8, .regular)).foregroundStyle(Paper.ink.opacity(0.75))
                 }
             }
             HStack(spacing: 8) {
@@ -621,25 +598,25 @@ struct TrainPage: View {
             PlannerBar(title: "The train", sub: info?.size.map { "\($0.cars) coaches" })
             if let s = info?.size {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(s.text).font(BoardInk.sans(11, .regular)).foregroundStyle(s.warn ? BoardInk.late : Color.white.opacity(0.85))
+                    Text(s.text).font(BoardInk.sans(11, .regular)).foregroundStyle(s.warn ? Paper.late : Paper.ink.opacity(0.85))
                     if let l = s.layout { ConsistView(layout: l, pal: pal) }
                 }
             } else {
                 Text(nsMissing ? "Train details need the NS key in your relay (see the GitHub page)." : "NS hasn’t said how this train is made up yet.")
-                    .font(BoardInk.sans(11, .regular)).foregroundStyle(Color.white.opacity(0.8))
+                    .font(BoardInk.sans(11, .regular)).foregroundStyle(Paper.ink.opacity(0.8))
             }
             PlannerBar(title: "How busy", sub: "NS forecast")
             if let c = info?.crowd, c > 0 {
                 HStack(spacing: 8) {
-                    Text(["", "Quiet", "Busy", "Very busy"][min(3, c)]).font(BoardInk.sans(15)).foregroundStyle(.white)
+                    Text(["", "Quiet", "Busy", "Very busy"][min(3, c)]).font(BoardInk.sans(15)).foregroundStyle(Paper.ink)
                     CrowdIcons(level: c).scaleEffect(1.4, anchor: .leading)
                 }
             } else {
-                Text("No forecast for this train.").font(BoardInk.sans(11, .regular)).foregroundStyle(Color.white.opacity(0.8))
+                Text("No forecast for this train.").font(BoardInk.sans(11, .regular)).foregroundStyle(Paper.ink.opacity(0.8))
             }
             PlannerBar(title: "Your ride", sub: p.trip.rideLabel)
             Text("Arrives \(p.to.short) \(Fmt.hhmm(p.trip.last.arrival))" + (p.trip.changes.isEmpty ? "" : " · change at \(p.trip.changes.joined(separator: ", "))"))
-                .font(BoardInk.sans(12, .regular)).foregroundStyle(.white)
+                .font(BoardInk.sans(12, .regular)).foregroundStyle(Paper.ink)
             TrackingNote(tracked: tracked, text: "You get a note if the platform changes or it runs late. It stops by itself once you’re on board.")
         }
     }
@@ -669,21 +646,18 @@ struct BusPage: View {
         VStack(alignment: .leading, spacing: 10) {
             PageTop(tracked: tracked, back: back, track: track)
             HStack(spacing: 8) {
-                Text(line).font(BoardInk.sans(15)).foregroundStyle(train ? Color(hex: 0x1A1A1A) : (g.map { RatingStyle.ink($0) } ?? BoardInk.navy)).lineLimit(1)
-                    .minimumScaleFactor(0.6)
-                    .frame(width: 44, height: 26)
-                    .background(train ? AnyShapeStyle(BoardInk.yellow) : (g.map { RatingStyle.fill($0) } ?? AnyShapeStyle(BoardInk.route)), in: RoundedRectangle(cornerRadius: 2))
+                LineBullet(line: line, train: train, grade: g, height: 28, minWidth: 46, font: 15)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(to).font(BoardInk.sans(22)).foregroundStyle(.white).lineLimit(1).minimumScaleFactor(0.6)
-                    Text("\(train ? "Train" : "Bus") \(line) · from \(stop)").font(BoardInk.sans(11, .regular)).foregroundStyle(Color.white.opacity(0.8)).lineLimit(1)
+                    Text(to).font(BoardInk.sans(22)).foregroundStyle(Paper.ink).lineLimit(1).minimumScaleFactor(0.6)
+                    Text("\(train ? "Train" : "Bus") \(line) · from \(stop)").font(BoardInk.sans(11, .regular)).foregroundStyle(Paper.ink.opacity(0.8)).lineLimit(1)
                 }
             }
             HStack(alignment: .center, spacing: 10) {
-                Text(Fmt.hhmm(cancelled ? scheduled : time)).font(BoardInk.sans(32)).foregroundStyle(.white).strikethrough(cancelled)
+                Text(Fmt.hhmm(cancelled ? scheduled : time)).font(BoardInk.sans(32)).foregroundStyle(Paper.ink).strikethrough(cancelled)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(status).font(BoardInk.sans(12)).foregroundStyle(cancelled || (live && abs(time.timeIntervalSince(scheduled)) >= 60) ? BoardInk.late : live ? BoardInk.green : Color.white.opacity(0.85))
+                    Text(status).font(BoardInk.sans(12)).foregroundStyle(cancelled || (live && abs(time.timeIntervalSince(scheduled)) >= 60) ? Paper.late : live ? Paper.ok : Paper.ink.opacity(0.85))
                         .lineLimit(2).minimumScaleFactor(0.8)
-                    Text(leaves(time)).font(BoardInk.sans(11, .regular)).foregroundStyle(Color.white.opacity(0.8))
+                    Text(leaves(time)).font(BoardInk.sans(11, .regular)).foregroundStyle(Paper.ink.opacity(0.8))
                 }
             }
             HStack(spacing: 8) {
@@ -693,10 +667,10 @@ struct BusPage: View {
             if let rank { RankBlock(rank: rank, cancelled: cancelled) }
             if let ride {
                 PlannerBar(title: "Your ride")
-                Text(ride).font(BoardInk.sans(12, .regular)).foregroundStyle(.white)
+                Text(ride).font(BoardInk.sans(12, .regular)).foregroundStyle(Paper.ink)
             }
             PlannerBar(title: "How busy")
-            Text(train ? "There’s no busyness forecast for this train here." : "There’s no busyness forecast for buses.").font(BoardInk.sans(11, .regular)).foregroundStyle(Color.white.opacity(0.8))
+            Text(train ? "There’s no busyness forecast for this train here." : "There’s no busyness forecast for buses.").font(BoardInk.sans(11, .regular)).foregroundStyle(Paper.ink.opacity(0.8))
             TrackingNote(tracked: tracked, text: "Watching the \(line): you’re told when the next one runs late, leaves early or is cancelled, until you’re on it.")
         }
     }
@@ -732,8 +706,8 @@ struct DestinationSheet: View {
                         ForEach(hits) { h in
                             Button { pick(Destination(id: h.id, name: h.name, lat: h.lat, lon: h.lon)) } label: {
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(h.name).font(BoardInk.sans(15)).foregroundStyle(.white)
-                                    if !h.town.isEmpty { Text(h.town).font(BoardInk.sans(12, .regular)).foregroundStyle(Color.white.opacity(0.7)) }
+                                    Text(h.name).font(BoardInk.sans(15)).foregroundStyle(Paper.ink)
+                                    if !h.town.isEmpty { Text(h.town).font(BoardInk.sans(12, .regular)).foregroundStyle(Paper.ink.opacity(0.7)) }
                                 }
                             }
                         }
@@ -744,13 +718,13 @@ struct DestinationSheet: View {
                 if !live.recents.isEmpty {
                     Section("Recent") {
                         ForEach(live.recents) { d in
-                            Button { pick(d) } label: { Text(d.name).font(BoardInk.sans(15)).foregroundStyle(.white) }
+                            Button { pick(d) } label: { Text(d.name).font(BoardInk.sans(15)).foregroundStyle(Paper.ink) }
                         }
                     }
                 }
             }
             .scrollContentBackground(.hidden)
-            .background(LinearGradient(colors: [BoardInk.blueTop, BoardInk.blueBottom], startPoint: .top, endPoint: .bottom).ignoresSafeArea())
+            .background(PaperFill().ignoresSafeArea()).preferredColorScheme(.light)
             .navigationTitle("Where to?")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
