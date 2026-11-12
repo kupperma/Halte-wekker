@@ -125,7 +125,6 @@ struct HomeStage<Menu: View, Boards: View>: View {
                 }
                 .animation(.easeOut(duration: 0.45), value: stage)
                 .animation(.easeInOut(duration: 0.6), value: home)
-                FilmGrain().frame(width: g.size.width, height: g.size.height).clipped()
                 // the live trains and your trip, written on the boards (gone the moment you walk away)
                 boards(WallBoards.rect(WallBoards.led, in: g.size), WallBoards.rect(WallBoards.planner, in: g.size))
                     .frame(width: g.size.width, height: g.size.height)
@@ -141,6 +140,8 @@ struct HomeStage<Menu: View, Boards: View>: View {
                     .opacity(stage == .map ? 1 : 0)
                     .allowsHitTesting(stage == .map)
                     .animation(stage == .map ? .easeOut(duration: 0.3) : nil, value: stage)
+                // a light grain over everything, the app's boards and map too, so they sit in the same picture
+                FilmGrain(strength: 0.07).frame(width: g.size.width, height: g.size.height).clipped()
             }
             .frame(width: g.size.width, height: g.size.height)
         }

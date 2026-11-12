@@ -396,6 +396,7 @@ struct StationBackdrop: View {
 
 /// Old-film grain: one noise picture, shifted a few times a second.
 struct FilmGrain: View {
+    var strength: Double = 0.12
     static let noise: UIImage = {
         let w = 160
         var px = [UInt8](repeating: 255, count: w * w * 4)
@@ -413,7 +414,7 @@ struct FilmGrain: View {
             Image(uiImage: Self.noise).resizable(resizingMode: .tile)
                 .offset(x: CGFloat((s * 37) % 70) - 35, y: CGFloat((s * 53) % 70) - 35)
                 .padding(-60)
-                .opacity(0.12).blendMode(.overlay)
+                .opacity(strength).blendMode(.overlay)
         }
         .allowsHitTesting(false)
     }

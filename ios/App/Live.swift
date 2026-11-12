@@ -34,6 +34,7 @@ final class LiveStore: ObservableObject {
     @Published var stopFilter = "all"           // "all" or a board stop id
     /// Also show the ones that left in the last half hour (and cancelled ones), to see what happened.
     @Published var showEarlier = false
+    private var emptyRetries = 0
     private var loadedFor: Direction?
     private var busy = false
     private var lastPanels = Date.distantPast
@@ -106,6 +107,9 @@ final class LiveStore: ObservableObject {
             toVeghel = keepBest(d + e)
         }
         panelsUpdated = Date()
+        // Transitous now and then sends nothing back: try an empty list again at the next refresh (30 s), a few times.
+        let empty = dir == .toSchool ? (board.isEmpty || trains.isEmpty || buas.isEmpty) : (buas.isEmpty || trains.isEmpty || toVeghel.isEmpty)
+        if empty && emptyRetries < 3 { emptyRetries += 1; lastPanels = .distantPast } else if !empty { emptyRetries = 0 }
         let rail = trains
         Task { await NSStore.shared.enrich(rail.map { ($0.trip, $0.from, $0.to) }) }
     }

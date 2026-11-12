@@ -959,7 +959,7 @@ const CAMA=new T.Vector3(-.195,2.05,4.2),FH=2.978,FW=1.374,yf=f=>2.05+(.5-f)*FH;
 function designA(v){const key='A'+v;if(DES[key]) return DES[key];const g=new T.Group();scene.add(g);const S2={cam:CAMA,g};
   const L={1:{h:[.118,.146],led:[.146,.372],pl:[.40,.962],cols:186,draw:ledA1,plan:plannerA,strip:['Departures',['Next fastest to',.63]]},
            2:{h:[.118,.142],led:[.142,.50],pl:[.525,.962],cols:280,draw:ledA2,plan:plannerCompact,strip:['Departures',['Trains to Breda',.66]]},
-           3:{h:[.118,.140],led:[.140,.255],pl:[.28,.962],cols:95,draw:ledA3,plan:plannerTall,strip:['Departures',['Trains',.78]]}}[v];
+           3:{h:[.118,.138],led:[.138,.246],pl:[.292,.962],cols:95,draw:ledA3,plan:plannerTall,strip:['Departures',['Trains',.78]]}}[v];
   const span=a=>[yf(a[0]),yf(a[1])],mid=a=>(yf(a[0])+yf(a[1]))/2,ht=a=>yf(a[0])-yf(a[1]);
   const lw=.95*FW,pw=.90*FW;
   g.add(box(lw+.04,ht([L.h[0],L.led[1]])+.04,.08,0x0b0c10,-3.035,mid([L.h[0],L.led[1]]),4.2,{metalness:.4,roughness:.5}));
@@ -1007,7 +1007,7 @@ function camPan(u){
   cam.position.copy(p);cam.lookAt(p.clone().add(new T.Vector3(Math.sin(yaw)*Math.cos(pitch),Math.sin(pitch),-Math.cos(yaw)*Math.cos(pitch))));
 }
 // Where the board's screen sits on screen at the end of the walk (0…1 of the picture), for the app to write on it.
-window.boardScreenRect=()=>{camWalk(1);cam.updateMatrixWorld();const L=[[.118,.255,.95],[.28,.962,.90]];
+window.boardScreenRect=()=>{camWalk(1);cam.updateMatrixWorld();const L=[[.118,.246,.95],[.292,.962,.90]];
   return L.map(([f0,f1,fw])=>{const y0=yf(f0),y1=yf(f1),w=fw*FW;const pts=[[-1,y0],[1,y0],[-1,y1],[1,y1]].map(([s2,y])=>new T.Vector3(BX,y,BZ+s2*w/2).project(cam));
     const xs=pts.map(p=>(p.x+1)/2),ys=pts.map(p=>(1-p.y)/2);return {x0:Math.min(...xs),x1:Math.max(...xs),y0:Math.min(...ys),y1:Math.max(...ys)};});};
 

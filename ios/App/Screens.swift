@@ -424,8 +424,8 @@ struct HomeView: View {
     @ViewBuilder private func busPanel(_ p: String) -> some View {
         switch p {
         case "board": veghelBuses
-        case "buas": tripBuses(home ? "Bus to Breda station" : "Breda station → BUas", live.buas)
-        default: tripBuses("Bus to Veghel", live.toVeghel)
+        case "buas": tripBuses(home ? "Bus to Breda station" : "Breda station → BUas", live.buas, fallback: nextBuses(first: home))
+        default: tripBuses("Bus to Veghel", live.toVeghel, fallback: nextBuses(first: false))
         }
     }
 
@@ -450,11 +450,27 @@ struct HomeView: View {
     }
 
     /// Buses from one of the other lists (Breda station to BUas, or to Veghel), with the last few that left.
-    @ViewBuilder private func tripBuses(_ title: String, _ all: [PanelTrip]) -> some View {
+    /// The buses of your next trips: the first ride of each (from BUas going home) or the last (to BUas, or to Veghel).
+    private func nextBuses(first: Bool) -> [Ride] {
+        var seen = Set<String>()
+        return live.next.compactMap { first ? $0.rides.first : $0.rides.last }
+            .filter { !$0.isTrain && $0.departure > Date().addingTimeInterval(-10 * 60) && seen.insert($0.tripId).inserted }
+    }
+
+    @ViewBuilder private func tripBuses(_ title: String, _ all: [PanelTrip], fallback: [Ride] = []) -> some View {
         let since = Date().addingTimeInterval(live.showEarlier ? -30 * 60 : -10 * 60)
         let list = Array(all.filter { $0.trip.first.departure > since && nearOK($0) }.prefix(8))
-        PlannerBar(title: title, sub: list.first.map { "from \(Fmt.place($0.trip.first.fromStop))" })
-        if list.isEmpty {
+        PlannerBar(title: title, sub: (list.first?.trip.first ?? fallback.first).map { "from \(Fmt.place($0.fromStop))" })
+        if list.isEmpty && !fallback.isEmpty {
+            // its own list hasn't come in (yet): the buses from your next trips
+            PlannerColumns()
+            ForEach(fallback) { r in
+                PlannerBusRow(line: r.line, to: r.headsign.isEmpty ? Fmt.place(r.toStop) : r.headsign, time: r.departure, scheduled: r.scheduledDeparture,
+                              live: r.live, cancelled: r.cancelled, grade: r.grade, note: "\(r.rideMinutes) min ride · arrives \(Fmt.hhmm(r.arrival))",
+                              watched: lines.isWatched(stopId: r.fromId, line: r.line, headsign: r.headsign), picked: picked == .ride(r)) { tapRide(r) }
+            }
+            Text("From your next trips; the full list comes in on the next refresh.").font(BoardInk.sans(9.5, .regular)).foregroundStyle(Color.white.opacity(0.65))
+        } else if list.isEmpty {
             Text(live.panelsUpdated == nil ? "Loading…" : "Nothing coming up right now.").font(BoardInk.sans(12, .regular)).foregroundStyle(Color.white.opacity(0.85))
         } else {
             PlannerColumns()

@@ -7,8 +7,8 @@ import SwiftUI
 /// Where the two screens sit at the end of the walk (share of the 540 × 1170 picture). The LED rectangle includes its
 /// blue title strip.
 enum WallBoards {
-    static let led = CGRect(x: 0.0246, y: 0.1175, width: 0.9508, height: 0.1372)
-    static let planner = CGRect(x: 0.0496, y: 0.2797, width: 0.9008, height: 0.6828)
+    static let led = CGRect(x: 0.02407, y: 0.11713, width: 0.95186, height: 0.12829)
+    static let planner = CGRect(x: 0.04912, y: 0.29152, width: 0.90176, height: 0.67154)
     static func rect(_ f: CGRect, in size: CGSize) -> CGRect {
         let v = MapSpot.picture(in: size)
         return CGRect(x: v.minX + f.minX * v.width, y: v.minY + f.minY * v.height, width: f.width * v.width, height: f.height * v.height)
@@ -154,7 +154,7 @@ struct LEDStrip: View {
     var body: some View {
         GeometryReader { g in
             let k = g.size.width / 346
-            let stripH = g.size.height * 0.16
+            let stripH = g.size.height * 0.156
             VStack(spacing: 0) {
                 // the header: warm black with amber letters and a thin amber rule, part of the same LED board
                 HStack {
@@ -172,7 +172,9 @@ struct LEDStrip: View {
                 TimelineView(.periodic(from: .now, by: 8)) { tl in
                     let pages = max(1, (rows.count + perPage - 1) / perPage)
                     let page = Int(tl.date.timeIntervalSinceReferenceDate / 8) % pages
-                    let shown = Array(rows.dropFirst(page * perPage).prefix(perPage))
+                    // the last page is filled up with the trains before it, so the board is never half empty
+                    let start = min(page * perPage, max(0, rows.count - perPage))
+                    let shown = Array(rows.dropFirst(start).prefix(perPage))
                     led(shown, k: k, rowH: max(8, (g.size.height - stripH - 12 * k) / CGFloat(perPage)), page: page, pages: pages)
                 }
             }
@@ -278,7 +280,26 @@ struct PlannerScreen<Content: View>: View {
             .scrollIndicators(.hidden)
         }
         .background(LinearGradient(colors: [BoardInk.blueTop, BoardInk.blueBottom], startPoint: .top, endPoint: .bottom))
+        .overlay(ScreenGlass().allowsHitTesting(false))
         .clipped()
+    }
+}
+
+/// So the planner reads as a screen in the station rather than a flat menu: faint scan lines, a little shading
+/// towards the edges, and the sheen of the glass.
+struct ScreenGlass: View {
+    var body: some View {
+        ZStack {
+            Canvas { c, size in
+                var path = Path()
+                var y: CGFloat = 0
+                while y < size.height { path.addRect(CGRect(x: 0, y: y, width: size.width, height: 0.6)); y += 3 }
+                c.fill(path, with: .color(.black.opacity(0.12)))
+            }
+            RadialGradient(colors: [.clear, .black.opacity(0.28)], center: .center, startRadius: 160, endRadius: 560)
+            LinearGradient(stops: [.init(color: .white.opacity(0.08), location: 0), .init(color: .clear, location: 0.38)], startPoint: .topLeading, endPoint: .bottomTrailing)
+            Rectangle().stroke(Color.white.opacity(0.10), lineWidth: 1)
+        }
     }
 }
 
