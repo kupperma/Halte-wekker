@@ -17,8 +17,8 @@ put the app's own map exactly over it.
 
 # The app icon
 
-`icon.js` draws the icon on a canvas: an "H" (for halte) made of metro lines on the station's tiled wall, with the pink
-neon border and the smiley sticker. `node render-icon.js <folder>` (with `icon.js` copied into `<folder>` as `draw.js`)
-writes `big.png` (1024, for `App/Assets.xcassets/AppIcon.appiconset/icon-1024.png`) and the website sizes
-(`s512`, `s192`, `s180` for `icons/apple-touch-icon.png`, `s32` for the favicon, which leaves out the sticker).
-Save them without transparency.
+`icon.js` draws the icon ("Night line") on a canvas: one line of the metro map on map paper, with the yellow glow of
+your route, bending up to your stop, where the alarm bell rings. `node render-icon.js <folder>` (with `icon.js` copied
+into `<folder>`) writes `icon-1024.png` (for `App/Assets.xcassets/AppIcon.appiconset/`) and the website sizes
+(`icon-512`, `icon-192`, `icon-180` for `icons/apple-touch-icon.png`, `icon-32` for the favicon). Save them without
+transparency.
