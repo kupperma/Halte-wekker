@@ -323,6 +323,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     /// When the app comes back to the screen: start the Live Activity if a trip started by itself in the background.
     func appBecameActive() {
         always = location.authorizationStatus == .authorizedAlways
+        Task { await NoticeLog.shared.collectDelivered() }       // off the lock screen, into the app's list
         if let a = awaySince, Date().timeIntervalSince(a) > 30 * 60 { guessDirection = true }
         awaySince = nil
         followClock()
@@ -476,9 +477,12 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         let id = notification.request.identifier
         let c = notification.request.content
         let title = c.title, body = c.body, kind = Notices.kind(of: c.title, c.userInfo)
+        let at = notification.date
+        Task { @MainActor in NoticeLog.shared.add(key: id, title: title, body: body, kind: kind, at: at) }
         if id == "alarm" || id.hasPrefix("platform-") { done([]); return }
+        // in the app as a banner, with its sound; kept in the app's list instead of the notification centre
         Task { @MainActor in Notices.shared.show(title: title, body: body, kind: kind) }
-        done([.list, .sound])
+        done([.sound])
     }
 
     func testAlarm() {

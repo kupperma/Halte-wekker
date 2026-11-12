@@ -383,6 +383,7 @@ final class GoStore: ObservableObject {
         if sound { c.sound = .default; c.interruptionLevel = .timeSensitive }
         let id = "go-\(Int(Date().timeIntervalSince1970))-\(notes.count)"
         posted.append(id)
+        NoticeLog.shared.add(key: id, title: title, body: body, kind: kind)       // kept, even when a newer one replaces it
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: id, content: c, trigger: nil)) { _ in }
     }
 

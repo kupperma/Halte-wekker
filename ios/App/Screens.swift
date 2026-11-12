@@ -105,6 +105,7 @@ struct HomeView: View {
     @State private var liveTrack: LiveTrackTarget?         // a bus or train you tapped, live on a map
     @State private var showMoving = false                  // everything moving near you, on a map
     @State private var showDemo = false                    // try it at home
+    @State private var showNotices = false                 // the notifications you had, and what's watched
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -156,6 +157,11 @@ struct HomeView: View {
             }).presentationDetents([.large])
         }
         .sheet(isPresented: $showDemo) { DemoSheet().presentationDetents([.large]) }
+        .sheet(isPresented: $showNotices) { NotificationsSheet().presentationDetents([.medium, .large]) }
+        // on the map: the bell, top left, clear of the map's own buttons
+        .overlay(alignment: .topLeading) {
+            if stage == .map { NoticeBell { showNotices = true }.padding(.leading, 18).padding(.top, 4).transition(.opacity) }
+        }
         .sheet(isPresented: $planning) { PlanSheet() }
         .sheet(isPresented: $liveSettings, onDismiss: { Task { await live.refresh(trip.direction, force: true) } }) { LiveSettingsSheet() }
         .sheet(item: $startReq) { r in StartSheet(req: r).presentationDetents([.medium, .large]) }
@@ -286,6 +292,7 @@ struct HomeView: View {
                 .background(Paper.paper, in: Capsule()).shadow(color: .black.opacity(0.35), radius: 5, y: 3)
             }
             .accessibilityLabel("Where you’re going: \(live.custom?.short ?? (home ? "home" : "school")). Tap to change.")
+            NoticeBell { showNotices = true }
             Button { showMoving = true } label: {
                 Image(systemName: "map.fill").font(.system(size: 13, weight: .semibold)).foregroundStyle(Paper.ink)
                     .frame(width: 34, height: 34).background(Paper.paper, in: Circle()).shadow(color: .black.opacity(0.35), radius: 5, y: 3)

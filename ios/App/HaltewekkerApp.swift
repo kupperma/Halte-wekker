@@ -23,6 +23,7 @@ struct HaltewekkerApp: App {
                 .onAppear {
                     let t = trip
                     near.onPosition = { t.guessFromPlace($0); t.maybeAutoHome($0) }
+                    Task { await NoticeLog.shared.collectDelivered() }
                 }
         }
     }
