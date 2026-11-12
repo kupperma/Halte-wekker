@@ -18,7 +18,7 @@ final class Morning: ObservableObject {
         photos = photos.filter { FileManager.default.fileExists(atPath: Self.dir.appendingPathComponent($0).path) }
     }
 
-    static var dir: URL {
+    nonisolated static var dir: URL {
         let u = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Morning", isDirectory: true)
         try? FileManager.default.createDirectory(at: u, withIntermediateDirectories: true)
         return u
