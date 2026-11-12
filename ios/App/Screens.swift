@@ -4,15 +4,19 @@ import SwiftUI
 struct RootView: View {
     @EnvironmentObject var trip: TripManager
     @EnvironmentObject var watch: WatchStore
+    @State private var browsing = false         // at a change: looking at the map and the boards for a bit
     var body: some View {
         Group {
             switch trip.phase {
             case .idle: HomeView()
             case .alarm: AlarmView()
-            case .transfer, .finished: ArrivalView()
+            case .transfer where browsing:
+                HomeView().safeAreaInset(edge: .bottom) { ChangeBar { withAnimation(.easeInOut(duration: 0.3)) { browsing = false } } }
+            case .transfer, .finished: ArrivalView(browse: { withAnimation(.easeInOut(duration: 0.3)) { browsing = true } })
             default: RideView()
             }
         }
+        .onChange(of: trip.phase) { _, p in if p != .transfer { browsing = false } }
         .overlay {
             if let a = watch.alert {
                 PlatformAlertView(alert: a, pal: .of(home: trip.direction == .home)) { watch.dismiss() }.transition(.opacity)
@@ -20,6 +24,33 @@ struct RootView: View {
         }
         .animation(.easeInOut(duration: 0.25), value: watch.alert)
         .preferredColorScheme(.dark)
+    }
+}
+
+/// At a change, while you look at the map: where you're changing and the next one, and the way back to it.
+struct ChangeBar: View {
+    @EnvironmentObject var trip: TripManager
+    let back: () -> Void
+    var body: some View {
+        Button(action: back) {
+            HStack(spacing: 10) {
+                Image(systemName: "arrow.triangle.swap").font(.system(size: 15, weight: .bold)).foregroundStyle(.white)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Change at \(trip.leg?.to.short ?? "your stop")").font(BoardInk.sans(14)).foregroundStyle(.white)
+                    if let r = trip.next {
+                        Text("\(r.isTrain ? r.name : "Bus \(r.line)") at \(Fmt.hhmm(r.departure))").font(BoardInk.sans(11.5, .regular)).foregroundStyle(Color.white.opacity(0.85))
+                    }
+                }
+                Spacer(minLength: 6)
+                Text("Back to your trip").font(BoardInk.sans(12)).foregroundStyle(BoardInk.navy)
+                    .padding(.horizontal, 10).padding(.vertical, 6).background(Color.white, in: Capsule())
+            }
+            .padding(.horizontal, 14).padding(.vertical, 10)
+            .background(Color(hex: 0x2F9E5B), in: RoundedRectangle(cornerRadius: 10))
+            .shadow(color: .black.opacity(0.4), radius: 8, y: 4)
+            .padding(.horizontal, 12).padding(.bottom, 4)
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -526,10 +557,10 @@ struct HomeView: View {
             let here = live.nearStops.filter { $0.name == name }
             let ids = Set(here.map(\.id))
             let isRail = !ids.isDisjoint(with: rail)
-            // at most two that have left, then what's next; Earlier and Later move through the rest
+            // from the next one that hasn't left; Earlier goes back to the ones that have, Later further on
             let all = live.nearBoard.filter { ids.contains($0.stopId) }
             let firstNext = all.firstIndex { ($0.cancelled ? $0.scheduled : $0.time) > Date().addingTimeInterval(-60) } ?? all.count
-            let start = min(max(0, firstNext - 2 + (nearShift[name] ?? 0)), max(0, all.count - 6))
+            let start = max(0, min(firstNext + (nearShift[name] ?? 0), all.count - 1))
             let rows = Array(all.dropFirst(start).prefix(6))
             HStack(spacing: 6) {
                 PlannerStop(name: "\(Fmt.place(name)) · \(Fmt.distance(here.map(\.meters).min() ?? 0))", rail: isRail)
@@ -654,7 +685,7 @@ struct HomeView: View {
     }
 
     @ViewBuilder private func tripBuses(_ title: String, _ all: [PanelTrip], fallback: [Ride] = []) -> some View {
-        let since = Date().addingTimeInterval(live.showEarlier ? -30 * 60 : -10 * 60)
+        let since = Date().addingTimeInterval(live.showEarlier ? -30 * 60 : -60)
         let list = Array(all.filter { $0.trip.first.departure > since && nearOK($0) }.prefix(8))
         PlannerBar(title: title, sub: (list.first?.trip.first ?? fallback.first).map { "from \(Fmt.place($0.fromStop))" })
         if list.isEmpty && !fallback.isEmpty {
@@ -1422,6 +1453,7 @@ struct AlarmView: View {
 
 struct ArrivalView: View {
     @EnvironmentObject var trip: TripManager
+    var browse: (() -> Void)? = nil             // to the map and the boards, while the change stays open
     @State private var spin = 0.0
     @State private var burst = false
     var pal: HWPalette { .of(home: trip.direction == .home) }
@@ -1481,6 +1513,18 @@ struct ArrivalView: View {
 
     /// A change: where you are, the next bus or train in one card, and what else leaves.
     @ViewBuilder private func change(_ n: Leg) -> some View {
+        if let browse {
+            Button(action: browse) {
+                HStack(spacing: 5) {
+                    Image(systemName: "chevron.left").font(.system(size: 12, weight: .bold))
+                    Text("MAP").font(HWFont.display(13)).tracking(1.4)
+                }
+                .foregroundStyle(.white).padding(.horizontal, 12).padding(.vertical, 8)
+                .background(BoardInk.band.opacity(0.92), in: Capsule()).overlay(Capsule().stroke(Color.white.opacity(0.22), lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Back to the map. Your change stays open.")
+        }
         VStack(alignment: .leading, spacing: 4) {
             Text("YOU’RE AT \((trip.arrivedAt ?? trip.leg?.to.short ?? "").uppercased())").font(BoardInk.sans(12)).tracking(1.6).foregroundStyle(pal.accent)
             Text("Change at \(trip.leg?.to.short ?? "")").font(BoardInk.sans(30)).foregroundStyle(.white).lineLimit(1).minimumScaleFactor(0.7)
