@@ -105,8 +105,11 @@ final class LiveStore: ObservableObject {
     func refresh(_ dir: Direction, at loc: CLLocation? = nil, force: Bool = false) async {
         if let loc { lastSeen = loc }
         // Away from your usual start (or going somewhere you picked): trips start from where you are.
+        // Going to school, anywhere in Veghel counts as home (your Veghel bus board); going home, only the BUas campus
+        // counts as school, so anywhere else in Breda the trip starts from where you are.
         let usual: Place = dir == .toSchool ? .veghel : .buas
-        let away = lastSeen.map { $0.distance(from: CLLocation(latitude: usual.coordinate.latitude, longitude: usual.coordinate.longitude)) > 2500 } ?? false
+        let radius = dir == .toSchool ? 2500.0 : 500.0
+        let away = lastSeen.map { $0.distance(from: CLLocation(latitude: usual.coordinate.latitude, longitude: usual.coordinate.longitude)) > radius } ?? false
         let from: CLLocation? = (away || custom != nil) ? lastSeen : nil
         let key = "\(dir.rawValue)|\(custom?.id ?? "")|\(from == nil ? "usual" : "here")"
         if busy && loadedFor == key { return }
