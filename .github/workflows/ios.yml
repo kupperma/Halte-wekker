@@ -26,11 +26,12 @@ jobs:
           xcodebuild -project Haltewekker.xcodeproj -scheme Haltewekker \
             -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
             -derivedDataPath build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
-            build 2>&1 | tee build.log | grep -E "error:|warning: .*deprecated|BUILD (SUCCEEDED|FAILED)" || true
-          test "${PIPESTATUS[0]}" = "0"
+            build 2>&1 | tee build.log | { grep -E "error:|warning: .*deprecated|BUILD (SUCCEEDED|FAILED)" || true; }
+          # (with pipefail the step fails when xcodebuild does, so a broken build is never packaged or released)
       - name: Package .ipa
         working-directory: ios
         run: |
+          test -f build/Build/Products/Release-iphoneos/Haltewekker.app/Info.plist
           mkdir -p Payload
           cp -R build/Build/Products/Release-iphoneos/Haltewekker.app Payload/
           zip -qry Haltewekker.ipa Payload

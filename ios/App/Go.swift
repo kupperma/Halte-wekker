@@ -829,7 +829,7 @@ struct GoView: View {
 extension View {
     /// A card on the Go screen: paper over the map, with its edge and a shadow.
     func glass(_ radius: CGFloat = 4) -> some View {
-        background(PaperFill(), in: RoundedRectangle(cornerRadius: radius))
+        background(PaperFill().clipShape(RoundedRectangle(cornerRadius: radius)))
             .overlay(RoundedRectangle(cornerRadius: radius).stroke(Paper.edge, lineWidth: 1))
             .compositingGroup()
             .shadow(color: .black.opacity(0.3), radius: 8, y: 5)

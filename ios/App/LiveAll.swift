@@ -119,7 +119,7 @@ struct LiveAllSheet: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(PaperFill().opacity(0.97), in: RoundedRectangle(cornerRadius: 10)).overlay(RoundedRectangle(cornerRadius: 10).stroke(Paper.edge, lineWidth: 1))
+        .background(PaperFill().opacity(0.97).clipShape(RoundedRectangle(cornerRadius: 10))).overlay(RoundedRectangle(cornerRadius: 10).stroke(Paper.edge, lineWidth: 1))
         .padding(10)
     }
 }
