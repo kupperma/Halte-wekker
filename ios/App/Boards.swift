@@ -47,11 +47,87 @@ extension HomeSection {
     }
 }
 
+/// Whether the trip was started at the boards, so the ride screen turns from the boards to the platform first.
+enum Handoff { static var fromBoards = false }
+
 /// What you tapped on a board: its page shows on the planner.
 enum BoardPick: Hashable {
     case train(PanelTrip)
     case bus(BoardDeparture)
     case busTrip(PanelTrip)
+    case ride(Ride)                 // one ride of your trip, from the Fastest tab
+}
+
+// MARK: speed ranks
+
+/// The speed rank of a ride: how it compares with the fastest ride seen on the same stretch (delays count).
+struct RankInfo {
+    let grade: String?
+    let minutes: Double
+    let best: Double?
+    let stretch: String
+    static func of(_ r: Ride) -> RankInfo {
+        let g = r.grade                 // (grading also remembers a new fastest time, so ask for it first)
+        return RankInfo(grade: g, minutes: r.arrival.timeIntervalSince(r.departure) / 60, best: Ratings.shared.best("\(r.fromId)>\(r.toStop)"),
+                        stretch: "\(Fmt.place(r.fromStop)) → \(Fmt.place(r.toStop))")
+    }
+    /// A trip is ranked on the ride that gets you there: the only one, or the last.
+    static func of(_ t: DoorTrip) -> RankInfo { of(t.rides.count == 1 ? t.first : t.last) }
+}
+
+/// The rank on a line's page: the coin, what it means, and the numbers behind it.
+struct RankBlock: View {
+    let rank: RankInfo
+    var cancelled = false
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            PlannerBar(title: "Speed rank", sub: rank.stretch)
+            HStack(alignment: .top, spacing: 10) {
+                Coin(grade: rank.grade, size: 42)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title).font(BoardInk.sans(15)).foregroundStyle(.white)
+                    Text(meaning).font(BoardInk.sans(11, .regular)).foregroundStyle(Color.white.opacity(0.88)).fixedSize(horizontal: false, vertical: true)
+                    if let n = numbers { Text(n).font(BoardInk.sans(11)).foregroundStyle(.white).fixedSize(horizontal: false, vertical: true) }
+                }
+            }
+        }
+    }
+    private var title: String {
+        guard let g = rank.grade else { return cancelled ? "No rank: it’s cancelled" : "No rank yet" }
+        return "\(g)-rank"
+    }
+    private var meaning: String {
+        switch rank.grade {
+        case "S": return "As fast as it gets on this stretch."
+        case "A": return "A little slower than the fastest seen here: up to 3 min, or 18% longer."
+        case "B": return "Slower than the fastest seen here: up to 30% longer."
+        case "C": return "Much slower than the fastest seen here."
+        default: return "A rank compares a ride with the fastest one seen on the same stretch."
+        }
+    }
+    private var numbers: String? {
+        guard rank.grade != nil, rank.minutes > 0 else { return nil }
+        var t = "This ride: \(Fmt.rideText(rank.minutes))"
+        if let b = rank.best, b > 0 {
+            let e = Int((rank.minutes - b).rounded())
+            t += " · the fastest: \(Fmt.rideText(b))" + (e >= 1 ? " (\(e) min slower)" : "")
+        }
+        return t + ". Delays count, so a late one drops a rank."
+    }
+}
+
+/// What the route colours on the planner mean.
+struct RankLegend: View {
+    var body: some View {
+        HStack(alignment: .top, spacing: 5) {
+            ForEach(["S", "A", "B", "C"], id: \.self) { g in
+                Text(g).font(BoardInk.sans(10)).foregroundStyle(RatingStyle.ink(g))
+                    .frame(width: 20, height: 15).background(RatingStyle.fill(g), in: RoundedRectangle(cornerRadius: 2))
+            }
+            Text("Route colours are speed ranks: how fast a bus gets you there compared with the fastest on that route. Tap any line for its rank.")
+                .font(BoardInk.sans(9.5, .regular)).foregroundStyle(Color.white.opacity(0.75)).fixedSize(horizontal: false, vertical: true)
+        }
+    }
 }
 
 // MARK: the LED strip
@@ -265,6 +341,7 @@ struct PlannerBusRow: View {
     let scheduled: Date
     let live: Bool
     let cancelled: Bool
+    var grade: String? = nil        // the route box takes the colour of its speed rank
     var note: String? = nil
     let watched: Bool
     let picked: Bool
@@ -275,8 +352,9 @@ struct PlannerBusRow: View {
         let late = live && !cancelled && abs(time.timeIntervalSince(scheduled)) >= 60
         Button(action: tap) {
             HStack(spacing: 0) {
-                Text(line).font(BoardInk.sans(13)).foregroundStyle(BoardInk.navy).lineLimit(1).minimumScaleFactor(0.6)
-                    .frame(width: 38, height: 20).background(BoardInk.route, in: RoundedRectangle(cornerRadius: 2))
+                Text(line).font(BoardInk.sans(13)).foregroundStyle(grade.map { RatingStyle.ink($0) } ?? BoardInk.navy).lineLimit(1).minimumScaleFactor(0.6)
+                    .frame(width: 38, height: 20)
+                    .background(grade.map { RatingStyle.fill($0) } ?? AnyShapeStyle(BoardInk.route), in: RoundedRectangle(cornerRadius: 2))
                     .padding(.trailing, 8)
                 if cancelled {
                     Text("Cancelled · \(to)").font(BoardInk.sans(12)).foregroundStyle(BoardInk.navy).lineLimit(1).minimumScaleFactor(0.7)
@@ -338,8 +416,11 @@ struct PlannerTripCard: View {
                 ForEach(Array(trip.rides.enumerated()), id: \.offset) { i, r in
                     if i > 0 { Rectangle().fill(Color(hex: 0x9FB1D6)).frame(width: 8, height: 2) }
                     HStack(spacing: 4) {
-                        Text(r.line).font(BoardInk.sans(11)).foregroundStyle(BoardInk.navy).lineLimit(1).minimumScaleFactor(0.6)
-                            .frame(width: 30, height: 17).background(r.isTrain ? BoardInk.yellow : BoardInk.route, in: RoundedRectangle(cornerRadius: 2))
+                        let g = r.isTrain ? nil : r.grade          // buses in the colour of their speed rank, trains in yellow
+                        Text(r.line).font(BoardInk.sans(11)).foregroundStyle(r.isTrain ? BoardInk.navy : (g.map { RatingStyle.ink($0) } ?? BoardInk.navy))
+                            .lineLimit(1).minimumScaleFactor(0.6)
+                            .frame(width: 30, height: 17)
+                            .background(r.isTrain ? AnyShapeStyle(BoardInk.yellow) : (g.map { RatingStyle.fill($0) } ?? AnyShapeStyle(BoardInk.route)), in: RoundedRectangle(cornerRadius: 2))
                         VStack(alignment: .leading, spacing: 0) {
                             Text(Fmt.hhmm(r.departure)).font(BoardInk.sans(13)).foregroundStyle(r.cancelled ? HWPalette.stamp : BoardInk.navy).strikethrough(r.cancelled)
                             Text("to \(Fmt.place(r.toStop))").font(BoardInk.sans(9.5, .regular)).foregroundStyle(Color(hex: 0x45608F)).lineLimit(1).minimumScaleFactor(0.7)
@@ -358,6 +439,52 @@ struct PlannerTripCard: View {
         }
         .padding(10)
         .background(Color.white, in: RoundedRectangle(cornerRadius: 6))
+    }
+}
+
+/// One ride of your trip on the Fastest tab: the line (buses in their rank colour, trains in yellow), where it goes,
+/// how it's doing, and when it leaves and gets there.
+struct PlannerRideRow: View {
+    let ride: Ride
+    let info: RailInfo?
+    let picked: Bool
+    let tap: () -> Void
+    var body: some View {
+        let st = RideText.status(ride, info)
+        let gone = ride.cancelled || info?.cancelled == true
+        let late = ride.live && !gone && abs(ride.delay) >= 1
+        let g = ride.isTrain ? nil : ride.grade
+        Button(action: tap) {
+            HStack(alignment: .top, spacing: 8) {
+                Text(ride.line).font(BoardInk.sans(13)).lineLimit(1).minimumScaleFactor(0.6)
+                    .foregroundStyle(ride.isTrain ? Color(hex: 0x1A1A1A) : (g.map { RatingStyle.ink($0) } ?? BoardInk.navy))
+                    .frame(width: 38, height: 20)
+                    .background(ride.isTrain ? AnyShapeStyle(BoardInk.yellow) : (g.map { RatingStyle.fill($0) } ?? AnyShapeStyle(BoardInk.route)), in: RoundedRectangle(cornerRadius: 2))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("to \(Fmt.place(ride.toStop))").font(BoardInk.sans(14)).foregroundStyle(.white).lineLimit(1).minimumScaleFactor(0.7)
+                    Text("from \(Fmt.place(ride.fromStop)) · \(ride.rideMinutes) min ride").font(BoardInk.sans(10, .regular)).foregroundStyle(Color.white.opacity(0.75)).lineLimit(1)
+                    Text(st.text).font(BoardInk.sans(10.5)).foregroundStyle(st.warn ? BoardInk.late : st.ok ? BoardInk.green : Color.white.opacity(0.8)).lineLimit(2)
+                }
+                Spacer(minLength: 4)
+                VStack(alignment: .trailing, spacing: 3) {
+                    if late {
+                        HStack(spacing: 4) {
+                            Text(Fmt.hhmm(ride.scheduledDeparture)).font(BoardInk.sans(10, .regular)).foregroundStyle(Color.white.opacity(0.7))
+                            Text(Fmt.hhmm(ride.departure)).font(BoardInk.sans(13)).foregroundStyle(BoardInk.navy)
+                                .padding(.horizontal, 4).padding(.vertical, 1).background(Color.white, in: RoundedRectangle(cornerRadius: 2))
+                        }
+                    } else {
+                        Text(Fmt.hhmm(gone ? ride.scheduledDeparture : ride.departure)).font(BoardInk.sans(15)).foregroundStyle(.white).strikethrough(gone)
+                    }
+                    Text("→ \(Fmt.hhmm(ride.arrival))").font(BoardInk.sans(10.5, .regular)).foregroundStyle(Color.white.opacity(0.8))
+                }
+            }
+            .padding(.vertical, 6)
+            .overlay(alignment: .bottom) { Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1) }
+            .background(picked ? Color.white.opacity(0.12) : Color.clear)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -444,6 +571,7 @@ struct TrainPage: View {
                     Text("PLATFORM").font(BoardInk.sans(8, .regular)).foregroundStyle(Color.white.opacity(0.75))
                 }
             }
+            RankBlock(rank: RankInfo.of(p.trip), cancelled: gone)
             PlannerBar(title: "The train", sub: info?.size.map { "\($0.cars) coaches" })
             if let s = info?.size {
                 VStack(alignment: .leading, spacing: 4) {
@@ -482,16 +610,19 @@ struct BusPage: View {
     let cancelled: Bool
     let status: String
     let ride: String?
+    var rank: RankInfo? = nil
     let tracked: Bool
     let back: () -> Void
     let track: () -> Void
 
     var body: some View {
+        let g = rank?.grade
         VStack(alignment: .leading, spacing: 10) {
             PageTop(tracked: tracked, back: back, track: track)
             HStack(spacing: 8) {
-                Text(line).font(BoardInk.sans(15)).foregroundStyle(BoardInk.navy).lineLimit(1)
-                    .frame(width: 44, height: 26).background(BoardInk.route, in: RoundedRectangle(cornerRadius: 2))
+                Text(line).font(BoardInk.sans(15)).foregroundStyle(g.map { RatingStyle.ink($0) } ?? BoardInk.navy).lineLimit(1)
+                    .frame(width: 44, height: 26)
+                    .background(g.map { RatingStyle.fill($0) } ?? AnyShapeStyle(BoardInk.route), in: RoundedRectangle(cornerRadius: 2))
                 VStack(alignment: .leading, spacing: 1) {
                     Text(to).font(BoardInk.sans(22)).foregroundStyle(.white).lineLimit(1).minimumScaleFactor(0.6)
                     Text("Bus \(line) · from \(stop)").font(BoardInk.sans(11, .regular)).foregroundStyle(Color.white.opacity(0.8)).lineLimit(1)
@@ -505,6 +636,7 @@ struct BusPage: View {
                     Text(leaves(time)).font(BoardInk.sans(11, .regular)).foregroundStyle(Color.white.opacity(0.8))
                 }
             }
+            if let rank { RankBlock(rank: rank, cancelled: cancelled) }
             if let ride {
                 PlannerBar(title: "Your ride")
                 Text(ride).font(BoardInk.sans(12, .regular)).foregroundStyle(.white)

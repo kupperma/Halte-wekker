@@ -81,6 +81,8 @@ struct HomeView: View {
             }
         }
         .animation(.easeInOut(duration: 0.3), value: trip.toast)
+        .onChange(of: stage) { _, s in Handoff.fromBoards = s == .station }
+        .onAppear { Handoff.fromBoards = stage == .station }
         .sheet(isPresented: $settings) { SettingsView().presentationDetents([.large]) }
         .sheet(isPresented: $planning) { PlanSheet() }
         .sheet(isPresented: $liveSettings, onDismiss: { Task { await live.refresh(trip.direction, force: true) } }) { LiveSettingsSheet() }
@@ -107,7 +109,7 @@ struct HomeView: View {
 
     // MARK: map ⇄ station
 
-    /// Pick a line on the map: step back from the wall, look down the platform, and walk over to the boards.
+    /// Pick a line on the map: step back from the wall and walk over to the boards.
     private func go(_ s: HomeSection) {
         guard stage == .map else { return }
         section = s
@@ -116,7 +118,7 @@ struct HomeView: View {
         moveToken += 1; loopToken += 1
         withAnimation(.easeOut(duration: 0.15)) { stage = .leaving }
         Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 2_200_000_000)        // the walk takes 2.2 s
+            try? await Task.sleep(nanoseconds: 1_600_000_000)        // the walk takes 1.6 s
             guard stage == .leaving else { return }
             withAnimation(.spring(response: 0.45, dampingFraction: 0.9)) { stage = .station }
             if s == .planned && planner.trip == nil {
@@ -132,7 +134,7 @@ struct HomeView: View {
         moveToken += 1
         withAnimation(.easeIn(duration: 0.2)) { stage = .returning }
         Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 2_200_000_000)
+            try? await Task.sleep(nanoseconds: 1_600_000_000)
             guard stage == .returning else { return }
             withAnimation(.easeOut(duration: 0.3)) { stage = .map }
         }
@@ -265,7 +267,7 @@ struct HomeView: View {
             pickedPage(p)
         } else {
             switch section {
-            case .fastest: fastestContent
+            case .fastest: boardFastestContent
             case .lines: boardLinesContent
             case .planned: plannedContent
             case .more: moreContent
@@ -285,6 +287,7 @@ struct HomeView: View {
             BusPage(line: d.line, to: d.headsign, stop: d.stopName, time: d.cancelled ? d.scheduled : d.time, scheduled: d.scheduled,
                     live: d.live, cancelled: d.cancelled, status: BoardRow.status(d),
                     ride: ride.map { "\(Fmt.rideText($0.minutes)) ride to \($0.station) station, arrives \(Fmt.hhmm($0.arrival))" },
+                    rank: ride.map { RankInfo(grade: d.cancelled ? nil : $0.grade, minutes: $0.minutes, best: $0.best, stretch: "\(Fmt.place(d.stopName)) → \($0.station)") },
                     tracked: lines.isWatched(stopId: d.stopId, line: d.line, headsign: d.headsign),
                     back: { withAnimation(.easeInOut(duration: 0.2)) { picked = nil } },
                     track: { lines.toggle(stopId: d.stopId, stopName: d.stopName, line: d.line, headsign: d.headsign, tripId: d.tripId, delay: d.live ? d.delay : nil) })
@@ -293,9 +296,103 @@ struct HomeView: View {
             BusPage(line: f.line, to: f.headsign.isEmpty ? Fmt.place(t.trip.last.toStop) : f.headsign, stop: Fmt.place(f.fromStop),
                     time: f.departure, scheduled: f.scheduledDeparture, live: f.live, cancelled: f.cancelled, status: RideText.status(f, nil).text,
                     ride: "\(t.trip.rideLabel) · arrives \(Fmt.place(t.trip.last.toStop)) \(Fmt.hhmm(t.trip.last.arrival))",
+                    rank: RankInfo.of(t.trip),
                     tracked: lines.isWatched(stopId: f.fromId, line: f.line, headsign: f.headsign),
                     back: { withAnimation(.easeInOut(duration: 0.2)) { picked = nil } },
                     track: { lines.toggle(stopId: f.fromId, stopName: f.fromStop, line: f.line, headsign: f.headsign, tripId: f.tripId, delay: f.live ? f.delay : nil) })
+        case .ride(let r):
+            if r.isTrain, let pt = trainTrip(r) {
+                TrainPage(p: pt, info: ns.rail(r), tracked: watch.isWatched(r, from: pt.from), nsMissing: ns.available == false, pal: pal,
+                          back: { withAnimation(.easeInOut(duration: 0.2)) { picked = nil } },
+                          track: { _ = watch.toggle(pt.trip, from: pt.from, to: pt.to) })
+            } else {
+                BusPage(line: r.line, to: r.headsign.isEmpty ? Fmt.place(r.toStop) : r.headsign, stop: Fmt.place(r.fromStop),
+                        time: r.departure, scheduled: r.scheduledDeparture, live: r.live, cancelled: r.cancelled, status: RideText.status(r, ns.rail(r)).text,
+                        ride: "\(r.rideMinutes) min ride · arrives \(Fmt.place(r.toStop)) \(Fmt.hhmm(r.arrival))",
+                        rank: RankInfo.of(r),
+                        tracked: lines.isWatched(stopId: r.fromId, line: r.line, headsign: r.headsign),
+                        back: { withAnimation(.easeInOut(duration: 0.2)) { picked = nil } },
+                        track: { lines.toggle(stopId: r.fromId, stopName: r.fromStop, line: r.line, headsign: r.headsign, tripId: r.tripId, delay: r.live ? r.delay : nil) })
+            }
+        }
+    }
+
+    /// A train from your trip as a one-ride trip between two of your stations (so it can be watched like the others).
+    private func trainTrip(_ r: Ride) -> PanelTrip? {
+        guard let from = Place.all.first(where: { $0.short == Fmt.place(r.fromStop) }),
+              let to = Place.all.first(where: { $0.short == Fmt.place(r.toStop) }) else { return nil }
+        return PanelTrip(trip: DoorTrip(rides: [r], start: r.departure, end: r.arrival), from: from, to: to)
+    }
+
+    private func tapRide(_ r: Ride) {
+        withAnimation(.easeInOut(duration: 0.2)) { picked = .ride(r) }
+        if r.isTrain {
+            if let pt = trainTrip(r), !watch.isWatched(r, from: pt.from) { _ = watch.toggle(pt.trip, from: pt.from, to: pt.to) }
+        } else if !lines.isWatched(stopId: r.fromId, line: r.line, headsign: r.headsign) {
+            lines.toggle(stopId: r.fromId, stopName: r.fromStop, line: r.line, headsign: r.headsign, tripId: r.tripId, delay: r.live ? r.delay : nil)
+        }
+    }
+
+    /// "Fastest" on the planner, in the same style as All lines: pick one of the next connections, see it ride by ride
+    /// (tap a ride for its page), wake up for it, or start one of your routes.
+    @ViewBuilder private var boardFastestContent: some View {
+        if live.next.isEmpty {
+            Text(live.nextError ?? "Finding your next connections…").font(BoardInk.sans(12, .regular)).foregroundStyle(Color.white.opacity(0.85))
+        } else {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 5) {
+                    ForEach(Array(live.next.enumerated()), id: \.offset) { i, o in
+                        Button { withAnimation(.easeInOut(duration: 0.2)) { live.pick = i } } label: {
+                            Text(Fmt.hhmm(o.first.departure)).font(BoardInk.sans(13))
+                                .foregroundStyle(i == live.pick ? BoardInk.blueBottom : Color.white)
+                                .padding(.horizontal, 10).padding(.vertical, 5)
+                                .background(i == live.pick ? Color.white : Color.white.opacity(0.14), in: RoundedRectangle(cornerRadius: 4))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityAddTraits(i == live.pick ? .isSelected : [])
+                    }
+                }
+            }
+            if let t = live.next[safe: live.pick] ?? live.next.first {
+                let r = t.via.flatMap { via in RoutePlan.all.first(where: { $0.station.short == via }) }
+                PlannerBar(title: t.via.map { "Your trip · via \($0)" } ?? "Your trip", sub: "\(home ? "home" : "at BUas") \(Fmt.hhmm(t.end))")
+                ForEach(Array(t.rides.enumerated()), id: \.offset) { i, ride in
+                    if i > 0 {
+                        let prev = t.rides[i - 1]
+                        let ch = Fmt.mins(ride.departure.timeIntervalSince(prev.arrival))
+                        Label("\(ch) min to change at \(Fmt.place(prev.toStop))\(ride.walkBefore > 0 ? ", \(ride.walkBefore) min walk" : "")", systemImage: "arrow.triangle.swap")
+                            .font(BoardInk.sans(10.5, .semibold)).foregroundStyle(ch - ride.walkBefore < 2 ? BoardInk.late : Color.white.opacity(0.8))
+                    }
+                    PlannerRideRow(ride: ride, info: ns.rail(ride), picked: picked == .ride(ride)) { tapRide(ride) }
+                }
+                if let r {
+                    Button { trip.start(r) } label: {
+                        Text("WAKE ME UP · VIA \(r.station.short.uppercased())").font(BoardInk.sans(12)).tracking(0.6).foregroundStyle(.white)
+                            .frame(maxWidth: .infinity).padding(.vertical, 9).background(Color(hex: 0x2F9E5B), in: RoundedRectangle(cornerRadius: 4))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        RankLegend()
+        WatchingCard(pal: pal)
+        PlannerBar(title: "Wake me up", sub: "pick a route")
+        ForEach(RoutePlan.all) { r in
+            Button { startReq = StartRequest(route: r) } label: {
+                HStack(spacing: 8) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(r.name).font(BoardInk.sans(14)).foregroundStyle(.white)
+                        Text(r.legs(trip.direction).map { "\($0.mode.title) to \($0.to.short)" }.joined(separator: " — "))
+                            .font(BoardInk.sans(10.5, .regular)).foregroundStyle(Color.white.opacity(0.75))
+                    }
+                    Spacer(minLength: 4)
+                    Image(systemName: "bell.and.waves.left.and.right").foregroundStyle(BoardInk.yellow)
+                }
+                .padding(.vertical, 7)
+                .overlay(alignment: .bottom) { Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1) }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
         }
     }
 
@@ -312,6 +409,7 @@ struct HomeView: View {
         ForEach(panelOrder.filter(shown).filter { $0 != "train" }, id: \.self) { p in busPanel(p) }
         Button(live.showEarlier ? "Hide earlier ones" : "Show more earlier ones") { withAnimation { live.showEarlier.toggle() } }
             .font(BoardInk.sans(12, .semibold)).foregroundStyle(.white)
+        RankLegend()
         WatchingCard(pal: pal)
         nearToggle
         nearNote
@@ -345,7 +443,7 @@ struct HomeView: View {
             ForEach(list.filter { $0.stopName == name }) { d in
                 let ride = live.boardRides["\(d.stopId)|\(d.tripId)"]
                 PlannerBusRow(line: d.line, to: d.headsign, time: d.cancelled ? d.scheduled : d.time, scheduled: d.scheduled, live: d.live, cancelled: d.cancelled,
-                              note: ride.map { "\(Fmt.rideText($0.minutes)) to \($0.station) station, arrives \(Fmt.hhmm($0.arrival))" },
+                              grade: d.cancelled ? nil : ride?.grade, note: ride.map { "\(Fmt.rideText($0.minutes)) to \($0.station) station, arrives \(Fmt.hhmm($0.arrival))" },
                               watched: lines.isWatched(stopId: d.stopId, line: d.line, headsign: d.headsign), picked: picked == .bus(d)) { tapBus(d) }
             }
         }
@@ -363,7 +461,7 @@ struct HomeView: View {
             ForEach(list) { p in
                 let f = p.trip.first
                 PlannerBusRow(line: f.line, to: f.headsign.isEmpty ? Fmt.place(p.trip.last.toStop) : f.headsign, time: f.departure, scheduled: f.scheduledDeparture,
-                              live: f.live, cancelled: f.cancelled, note: "\(p.trip.rideLabel) · arrives \(Fmt.hhmm(p.trip.last.arrival))",
+                              live: f.live, cancelled: f.cancelled, grade: p.trip.rides.count == 1 ? f.grade : p.trip.last.grade, note: "\(p.trip.rideLabel) · arrives \(Fmt.hhmm(p.trip.last.arrival))",
                               watched: lines.isWatched(stopId: f.fromId, line: f.line, headsign: f.headsign), picked: picked == .busTrip(p)) { tapBusTrip(p) }
             }
         }
@@ -775,10 +873,14 @@ struct RideView: View {
     @EnvironmentObject var lines: LineWatchStore
     @Environment(\.scenePhase) private var scene
     @State private var earlier = false
+    @State private var panning = Handoff.fromBoards       // started at the boards: turn round to the platform first
+    @State private var loopRestart = 0
     var pal: HWPalette { .of(home: trip.direction == .home) }
     var body: some View {
         ZStack {
-            StationBackdrop(home: trip.direction == .home, moving: trip.movingStation && scene == .active, dim: 0.62)
+            // the station shows through: a lighter dim, and the panels are a little see-through
+            StationBackdrop(home: trip.direction == .home, moving: trip.movingStation && scene == .active, dim: 0.42,
+                            pan: panning ? "pan-\(trip.direction == .home ? "home" : "out")" : nil, restart: loopRestart)
             VStack(alignment: .leading, spacing: 0) {
                 HStack {
                     Label(trip.accuracy.map { "GPS ±\(Int($0)) m" } ?? "Finding GPS…", systemImage: "location.fill")
@@ -798,8 +900,20 @@ struct RideView: View {
             }
             .padding(22)
         }
+        .environment(\.seeThrough, true)
         .animation(.easeInOut(duration: 0.4), value: trip.waitingToBoard)
-        .onAppear { music.setFast(scene == .active) }
+        .onAppear {
+            music.setFast(scene == .active)
+            // the turn from the boards to the platform takes 1.6 s; then the station loop carries on from its first frame
+            if panning {
+                Handoff.fromBoards = false
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 1_600_000_000)
+                    loopRestart += 1
+                    withAnimation(.easeOut(duration: 0.25)) { panning = false }
+                }
+            }
+        }
         .onDisappear { music.setFast(false) }
         .onChange(of: scene) { _, s in music.setFast(s == .active) }
         .task(id: trip.index) {

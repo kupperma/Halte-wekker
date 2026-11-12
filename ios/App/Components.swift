@@ -5,9 +5,19 @@ import UIKit
 // MARK: brass ticket frame
 
 /// Engraved paper, a brass double rule, corner diamonds and punched notches along the top.
+/// Panels let the station show through on the ride screen.
+private struct SeeThroughKey: EnvironmentKey { static let defaultValue = false }
+extension EnvironmentValues {
+    var seeThrough: Bool {
+        get { self[SeeThroughKey.self] }
+        set { self[SeeThroughKey.self] = newValue }
+    }
+}
+
 struct BrassFrame: ViewModifier {
     let pal: HWPalette
     var pad: CGFloat = 10
+    @Environment(\.seeThrough) private var seeThrough
     func body(content: Content) -> some View {
         content
             .padding(pad)
@@ -23,6 +33,7 @@ struct BrassFrame: ViewModifier {
                         }
                     }
                 }
+                .opacity(seeThrough ? 0.7 : 1)
             )
             .overlay(FrameLines(pal: pal).allowsHitTesting(false))
             .clipShape(RoundedRectangle(cornerRadius: 3))
@@ -359,12 +370,14 @@ struct StationBackdrop: View {
     let home: Bool
     let moving: Bool
     var dim: Double = 0.38
+    var pan: String? = nil          // a short video first: turning from the boards on the wall to the platform
+    var restart = 0                 // change it to start the station loop again from its first frame
     var body: some View {
         ZStack {
             HWPalette.bg
             ForEach([false, true], id: \.self) { h in
                 Group {
-                    if moving { StationVideo(name: h ? "station-home" : "station-out", playing: h == home) }
+                    if moving { StationVideo(name: h ? "station-home" : "station-out", playing: h == home, restart: restart) }
                     else if let img = UIImage(named: h ? "still-home" : "still-out") ?? Bundle.main.path(forResource: h ? "still-home" : "still-out", ofType: "jpg").flatMap(UIImage.init(contentsOfFile:)) {
                         Image(uiImage: img).resizable().scaledToFill()
                     }
@@ -372,6 +385,7 @@ struct StationBackdrop: View {
                 .opacity(h == home ? 1 : 0)
                 .animation(.easeInOut(duration: 0.8), value: home)
             }
+            if let pan { OneShotVideo(name: pan, token: 1).transition(.opacity) }
             Color.black.opacity(dim)
             RadialGradient(colors: [.clear, .black.opacity(0.6)], center: .init(x: 0.5, y: 0.3), startRadius: 120, endRadius: 520)
             FilmGrain()

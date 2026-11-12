@@ -14,6 +14,7 @@ struct BoardRide: Hashable {
     let station: String
     let arrival: Date
     let grade: String?
+    var best: Double? = nil         // the fastest seen on this stretch, for the rank's numbers
 }
 
 /// Live times for the home screen: your next door-to-door trip and the lists per leg.
@@ -120,7 +121,8 @@ final class LiveStore: ObservableObject {
                 for t in l where t.first.walkBefore == 0 {           // a bus from the other Veghel stop has a walk first
                     let k = "\(id)|\(t.first.tripId)"
                     if out[k] == nil {
-                        out[k] = BoardRide(minutes: t.rideMinutes, station: Fmt.place(t.last.toStop), arrival: t.last.arrival, grade: t.first.grade)
+                        out[k] = BoardRide(minutes: t.rideMinutes, station: Fmt.place(t.last.toStop), arrival: t.last.arrival, grade: t.first.grade,
+                                             best: Ratings.shared.best("\(t.first.fromId)>\(t.first.toStop)"))
                     }
                 }
             }
