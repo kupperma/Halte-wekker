@@ -2,9 +2,8 @@ import AVFoundation
 import SwiftUI
 import UIKit
 
-// MARK: brass ticket frame
+// MARK: panels (the planner's style)
 
-/// Engraved paper, a brass double rule, corner diamonds and punched notches along the top.
 /// Panels let the station show through on the ride screen.
 private struct SeeThroughKey: EnvironmentKey { static let defaultValue = false }
 extension EnvironmentValues {
@@ -21,23 +20,14 @@ struct BrassFrame: ViewModifier {
     func body(content: Content) -> some View {
         content
             .padding(pad)
+            // a panel like the station's planner screen: deep blue, a thin light edge (it was brass and engraved paper)
             .background(
-                ZStack {
-                    LinearGradient(colors: [pal.paper, pal.paper2], startPoint: .top, endPoint: .bottom)
-                    Canvas { ctx, size in
-                        let c = CGPoint(x: size.width / 2, y: size.height * 1.2)
-                        var r: CGFloat = 7
-                        while r < size.height * 1.4 {
-                            ctx.stroke(Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2)), with: .color(.white.opacity(0.03)), lineWidth: 1)
-                            r += 7
-                        }
-                    }
-                }
-                .opacity(seeThrough ? 0.7 : 1)
+                LinearGradient(colors: [Color(hex: 0x163F9E), Color(hex: 0x0C2C7A)], startPoint: .top, endPoint: .bottom)
+                    .opacity(seeThrough ? 0.78 : 1)
             )
-            .overlay(FrameLines(pal: pal).allowsHitTesting(false))
-            .clipShape(RoundedRectangle(cornerRadius: 3))
-            .shadow(color: .black.opacity(0.6), radius: 14, y: 10)
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.white.opacity(0.16), lineWidth: 1).allowsHitTesting(false))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .shadow(color: .black.opacity(0.45), radius: 12, y: 8)
     }
 }
 
@@ -293,11 +283,10 @@ struct BandButton: View {
     let action: () -> Void
     var body: some View {
         Button(action: action) {
-            Text(title.uppercased()).font(HWFont.display(16)).tracking(1.6).foregroundStyle(Color(hex: 0x0B0D14))
-                .frame(maxWidth: .infinity).padding(.vertical, 16)
-                .background(pal.band)
-                .overlay(RoundedRectangle(cornerRadius: 2).inset(by: 3).stroke(.white.opacity(0.3), lineWidth: 1))
-                .clipShape(RoundedRectangle(cornerRadius: 3))
+            // the green button of the planner
+            Text(title.uppercased()).font(HWFont.display(15)).tracking(0.8).foregroundStyle(.white)
+                .frame(maxWidth: .infinity).padding(.vertical, 14)
+                .background(Color(hex: 0x2F9E5B), in: RoundedRectangle(cornerRadius: 6))
         }
         .buttonStyle(.plain)
     }

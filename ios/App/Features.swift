@@ -214,7 +214,7 @@ struct PlanSheet: View {
                 }
             }
             .scrollContentBackground(.hidden)
-            .background(LinearGradient(colors: [pal.paper, HWPalette.bg], startPoint: .top, endPoint: .bottom).ignoresSafeArea())
+            .background(LinearGradient(colors: [BoardInk.blueTop, BoardInk.blueBottom], startPoint: .top, endPoint: .bottom).ignoresSafeArea())
             .font(HWFont.body(15)).tint(pal.band)
             .navigationTitle("Plan by train time")
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
@@ -500,7 +500,7 @@ struct StartSheet: View {
                 }
             }
             .scrollContentBackground(.hidden)
-            .background(LinearGradient(colors: [pal.paper, HWPalette.bg], startPoint: .top, endPoint: .bottom).ignoresSafeArea())
+            .background(LinearGradient(colors: [BoardInk.blueTop, BoardInk.blueBottom], startPoint: .top, endPoint: .bottom).ignoresSafeArea())
             .font(HWFont.body(15)).tint(pal.band)
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
@@ -916,10 +916,10 @@ struct ToastView: View {
     var body: some View {
         Text(text).font(HWFont.body(13, bold: true)).foregroundStyle(HWPalette.ink)
             .padding(14).frame(maxWidth: .infinity, alignment: .leading)
-            .background(pal.paper.opacity(0.97))
-            .overlay(RoundedRectangle(cornerRadius: 3).stroke(pal.brass, lineWidth: 1.5))
-            .clipShape(RoundedRectangle(cornerRadius: 3))
-            .shadow(color: .black.opacity(0.6), radius: 12, y: 6)
+            .background(Color(hex: 0x0B2F86).opacity(0.97))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.white.opacity(0.2), lineWidth: 1))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .shadow(color: .black.opacity(0.5), radius: 12, y: 6)
             .padding(.horizontal, 18)
     }
 }

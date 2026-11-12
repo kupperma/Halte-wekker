@@ -2,9 +2,10 @@ import SwiftUI
 
 /// The boarding-pass look, shared by the app and the Live Activity.
 enum HWFont {
-    static func display(_ size: CGFloat) -> Font { .custom("OldStandardTT-Bold", size: size) }
-    static func displayRegular(_ size: CGFloat) -> Font { .custom("OldStandardTT-Regular", size: size) }
-    static func body(_ size: CGFloat, bold: Bool = false) -> Font { .custom(bold ? "CourierPrime-Bold" : "CourierPrime-Regular", size: size) }
+    // The plain sans of the station boards (it took over from the old serif and typewriter faces).
+    static func display(_ size: CGFloat) -> Font { .system(size: size * 0.94, weight: .bold) }
+    static func displayRegular(_ size: CGFloat) -> Font { .system(size: size * 0.94, weight: .regular) }
+    static func body(_ size: CGFloat, bold: Bool = false) -> Font { .system(size: size, weight: bold ? .semibold : .regular) }
 }
 
 extension Color {
@@ -17,16 +18,16 @@ extension Color {
 /// Ink blue going to Breda, oxblood going home.
 struct HWPalette {
     let paper: Color, paper2: Color, brass: Color, line: Color, accent: Color, band: Color
-    static let ink = Color(hex: 0xEDE3CC)
-    static let muted = Color(hex: 0xA79F8C)
+    static let ink = Color(hex: 0xF3F6FF)
+    static let muted = Color(hex: 0xAAB6CF)
     static let bg = Color(hex: 0x07080D)
     static let stamp = Color(hex: 0xC8432F)
     static let warn = Color(hex: 0xFFB37A)
     static let ok = Color(hex: 0x7FDCA4)
-    static let toBreda = HWPalette(paper: Color(hex: 0x0F1428), paper2: Color(hex: 0x090C18), brass: Color(hex: 0xB9A066),
-                                   line: Color(hex: 0x5E5A44), accent: Color(hex: 0x9BE7FF), band: Color(hex: 0x9BE7FF))
-    static let home = HWPalette(paper: Color(hex: 0x1E1012), paper2: Color(hex: 0x120809), brass: Color(hex: 0xC9965A),
-                                line: Color(hex: 0x76523A), accent: Color(hex: 0xFFC27A), band: Color(hex: 0xFFB45E))
+    static let toBreda = HWPalette(paper: Color(hex: 0x0F1428), paper2: Color(hex: 0x090C18), brass: Color(hex: 0x9FB8E8),
+                                   line: Color(hex: 0x3D5A9E), accent: Color(hex: 0x9BE7FF), band: Color(hex: 0x9BE7FF))
+    static let home = HWPalette(paper: Color(hex: 0x1E1012), paper2: Color(hex: 0x120809), brass: Color(hex: 0xE6CFC0),
+                                line: Color(hex: 0x7A5A50), accent: Color(hex: 0xFFC27A), band: Color(hex: 0xFFB45E))
     static func of(home: Bool) -> HWPalette { home ? .home : .toBreda }
 }
 

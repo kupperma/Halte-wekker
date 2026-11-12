@@ -180,8 +180,8 @@ struct HomeView: View {
                     Image(systemName: "chevron.left").font(.system(size: 12, weight: .bold))
                     Text("MAP").font(HWFont.display(13)).tracking(1.4)
                 }
-                .foregroundStyle(pal.brass).padding(.horizontal, 12).padding(.vertical, 8)
-                .background(Color.black.opacity(0.6), in: Capsule()).overlay(Capsule().stroke(pal.brass, lineWidth: 1.2))
+                .foregroundStyle(.white).padding(.horizontal, 12).padding(.vertical, 8)
+                .background(BoardInk.band.opacity(0.92), in: Capsule()).overlay(Capsule().stroke(Color.white.opacity(0.22), lineWidth: 1))
             }
             .buttonStyle(.plain).accessibilityLabel("Back to the map")
             Spacer(minLength: 4)
@@ -190,14 +190,14 @@ struct HomeView: View {
                     Text(trip.direction.word).font(HWFont.display(13)).tracking(1.6)
                     Image(systemName: "arrow.up.arrow.down").font(.system(size: 11, weight: .bold))
                 }
-                .foregroundStyle(pal.accent).padding(.horizontal, 10).padding(.vertical, 8)
-                .background(Color.black.opacity(0.6), in: Capsule()).overlay(Capsule().stroke(pal.brass, lineWidth: 1.2))
+                .foregroundStyle(.white).padding(.horizontal, 10).padding(.vertical, 8)
+                .background(BoardInk.band.opacity(0.92), in: Capsule()).overlay(Capsule().stroke(Color.white.opacity(0.22), lineWidth: 1))
             }
             .buttonStyle(.plain)
             .accessibilityLabel(home ? "Going home. Tap to switch to going to Breda." : "Going to Breda. Tap to switch to going home.")
             Button { settings = true } label: {
-                Image(systemName: "gearshape").font(.system(size: 14, weight: .semibold)).foregroundStyle(pal.brass)
-                    .frame(width: 34, height: 34).background(Color.black.opacity(0.6), in: Circle()).overlay(Circle().stroke(pal.brass, lineWidth: 1.2))
+                Image(systemName: "gearshape").font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
+                    .frame(width: 34, height: 34).background(BoardInk.band.opacity(0.92), in: Circle()).overlay(Circle().stroke(Color.white.opacity(0.22), lineWidth: 1))
             }
             .buttonStyle(.plain).accessibilityLabel("Settings")
         }
@@ -601,13 +601,13 @@ struct HomeView: View {
     private var planButton: some View {
         Button { planning = true } label: {
             HStack(spacing: 12) {
-                Image(systemName: "tram.fill").font(.system(size: 14)).foregroundStyle(pal.brass).frame(width: 32, height: 32).overlay(Circle().stroke(pal.brass, lineWidth: 1.5))
+                Image(systemName: "tram.fill").font(.system(size: 14, weight: .semibold)).foregroundStyle(.white).frame(width: 32, height: 32).background(BoardInk.band, in: RoundedRectangle(cornerRadius: 6))
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Plan by train time").font(HWFont.display(17)).foregroundStyle(HWPalette.ink)
                     Text("Pick the train you take with your friend. The buses before and after it are added for you.").font(HWFont.body(12)).foregroundStyle(HWPalette.muted)
                 }
                 Spacer(minLength: 0)
-                Image(systemName: "chevron.right").font(.system(size: 12, weight: .bold)).foregroundStyle(pal.brass)
+                Image(systemName: "chevron.right").font(.system(size: 12, weight: .bold)).foregroundStyle(Color.white.opacity(0.8))
             }
             .contentShape(Rectangle())
             .brass(pal, pad: 14)
@@ -671,11 +671,11 @@ struct HomeView: View {
     private func foldHeader(_ key: String, _ title: String, icon: String, next: String) -> some View {
         Button { withAnimation(.easeInOut(duration: 0.2)) { if open.contains(key) { open.remove(key) } else { open.insert(key) } } } label: {
             HStack(spacing: 10) {
-                Image(systemName: icon).font(.system(size: 14)).foregroundStyle(pal.brass).frame(width: 32, height: 32).overlay(Circle().stroke(pal.brass, lineWidth: 1.5))
+                Image(systemName: icon).font(.system(size: 14, weight: .semibold)).foregroundStyle(.white).frame(width: 32, height: 32).background(BoardInk.band, in: RoundedRectangle(cornerRadius: 6))
                 Text(title).font(HWFont.display(17)).foregroundStyle(HWPalette.ink)
                 Spacer()
                 Text(next).font(HWFont.body(12)).foregroundStyle(pal.accent)
-                Image(systemName: "chevron.down").font(.system(size: 12, weight: .bold)).foregroundStyle(pal.brass).rotationEffect(.degrees(open.contains(key) ? 180 : 0))
+                Image(systemName: "chevron.down").font(.system(size: 12, weight: .bold)).foregroundStyle(Color.white.opacity(0.8)).rotationEffect(.degrees(open.contains(key) ? 180 : 0))
             }
             .padding(.vertical, 4).contentShape(Rectangle())
         }
@@ -686,7 +686,7 @@ struct HomeView: View {
         VStack(alignment: .leading, spacing: 0) {
             foldHeader(key, title, icon: icon, next: next)
             if open.contains(key) {
-                DottedLine(vertical: false).stroke(pal.line, style: StrokeStyle(lineWidth: 1.5, dash: [4, 3])).frame(height: 1.5).padding(.top, 8)
+                Rectangle().fill(Color.white.opacity(0.14)).frame(height: 1).padding(.top, 8)
                 content()
             }
         }
@@ -909,7 +909,8 @@ struct RideView: View {
                 if trip.phase == .awake {
                     Button { trip.legDone() } label: {
                         Text("I’M OFF, END THIS LEG").font(HWFont.display(15)).tracking(1.4).foregroundStyle(HWPalette.ink).frame(maxWidth: .infinity).padding(.vertical, 14)
-                            .overlay(RoundedRectangle(cornerRadius: 3).stroke(pal.brass, lineWidth: 1.5))
+                            .background(Color(hex: 0x0B2F86).opacity(0.9), in: RoundedRectangle(cornerRadius: 6))
+                            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.white.opacity(0.18), lineWidth: 1))
                     }.buttonStyle(.plain).padding(.bottom, 8)
                 }
                 HoldButton(title: "Hold to end trip", pal: pal) { trip.endTrip() }
@@ -1129,7 +1130,7 @@ struct SongCard: View {
                 } else { ZStack { pal.paper; Image(systemName: "music.note").foregroundStyle(pal.brass) } }
             }
             .frame(width: 46, height: 46).clipShape(RoundedRectangle(cornerRadius: 3))
-            .overlay(RoundedRectangle(cornerRadius: 3).stroke(pal.brass.opacity(0.7), lineWidth: 1))
+            .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color.white.opacity(0.3), lineWidth: 1))
             VStack(alignment: .leading, spacing: 2) {
                 Text("\(song.playing ? "NOW PLAYING" : "PAUSED") · \(song.app.uppercased())").font(HWFont.body(10)).tracking(1.4).foregroundStyle(pal.accent)
                 Text(song.title).font(HWFont.display(16)).foregroundStyle(HWPalette.ink).lineLimit(1)
@@ -1151,12 +1152,13 @@ struct HoldButton: View {
     let action: () -> Void
     @State private var progress: CGFloat = 0
     var body: some View {
-        Text(title.uppercased()).font(HWFont.display(16)).tracking(1.4).foregroundStyle(HWPalette.ink)
-            .frame(maxWidth: .infinity).padding(.vertical, 20)
-            .background(alignment: .leading) { GeometryReader { g in pal.band.opacity(0.35).frame(width: g.size.width * progress) } }
-            .background(Color.black.opacity(0.55))
-            .overlay(RoundedRectangle(cornerRadius: 3).stroke(pal.brass, lineWidth: 1.5))
-            .clipShape(RoundedRectangle(cornerRadius: 3))
+        // a navy button like the planner's tabs; it fills up green while you hold it
+        Text(title.uppercased()).font(HWFont.display(15)).tracking(0.8).foregroundStyle(.white)
+            .frame(maxWidth: .infinity).padding(.vertical, 18)
+            .background(alignment: .leading) { GeometryReader { g in Color(hex: 0x2F9E5B).frame(width: g.size.width * progress) } }
+            .background(Color(hex: 0x0B2F86).opacity(0.9))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.white.opacity(0.18), lineWidth: 1))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
             .onLongPressGesture(minimumDuration: seconds, perform: { progress = 0; action() }, onPressingChanged: { p in
                 withAnimation(p ? .linear(duration: seconds) : .easeOut(duration: 0.2)) { progress = p ? 1 : 0 }
             })
@@ -1337,7 +1339,7 @@ struct SettingsView: View {
                 } footer: { Text("Haltewekker \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")") }
             }
             .scrollContentBackground(.hidden)
-            .background(LinearGradient(colors: [pal.paper, HWPalette.bg], startPoint: .top, endPoint: .bottom).ignoresSafeArea())
+            .background(LinearGradient(colors: [BoardInk.blueTop, BoardInk.blueBottom], startPoint: .top, endPoint: .bottom).ignoresSafeArea())
             .font(HWFont.body(15))
             .tint(pal.band)
             .navigationTitle("Settings")
