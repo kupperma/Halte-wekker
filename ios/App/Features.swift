@@ -189,6 +189,8 @@ struct PlanSheet: View {
     @EnvironmentObject var planner: Planner
     @EnvironmentObject var trip: TripManager
     @Environment(\.dismiss) private var dismiss
+    var byArrival = true                    // be there by a time (or else: your friend's train)
+    @State private var arriveMode = true
     @State private var out = true
     @State private var time = Date()
     @State private var tomorrow = false
@@ -198,29 +200,47 @@ struct PlanSheet: View {
         NavigationStack {
             Form {
                 Section {
-                    Picker("Direction", selection: $out) { Text("To Breda").tag(true); Text("Home").tag(false) }.pickerStyle(.segmented)
-                    DatePicker(out ? "Arrive in Breda at" : "Leave Breda at", selection: $time, displayedComponents: .hourAndMinute)
+                    Picker("Plan by", selection: $arriveMode) { Text("Be there by").tag(true); Text("Friend’s train").tag(false) }.pickerStyle(.segmented)
+                }
+                Section {
+                    Picker("Direction", selection: $out) { Text(arriveMode ? "To school" : "To Breda").tag(true); Text("Home").tag(false) }.pickerStyle(.segmented)
+                    DatePicker(arriveMode ? (out ? "Be at BUas by" : "Be home by") : (out ? "Arrive in Breda at" : "Leave Breda at"), selection: $time, displayedComponents: .hourAndMinute)
                     Picker("Day", selection: $tomorrow) { Text("Today").tag(false); Text("Tomorrow").tag(true) }.pickerStyle(.segmented)
                 } footer: {
-                    Text("Use the time of your friend’s train. The app finds that train, \(out ? "the bus from Veghel that gets you there in time and the bus to BUas after it" : "the bus from BUas to catch it and the bus to Veghel after it").")
+                    if arriveMode {
+                        Text("The app finds the trip that leaves the latest and still gets you \(out ? "to BUas" : "home to Veghel") in time, from \(out ? "your Veghel stops" : "BUas"), with live times. You get a reminder ten minutes before you have to leave.")
+                    } else {
+                        Text("Use the time of your friend’s train. The app finds that train, \(out ? "the bus from Veghel that gets you there in time and the bus to BUas after it" : "the bus from BUas to catch it and the bus to Veghel after it").")
+                    }
                 }
                 if let error { Section { Text(error).foregroundStyle(Paper.late) } }
                 Section {
-                    Button("Find this trip") {
-                        if let e = planner.set(out: out, time: time, tomorrow: tomorrow) { error = e } else { dismiss() }
+                    Button(arriveMode ? "Find the best trip" : "Find this trip") {
+                        let e = arriveMode ? planner.setArrive(out: out, time: time, tomorrow: tomorrow) : planner.set(out: out, time: time, tomorrow: tomorrow)
+                        if let e { error = e } else { dismiss() }
                     }
                     .foregroundStyle(pal.deep)
-                    if planner.trip != nil { Button("Remove the trip", role: .destructive) { planner.clear(); dismiss() } }
+                    if arriveMode && planner.arrive != nil { Button("Remove this plan", role: .destructive) { planner.clearArrive(); dismiss() } }
+                    if !arriveMode && planner.trip != nil { Button("Remove the trip", role: .destructive) { planner.clear(); dismiss() } }
                 }
             }
             .scrollContentBackground(.hidden)
             .background(PaperFill().ignoresSafeArea()).preferredColorScheme(.light)
             .font(HWFont.body(15)).tint(pal.band)
-            .navigationTitle("Plan by train time")
+            .navigationTitle(arriveMode ? "Be there by" : "Plan by train time")
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
         }
         .onAppear {
-            if let t = planner.trip, let w = t.when {
+            arriveMode = byArrival
+            if byArrival {
+                if let a = planner.arrive, let w = a.when {
+                    out = a.out; time = w; tomorrow = !Calendar.current.isDateInToday(w)
+                } else {
+                    out = trip.direction == .toSchool
+                    tomorrow = Calendar.current.component(.hour, from: Date()) >= (out ? 9 : 17)
+                    time = Calendar.current.date(bySettingHour: out ? 9 : 18, minute: 0, second: 0, of: Date()) ?? Date()
+                }
+            } else if let t = planner.trip, let w = t.when {
                 out = t.out; time = w; tomorrow = !Calendar.current.isDateInToday(w)
             } else {
                 out = trip.direction == .toSchool
@@ -306,7 +326,7 @@ struct PlannedPass: View {
                         Button { planner.pick = i } label: {
                             Text("\(x.train.first.name.isEmpty ? "Train" : x.train.first.name) \(t.out ? "from \(x.from.short)" : "to \(x.to.short)")")
                                 .font(HWFont.body(12, bold: true))
-                                .foregroundStyle(i == planner.pick ? Color(hex: 0x14121A) : Paper.ink)
+                                .foregroundStyle(i == planner.pick ? Color.white : Paper.ink)
                                 .padding(.horizontal, 10).padding(.vertical, 6)
                                 .background(i == planner.pick ? Paper.ink : .clear)
                                 .overlay(Rectangle().stroke(pal.line, lineWidth: 1))
@@ -922,5 +942,86 @@ struct TipsList: View {
             }
         }
         .padding(.vertical, 8)
+    }
+}
+
+
+/// Be there by a time: when to leave, how much time you have to spare, the trip as a metro line, the other ways that
+/// also get you there in time (leaving earlier), and the alarm for it.
+struct ArrivePass: View {
+    @EnvironmentObject var planner: Planner
+    let edit: () -> Void
+    let wake: (DoorTrip) -> Void
+    var body: some View {
+        if let a = planner.arrive {
+            let dest = a.out ? "BUas" : "Veghel"
+            VStack(alignment: .leading, spacing: 10) {
+                PaperBand(home: !a.out) {
+                    HStack(alignment: .bottom) {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("BE THERE BY · \(a.dayLabel.uppercased())").font(BoardInk.sans(10)).tracking(1.6).opacity(0.85)
+                            Text("\(dest) by \(a.time)").font(HWFont.display(24)).lineLimit(1).minimumScaleFactor(0.7)
+                        }
+                        Spacer(minLength: 6)
+                        Button(action: edit) {
+                            Text("Change").font(BoardInk.sans(12)).foregroundStyle(.white).underline()
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, -14).padding(.top, -14)
+                if let t = planner.arriveChosen, let T = a.when {
+                    let spare = Fmt.mins(T.timeIntervalSince(t.end))
+                    HStack(alignment: .lastTextBaseline) {
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text("LEAVE BY").font(BoardInk.sans(10)).tracking(1.4).foregroundStyle(Paper.muted)
+                            Text(Fmt.hhmm(t.start)).font(HWFont.display(32)).foregroundStyle(Paper.ink).monospacedDigit()
+                        }
+                        Spacer()
+                        VStack(alignment: .trailing, spacing: 0) {
+                            Text("THERE AT").font(BoardInk.sans(10)).tracking(1.4).foregroundStyle(Paper.muted)
+                            Text(Fmt.hhmm(t.end)).font(HWFont.display(24)).foregroundStyle(Paper.ink).monospacedDigit()
+                            Text(spare == 0 ? "just in time" : "\(spare) min to spare").font(BoardInk.sans(11.5)).foregroundStyle(spare < 3 ? Paper.late : Paper.ok)
+                        }
+                    }
+                    if planner.arriveOptions.count > 1 {
+                        // the best one first; the others leave earlier (more time to spare)
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 6) {
+                                ForEach(Array(planner.arriveOptions.enumerated()), id: \.offset) { i, o in
+                                    Button { withAnimation(.easeInOut(duration: 0.2)) { planner.arrivePick = i } } label: {
+                                        VStack(spacing: 0) {
+                                            Text(Fmt.hhmm(o.first.departure)).font(BoardInk.sans(13))
+                                            Text(i == 0 ? "best" : "\(Fmt.mins(T.timeIntervalSince(o.end))) spare").font(BoardInk.sans(9.5, .medium)).opacity(0.85)
+                                        }
+                                        .foregroundStyle(i == planner.arrivePick ? Color.white : Paper.ink)
+                                        .padding(.horizontal, 10).padding(.vertical, 5)
+                                        .background(i == planner.arrivePick ? Paper.navy : Paper.ink.opacity(0.07), in: RoundedRectangle(cornerRadius: 4))
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                        }
+                    }
+                    Rectangle().fill(Paper.rule).frame(height: 1)
+                    TripLine(trip: t, others: planner.arriveOptions.filter { $0.id != t.id }, dest: dest)
+                    Button { wake(t) } label: {
+                        Text("WAKE ME ON THIS TRIP").font(HWFont.display(14)).tracking(0.8).foregroundStyle(.white)
+                            .frame(maxWidth: .infinity).padding(.vertical, 12).background(Paper.green, in: RoundedRectangle(cornerRadius: 6))
+                    }
+                    .buttonStyle(.plain)
+                    Text("Leaves the latest and still gets you there in time. A reminder comes ten minutes before you have to leave.")
+                        .font(BoardInk.sans(10.5, .regular)).foregroundStyle(Paper.muted).fixedSize(horizontal: false, vertical: true)
+                } else if let e = planner.arriveError {
+                    Text(e).font(BoardInk.sans(12.5)).foregroundStyle(Paper.late).fixedSize(horizontal: false, vertical: true)
+                } else {
+                    HStack(spacing: 8) { ProgressView(); Text("Finding the best trip…").font(BoardInk.sans(12.5, .regular)).foregroundStyle(Paper.muted) }
+                }
+            }
+            .padding(14)
+            .background(Paper.card, in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Paper.edge, lineWidth: 1))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+        }
     }
 }

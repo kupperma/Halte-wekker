@@ -33,14 +33,14 @@ struct FrameLines: View {
             let r1 = CGRect(origin: .zero, size: size).insetBy(dx: 4, dy: 4)
             let r2 = CGRect(origin: .zero, size: size).insetBy(dx: 7, dy: 7)
             ctx.stroke(Path(roundedRect: r1, cornerRadius: 1), with: .color(pal.line), lineWidth: 1)
-            ctx.stroke(Path(roundedRect: r2, cornerRadius: 1), with: .color(pal.brass), lineWidth: 1.5)
+            ctx.stroke(Path(roundedRect: r2, cornerRadius: 1), with: .color(pal.deep), lineWidth: 1.5)
             for p in [CGPoint(x: r2.minX, y: r2.minY), CGPoint(x: r2.maxX, y: r2.minY), CGPoint(x: r2.minX, y: r2.maxY), CGPoint(x: r2.maxX, y: r2.maxY)] {
                 var d = Path(); d.move(to: CGPoint(x: p.x, y: p.y - 5)); d.addLine(to: CGPoint(x: p.x + 5, y: p.y)); d.addLine(to: CGPoint(x: p.x, y: p.y + 5)); d.addLine(to: CGPoint(x: p.x - 5, y: p.y)); d.closeSubpath()
-                ctx.fill(d, with: .color(pal.paper)); ctx.stroke(d, with: .color(pal.brass), lineWidth: 1.3)
+                ctx.fill(d, with: .color(Paper.paper)); ctx.stroke(d, with: .color(pal.deep), lineWidth: 1.3)
             }
             var x: CGFloat = 16
             while x < size.width - 10 {
-                ctx.fill(Path(ellipseIn: CGRect(x: x - 3, y: -3, width: 6, height: 6)), with: .color(HWPalette.bg))
+                ctx.fill(Path(ellipseIn: CGRect(x: x - 3, y: -3, width: 6, height: 6)), with: .color(Paper.paper))
                 x += 13
             }
         }
@@ -119,10 +119,10 @@ struct RouteStrip: View {
                 ForEach(0..<stops.count, id: \.self) { i in
                     let first = i == 0, last = i == stops.count - 1
                     VStack(alignment: first ? .leading : last ? .trailing : .center, spacing: 3) {
-                        Circle().fill(pal.paper).overlay(Circle().stroke(HWPalette.ink, lineWidth: 3)).frame(width: 18, height: 18)
-                        Text(stops[i].name.uppercased()).font(HWFont.display(11)).foregroundStyle(HWPalette.ink)
+                        Circle().fill(Color.white).overlay(Circle().stroke(Paper.ink, lineWidth: 3)).frame(width: 18, height: 18)
+                        Text(stops[i].name.uppercased()).font(HWFont.display(11)).foregroundStyle(Paper.ink)
                             .multilineTextAlignment(first ? .leading : last ? .trailing : .center).lineLimit(2).fixedSize(horizontal: false, vertical: true)
-                        Text(stops[i].time).font(HWFont.body(11)).foregroundStyle(pal.accent)
+                        Text(stops[i].time).font(HWFont.body(11)).foregroundStyle(pal.deep)
                     }
                     .frame(width: first || last ? 90 : 70, alignment: first ? .leading : last ? .trailing : .center)
                     .offset(x: first ? -9 : last ? w - 90 + 9 : CGFloat(i) * step - 35)
@@ -152,17 +152,17 @@ struct PassSection: View {
             RatingBar(grade: grade, pal: pal).frame(width: 4).clipShape(Capsule()).padding(.vertical, 8)
             HStack(alignment: .top, spacing: 10) {
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(time).font(HWFont.display(25)).foregroundStyle(pal.accent).strikethrough(gone).monospacedDigit()
-                    if let tag { Text(tag).font(HWFont.display(10)).tracking(1.2).foregroundStyle(Color(hex: 0x14121A)).padding(.horizontal, 5).padding(.vertical, 3).background(pal.band) }
+                    Text(time).font(HWFont.display(25)).foregroundStyle(pal.deep).strikethrough(gone).monospacedDigit()
+                    if let tag { Text(tag).font(HWFont.display(10)).tracking(1.2).foregroundStyle(Paper.ink).padding(.horizontal, 5).padding(.vertical, 3).background(Paper.yellow) }
                 }
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 6) {
-                        Text(badge).font(HWFont.display(12)).foregroundStyle(HWPalette.ink).padding(.horizontal, 5).padding(.vertical, 3)
-                            .overlay(RoundedRectangle(cornerRadius: 2).stroke(HWPalette.ink, lineWidth: 1.5)).fixedSize()
-                        Text(to).font(HWFont.display(15)).foregroundStyle(HWPalette.ink).lineLimit(2)
+                        Text(badge).font(HWFont.display(12)).foregroundStyle(Paper.ink).padding(.horizontal, 5).padding(.vertical, 3)
+                            .overlay(RoundedRectangle(cornerRadius: 2).stroke(Paper.ink, lineWidth: 1.5)).fixedSize()
+                        Text(to).font(HWFont.display(15)).foregroundStyle(Paper.ink).lineLimit(2)
                     }
                     ForEach(lines) { l in
-                        Text(l.text).font(HWFont.body(11, bold: l.warn)).foregroundStyle(l.warn ? Paper.late : HWPalette.ink.opacity(0.75))
+                        Text(l.text).font(HWFont.body(11, bold: l.warn)).foregroundStyle(l.warn ? Paper.late : Paper.ink.opacity(0.75))
                     }
                     if let extra { extra.padding(.top, 2) }
                 }
@@ -171,7 +171,7 @@ struct PassSection: View {
             .padding(.leading, 10).padding(.vertical, 9)
             VStack(spacing: 3) {
                 Coin(grade: grade, size: 30, pal: pal)
-                Text("SPEED").font(HWFont.body(9)).tracking(1.4).foregroundStyle(HWPalette.ink.opacity(0.65))
+                Text("SPEED").font(HWFont.body(9)).tracking(1.4).foregroundStyle(Paper.ink.opacity(0.65))
             }
             .frame(width: 56)
             .padding(.vertical, 8)
@@ -202,7 +202,7 @@ struct BoardingPass: View {
         let pal = HWPalette.of(home: home), r = trip.rides, stops = stopList()
         VStack(spacing: 0) {
             HStack {
-                Text("BOARDING PASS").font(HWFont.display(13)).tracking(2).foregroundStyle(pal.brass)
+                Text("BOARDING PASS").font(HWFont.display(13)).tracking(2).foregroundStyle(pal.deep)
                 Spacer()
                 Text("Nº \(String(format: "%06d", Int(trip.first.departure.timeIntervalSince1970 / 60) % 1_000_000))").font(HWFont.body(11)).foregroundStyle(HWPalette.stamp)
             }
@@ -213,15 +213,15 @@ struct BoardingPass: View {
                 Spacer()
                 Text((home ? "Home around \(Fmt.hhmm(trip.end))" : "At BUas \(Fmt.hhmm(trip.end))").uppercased())
             }
-            .font(HWFont.body(11)).tracking(0.8).foregroundStyle(HWPalette.ink.opacity(0.8)).padding(.horizontal, 12).padding(.top, 6)
+            .font(HWFont.body(11)).tracking(0.8).foregroundStyle(Paper.ink.opacity(0.8)).padding(.horizontal, 12).padding(.top, 6)
             if options.count > 1, let pick {
                 HStack(spacing: 6) {
                     ForEach(Array(options.enumerated()), id: \.offset) { i, o in
                         Button { pick.wrappedValue = i } label: {
                             Text(Fmt.hhmm(o.first.departure)).font(HWFont.body(12, bold: true))
-                                .foregroundStyle(i == pick.wrappedValue ? Color(hex: 0x14121A) : HWPalette.ink)
+                                .foregroundStyle(i == pick.wrappedValue ? Color.white : Paper.ink)
                                 .padding(.horizontal, 10).padding(.vertical, 6)
-                                .background(i == pick.wrappedValue ? HWPalette.ink : .clear)
+                                .background(i == pick.wrappedValue ? Paper.ink : .clear)
                                 .overlay(Rectangle().stroke(pal.line, lineWidth: 1))
                         }.buttonStyle(.plain)
                     }
@@ -240,7 +240,7 @@ struct BoardingPass: View {
                 Spacer()
                 Text("VALID TODAY ONLY")
             }
-            .font(HWFont.body(11)).tracking(0.8).foregroundStyle(HWPalette.ink.opacity(0.85))
+            .font(HWFont.body(11)).tracking(0.8).foregroundStyle(Paper.ink.opacity(0.85))
             .padding(.horizontal, 12).padding(.vertical, 7)
             .overlay(alignment: .top) { DottedLine(vertical: false).stroke(pal.line, style: StrokeStyle(lineWidth: 1.5, dash: [4, 3])).frame(height: 1.5) }
         }

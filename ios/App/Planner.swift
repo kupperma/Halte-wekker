@@ -1,4 +1,5 @@
 import Foundation
+import UserNotifications
 
 /// The train you take with your friend: arrive in Breda at (or leave Breda at) a time, today or tomorrow.
 struct PlannedTrip: Codable, Equatable {
@@ -49,9 +50,88 @@ final class Planner: ObservableObject {
     @Published private(set) var busy = false
     @Published var pick = 0 { didSet { watchChosen() } }
 
+    // MARK: be there by a time
+
+    /// Be at school (or home) by a time: `out` is to BUas, `time` when you want to be there.
+    @Published private(set) var arrive: PlannedTrip?
+    /// The trips that get you there in time, the best first: the one that leaves the latest (then the fewest changes).
+    @Published private(set) var arriveOptions: [DoorTrip] = []
+    @Published var arrivePick = 0 { didSet { remind() } }
+    @Published private(set) var arriveError: String?
+    @Published private(set) var arriveBusy = false
+    private var arriveUpdated: Date?
+
     init() {
         trip = UserDefaults.standard.data(forKey: "plannedTrip").flatMap { try? JSONDecoder().decode(PlannedTrip.self, from: $0) }
         if trip?.expired == true { clear() }
+        arrive = UserDefaults.standard.data(forKey: "arrivePlan").flatMap { try? JSONDecoder().decode(PlannedTrip.self, from: $0) }
+        if let a = arrive, let w = a.when, Date() > w { clearArrive() }
+    }
+
+    var arriveChosen: DoorTrip? { arriveOptions[safe: arrivePick] ?? arriveOptions.first }
+
+    /// Plan backwards from when you want to be there. Returns a message if the time doesn't work.
+    func setArrive(out: Bool, time: Date, tomorrow: Bool) -> String? {
+        let day = Calendar.current.date(byAdding: .day, value: tomorrow ? 1 : 0, to: Date())!
+        let a = PlannedTrip(out: out, date: Fmt.ymd.string(from: day), time: Fmt.hhmm(time))
+        if let w = a.when, w < Date().addingTimeInterval(10 * 60) { return "That’s too soon (or already passed) today. Pick a later time, or Tomorrow." }
+        arrive = a; arriveOptions = []; arriveError = nil; arriveUpdated = nil; arrivePick = 0
+        UserDefaults.standard.set(try? JSONEncoder().encode(a), forKey: "arrivePlan")
+        Task { await refreshArrive(force: true) }
+        return nil
+    }
+
+    func clearArrive() {
+        arrive = nil; arriveOptions = []; arriveError = nil; arriveUpdated = nil; arrivePick = 0
+        UserDefaults.standard.removeObject(forKey: "arrivePlan")
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: ["arrive-leave"])
+    }
+
+    /// Every two minutes while the home screen is on: the trips that get you there by the time, from your Veghel stops
+    /// (or from BUas going home), with live times.
+    func refreshArrive(force: Bool = false) async {
+        guard let a = arrive, let T = a.when else { return }
+        if Date() > T { clearArrive(); return }
+        guard !arriveBusy, force || arriveUpdated.map({ Date().timeIntervalSince($0) >= 120 }) ?? true else { return }
+        arriveBusy = true
+        defer { arriveBusy = false }
+        let from: Place = a.out ? StopsStore.shared.veghel : .buas
+        let to: Place = a.out ? .buas : .veghel
+        let all = await Transit.plan(from: from, to: to, modes: nil, at: T, count: 6, maxTransfers: 4, arriveBy: true)
+        guard arrive == a else { return }
+        var seen = Set<String>()
+        let inTime = all.filter { $0.end <= T.addingTimeInterval(60) && $0.first.departure > Date().addingTimeInterval(-60) && seen.insert($0.id).inserted }
+        // the best: leave as late as you can and still be there in time; then the fewest changes
+        let best = inTime.sorted { ($0.start, -$0.rides.count) > ($1.start, -$1.rides.count) }
+        arriveUpdated = Date()
+        if best.isEmpty {
+            arriveError = all.isEmpty ? "No trips found for that time yet. It tries again in a couple of minutes."
+                                      : "Nothing gets you there by \(a.time). The earliest arrives \(Fmt.hhmm(all.map(\.end).min() ?? T))."
+            if !all.isEmpty { arriveOptions = [] }
+            return
+        }
+        let old = arriveChosen?.first.tripId
+        arriveOptions = Array(best.prefix(4))
+        arrivePick = arriveOptions.firstIndex { $0.first.tripId == old } ?? 0
+        arriveError = nil
+        remind()
+    }
+
+    /// A reminder ten minutes before you have to leave.
+    private func remind() {
+        let c = UNUserNotificationCenter.current()
+        c.removePendingNotificationRequests(withIdentifiers: ["arrive-leave"])
+        guard let a = arrive, let t = arriveChosen else { return }
+        let at = t.start.addingTimeInterval(-10 * 60)
+        guard at > Date().addingTimeInterval(30) else { return }
+        let f = t.first
+        let n = UNMutableNotificationContent()
+        n.title = "Leave in 10 min"
+        n.body = "\(f.isTrain ? f.name : "Bus \(f.line)") at \(Fmt.hhmm(f.departure)) from \(Fmt.place(f.fromStop)) · \(a.out ? "BUas" : "home") by \(a.time)"
+        n.sound = .default
+        n.interruptionLevel = .timeSensitive
+        n.userInfo = ["kind": "go"]
+        c.add(UNNotificationRequest(identifier: "arrive-leave", content: n, trigger: UNTimeIntervalNotificationTrigger(timeInterval: at.timeIntervalSinceNow, repeats: false))) { _ in }
     }
 
     var chosen: PlanOption? { options[safe: pick] ?? options.first }
@@ -76,6 +156,7 @@ final class Planner: ObservableObject {
 
     /// Every minute while the home screen is on.
     func refresh(force: Bool = false) async {
+        await refreshArrive(force: force)
         guard let t = trip else { return }
         if t.expired { clear(); return }
         guard !busy, force || updated.map({ Date().timeIntervalSince($0) >= 60 }) ?? true, let T = t.when else { return }

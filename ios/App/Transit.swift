@@ -209,19 +209,20 @@ enum Transit {
     }
 
     /// The planner. `modes` nil means every kind of transport.
-    static func plan(from: String, to: String, modes: String?, at: Date, count: Int, maxTransfers: Int) async -> [DoorTrip] {
+    static func plan(from: String, to: String, modes: String?, at: Date, count: Int, maxTransfers: Int, arriveBy: Bool = false) async -> [DoorTrip] {
         var q: [URLQueryItem] = [.init(name: "fromPlace", value: from), .init(name: "toPlace", value: to),
                                  .init(name: "numItineraries", value: String(count)), .init(name: "maxTransfers", value: String(maxTransfers)),
                                  .init(name: "time", value: iso.string(from: at))]
+        if arriveBy { q.append(.init(name: "arriveBy", value: "true")) }       // `at` is when you want to be there
         if let m = modes { q.append(.init(name: "transitModes", value: m)) }
         guard let json = try? await get("/v5/plan", q) as? [String: Any], let its = json["itineraries"] as? [[String: Any]] else { return [] }
         return its.compactMap(parseItinerary)
     }
 
-    static func plan(from: Place, to: Place, modes: String?, at: Date, count: Int, maxTransfers: Int) async -> [DoorTrip] {
+    static func plan(from: Place, to: Place, modes: String?, at: Date, count: Int, maxTransfers: Int, arriveBy: Bool = false) async -> [DoorTrip] {
         await withTaskGroup(of: [DoorTrip].self) { g in
             for a in from.ids { for b in to.ids {
-                g.addTask { await plan(from: a, to: b, modes: modes, at: at, count: count, maxTransfers: maxTransfers) }
+                g.addTask { await plan(from: a, to: b, modes: modes, at: at, count: count, maxTransfers: maxTransfers, arriveBy: arriveBy) }
             } }
             var all: [DoorTrip] = []
             for await r in g { all += r }

@@ -106,6 +106,7 @@ struct HomeView: View {
     @State private var showMoving = false                  // everything moving near you, on a map
     @State private var showDemo = false                    // try it at home
     @State private var showNotices = false                 // the notifications you had, and what's watched
+    @State private var planByArrival = true                // the plan sheet opens on "be there by"
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -162,7 +163,7 @@ struct HomeView: View {
         .overlay(alignment: .topLeading) {
             if stage == .map { NoticeBell { showNotices = true }.padding(.leading, 18).padding(.top, 4).transition(.opacity) }
         }
-        .sheet(isPresented: $planning) { PlanSheet() }
+        .sheet(isPresented: $planning) { PlanSheet(byArrival: planByArrival) }
         .sheet(isPresented: $liveSettings, onDismiss: { Task { await live.refresh(trip.direction, force: true) } }) { LiveSettingsSheet() }
         .sheet(item: $startReq) { r in StartSheet(req: r).presentationDetents([.medium, .large]) }
         .sheet(item: $stopEdit) { r in StopSheet(req: r) }
@@ -201,7 +202,8 @@ struct HomeView: View {
             try? await Task.sleep(nanoseconds: 280_000_000)          // the map comes down, the sheets go up
             guard stage == .leaving else { return }
             withAnimation(.spring(response: 0.45, dampingFraction: 0.9)) { stage = .station }
-            if s == .planned && planner.trip == nil {
+            if s == .planned && planner.trip == nil && planner.arrive == nil {
+                planByArrival = true
                 try? await Task.sleep(nanoseconds: 400_000_000)
                 planning = true
             }
@@ -252,7 +254,10 @@ struct HomeView: View {
         return "Every bus and train, live"
     }
     private var plannedSub: String {
-        guard let t = planner.trip else { return "Travel with your friend’s train" }
+        if let a = planner.arrive {
+            return "\(a.dayLabel) · \(a.out ? "BUas" : "home") by \(a.time)" + (planner.arriveChosen.map { " · leave \(Fmt.hhmm($0.start))" } ?? "")
+        }
+        guard let t = planner.trip else { return "Be there by a time, or travel with your friend’s train" }
         return "\(t.dayLabel) · \(t.out ? "arrive Breda" : "leave Breda") \(t.time)"
     }
 
@@ -378,7 +383,7 @@ struct HomeView: View {
         picked = nil
         if s == .more { open.insert("scores") }
         withAnimation(.easeInOut(duration: 0.2)) { section = s }
-        if s == .planned && planner.trip == nil { planning = true }
+        if s == .planned && planner.trip == nil && planner.arrive == nil { planByArrival = true; planning = true }
     }
 
     // Tapping a line opens its page on the planner and starts tracking it.
@@ -827,8 +832,18 @@ struct HomeView: View {
     }
 
     @ViewBuilder private var plannedContent: some View {
+        // be there by a time: the trip that leaves the latest and still gets you there
+        if planner.arrive != nil {
+            ArrivePass(edit: { planByArrival = true; planning = true }, wake: { t in
+                if let a = planner.arrive { trip.pick(a.out ? .toSchool : .home) }
+                if let via = t.via, let r = RoutePlan.all.first(where: { $0.station.short == via }) { startReq = StartRequest(route: r) }
+                else if let r = RoutePlan.from(t) { trip.start(r) }
+            })
+        } else {
+            arriveButton
+        }
         if planner.trip != nil {
-            PlannedPass(edit: { planning = true }, wake: { r in
+            PlannedPass(edit: { planByArrival = false; planning = true }, wake: { r in
                 if let t = planner.trip { trip.pick(t.out ? .toSchool : .home) }
                 startReq = StartRequest(route: r)
             })
@@ -925,8 +940,25 @@ struct HomeView: View {
         }
     }
 
+    private var arriveButton: some View {
+        Button { planByArrival = true; planning = true } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "flag.checkered").font(.system(size: 14, weight: .semibold)).foregroundStyle(.white).frame(width: 32, height: 32).background(Paper.green, in: RoundedRectangle(cornerRadius: 6))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Be there by…").font(HWFont.display(17)).foregroundStyle(Paper.ink)
+                    Text("Say when you want to be at school (or home). You get the trip that leaves the latest and still gets you there.").font(HWFont.body(12)).foregroundStyle(Paper.muted)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right").font(.system(size: 12, weight: .bold)).foregroundStyle(Paper.ink.opacity(0.8))
+            }
+            .contentShape(Rectangle())
+            .brass(pal, pad: 14)
+        }
+        .buttonStyle(.plain)
+    }
+
     private var planButton: some View {
-        Button { planning = true } label: {
+        Button { planByArrival = false; planning = true } label: {
             HStack(spacing: 12) {
                 Image(systemName: "tram.fill").font(.system(size: 14, weight: .semibold)).foregroundStyle(.white).frame(width: 32, height: 32).background(BoardInk.band, in: RoundedRectangle(cornerRadius: 6))
                 VStack(alignment: .leading, spacing: 3) {
