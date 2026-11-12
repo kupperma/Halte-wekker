@@ -1305,14 +1305,15 @@ struct RideView: View {
     private var ringSize: CGFloat { min(250, max(170, screenH * 0.31 - (trip.phase == .awake ? 60 : 0) - (music.song == nil ? 0 : 20))) }
     var body: some View {
         ZStack(alignment: .topTrailing) {
-            // the blue wall, and the trip on a sheet of paper pinned to it
-            WallBackground()
+            // the metro station behind it (moving, or the still picture), and the trip on a sheet of paper over it that
+            // the station shows through a little
+            StationBackdrop(home: trip.direction == .home, moving: trip.movingStation, dim: 0.28)
             VStack(alignment: .leading, spacing: 12) {
                 VStack(alignment: .leading, spacing: 0) {
                     if trip.waitingToBoard { boarding } else { riding }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                .paperSheet()
+                .paperSheet(opacity: 0.84)
                 if trip.phase == .awake {
                     Button { trip.legDone() } label: {
                         Text("I’M OFF, END THIS LEG").font(HWFont.display(15)).tracking(1.4).foregroundStyle(.white).frame(maxWidth: .infinity).padding(.vertical, 14)

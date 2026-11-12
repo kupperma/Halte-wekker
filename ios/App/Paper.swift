@@ -93,8 +93,8 @@ struct WallSticker: View {
 
 extension View {
     /// A sheet of paper pinned to the wall: the paper, a thin edge, a shadow and two strips of tape at the top.
-    func paperSheet(tape: Bool = true) -> some View {
-        background(PaperFill())
+    func paperSheet(tape: Bool = true, opacity: Double = 1) -> some View {
+        background(PaperFill().opacity(opacity))
             .overlay(Rectangle().stroke(Paper.edge, lineWidth: 1).allowsHitTesting(false))
             .compositingGroup()
             .shadow(color: .black.opacity(0.45), radius: 12, y: 8)
