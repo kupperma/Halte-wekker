@@ -54,6 +54,7 @@ struct HomeView: View {
     @State private var nearShift: [String: Int] = [:]     // how far back or forward you've gone at each stop near you
     @State private var walkTo: WalkTarget?                 // the walk to a stop, on a map
     @State private var liveTrack: LiveTrackTarget?         // a bus or train you tapped, live on a map
+    @State private var showMoving = false                  // everything moving near you, on a map
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -89,6 +90,7 @@ struct HomeView: View {
         .onChange(of: near.position?.coordinate.latitude) { _, _ in Task { await live.refresh(trip.direction, at: near.position) } }
         .sheet(item: $walkTo) { WalkMapSheet(target: $0).presentationDetents([.large]) }
         .sheet(item: $liveTrack) { LiveBusSheet(target: $0).presentationDetents([.large]) }
+        .sheet(isPresented: $showMoving) { LiveAllSheet(center: near.position?.coordinate ?? Place.breda.coordinate).presentationDetents([.large]) }
         .sheet(isPresented: $choosingDestination) {
             DestinationSheet { d in
                 live.go(to: d)
@@ -220,6 +222,11 @@ struct HomeView: View {
                 .background(BoardInk.band.opacity(0.92), in: Capsule()).overlay(Capsule().stroke(Color.white.opacity(0.22), lineWidth: 1))
             }
             .accessibilityLabel("Where you’re going: \(live.custom?.short ?? (home ? "home" : "school")). Tap to change.")
+            Button { showMoving = true } label: {
+                Image(systemName: "map.fill").font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
+                    .frame(width: 34, height: 34).background(BoardInk.band.opacity(0.92), in: Circle()).overlay(Circle().stroke(Color.white.opacity(0.22), lineWidth: 1))
+            }
+            .buttonStyle(.plain).accessibilityLabel("Everything moving near you, on a map")
             Button { settings = true } label: {
                 Image(systemName: "gearshape").font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
                     .frame(width: 34, height: 34).background(BoardInk.band.opacity(0.92), in: Circle()).overlay(Circle().stroke(Color.white.opacity(0.22), lineWidth: 1))
@@ -423,7 +430,7 @@ struct HomeView: View {
             if let t = live.next[safe: live.pick] ?? live.next.first {
                 let r = live.anywhere ? RoutePlan.from(t) : t.via.flatMap { via in RoutePlan.all.first(where: { $0.station.short == via }) }
                 let dest = live.destination(trip.direction).short
-                PlannerBar(title: live.here != nil ? "Your trip · from here" : t.via.map { "Your trip · via \($0)" } ?? "Your trip",
+                PlannerBar(title: live.onBoard != nil ? "Your trip · on board" : live.here != nil ? "Your trip · from here" : t.via.map { "Your trip · via \($0)" } ?? "Your trip",
                            sub: live.anywhere ? "at \(dest) \(Fmt.hhmm(t.end))" : "\(home ? "home" : "at BUas") \(Fmt.hhmm(t.end))")
                 ForEach(Array(t.rides.enumerated()), id: \.offset) { i, ride in
                     if i > 0 {
@@ -435,7 +442,7 @@ struct HomeView: View {
                     PlannerRideRow(ride: ride, info: ns.rail(ride), picked: picked == .ride(ride)) { tapRide(ride) }
                 }
                 if let r {
-                    Button { trip.start(r) } label: {
+                    Button { if live.anywhere { wake(t) } else { trip.start(r) } } label: {
                         Text(live.anywhere ? "WAKE ME UP · TO \(r.station.short.uppercased())" : "WAKE ME UP · VIA \(r.station.short.uppercased())").font(BoardInk.sans(12)).tracking(0.6).foregroundStyle(.white)
                             .frame(maxWidth: .infinity).padding(.vertical, 9).background(Color(hex: 0x2F9E5B), in: RoundedRectangle(cornerRadius: 4))
                     }
@@ -475,10 +482,16 @@ struct HomeView: View {
         if let t = live.next[safe: live.pick] ?? live.next.first {
             let r = RoutePlan.from(t)
             PlannerTripCard(trip: t, home: home, wakeTitle: r.map { _ in "Wake me up · to \(dest)" }, arrive: "at \(dest) \(Fmt.hhmm(t.end))",
-                            title: live.here == nil ? "Your trip · fastest" : "Your trip · from here") {
-                if let r { trip.start(r) }
+                            title: live.onBoard.map { "On the \($0.vehicle.title) now" } ?? (live.here == nil ? "Your trip · fastest" : "Your trip · from here")) {
+                wake(t)
             }
-            if t.first.walkBefore > 0 || walkTarget(t.first) != nil {
+            if let ob = live.onBoard, t.first.tripId == ob.vehicle.tripId {
+                Label("You’re on the \(ob.vehicle.title) to \(ob.to): stay on until \(Fmt.place(t.first.toStop))", systemImage: ob.vehicle.isTrain ? "tram.fill" : "bus.fill")
+                    .font(BoardInk.sans(11.5, .semibold)).foregroundStyle(Color.white.opacity(0.9))
+            } else if let ob = live.onBoard {
+                Label("You’re on the \(ob.vehicle.title): get off at \(ob.next) and change there", systemImage: ob.vehicle.isTrain ? "tram.fill" : "bus.fill")
+                    .font(BoardInk.sans(11.5, .semibold)).foregroundStyle(Color.white.opacity(0.9))
+            } else if t.first.walkBefore > 0 || walkTarget(t.first) != nil {
                 HStack(spacing: 8) {
                     Label(t.first.walkBefore > 0 ? "First a \(t.first.walkBefore) min walk to \(Fmt.place(t.first.fromStop))" : "Your stop: \(Fmt.place(t.first.fromStop))",
                           systemImage: "figure.walk")
@@ -550,6 +563,12 @@ struct HomeView: View {
                 }
             }
         }
+    }
+
+    /// Wake me up for a trip from anywhere; on a bus or train, the alarm starts with the one you're on.
+    private func wake(_ t: DoorTrip) {
+        guard let r = RoutePlan.from(t) else { return }
+        if let ob = live.onBoard, t.first.tripId == ob.vehicle.tripId { trip.start(r, vehicle: ob.vehicle) } else { trip.start(r) }
     }
 
     /// The walk to where a ride leaves from (to catch that ride), if we know where its stop is.
@@ -722,6 +741,21 @@ struct HomeView: View {
     }
 
     @ViewBuilder private var moreContent: some View {
+        Button { showMoving = true } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "map.fill").font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
+                    .frame(width: 32, height: 32).background(BoardInk.band, in: RoundedRectangle(cornerRadius: 6))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Everything moving near you").font(HWFont.display(17)).foregroundStyle(HWPalette.ink)
+                    Text("Every bus and train around you, live on a map.").font(HWFont.body(12)).foregroundStyle(HWPalette.muted)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right").font(.system(size: 12, weight: .bold)).foregroundStyle(Color.white.opacity(0.8))
+            }
+            .contentShape(Rectangle())
+            .brass(pal, pad: 14)
+        }
+        .buttonStyle(.plain)
         fold("scores", "Leaderboard", icon: "trophy.fill",
              next: scores.bestThisWeek(home: true).map { "Home \(Int($0.mins.rounded())) min" } ?? "") {
             LeaderboardView(pal: pal).padding(.top, 10)

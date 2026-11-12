@@ -52,6 +52,14 @@ final class LiveStore: ObservableObject {
     @Published private(set) var nearBoard: [BoardDeparture] = []     // what leaves from the stops around you
     private var lastSeen: CLLocation?
     private var plannedFrom: CLLocation?
+    private var lastMoving: Date?               // when you last went at bus or train speed
+    /// The bus or train you're on now (you're moving, and its live position is right where you are).
+    @Published private(set) var onBoard: OnBoard?
+    struct OnBoard: Equatable {
+        let vehicle: Vehicle
+        let to: String              // where it's going
+        let next: String            // its next stop
+    }
     private var nearAt: (CLLocation, Date)?
     /// Trips from where you are, not one of your two routes (so the boards show what's around you).
     var anywhere: Bool { here != nil || custom != nil }
@@ -66,6 +74,50 @@ final class LiveStore: ObservableObject {
             recents = Array(([d] + recents.filter { $0.id != d.id }).prefix(6))
             UserDefaults.standard.set(try? JSONEncoder().encode(recents), forKey: "recentDests")
         }
+    }
+
+    /// You're on a bus or train: find it (its live position closest to you), then plan from its next stop, from when it
+    /// gets there, so your trip carries on with it (or changes there) instead of starting with one you'd still have to catch.
+    private func onBoardTrips(_ f: CLLocation, to dest: Place) async -> (OnBoard, [DoorTrip])? {
+        let now = Date()
+        let segs = await Transit.vehicles(near: f.coordinate, radiusDeg: 0.02)
+        var best: (VehicleSegment, Double)?
+        for s in segs {
+            guard let p = s.position(at: now) else { continue }
+            let d = f.distance(from: CLLocation(latitude: p.latitude, longitude: p.longitude))
+            if d < 600, best == nil || d < best!.1 { best = (s, d) }
+        }
+        guard let seg = best?.0 else { return nil }
+        let stops = await Transit.tripStops(seg.tripId)
+        guard let next = stops.first(where: { ($0.arrival ?? .distantPast) > now.addingTimeInterval(20) }) else { return nil }
+        let at = next.arrival ?? now
+        var its: [DoorTrip] = []
+        for b in dest.ids {
+            its += await Transit.plan(from: "\(next.coordinate.latitude),\(next.coordinate.longitude)", to: b, modes: nil, at: at.addingTimeInterval(-60), count: 5, maxTransfers: 4)
+        }
+        let v = Vehicle(tripId: seg.tripId, line: seg.isTrain ? Transit.trainLabel(seg.line) : seg.line, isTrain: seg.isTrain)
+        func onIt(to name: String, lat: Double?, lon: Double?, arrival: Date, scheduled: Date) -> Ride {
+            Ride(tripId: seg.tripId, line: v.line, name: seg.line, isTrain: seg.isTrain, departure: now, scheduledDeparture: now,
+                 arrival: arrival, scheduledArrival: scheduled, fromStop: "On board", fromId: "onboard", toStop: name, platform: nil,
+                 live: true, cancelled: false, walkBefore: 0,
+                 fromLat: f.coordinate.latitude, fromLon: f.coordinate.longitude, toLat: lat, toLon: lon)
+        }
+        var seen = Set<String>()
+        let all: [DoorTrip] = its.compactMap { t in
+            guard t.first.departure >= at.addingTimeInterval(-120) else { return nil }
+            var rides = t.rides
+            if rides.first?.tripId == seg.tripId {
+                let r = rides.removeFirst()          // it stays on: the ride you're on goes on to where you get off
+                rides.insert(onIt(to: r.toStop, lat: r.toLat, lon: r.toLon, arrival: r.arrival, scheduled: r.scheduledArrival), at: 0)
+            } else {
+                rides.insert(onIt(to: next.name, lat: next.coordinate.latitude, lon: next.coordinate.longitude, arrival: at, scheduled: at), at: 0)
+            }
+            return DoorTrip(rides: rides, start: now, end: t.end)
+        }
+        .filter { seen.insert($0.id).inserted }
+        .sorted { $0.end < $1.end }
+        guard !all.isEmpty else { return nil }
+        return (OnBoard(vehicle: v, to: Fmt.place(stops.last?.name ?? seg.toName), next: Fmt.place(next.name)), Array(all.prefix(4)))
     }
 
     /// Where you're going: your pick, or school or home.
@@ -110,7 +162,15 @@ final class LiveStore: ObservableObject {
     }
 
     func refresh(_ dir: Direction, at loc: CLLocation? = nil, force: Bool = false) async {
-        if let loc { lastSeen = loc }
+        if let loc {
+            // moving at bus or train speed (by the GPS, or between two positions): you're probably on board
+            if loc.speed >= 5 { lastMoving = loc.timestamp }
+            if let p = lastSeen, loc.timestamp > p.timestamp {
+                let dt = loc.timestamp.timeIntervalSince(p.timestamp)
+                if dt < 300, loc.distance(from: p) / dt >= 5 { lastMoving = loc.timestamp }
+            }
+            lastSeen = loc
+        }
         // Away from your usual start (or going somewhere you picked): trips start from where you are.
         // Going to school, anywhere in Veghel counts as home (your Veghel bus board); going home, only the BUas campus
         // counts as school, so anywhere else in Breda the trip starts from where you are.
@@ -129,9 +189,17 @@ final class LiveStore: ObservableObject {
         busy = true; loadedFor = key; here = from
         defer { busy = false }
         let trips: [DoorTrip]
-        if let f = from { plannedFrom = f; trips = await Transit.tripsFrom(f.coordinate, to: destination(dir)) }
-        else if custom != nil { trips = await Transit.tripsFrom(usual.coordinate, to: destination(dir)) }
-        else { trips = await Transit.nextTrips(dir) }
+        if let f = from {
+            plannedFrom = f
+            // on a bus or train (moving, or moved in the last 3 minutes, e.g. standing at a station): carry on with it
+            if let m = lastMoving, Date().timeIntervalSince(m) < 180, let ob = await onBoardTrips(f, to: destination(dir)) {
+                onBoard = ob.0; trips = ob.1
+            } else {
+                onBoard = nil; trips = await Transit.tripsFrom(f.coordinate, to: destination(dir))
+            }
+        }
+        else if custom != nil { onBoard = nil; trips = await Transit.tripsFrom(usual.coordinate, to: destination(dir)) }
+        else { onBoard = nil; trips = await Transit.nextTrips(dir) }
         guard loadedFor == key else { return }
         // One empty answer from Transitous doesn't wipe what you had: keep the trips that haven't left yet, and ask again sooner.
         next = trips.isEmpty ? next.filter { $0.first.departure > Date().addingTimeInterval(-60) } : trips

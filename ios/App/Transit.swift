@@ -301,6 +301,26 @@ enum Transit {
         }
     }
 
+    /// Every bus and train running in an area now and in the next few minutes, for the live map of everything near you.
+    static func liveVehicles(min a: CLLocationCoordinate2D, max b: CLLocationCoordinate2D) async -> [VehicleSegment] {
+        let now = Date()
+        let q: [URLQueryItem] = [.init(name: "min", value: "\(a.latitude),\(a.longitude)"), .init(name: "max", value: "\(b.latitude),\(b.longitude)"),
+                                 .init(name: "startTime", value: iso.string(from: now.addingTimeInterval(-60))),
+                                 .init(name: "endTime", value: iso.string(from: now.addingTimeInterval(240))),
+                                 .init(name: "zoom", value: "15")]
+        guard let list = try? await get("/v1/map/trips", q) as? [[String: Any]] else { return [] }
+        return list.compactMap { s in
+            let mode = (s["mode"] as? String) ?? ""
+            guard mode != "AIRPLANE", let trips = s["trips"] as? [[String: Any]], let t = trips.first, let id = t["tripId"] as? String,
+                  let dep = date(s["departure"]), let arr = date(s["arrival"]), let poly = s["polyline"] as? String else { return nil }
+            let train = !(mode.contains("BUS") || mode.contains("COACH"))
+            let line = (t["routeShortName"] as? String) ?? "?"
+            return VehicleSegment(tripId: id, line: train ? trainLabel(line) : line, isTrain: train,
+                                  fromName: ((s["from"] as? [String: Any])?["name"] as? String) ?? "", toName: ((s["to"] as? [String: Any])?["name"] as? String) ?? "",
+                                  departure: dep, arrival: arr, path: decodePolyline(poly))
+        }
+    }
+
     /// Every stop of one trip with its live arrival.
     static func tripStops(_ tripId: String) async -> [TripStop] {
         guard let json = try? await get("/v5/trip", [.init(name: "tripId", value: tripId)]) as? [String: Any],
