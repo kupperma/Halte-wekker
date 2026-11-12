@@ -506,8 +506,9 @@ struct TripRow: View {
 struct RideView: View {
     @EnvironmentObject var trip: TripManager
     @EnvironmentObject var music: NowPlaying
+    @EnvironmentObject var ns: NSStore
+    @EnvironmentObject var planner: Planner
     @Environment(\.scenePhase) private var scene
-    @State private var confirmEnd = false
     var pal: HWPalette { .of(home: trip.direction == .home) }
     var body: some View {
         ZStack {
@@ -520,44 +521,7 @@ struct RideView: View {
                     Spacer()
                     if trip.autoStarted { Text("STARTED BY ITSELF").font(HWFont.body(10)).tracking(1.2).foregroundStyle(pal.accent) }
                 }
-                Spacer()
-                if trip.legs.count > 1 { Text("LEG \(trip.index + 1) OF \(trip.legs.count)").font(HWFont.body(11)).tracking(1.6).foregroundStyle(HWPalette.muted) }
-                Text("NOW RIDING").font(HWFont.body(11)).tracking(1.8).foregroundStyle(HWPalette.ink.opacity(0.75)).padding(.top, 8)
-                Text(trip.vehicle.map { "\($0.title) to \(trip.leg?.to.short ?? "")" } ?? (trip.leg?.title ?? ""))
-                    .font(HWFont.display(24)).foregroundStyle(HWPalette.ink)
-                if trip.vehicle == nil { Text("Looking for the bus or train you’re on…").font(HWFont.body(12)).foregroundStyle(HWPalette.muted) }
-                let parts = trip.distance.map { Fmt.distanceParts($0) } ?? ("–", "")
-                VStack(spacing: 4) {
-                    Text(parts.0).font(HWFont.display(music.song == nil ? 104 : 88)).foregroundStyle(HWPalette.ink).monospacedDigit()
-                        .shadow(color: pal.accent.opacity(0.45), radius: 22).contentTransition(.numericText())
-                    Text("\(parts.1.uppercased()) TO \((trip.leg?.to.short ?? "").uppercased())").font(HWFont.display(13)).tracking(3).foregroundStyle(pal.accent)
-                }
-                .frame(maxWidth: .infinity).padding(.top, 16)
-                // the metro drives along as you get closer, like a song's progress bar
-                TimelineView(.periodic(from: .now, by: 2)) { ctx in
-                    MetroTrack(progress: trip.progress(at: ctx.date), home: trip.direction == .home).frame(height: 34)
-                }
-                .id(trip.index)
-                .padding(.top, 12)
-                HStack {
-                    Text(trip.legFrom.map { Fmt.hhmm($0) } ?? (trip.leg?.from.short ?? ""))
-                    Spacer()
-                    Text(trip.legTo.map { "\(Fmt.hhmm($0)) \(trip.leg?.to.short ?? "")" } ?? (trip.leg?.to.short ?? ""))
-                }
-                .font(HWFont.body(11)).foregroundStyle(HWPalette.muted).padding(.top, 4)
-                Text(trip.phase == .awake ? (trip.ringAtStop ? "You’re awake. It rings once more at the stop." : "You’re awake. Get your things ready.")
-                                          : "It rings at \(Fmt.distance(trip.wakeKm * 1000)) from the stop.")
-                    .font(HWFont.body(13)).foregroundStyle(HWPalette.muted).frame(maxWidth: .infinity).padding(.top, 10)
-                if let a = trip.arrival {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("\(trip.finalName) around \(Fmt.hhmm(a))").font(HWFont.display(22)).foregroundStyle(HWPalette.ink)
-                        if let n = trip.nextText { Text(n).font(HWFont.body(12)).foregroundStyle(HWPalette.muted) }
-                        if let la = trip.legArrival { Text("This \(trip.leg?.mode == .train ? "train" : "bus") arrives at \(Fmt.hhmm(la))").font(HWFont.body(12)).foregroundStyle(pal.accent) }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading).brass(pal, pad: 16).padding(.top, 18)
-                }
-                if let song = music.song { SongCard(song: song, pal: pal).padding(.top, 12) }
-                Spacer()
+                if trip.waitingToBoard { boarding } else { riding }
                 if trip.phase == .awake {
                     Button { trip.legDone() } label: {
                         Text("I’M OFF, END THIS LEG").font(HWFont.display(15)).tracking(1.4).foregroundStyle(HWPalette.ink).frame(maxWidth: .infinity).padding(.vertical, 14)
@@ -568,9 +532,125 @@ struct RideView: View {
             }
             .padding(22)
         }
+        .animation(.easeInOut(duration: 0.4), value: trip.waitingToBoard)
         .onAppear { music.setFast(scene == .active) }
         .onDisappear { music.setFast(false) }
         .onChange(of: scene) { _, s in music.setFast(s == .active) }
+        .task(id: trip.index) {
+            while !Task.isCancelled {
+                if trip.waitingToBoard { await trip.loadUpcoming() }
+                try? await Task.sleep(nanoseconds: 20_000_000_000)
+            }
+        }
+    }
+
+    private var legKicker: some View {
+        Group {
+            if trip.legs.count > 1 { Text("LEG \(trip.index + 1) OF \(trip.legs.count)").font(HWFont.body(11)).tracking(1.6).foregroundStyle(HWPalette.muted) }
+        }
+    }
+
+    // MARK: still at the stop: what you can take
+
+    private var boardingTitle: String {
+        guard let l = trip.leg else { return "" }
+        if trip.index == 0 && trip.route?.single == nil { return trip.direction == .toSchool ? "Next buses towards BUas" : "Next trains home" }
+        return "Next \(l.mode == .train ? "trains" : "buses") to \(l.to.short)"
+    }
+
+    @ViewBuilder private var boarding: some View {
+        let rail = trip.leg?.mode == .train
+        let list = Array(trip.upcoming.filter { $0.trip.first.departure > Date().addingTimeInterval(-90) }.prefix(8))
+        let mine = planner.chosen?.tripIds ?? []
+        legKicker.padding(.top, 18)
+        Text("WAITING TO BOARD").font(HWFont.body(11)).tracking(1.8).foregroundStyle(HWPalette.ink.opacity(0.75)).padding(.top, 8)
+        Text(boardingTitle).font(HWFont.display(26)).foregroundStyle(HWPalette.ink)
+        Text("It notices which one you get on by itself: your GPS against the live position of every \(rail ? "train" : "bus") nearby. Or tap the one you’re on.")
+            .font(HWFont.body(12)).foregroundStyle(HWPalette.muted).padding(.top, 4)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                if list.isEmpty {
+                    Text(trip.upcomingError ?? "Looking up the next \(rail ? "trains" : "buses")…").font(HWFont.body(12)).foregroundStyle(HWPalette.muted).padding(.vertical, 12)
+                }
+                ForEach(list) { p in
+                    let t = p.trip
+                    Button { trip.choose(p) } label: {
+                        TripRow(trip: t, pal: pal,
+                                head: t.first.isTrain ? "\(t.first.name.isEmpty ? "Train" : t.first.name) to \(p.to.short)" : "To \(Fmt.place(t.last.toStop))",
+                                extra: "\(t.rideLabel) · arrives \(Fmt.hhmm(t.last.arrival))",
+                                info: t.first.isTrain ? ns.rail(t.first) : nil, mine: mine.contains(t.first.tripId))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Tap if you’re on this one")
+                    Rectangle().fill(.white.opacity(0.06)).frame(height: 1)
+                }
+                if let u = trip.upcomingAt { Text("Updated at \(Fmt.hhmm(u)).").font(HWFont.body(10)).foregroundStyle(HWPalette.muted).padding(.top, 6) }
+            }
+        }
+        .brass(pal, pad: 14)
+        .padding(.top, 12).padding(.bottom, 12)
+    }
+
+    // MARK: on board
+
+    @ViewBuilder private var riding: some View {
+        Spacer()
+        legKicker
+        Text(trip.vehicle == nil ? "NOW RIDING" : trip.pickedByHand ? "YOU PICKED" : "YOU’RE ON").font(HWFont.body(11)).tracking(1.8).foregroundStyle(HWPalette.ink.opacity(0.75)).padding(.top, 8)
+        Text(trip.vehicle.map { "\($0.title) to \(trip.leg?.to.short ?? "")" } ?? (trip.leg?.title ?? ""))
+            .font(HWFont.display(24)).foregroundStyle(HWPalette.ink)
+        if trip.vehicle == nil { Text("Looking for the bus or train you’re on…").font(HWFont.body(12)).foregroundStyle(HWPalette.muted) }
+        let parts = trip.distance.map { Fmt.distanceParts($0) } ?? ("–", "")
+        let extras = (music.song == nil ? 0 : 1) + (trip.vehicle == nil ? 0 : 1)
+        VStack(spacing: 4) {
+            Text(parts.0).font(HWFont.display(extras == 0 ? 104 : extras == 1 ? 88 : 74)).foregroundStyle(HWPalette.ink).monospacedDigit()
+                .shadow(color: pal.accent.opacity(0.45), radius: 22).contentTransition(.numericText())
+            Text("\(parts.1.uppercased()) TO \((trip.leg?.to.short ?? "").uppercased())").font(HWFont.display(13)).tracking(3).foregroundStyle(pal.accent)
+        }
+        .frame(maxWidth: .infinity).padding(.top, 12)
+        // the metro drives along as you get closer, like a song's progress bar
+        TimelineView(.periodic(from: .now, by: 2)) { ctx in
+            MetroTrack(progress: trip.progress(at: ctx.date), home: trip.direction == .home).frame(height: 34)
+        }
+        .id(trip.index)
+        .padding(.top, 10)
+        HStack {
+            Text(trip.legFrom.map { Fmt.hhmm($0) } ?? (trip.leg?.from.short ?? ""))
+            Spacer()
+            Text(trip.legTo.map { "\(Fmt.hhmm($0)) \(trip.leg?.to.short ?? "")" } ?? (trip.leg?.to.short ?? ""))
+        }
+        .font(HWFont.body(11)).foregroundStyle(HWPalette.muted).padding(.top, 4)
+        Text(trip.phase == .awake ? (trip.ringAtStop ? "You’re awake. It rings once more at the stop." : "You’re awake. Get your things ready.")
+                                  : "It rings at \(Fmt.distance(trip.wakeKm * 1000)) from the stop.")
+            .font(HWFont.body(13)).foregroundStyle(HWPalette.muted).frame(maxWidth: .infinity).padding(.top, 8)
+        if trip.arrival != nil || trip.vehicle != nil {
+            VStack(alignment: .leading, spacing: 3) {
+                if let a = trip.arrival { Text("\(trip.finalName) around \(Fmt.hhmm(a))").font(HWFont.display(22)).foregroundStyle(HWPalette.ink) }
+                if let n = trip.nextText { Text(n).font(HWFont.body(12)).foregroundStyle(HWPalette.muted) }
+                if let v = trip.vehicle { vehicleLines(v) }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading).brass(pal, pad: 16).padding(.top, 14)
+        }
+        if let song = music.song { SongCard(song: song, pal: pal).padding(.top, 10) }
+        Spacer()
+    }
+
+    /// "On bus 305: arrives Eindhoven 08:12, in 14 min" · "Going 54 km/h · next stop Erp 07:58" · how it knows.
+    @ViewBuilder private func vehicleLines(_ v: Vehicle) -> some View {
+        let what = v.isTrain ? v.title : "bus \(v.line)"
+        if let la = trip.legArrival {
+            let m = Fmt.mins(la.timeIntervalSinceNow)
+            Text("On \(what): arrives \(trip.leg?.to.short ?? "") \(Fmt.hhmm(la)), \(m == 0 ? "now" : "in \(m) min")")
+                .font(HWFont.body(13, bold: true)).foregroundStyle(pal.accent)
+        } else {
+            Text("On \(what)").font(HWFont.body(13, bold: true)).foregroundStyle(pal.accent)
+        }
+        let speed = trip.speed.flatMap { $0 > 1 ? "Going \(Int(($0 * 3.6).rounded())) km/h" : nil }
+        let stop = trip.nextStop.flatMap { s in s.arrival.map { "next stop \(Fmt.place(s.name)) \(Fmt.hhmm($0))" } }
+        let line = [speed, stop].compactMap { $0 }.joined(separator: " · ")
+        if !line.isEmpty { Text(line.prefix(1).uppercased() + line.dropFirst()).font(HWFont.body(12)).foregroundStyle(HWPalette.ink.opacity(0.85)) }
+        Text(trip.pickedByHand ? "You picked it in the list." : trip.matchMeters.map { "Recognised: its live position is \($0) m from yours." } ?? "Recognised from its live position.")
+            .font(HWFont.body(11)).foregroundStyle(HWPalette.muted)
     }
 }
 
@@ -652,7 +732,6 @@ struct AlarmView: View {
 
 struct ArrivalView: View {
     @EnvironmentObject var trip: TripManager
-    @StateObject private var transfers = TransferStore()
     @State private var spin = 0.0
     @State private var burst = false
     @State private var backup = 0
@@ -684,7 +763,7 @@ struct ArrivalView: View {
                             if let r = trip.next { Text("To \(n.to.short)\(r.platform.map { " · platform \($0)" } ?? "") · \(r.rideMinutes) min").font(HWFont.body(12)).foregroundStyle(HWPalette.muted) }
                             Text("It rings at \(Fmt.km(trip.km(for: n))) from the stop.").font(HWFont.body(12)).foregroundStyle(HWPalette.muted)
                             if let a = trip.arrival { Text("\(trip.finalName) around \(Fmt.hhmm(a))").font(HWFont.body(12, bold: true)).foregroundStyle(pal.accent) }
-                            if trip.autoStart { Text("It starts the next leg by itself when you’re on board.").font(HWFont.body(11)).foregroundStyle(HWPalette.muted) }
+                            Text("It starts the next leg by itself once you’re on board: it recognises the \(n.mode == .train ? "train" : "bus") from its live position.").font(HWFont.body(11)).foregroundStyle(HWPalette.muted)
                             Rectangle().fill(.white.opacity(0.07)).frame(height: 1).padding(.vertical, 4)
                             Picker("Backup alarm", selection: $backup) {
                                 Text("Backup alarm: off").tag(0)
@@ -693,7 +772,7 @@ struct ArrivalView: View {
                             .pickerStyle(.menu).tint(pal.accent).font(HWFont.body(13))
                         }
                         .frame(maxWidth: .infinity, alignment: .leading).brass(pal, pad: 16)
-                        TransferList(store: transfers, mode: n.mode, dest: n.mode == .train ? n.to.short : "Veghel", pal: pal).brass(pal, pad: 14)
+                        TransferList(all: trip.upcoming, updated: trip.upcomingAt, error: trip.upcomingError, mode: n.mode, dest: n.mode == .train ? n.to.short : "Veghel", pal: pal).brass(pal, pad: 14)
                     } else {
                         Text(trip.route?.single != nil ? "You’re at \(trip.arrivedAt ?? "your stop")" : trip.direction == .home ? "You’re home" : "You’re in Breda")
                             .font(HWFont.display(34)).foregroundStyle(HWPalette.ink)
@@ -722,7 +801,7 @@ struct ArrivalView: View {
         }
         .task(id: trip.index) {
             while !Task.isCancelled {
-                if let n = nextLeg, let here = trip.leg?.to { await transfers.load(from: here, to: n.to, mode: n.mode) }
+                if nextLeg != nil { await trip.loadUpcoming() }
                 try? await Task.sleep(nanoseconds: 20_000_000_000)
             }
         }

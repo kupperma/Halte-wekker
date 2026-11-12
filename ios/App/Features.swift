@@ -713,36 +713,10 @@ struct LiveSettingsSheet: View {
 
 // MARK: at a transfer: what leaves next from here
 
-@MainActor
-final class TransferStore: ObservableObject {
-    @Published private(set) var list: [PanelTrip] = []
-    @Published private(set) var error: String?
-    @Published private(set) var updated: Date?
-    private var key = ""
-
-    func load(from: Place, to: Place, mode: Mode, force: Bool = false) async {
-        let k = "\(from.key)>\(to.key)>\(mode.rawValue)"
-        if k != key { key = k; list = []; error = nil; updated = nil }
-        guard force || updated.map({ Date().timeIntervalSince($0) >= 60 }) ?? true else { return }
-        let rail = mode == .train
-        let l = await Transit.plan(from: from, to: to, modes: rail ? "RAIL" : "BUS", at: Date().addingTimeInterval(-60), count: rail ? 8 : 6, maxTransfers: rail ? 1 : 0)
-        guard k == key else { return }
-        updated = Date()
-        if l.isEmpty {
-            if list.isEmpty { error = "Couldn’t load the next \(rail ? "trains" : "buses") just now. It tries again in a minute." }
-            return
-        }
-        Ratings.shared.learn(from, to, l)
-        // Hide an option when one that leaves later still gets you there as early.
-        let kept = l.filter { o in !l.contains { q in q.id != o.id && q.first.departure > o.first.departure && Fmt.place(q.last.toStop) == Fmt.place(o.last.toStop) && q.last.arrival <= o.last.arrival } }
-        list = kept.map { PanelTrip(trip: $0, from: from, to: to) }
-        error = nil
-        if rail { await NSStore.shared.enrich(list.map { ($0.trip, $0.from, $0.to) }) }
-    }
-}
-
 struct TransferList: View {
-    @ObservedObject var store: TransferStore
+    let all: [PanelTrip]
+    let updated: Date?
+    let error: String?
     let mode: Mode
     let dest: String
     let pal: HWPalette
@@ -752,16 +726,16 @@ struct TransferList: View {
     var body: some View {
         let what = mode == .train ? "trains" : "buses"
         let mine = planner.chosen?.tripIds ?? []
-        let list = Array(store.list.filter { $0.trip.first.departure > Date().addingTimeInterval(-60) }.prefix(6))
+        let list = Array(all.filter { $0.trip.first.departure > Date().addingTimeInterval(-60) }.prefix(6))
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text("Next \(what) to \(dest)").font(HWFont.display(18)).foregroundStyle(HWPalette.ink)
                 Spacer()
-                if let u = store.updated { Text("Updated \(Fmt.hhmm(u))").font(HWFont.body(11)).foregroundStyle(HWPalette.muted) }
+                if let u = updated { Text("Updated \(Fmt.hhmm(u))").font(HWFont.body(11)).foregroundStyle(HWPalette.muted) }
             }
             .padding(.bottom, 6)
             if list.isEmpty {
-                Text(store.error ?? (store.updated == nil ? "Looking up the next \(what)…" : "No \(what) to \(dest) coming up."))
+                Text(error ?? (updated == nil ? "Looking up the next \(what)…" : "No \(what) to \(dest) coming up."))
                     .font(HWFont.body(12)).foregroundStyle(HWPalette.muted).padding(.vertical, 10)
             }
             ForEach(list) { p in

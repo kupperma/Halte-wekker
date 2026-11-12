@@ -56,6 +56,16 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
     @Published private(set) var kmMem: [String: Double] = UserDefaults.standard.dictionary(forKey: "kmMem") as? [String: Double] ?? [:]
     @Published private(set) var backupAt: Date?
     @Published private(set) var lastScore: ScoreResult?
+    // Before you're on board, and at a transfer: what leaves next for this leg.
+    @Published private(set) var upcoming: [PanelTrip] = []
+    @Published private(set) var upcomingAt: Date?
+    @Published private(set) var upcomingError: String?
+    // Once it knows which bus or train you're on.
+    @Published private(set) var vehicleStops: [TripStop] = []
+    @Published private(set) var matchMeters: Int?            // how far its live position was from yours
+    @Published private(set) var pickedByHand = false
+    @Published private(set) var speed: Double?               // m/s, from GPS
+    @Published private(set) var startDistance: Double?       // how far you are from where this leg starts
     @Published private(set) var always = false
 
     let sound = AlarmSound()
@@ -75,6 +85,9 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
     private var startedAtLeg = 0
     private var backupTask: Task<Void, Never>?
     private var lastWatchCheck = Date.distantPast
+    private var upcomingKey = ""
+    private var upcomingBusy = false
+    private var lastVehicleRefresh = Date.distantPast
     private let arriveM = 450.0
 
     var leg: Leg? { index < legs.count ? legs[index] : nil }
@@ -160,12 +173,17 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
         legStart = Date()
         arrival = nil; next = nil; legArrival = nil; legFrom = nil; legTo = nil
         vehicle = v
+        vehicleStops = []; matchMeters = nil; pickedByHand = false; startDistance = nil
         location.allowsBackgroundLocationUpdates = true
         location.showsBackgroundLocationIndicator = true
         location.startUpdatingLocation()
         if v != nil { Task { await self.vehicleFound(v!) } } else { startDetecting() }
         refreshEta(force: true)
+        Task { await loadUpcoming(force: true) }
     }
+
+    /// Still at the start of this leg (within 2 km) and not on board yet: show what leaves next.
+    var waitingToBoard: Bool { phase == .sleeping && vehicle == nil && (startDistance ?? 0) < 2000 }
 
     func stopAlarm() {
         sound.stop()
@@ -181,8 +199,9 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
         arrivedAt = leg?.to.short
         if index + 1 < legs.count {
             phase = .transfer
-            // With auto-start on, keep looking for the next bus or train so the next leg starts by itself.
-            if autoStart { vehicle = nil; startDetecting(forNextLeg: true) } else { location.stopUpdatingLocation() }
+            // Keep looking for the next bus or train, so the next leg starts by itself once you're on board.
+            vehicle = nil; startDetecting(forNextLeg: true)
+            Task { await loadUpcoming(force: true) }
         } else {
             phase = .finished
             location.stopUpdatingLocation()
@@ -212,6 +231,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
         location.allowsBackgroundLocationUpdates = false
         phase = .idle
         route = nil; legs = []; distance = nil; arrival = nil; next = nil; vehicle = nil; legArrival = nil; arrivedAt = nil
+        upcoming = []; upcomingAt = nil; upcomingError = nil; upcomingKey = ""; vehicleStops = []; matchMeters = nil; speed = nil; startDistance = nil
         legFrom = nil; legTo = nil; maxDistance = nil
         let a = activity; activity = nil
         Task { await a?.end(nil, dismissalPolicy: .immediate) }
@@ -252,7 +272,12 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
     private func handle(_ loc: CLLocation) {
         samples.append(loc)
         samples.removeAll { $0.timestamp < Date().addingTimeInterval(-240) }
+        if loc.speed >= 0 { speed = loc.speed }
+        if phase == .transfer { Task { await loadUpcoming() } }
         guard let leg, phase == .sleeping || phase == .awake else { return }
+        startDistance = loc.distance(from: CLLocation(latitude: leg.from.coordinate.latitude, longitude: leg.from.coordinate.longitude))
+        if vehicle == nil { Task { await loadUpcoming() } }
+        else if Date().timeIntervalSince(lastVehicleRefresh) > 60 { lastVehicleRefresh = Date(); Task { await refreshVehicle() } }
         let d = loc.distance(from: CLLocation(latitude: leg.to.coordinate.latitude, longitude: leg.to.coordinate.longitude))
         distance = d
         if loc.horizontalAccuracy >= 0 && loc.horizontalAccuracy < 250 { maxDistance = max(maxDistance ?? 0, d) }
@@ -322,26 +347,35 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
 
     // MARK: which bus or train you're on
 
+    /// Keeps comparing your GPS with every bus and train nearby until it knows which one you're on.
+    /// One look is enough when it's one of the departures it expected; otherwise it wants the same one twice.
     private func startDetecting(forNextLeg: Bool = false) {
         detectTask?.cancel()
         detectTask = Task { [weak self] in
             var lastBest: String?
-            for _ in 0..<14 {                       // about 9 minutes, then give up
-                try? await Task.sleep(nanoseconds: 40_000_000_000)
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 15_000_000_000)
                 guard let self, !Task.isCancelled else { return }
-                if self.vehicle != nil && !forNextLeg { return }
-                guard let v = await self.matchVehicle(mode: forNextLeg ? self.legs[safe: self.index + 1]?.mode : self.leg?.mode) else { lastBest = nil; continue }
-                if v.tripId == lastBest {
-                    if forNextLeg { if self.phase == .transfer { self.nextLeg(vehicle: v) }; return }
-                    await self.vehicleFound(v); return
+                if forNextLeg { guard self.phase == .transfer else { return } }
+                else { guard self.vehicle == nil, self.phase == .sleeping || self.phase == .awake else { return } }
+                let mode = forNextLeg ? self.legs[safe: self.index + 1]?.mode : self.leg?.mode
+                guard let m = await self.matchVehicle(mode: mode) else { lastBest = nil; continue }
+                let expected = self.upcoming.contains { $0.trip.first.tripId == m.vehicle.tripId } && m.meters < 300
+                if expected || m.vehicle.tripId == lastBest {
+                    if forNextLeg {
+                        if self.phase == .transfer { self.nextLeg(vehicle: m.vehicle); self.matchMeters = Int(m.meters) }
+                    } else {
+                        await self.vehicleFound(m.vehicle, meters: m.meters)
+                    }
+                    return
                 }
-                lastBest = v.tripId
+                lastBest = m.vehicle.tripId
             }
         }
     }
 
     /// Compares where you've been in the last minutes with where every nearby bus or train should have been.
-    private func matchVehicle(mode: Mode?) async -> Vehicle? {
+    private func matchVehicle(mode: Mode?) async -> (vehicle: Vehicle, meters: Double)? {
         let recent = samples.filter { $0.timestamp > Date().addingTimeInterval(-150) && $0.horizontalAccuracy < 150 }
         guard let last = recent.last, recent.count >= 2 else { return nil }
         let speed = max(last.speed, recent.first.map { last.distance(from: $0) / max(1, last.timestamp.timeIntervalSince($0.timestamp)) } ?? 0)
@@ -359,32 +393,102 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
             let avg = total / n
             if avg < (s.isTrain ? 600 : 400), best == nil || avg < best!.1 { best = (Vehicle(tripId: s.tripId, line: s.isTrain ? Transit.trainLabel(s.line) : s.line, isTrain: s.isTrain), avg) }
         }
-        return best?.0
+        return best.map { (vehicle: $0.0, meters: $0.1) }
     }
 
-    /// Found it: use that vehicle's own live arrival at your stop.
-    private func vehicleFound(_ v: Vehicle) async {
+    /// "I'm on this one": you picked it in the list.
+    func choose(_ p: PanelTrip) {
+        let f = p.trip.first
+        detectTask?.cancel()
+        pickedByHand = true
+        Task { await vehicleFound(Vehicle(tripId: f.tripId, line: f.line, isTrain: f.isTrain), meters: nil, dest: p.to) }
+    }
+
+    /// Found it: use that vehicle's own live arrival at your stop. On the first leg it follows the route
+    /// of the bus or train you actually took (via Den Bosch or via Eindhoven).
+    private func vehicleFound(_ v: Vehicle, meters: Double? = nil, dest: Place? = nil) async {
         vehicle = v
-        guard let leg else { return }
+        if let meters { matchMeters = Int(meters) }
         let stops = await Transit.tripStops(v.tripId)
-        let target = CLLocation(latitude: leg.to.coordinate.latitude, longitude: leg.to.coordinate.longitude)
-        if let s = stops.filter({ $0.arrival != nil }).min(by: {
-            target.distance(from: CLLocation(latitude: $0.coordinate.latitude, longitude: $0.coordinate.longitude)) <
-            target.distance(from: CLLocation(latitude: $1.coordinate.latitude, longitude: $1.coordinate.longitude)) }),
-           target.distance(from: CLLocation(latitude: s.coordinate.latitude, longitude: s.coordinate.longitude)) < 1500 {
-            legArrival = s.arrival
-            legTo = s.arrival
-            let from = CLLocation(latitude: leg.from.coordinate.latitude, longitude: leg.from.coordinate.longitude)
-            if let b = stops.filter({ $0.arrival != nil }).min(by: {
-                from.distance(from: CLLocation(latitude: $0.coordinate.latitude, longitude: $0.coordinate.longitude)) <
-                from.distance(from: CLLocation(latitude: $1.coordinate.latitude, longitude: $1.coordinate.longitude)) }),
-               from.distance(from: CLLocation(latitude: b.coordinate.latitude, longitude: b.coordinate.longitude)) < 1500,
-               let dep = b.arrival, dep < s.arrival! {
-                legFrom = dep
+        if index == 0, let r = route, r.single == nil {
+            let names = stops.map { $0.name.lowercased() }
+            func goes(_ p: Place) -> Bool { names.contains { $0.contains(p == .denBosch ? "hertogenbosch" : "eindhoven") } }
+            let fromList = upcoming.first(where: { $0.trip.first.tripId == v.tripId })?.to
+            let to = dest ?? fromList ?? (goes(r.station) ? r.station : RoutePlan.all.map(\.station).first(where: goes))
+            if let to, to != r.station, let nr = RoutePlan.via(to) {
+                route = nr; legs = nr.legs(direction); distance = nil; maxDistance = nil
             }
         }
+        applyStops(stops)
         refreshEta(force: true)
         pushActivity(force: true)
+    }
+
+    /// Every minute while riding: the vehicle's live times (delays, next stop).
+    private func refreshVehicle() async {
+        guard let v = vehicle else { return }
+        let stops = await Transit.tripStops(v.tripId)
+        guard vehicle == v, !stops.isEmpty else { return }
+        applyStops(stops)
+        pushActivity(force: false)
+    }
+
+    private func applyStops(_ stops: [TripStop]) {
+        guard let leg else { return }
+        let target = CLLocation(latitude: leg.to.coordinate.latitude, longitude: leg.to.coordinate.longitude)
+        let timed = stops.filter { $0.arrival != nil }
+        func d(_ s: TripStop, _ to: CLLocation) -> Double { to.distance(from: CLLocation(latitude: s.coordinate.latitude, longitude: s.coordinate.longitude)) }
+        guard let s = timed.min(by: { d($0, target) < d($1, target) }), d(s, target) < 1500 else { vehicleStops = stops; return }
+        legArrival = s.arrival
+        legTo = s.arrival
+        let from = CLLocation(latitude: leg.from.coordinate.latitude, longitude: leg.from.coordinate.longitude)
+        if let b = timed.min(by: { d($0, from) < d($1, from) }), d(b, from) < 1500, let dep = b.arrival, dep < s.arrival! { legFrom = dep }
+        // Only the stops up to yours.
+        if let end = stops.firstIndex(where: { $0.name == s.name && $0.arrival == s.arrival }) { vehicleStops = Array(stops[...end]) } else { vehicleStops = stops }
+    }
+
+    /// The next stop the bus or train reaches, and when.
+    var nextStop: TripStop? { vehicleStops.first { ($0.arrival ?? .distantPast) > Date() } }
+
+    // MARK: what leaves next
+
+    /// The next buses or trains for the leg you're about to take (before you're on board, and at a transfer).
+    /// On the first leg it lists both routes: towards BUas via Den Bosch or Eindhoven, or home the same way.
+    func loadUpcoming(force: Bool = false) async {
+        var target: (from: Place, to: [Place], mode: Mode)?
+        if phase == .transfer, let n = legs[safe: index + 1] { target = (n.from, [n.to], n.mode) }
+        else if (phase == .sleeping || phase == .awake) && vehicle == nil, let l = leg {
+            let both = index == 0 && route?.single == nil
+            target = (l.from, both ? RoutePlan.all.map { $0.legs(direction)[0].to } : [l.to], l.mode)
+        }
+        guard let t = target else { return }
+        let k = "\(t.from.key)>\(t.to.map(\.key).joined(separator: ","))>\(t.mode.rawValue)>\(index)"
+        if k != upcomingKey { upcomingKey = k; upcoming = []; upcomingAt = nil; upcomingError = nil }
+        guard !upcomingBusy, force || upcomingAt.map({ Date().timeIntervalSince($0) >= 60 }) ?? true else { return }
+        upcomingBusy = true
+        defer { upcomingBusy = false }
+        let rail = t.mode == .train
+        let from = t.from.key == "veghel" ? StopsStore.shared.veghel : t.from
+        var all: [PanelTrip] = []
+        for dest in t.to {
+            let l = await Transit.plan(from: from, to: dest, modes: rail ? "RAIL" : "BUS", at: Date().addingTimeInterval(-60), count: rail ? 8 : 6, maxTransfers: rail ? 1 : 0)
+            Ratings.shared.learn(from, dest, l)
+            all += l.map { PanelTrip(trip: $0, from: from, to: dest) }
+        }
+        guard k == upcomingKey else { return }
+        upcomingAt = Date()
+        guard !all.isEmpty else {
+            if upcoming.isEmpty { upcomingError = "Couldn’t load the next \(rail ? "trains" : "buses") just now. It tries again in a minute." }
+            return
+        }
+        // The same bus can come up from both Veghel stops: keep it once, with the least walking.
+        var seen = Set<String>()
+        let once = all.sorted { $0.trip.first.walkBefore < $1.trip.first.walkBefore }.filter { seen.insert($0.trip.first.tripId).inserted }
+        // Hide an option when one that leaves later still gets you there as early.
+        let kept = once.filter { o in !once.contains { q in q.id != o.id && q.to == o.to && q.trip.first.departure > o.trip.first.departure && q.trip.last.arrival <= o.trip.last.arrival } }
+        upcoming = kept.sorted { $0.trip.first.departure < $1.trip.first.departure }
+        upcomingError = nil
+        if rail { await NSStore.shared.enrich(upcoming.map { ($0.trip, $0.from, $0.to) }) }
     }
 
     // MARK: starting by itself
@@ -424,7 +528,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
             for _ in 0..<10 {
                 try? await Task.sleep(nanoseconds: 35_000_000_000)
                 guard let self, !Task.isCancelled, self.phase == .idle else { return }
-                guard let v = await self.matchVehicle(mode: nil) else { lastBest = nil; continue }
+                guard let v = await self.matchVehicle(mode: nil)?.vehicle else { lastBest = nil; continue }
                 if v.tripId == lastBest, await self.autoStartTrip(from: place, on: v) { return }
                 lastBest = v.tripId
             }
@@ -530,7 +634,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
         case .finished: return "YOU’RE THERE"
         case .alarm(let a): return a ? "WAKE UP" : "GET OFF NOW"
         case .awake: return "GET READY"
-        default: return "NOW RIDING"
+        default: return waitingToBoard ? "WAITING TO BOARD" : "NOW RIDING"
         }
     }
 
