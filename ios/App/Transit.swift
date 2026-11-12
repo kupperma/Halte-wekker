@@ -205,16 +205,16 @@ enum Transit {
     }
 
     /// Door-to-door trips from where you are to a place, without the ones a later trip beats.
-    static func tripsFrom(_ c: CLLocationCoordinate2D, to: Place) async -> [DoorTrip] {
+    static func tripsFrom(_ c: CLLocationCoordinate2D, to: Place, count: Int = 5, keep: Int = 5) async -> [DoorTrip] {
         let now = Date()
         var all: [DoorTrip] = []
         for b in to.ids {
-            all += await plan(from: "\(c.latitude),\(c.longitude)", to: b, modes: nil, at: now.addingTimeInterval(-120), count: 5, maxTransfers: 4)
+            all += await plan(from: "\(c.latitude),\(c.longitude)", to: b, modes: nil, at: now.addingTimeInterval(-120), count: count, maxTransfers: 4)
         }
         var seen = Set<String>()
         all = all.filter { $0.first.departure >= now.addingTimeInterval(-60) && seen.insert($0.id).inserted }.sorted { $0.first.departure < $1.first.departure }
         let kept = all.filter { t in !all.contains { $0.id != t.id && $0.first.departure >= t.first.departure && $0.end < t.end } }
-        return Array(kept.prefix(5))
+        return Array(kept.prefix(keep))
     }
 
     /// A stop near you: a bus stop, or a train station (by the station, not one platform).

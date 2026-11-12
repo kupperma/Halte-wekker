@@ -130,16 +130,16 @@ final class GoStore: ObservableObject {
             return
         }
         let d = dest
-        let found = await Transit.tripsFrom(loc.coordinate, to: d)
+        let found = await Transit.tripsFrom(loc.coordinate, to: d, count: 8, keep: 8)
         guard watching, dest == d else { return }
         // One empty answer keeps what you had (that hasn't left).
         let list = found.isEmpty ? ([best].compactMap { $0 } + others).filter { $0.first.departure > now } : found
         // The ones you can still make: not cancelled, and you'd have had to set off at most a minute and a half ago.
         let ok = list.filter { !$0.first.cancelled && $0.start >= now.addingTimeInterval(-90) }
-        var pick = ok.min { ($0.end, $0.first.departure) < ($1.end, $1.first.departure) }
+        var pick = ok.min(by: Self.sooner)
         // Stay with the one you're catching unless another gets you there at least a minute sooner.
         if let cur = best, let p = pick, p.first.tripId != cur.first.tripId,
-           let same = ok.filter({ $0.first.tripId == cur.first.tripId }).min(by: { $0.end < $1.end }),
+           let same = ok.filter({ $0.first.tripId == cur.first.tripId }).min(by: Self.sooner),
            p.end > same.end.addingTimeInterval(-60) {
             pick = same
         }
@@ -152,7 +152,7 @@ final class GoStore: ObservableObject {
         }
         let prev = best
         best = p
-        others = Array(ok.filter { $0.first.tripId != p.first.tripId }.sorted { $0.first.departure < $1.first.departure }.prefix(3))
+        others = Array(ok.filter { $0.first.tripId != p.first.tripId }.sorted(by: Self.sooner).prefix(3))
         error = nil
         updated = now
         if let prev, prev.first.tripId != p.first.tripId {
@@ -170,6 +170,15 @@ final class GoStore: ObservableObject {
             missed = nil
             tell("The \(Self.what(m.trip.first)) has left", "Next: the \(Self.what(p.first)) at \(Fmt.hhmm(p.first.departure)) from \(Fmt.place(p.first.fromStop)). \(d.short) at \(Fmt.hhmm(p.end)).")
         }
+    }
+
+    /// Which gets you there first: the earliest arrival; the same arrival, then fewer changes, then the one that leaves later
+    /// (less waiting around).
+    static func sooner(_ a: DoorTrip, _ b: DoorTrip) -> Bool {
+        let ea = Int(a.end.timeIntervalSince1970 / 60), eb = Int(b.end.timeIntervalSince1970 / 60)
+        if ea != eb { return ea < eb }
+        if a.rides.count != b.rides.count { return a.rides.count < b.rides.count }
+        return a.first.departure > b.first.departure
     }
 
     /// The fastest way changed: say why, and that it's watching the new one now.
@@ -406,6 +415,7 @@ struct GoView: View {
     var body: some View {
         GeometryReader { g in
             let bar: CGFloat = 50                                   // the buttons along the top
+            let foot: CGFloat = 62                                  // the button along the bottom
             let window = max(220, (g.size.height - bar) * 0.47)     // the map you see above the cards
             ZStack(alignment: .top) {
                 GoMap(ride: go.arrived ? nil : go.best?.first, here: go.here,
@@ -414,15 +424,26 @@ struct GoView: View {
                 // a little shade under the buttons, so they read on any map
                 LinearGradient(colors: [.black.opacity(0.55), .clear], startPoint: .top, endPoint: .bottom)
                     .frame(height: g.safeAreaInsets.top + bar + 30).ignoresSafeArea(edges: .top).allowsHitTesting(false)
+                // the cards scroll under the buttons at the top (and above the one at the bottom), fading out smoothly
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Color.clear.frame(height: bar + window - 6)      // the map shows through here
+                        content
+                    }
+                    .padding(.horizontal, 12).padding(.bottom, foot + 20)
+                }
+                .mask {
+                    VStack(spacing: 0) {
+                        Color.clear.frame(height: bar - 16)
+                        LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom).frame(height: 40)
+                        Color.black
+                        LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom).frame(height: 34)
+                        Color.clear.frame(height: foot - 10)
+                    }
+                }
                 VStack(spacing: 0) {
                     topBar.frame(height: bar)
-                    ScrollView(showsIndicators: false) {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Color.clear.frame(height: window - 6)        // the map shows through here
-                            content
-                        }
-                        .padding(.horizontal, 12).padding(.bottom, 16)
-                    }
+                    Spacer(minLength: 0)
                     bottom
                 }
             }
