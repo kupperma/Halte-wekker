@@ -429,20 +429,41 @@ function drawNetwork(x,k,ox,oy,via){
   badge('IC',262,48,'#224F86');badge('IC',246,128,'#528DBA');badge('306',286,84,'#DA421E');badge('305',290,166,'#F3791D');badge('BUS',52,152,'#8C6DAB');
 }
 
+// Wear and tear on the wall map: stained edges, dust at the bottom, smudges where people touch it, scratches,
+// a coffee ring and old tape. Seeded, so the app's own map gets exactly the same marks.
+function grime(x,w,h,seed){
+  let s=seed||7;const rnd=()=>{s=(s*16807)%2147483647;return s/2147483647;};const k=w/346;
+  let g=x.createRadialGradient(w/2,h*.45,Math.min(w,h)*.3,w/2,h/2,Math.max(w,h)*.72);g.addColorStop(0,'rgba(70,55,30,0)');g.addColorStop(1,'rgba(70,55,30,.24)');x.fillStyle=g;x.fillRect(0,0,w,h);
+  g=x.createLinearGradient(0,h*.78,0,h);g.addColorStop(0,'rgba(80,68,45,0)');g.addColorStop(1,'rgba(80,68,45,.2)');x.fillStyle=g;x.fillRect(0,h*.78,w,h*.22);
+  // smudges, more where hands go (the lines you pick, lower right)
+  for(let i=0;i<22;i++){const lower=i<12,cx=(lower?.25+rnd()*.7:rnd())*w,cy=(lower?.58+rnd()*.36:rnd())*h,r=(8+rnd()*26)*k;
+    const sg=x.createRadialGradient(cx,cy,0,cx,cy,r);sg.addColorStop(0,`rgba(55,45,30,${.05+rnd()*.07})`);sg.addColorStop(1,'rgba(55,45,30,0)');x.fillStyle=sg;x.beginPath();x.arc(cx,cy,r,0,7);x.fill();}
+  // a coffee ring, low on the right
+  x.lineWidth=2.4*k;x.strokeStyle='rgba(120,78,35,.2)';x.beginPath();x.arc(w*.87,h*.905,17*k,.4,5.9);x.stroke();
+  x.lineWidth=1*k;x.strokeStyle='rgba(120,78,35,.12)';x.beginPath();x.arc(w*.87,h*.905,14.5*k,1.2,6.1);x.stroke();
+  // fine scratches in the glass
+  for(let i=0;i<30;i++){const sx=rnd()*w,sy=rnd()*h,l=(10+rnd()*55)*k,a=rnd()*Math.PI;x.strokeStyle=`rgba(255,255,255,${.12+rnd()*.14})`;x.lineWidth=(.5+rnd()*.6)*k;
+    x.beginPath();x.moveTo(sx,sy);x.lineTo(sx+Math.cos(a)*l,sy+Math.sin(a)*l);x.stroke();}
+  // old tape at two corners
+  [[.06,.04,-.5],[.93,.975,.45]].forEach(([u,v,rot])=>{x.save();x.translate(u*w,v*h);x.rotate(rot);x.fillStyle='rgba(225,215,180,.32)';x.fillRect(-22*k,-6*k,44*k,12*k);x.strokeStyle='rgba(150,140,110,.25)';x.lineWidth=.8*k;x.strokeRect(-22*k,-6*k,44*k,12*k);x.restore();});
+  // a little yellowing
+  x.fillStyle='rgba(200,170,90,.05)';x.fillRect(0,0,w,h);
+}
+
 function paintMap(home){
   // A Berlin-style network map: white paper, bold colour lines at 45°, white interchange markers, line badges.
   const W=780,H=Math.round(W*562/346),k=W/346,c=document.createElement('canvas');c.width=W;c.height=H;const x=c.getContext('2d');
   const P=home?{brass:'#C9965A',line:'#76523A',acc:'#7A2A1E'}:{brass:'#B9A066',line:'#5E5A44',acc:'#1D2C5A'};
   const SANS='Helvetica Neue, Helvetica, Arial, sans-serif';
   x.fillStyle='#F7F5EF';x.fillRect(0,0,W,H);
-  x.strokeStyle=P.line;x.lineWidth=1*k;x.strokeRect(4*k,4*k,W-8*k,H-8*k);x.strokeStyle=P.brass;x.lineWidth=1.5*k;x.strokeRect(7*k,7*k,W-14*k,H-14*k);
-  [[7,7],[339,7],[7,555],[339,555]].forEach(([a,b])=>{x.beginPath();x.moveTo(a*k,(b-5)*k);x.lineTo((a+5)*k,b*k);x.lineTo(a*k,(b+5)*k);x.lineTo((a-5)*k,b*k);x.closePath();x.fillStyle='#F7F5EF';x.fill();x.stroke();});
+  x.strokeStyle='#C9C4B6';x.lineWidth=1*k;x.strokeRect(3*k,3*k,W-6*k,H-6*k);
   const TX=(t,px,py,size,col,weight,al,base)=>{x.font=`${weight||400} ${size*k}px ${SANS}`;x.fillStyle=col;x.textAlign=al||'left';x.textBaseline=base||'alphabetic';x.fillText(t,px*k,py*k);};
   const rr=(a,b,w,h,r)=>{x.beginPath();x.moveTo((a+r)*k,b*k);x.arcTo((a+w)*k,b*k,(a+w)*k,(b+h)*k,r*k);x.arcTo((a+w)*k,(b+h)*k,a*k,(b+h)*k,r*k);x.arcTo(a*k,(b+h)*k,a*k,b*k,r*k);x.arcTo(a*k,b*k,(a+w)*k,b*k,r*k);x.closePath();};
   // header
-  TX('Haltewekker',20,44,24,'#1D1D1B',700);
-  TX('Network map · Veghel ⇄ Breda',20,60,10.5,'#6B6B6B',400);
-  x.strokeStyle='#1D1D1B';x.lineWidth=1.5*k;x.beginPath();x.arc(314*k,38*k,15*k,0,7);x.stroke();
+  x.fillStyle=P.acc;x.fillRect(0,0,W,64*k);
+  TX('Haltewekker',20,38,24,'#FFFFFF',700);
+  TX('Network map · Veghel ⇄ Breda',20,54,10.5,'rgba(255,255,255,.78)',400);
+  x.strokeStyle='#FFFFFF';x.lineWidth=1.5*k;x.beginPath();x.arc(314*k,32*k,15*k,0,7);x.stroke();
   // direction: two badges, the one you're going is filled
   [['TO BREDA',20,!home],['HOME',126,home]].forEach(([t,bx,on])=>{rr(bx,72,100,28,4);if(on){x.fillStyle=P.acc;x.fill();}else{x.strokeStyle='#B9B5AA';x.lineWidth=1.2*k;x.stroke();}
     TX(t,bx+50,86,12.5,on?'#FFFFFF':'#8A877F',700,'center','middle');});
@@ -459,16 +480,57 @@ function paintMap(home){
     x.fillStyle='#DDD9CE';x.fillRect(20*k,(y0+52)*k,306*k,1*k);});
   rr(20,524,22,16,3);x.fillStyle='#8E8E8E';x.fill();TX('M',31,532.5,10,'#fff',700,'center','middle');
   TX('More · leaderboard, single stop, tips',50,536,10.5,'#3A3A38',400);
+  TX('Not to scale',326,552,8,'#9A968C',400,'right','alphabetic');
+  grime(x,W,H,7);
   const t=new T.CanvasTexture(c);t.anisotropy=8;return t;
 }
 let mapTex=null;   // painted once the fonts are in
 const posterM=new T.MeshBasicMaterial({color:0xffffff});
 const poster=new T.Mesh(new T.PlaneGeometry(PW,PH),posterM);poster.rotation.y=Math.PI/2;poster.position.set(PX0+.035,PY,PZ);scene.add(poster);
-const frameM=mat(0x8a6a30,{metalness:.6,roughness:.35,emissive:0x2a1d08});
-const fr=new T.Mesh(new T.BoxGeometry(.05,PH+.07,PW+.07),frameM);fr.position.set(PX0,PY,PZ);scene.add(fr);
-// a small brass lamp over the map
-add(new T.BoxGeometry(.07,.025,.3),frameM,PX0+.06,PY+PH/2+.09,PZ);add(new T.BoxGeometry(.012,.07,.012),frameM,PX0+.03,PY+PH/2+.065,PZ-.1);add(new T.BoxGeometry(.012,.07,.012),frameM,PX0+.03,PY+PH/2+.065,PZ+.1);
-const mapLamp=new T.PointLight(0xfff0d0,.8,3,2);mapLamp.position.set(PX0+.45,PY+PH/2+.05,PZ);scene.add(mapLamp);
+const frameM=mat(0xdfe3e8,{metalness:.15,roughness:.32,emissive:0x23262c});                                  // brushed aluminium, like a real station map
+const fr=new T.Mesh(new T.BoxGeometry(.05,PH+.1,PW+.1),frameM);fr.position.set(PX0,PY,PZ);scene.add(fr);
+add(new T.BoxGeometry(.055,PH+.02,PW+.02),mat(0x6f7682,{metalness:.4,roughness:.4}),PX0+.003,PY,PZ);
+// Around the map: ads, the station paper and stickers (painted once the fonts are in).
+let decorated=false;
+function decorate(){
+  if(decorated) return;decorated=true;
+  const SANS='Helvetica Neue, Helvetica, Arial, sans-serif',SERIF='"Old Standard TT", Georgia, serif';
+  const ctex=(w,h,draw)=>{const c=document.createElement('canvas');c.width=w;c.height=h;draw(c.getContext('2d'),w,h);const t=new T.CanvasTexture(c);t.anisotropy=4;return t;};
+  const onWall=(t,w,h,z,y,x)=>{const o=new T.Mesh(new T.PlaneGeometry(w,h),new T.MeshStandardMaterial({map:t,transparent:true,roughness:.75}));o.rotation.y=Math.PI/2;o.position.set(x||-3.035,y,z);scene.add(o);return o;};
+  const worn=(x,w,h,seed)=>{let s=seed;const r=()=>{s=(s*16807)%2147483647;return s/2147483647;};const g=x.createRadialGradient(w/2,h/2,Math.min(w,h)*.3,w/2,h/2,Math.max(w,h)*.75);g.addColorStop(0,'rgba(60,45,25,0)');g.addColorStop(1,'rgba(60,45,25,.3)');x.fillStyle=g;x.fillRect(0,0,w,h);
+    for(let i=0;i<10;i++){x.fillStyle=`rgba(60,45,25,${.04+r()*.06})`;x.beginPath();x.arc(r()*w,r()*h,6+r()*30,0,7);x.fill();}};
+  // the station paper, with harmless made-up news
+  onWall(ctex(420,600,(x,w,h)=>{x.fillStyle='#f1ede2';x.fillRect(0,0,w,h);x.fillStyle='#1d1d1b';x.font=`700 44px ${SERIF}`;x.textAlign='center';x.fillText('The Platform Post',w/2,62);
+    x.fillRect(24,76,w-48,3);x.font=`700 12px ${SANS}`;x.fillText('FREE · EVERY MORNING · DON’T MISS YOUR STOP',w/2,98);
+    x.textAlign='left';x.font=`700 30px ${SERIF}`;['Student sleeps','through zero stops','all week'].forEach((l,i)=>x.fillText(l,24,150+i*34));
+    x.fillStyle='#8a8577';x.fillRect(24,262,w-48,150);x.fillStyle='#5d6575';x.beginPath();x.moveTo(24,412);x.lineTo(150,300);x.lineTo(260,380);x.lineTo(396,290);x.lineTo(396,412);x.fill();
+    x.fillStyle='#1d1d1b';x.font=`13px ${SANS}`;['Her phone woke her 2 km before every stop.','“I just close my eyes,” she said. Page 3','','Bus driver waves at every single pigeon','Stroopwafel found on platform 2: owner sought','Escalator now 4% faster, say regulars'].forEach((l,i)=>x.fillText(l,24,438+i*22));
+    worn(x,w,h,11);}),.56,.8,.42,2.05);
+  // ads
+  onWall(ctex(400,580,(x,w,h)=>{const g=x.createLinearGradient(0,0,0,h);g.addColorStop(0,'#f6c24a');g.addColorStop(1,'#e07b2e');x.fillStyle=g;x.fillRect(0,0,w,h);
+    x.fillStyle='#7a3b12';x.beginPath();x.arc(w/2,230,120,0,7);x.fill();x.strokeStyle='#f6c24a';x.lineWidth=6;for(let i=-3;i<=3;i++){x.beginPath();x.moveTo(w/2+i*30-80,150);x.lineTo(w/2+i*30+80,310);x.stroke();x.beginPath();x.moveTo(w/2+i*30+80,150);x.lineTo(w/2+i*30-80,310);x.stroke();}
+    x.fillStyle='#fff';x.font=`700 46px ${SERIF}`;x.textAlign='center';x.fillText('Stroopwafel',w/2,430);x.fillText('Express',w/2,478);x.font=`700 20px ${SANS}`;x.fillText('2 FOR €3 · PLATFORM 2',w/2,530);worn(x,w,h,23);}),.6,.87,0,0).visible=false;
+  onWall(ctex(800,400,(x,w,h)=>{const g=x.createLinearGradient(0,0,w,0);g.addColorStop(0,'#f6c24a');g.addColorStop(1,'#e07b2e');x.fillStyle=g;x.fillRect(0,0,w,h);
+    x.fillStyle='#7a3b12';x.beginPath();x.arc(200,200,140,0,7);x.fill();x.strokeStyle='#f6c24a';x.lineWidth=7;for(let i=-3;i<=3;i++){x.beginPath();x.moveTo(200+i*34-95,105);x.lineTo(200+i*34+95,295);x.stroke();x.beginPath();x.moveTo(200+i*34+95,105);x.lineTo(200+i*34-95,295);x.stroke();}
+    x.fillStyle='#fff';x.font=`700 70px ${SERIF}`;x.textAlign='left';x.fillText('Stroopwafel',380,170);x.fillText('Express',380,245);x.font=`700 30px ${SANS}`;x.fillText('2 FOR €3 · PLATFORM 2',384,315);worn(x,w,h,23);}),2.0,1.0,-3.5,4.1,-2.69);
+  { const jz=onWall(ctex(360,520,(x,w,h)=>{x.fillStyle='#14161f';x.fillRect(0,0,w,h);x.fillStyle='#e8c46a';x.font=`700 40px ${SERIF}`;x.textAlign='center';x.fillText('NIGHT TRAIN',w/2,86);x.fillText('JAZZ',w/2,132);
+    x.strokeStyle='#e8c46a';x.lineWidth=5;x.beginPath();x.arc(w/2,280,82,0,7);x.stroke();x.fillStyle='#e8c46a';x.fillRect(w/2-6,200,12,160);x.beginPath();x.arc(w/2+30,360,26,0,7);x.fill();
+    x.font=`700 20px ${SANS}`;x.fillText('FRIDAY 21:00',w/2,436);x.font=`16px ${SANS}`;x.fillText('Last train home 00:42',w/2,466);worn(x,w,h,31);}),.42,.62,-.96,1.95,-3.0);jz.rotation.y=0; }   // on the side of the lift wall, facing the map
+  onWall(ctex(260,360,(x,w,h)=>{x.fillStyle='#ffffff';x.fillRect(0,0,w,h);x.fillStyle='#1d4f9a';x.fillRect(0,0,w,70);x.fillStyle='#fff';x.font=`700 26px ${SANS}`;x.textAlign='center';x.fillText('LOST & FOUND',w/2,46);
+    x.fillStyle='#1d1d1b';x.font=`17px ${SANS}`;['4,012 umbrellas','317 left gloves','1 trombone','Ask at the','service desk'].forEach((l,i)=>x.fillText(l,w/2,112+i*42));worn(x,w,h,41);}),.32,.44,-.3,2.32);
+  // stickers on the frame and the wall around it
+  const sticker=(draw,w,h,z,y,rot,x)=>{const t=ctex(128,Math.round(128*h/w),(c,cw,ch)=>{c.clearRect(0,0,cw,ch);draw(c,cw,ch);});const o=onWall(t,w,h,z,y,x);o.rotation.z=rot||0;return o;};
+  sticker((c,w,h)=>{c.fillStyle='#1d4f9a';c.beginPath();c.arc(w/2,h/2,w/2-4,0,7);c.fill();c.strokeStyle='#fff';c.lineWidth=6;c.stroke();c.fillStyle='#fff';c.font=`700 44px ${SANS}`;c.textAlign='center';c.textBaseline='middle';c.fillText('HW',w/2,h/2+2);},.085,.085,1.98,1.52,.2,-2.99);
+  sticker((c,w,h)=>{c.fillStyle='#f6d02e';c.beginPath();c.arc(w/2,h/2,w/2-4,0,7);c.fill();c.fillStyle='#1d1d1b';c.beginPath();c.arc(w*.36,h*.4,7,0,7);c.arc(w*.64,h*.4,7,0,7);c.fill();c.lineWidth=7;c.strokeStyle='#1d1d1b';c.beginPath();c.arc(w/2,h*.52,26,.3,2.84);c.stroke();},.075,.075,1.21,2.76,-.3,-2.99);
+  sticker((c,w,h)=>{c.fillStyle='#ffffff';c.fillRect(4,4,w-8,h-8);c.fillStyle='#DA421E';c.font=`700 26px ${SANS}`;c.textAlign='center';c.textBaseline='middle';c.fillText('306 ♥',w/2,h/2+2);},.11,.055,1.42,2.95,.08);
+  sticker((c,w,h)=>{c.fillStyle='#e94f7a';c.beginPath();for(let i=0;i<10;i++){const a=i/10*Math.PI*2-Math.PI/2,r=i%2?w*.2:w*.46;c.lineTo(w/2+Math.cos(a)*r,h/2+Math.sin(a)*r);}c.closePath();c.fill();},.07,.07,1.86,2.92,.4);
+  sticker((c,w,h)=>{c.fillStyle='#f2f2ee';c.beginPath();c.moveTo(6,10);c.lineTo(w-8,4);c.lineTo(w-4,h-14);c.lineTo(w*.6,h-4);c.lineTo(w*.45,h-16);c.lineTo(10,h-8);c.closePath();c.fill();c.fillStyle='#1d1d1b';c.font=`700 15px ${SANS}`;c.textAlign='center';c.textBaseline='middle';c.fillText('I ♥ BRABANT',w/2,h/2);},.13,.06,1.3,1.33,-.06);
+  sticker((c,w,h)=>{c.fillStyle='#4CC38A';c.fillRect(6,6,w-12,h-12);c.fillStyle='#08321D';c.font=`700 21px ${SANS}`;c.textAlign='center';c.textBaseline='middle';c.fillText('S-RANK',w/2,h/2+2);},.09,.045,2.6,2.6,-.12);
+  // grime on the wall round the map
+  for(let i=0;i<6;i++){const t=ctex(128,128,(c,w,h)=>{const g=c.createRadialGradient(w/2,h/2,4,w/2,h/2,w/2);g.addColorStop(0,'rgba(10,12,16,.18)');g.addColorStop(1,'rgba(10,12,16,0)');c.fillStyle=g;c.fillRect(0,0,w,h);});
+    onWall(t,.3+i*.05,.25+i*.04,[.9,2.3,1.05,2.1,.2,3.0][i],[1.2,3.05,3.1,1.25,1.4,1.15][i],-3.07).material.depthWrite=false;}
+}
+
 
 /* ---------- The camera: face to face with the map, then back away and turn to the platform ---------- */
 const CM={p:new T.Vector3(PX0+1.75,PY,PZ),yaw:-Math.PI/2,pitch:0};
@@ -486,7 +548,7 @@ function camAt(u){
 window.posterRect=()=>{camAt(0);cam.updateMatrixWorld();const pts=[[-1,-1],[1,-1],[-1,1],[1,1]].map(([s,t])=>new T.Vector3(PX0+.04,PY+t*PH/2,PZ+s*PW/2).project(cam));
   const xs=pts.map(p=>(p.x+1)/2),ys=pts.map(p=>(1-p.y)/2);return {x0:Math.min(...xs),x1:Math.max(...xs),y0:Math.min(...ys),y1:Math.max(...ys)};};
 window.peekLift=(t,c)=>{if(!mapTex) mapTex=[paintMap(false),paintMap(true)];light(0);extrasAt(t);c=c||[.2,1.7,-4.9,-3,1.4,-4.9];cam.position.set(c[0],c[1],c[2]);cam.lookAt(c[3],c[4],c[5]);r.render(scene,cam);return r.domElement.toDataURL('image/jpeg',0.9);};
-window.renderMove=(u,mix)=>{if(!mapTex) mapTex=[paintMap(false),paintMap(true)];light(mix);posterM.map=mapTex[mix>.5?1:0];posterM.needsUpdate=true;train.position.z=zAt(0);extrasAt(-1.6+u*1.6);camAt(u);r.render(scene,cam);return r.domElement.toDataURL('image/jpeg',0.9);};
+window.renderMove=(u,mix)=>{if(!mapTex){mapTex=[paintMap(false),paintMap(true)];decorate();}light(mix);posterM.map=mapTex[mix>.5?1:0];posterM.needsUpdate=true;train.position.z=zAt(0);extrasAt(-1.6+u*1.6);camAt(u);r.render(scene,cam);return r.domElement.toDataURL('image/jpeg',0.9);};
 // Deterministic train position for a time t (seconds) in the 30 s loop.
 function zAt(t){let acc=0;for(const p of plan){if(t<acc+p.d){const u=(t-acc)/p.d;return p.from+(p.to-p.from)*p.ease(u);}acc+=p.d;}return plan[0].from;}
 window.renderFrame=(t,mix)=>{light(mix);train.position.z=zAt(t%30);extrasAt(t);r.render(scene,cam);return r.domElement.toDataURL('image/jpeg',0.9);};

@@ -157,23 +157,8 @@ private enum MapInk {
     static func sans(_ size: CGFloat, _ w: Font.Weight = .regular) -> Font { .system(size: size, weight: w) }
 }
 
-/// The double brass rule with corner diamonds, like on the boarding pass.
-private struct MapFrame: View {
-    let pal: HWPalette
-    var body: some View {
-        Canvas { ctx, size in
-            let r1 = CGRect(origin: .zero, size: size).insetBy(dx: 4, dy: 4)
-            let r2 = CGRect(origin: .zero, size: size).insetBy(dx: 7, dy: 7)
-            ctx.stroke(Path(r1), with: .color(pal.line), lineWidth: 1)
-            ctx.stroke(Path(r2), with: .color(pal.brass), lineWidth: 1.5)
-            for p in [CGPoint(x: r2.minX, y: r2.minY), CGPoint(x: r2.maxX, y: r2.minY), CGPoint(x: r2.minX, y: r2.maxY), CGPoint(x: r2.maxX, y: r2.maxY)] {
-                var d = Path(); d.move(to: CGPoint(x: p.x, y: p.y - 5)); d.addLine(to: CGPoint(x: p.x + 5, y: p.y)); d.addLine(to: CGPoint(x: p.x, y: p.y + 5)); d.addLine(to: CGPoint(x: p.x - 5, y: p.y)); d.closeSubpath()
-                ctx.fill(d, with: .color(MapInk.paper)); ctx.stroke(d, with: .color(pal.brass), lineWidth: 1.5)
-            }
-        }
-        .allowsHitTesting(false)
-    }
-}
+/// Wear and tear: the same stains, smudges, scratches, coffee ring and tape as the map on the wall.
+private let mapGrime: UIImage? = Bundle.main.path(forResource: "map-grime", ofType: "png").flatMap(UIImage.init(contentsOfFile:))
 
 /// Your commute as a metro map: the rail corridor Breda–Tilburg–Boxtel with both Intercitys side by side, splitting
 /// at Boxtel to Den Bosch and to Eindhoven, the 306 and 305 to Veghel and the bus to BUas. Your fastest route glows yellow.
@@ -259,14 +244,16 @@ struct MetroMapMenu: View {
         let pal = HWPalette.of(home: home)
         ZStack(alignment: .topLeading) {
             MapInk.paper
-            MapFrame(pal: pal)
-            Text("Haltewekker").font(MapInk.sans(24, .bold)).foregroundStyle(MapInk.text).offset(x: 20, y: 18)
-            Text("Network map · Veghel ⇄ Breda").font(MapInk.sans(10.5)).foregroundStyle(MapInk.grey).offset(x: 20, y: 49)
+            Rectangle().stroke(Color(hex: 0xC9C4B6), lineWidth: 1).padding(3)
+            // the title band, in the colour of where you're going
+            accent.frame(width: MapSpot.design.width, height: 64)
+            Text("Haltewekker").font(MapInk.sans(24, .bold)).foregroundStyle(.white).offset(x: 20, y: 12)
+            Text("Network map · Veghel ⇄ Breda").font(MapInk.sans(10.5)).foregroundStyle(.white.opacity(0.78)).offset(x: 20, y: 43)
             Button(action: settings) {
-                Image(systemName: "gearshape").font(.system(size: 14, weight: .semibold)).foregroundStyle(MapInk.text)
-                    .frame(width: 30, height: 30).overlay(Circle().stroke(MapInk.text, lineWidth: 1.5))
+                Image(systemName: "gearshape").font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
+                    .frame(width: 30, height: 30).overlay(Circle().stroke(.white, lineWidth: 1.5))
             }
-            .buttonStyle(.plain).offset(x: 299, y: 23).accessibilityLabel("Settings")
+            .buttonStyle(.plain).offset(x: 299, y: 17).accessibilityLabel("Settings")
             Button(action: toggle) {
                 HStack(spacing: 6) {
                     directionBadge("TO BREDA", on: !home)
@@ -291,6 +278,11 @@ struct MetroMapMenu: View {
                 .padding(.vertical, 4).contentShape(Rectangle())
             }
             .buttonStyle(.plain).offset(x: 20, y: 520)
+            Text("Not to scale").font(MapInk.sans(8)).foregroundStyle(Color(hex: 0x9A968C))
+                .frame(width: 306, alignment: .trailing).offset(x: 20, y: 543)
+            if let g = mapGrime {
+                Image(uiImage: g).resizable().frame(width: MapSpot.design.width, height: MapSpot.design.height).allowsHitTesting(false)
+            }
         }
         .frame(width: MapSpot.design.width, height: MapSpot.design.height)
     }
