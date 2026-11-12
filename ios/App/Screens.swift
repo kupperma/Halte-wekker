@@ -375,7 +375,7 @@ struct HomeView: View {
             }
         }
         RankLegend()
-        WatchingCard(pal: pal)
+        WatchingCard(pal: pal, board: true)
         PlannerBar(title: "Wake me up", sub: "pick a route")
         ForEach(RoutePlan.all) { r in
             Button { startReq = StartRequest(route: r) } label: {
@@ -410,7 +410,7 @@ struct HomeView: View {
         Button(live.showEarlier ? "Hide earlier ones" : "Show more earlier ones") { withAnimation { live.showEarlier.toggle() } }
             .font(BoardInk.sans(12, .semibold)).foregroundStyle(.white)
         RankLegend()
-        WatchingCard(pal: pal)
+        WatchingCard(pal: pal, board: true)
         nearToggle
         nearNote
         if trip.locationDenied {
@@ -496,13 +496,13 @@ struct HomeView: View {
 
     @ViewBuilder private var fastestContent: some View {
         nextPass
-        WatchingCard(pal: pal)
+        WatchingCard(pal: pal, board: true)
         sectionTitle("Wake me up")
         routesList
     }
 
     @ViewBuilder private var linesContent: some View {
-        WatchingCard(pal: pal)
+        WatchingCard(pal: pal, board: true)
         HStack(alignment: .firstTextBaseline) {
             sectionTitle("Live times")
             Spacer()
@@ -541,7 +541,7 @@ struct HomeView: View {
             Text("Pick the time of your friend’s train, today or tomorrow. You get a boarding pass with the bus before it and the bus after it, and an alarm if the train changes platform or runs late.")
                 .font(HWFont.body(12)).foregroundStyle(HWPalette.ink.opacity(0.85))
         }
-        WatchingCard(pal: pal)
+        WatchingCard(pal: pal, board: true)
     }
 
     @ViewBuilder private var moreContent: some View {

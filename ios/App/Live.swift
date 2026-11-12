@@ -63,10 +63,11 @@ final class LiveStore: ObservableObject {
         defer { busy = false }
         let trips = await Transit.nextTrips(dir)
         guard loadedFor == dir else { return }
-        next = trips
-        nextError = trips.isEmpty ? "No trips found right now. It tries again in a minute." : nil
-        if pick >= trips.count { pick = 0 }
-        updated = Date()
+        // One empty answer from Transitous doesn't wipe what you had: keep the trips that haven't left yet, and ask again sooner.
+        next = trips.isEmpty ? next.filter { $0.first.departure > Date().addingTimeInterval(-60) } : trips
+        nextError = next.isEmpty ? "No trips found right now. It tries again in a minute." : nil
+        if pick >= next.count { pick = 0 }
+        updated = trips.isEmpty ? Date().addingTimeInterval(-40) : Date()
         // The lists per leg every two minutes (Transitous is volunteer-run).
         guard force || Date().timeIntervalSince(lastPanels) > 120 else { return }
         lastPanels = Date()
@@ -82,6 +83,7 @@ final class LiveStore: ObservableObject {
             l.filter { o in !l.contains { q in q.id != o.id && q.from == o.from && q.to == o.to && q.trip.first.departure > o.trip.first.departure && q.trip.end <= o.trip.end } }
                 .sorted { $0.trip.first.departure < $1.trip.first.departure }
         }
+        var empty = false
         if dir == .toSchool {
             async let b = Transit.board(stopIds: veghel.ids, from: now, n: 40)
             async let t1 = panel(.eindhoven, .breda, "RAIL", 8, 1)
@@ -90,10 +92,11 @@ final class LiveStore: ObservableObject {
             async let g = boardGrades(veghel)
             let (bb, a, c, d, gg) = await (b, t1, t2, u, g)
             guard loadedFor == dir else { return }
-            board = bb
-            boardRides = gg
-            trains = keepBest(a + c)
-            buas = keepBest(d)
+            empty = bb.isEmpty || (a + c).isEmpty || d.isEmpty
+            if !bb.isEmpty { board = bb }                       // (an empty answer keeps the last list)
+            if !gg.isEmpty { boardRides = gg }
+            if !(a + c).isEmpty { trains = keepBest(a + c) }
+            if !d.isEmpty { buas = keepBest(d) }
         } else {
             async let u = panel(.buas, .breda, "BUS", 12, 0)
             async let t1 = panel(.breda, .eindhoven, "RAIL", 8, 1)
@@ -102,13 +105,13 @@ final class LiveStore: ObservableObject {
             async let v2 = panel(.eindhoven, veghel, "BUS", 8, 0)
             let (uu, a, c, d, e) = await (u, t1, t2, v1, v2)
             guard loadedFor == dir else { return }
-            buas = keepBest(uu)
-            trains = keepBest(a + c)
-            toVeghel = keepBest(d + e)
+            empty = uu.isEmpty || (a + c).isEmpty || (d + e).isEmpty
+            if !uu.isEmpty { buas = keepBest(uu) }
+            if !(a + c).isEmpty { trains = keepBest(a + c) }
+            if !(d + e).isEmpty { toVeghel = keepBest(d + e) }
         }
         panelsUpdated = Date()
         // Transitous now and then sends nothing back: try an empty list again at the next refresh (30 s), a few times.
-        let empty = dir == .toSchool ? (board.isEmpty || trains.isEmpty || buas.isEmpty) : (buas.isEmpty || trains.isEmpty || toVeghel.isEmpty)
         if empty && emptyRetries < 3 { emptyRetries += 1; lastPanels = .distantPast } else if !empty { emptyRetries = 0 }
         let rail = trains
         Task { await NSStore.shared.enrich(rail.map { ($0.trip, $0.from, $0.to) }) }

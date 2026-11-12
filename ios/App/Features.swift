@@ -827,9 +827,12 @@ struct WatchingCard: View {
     @EnvironmentObject var lines: LineWatchStore
     @EnvironmentObject var trains: WatchStore
     let pal: HWPalette
+    var board = false                   // in the planner's style, on the boards on the wall
     var body: some View {
         let manual = trains.watches.filter { !$0.auto && $0.target > Date().addingTimeInterval(-20 * 60) }
-        if !lines.watches.isEmpty || !manual.isEmpty {
+        if (!lines.watches.isEmpty || !manual.isEmpty) && board {
+            boardCard(manual)
+        } else if !lines.watches.isEmpty || !manual.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Image(systemName: "bell.badge.fill").foregroundStyle(pal.accent)
@@ -850,6 +853,48 @@ struct WatchingCard: View {
             .brass(pal, pad: 14)
         }
     }
+    /// On the planner: a white header bar, then each line with its box (trains yellow, buses light blue) and a Stop button.
+    private func boardCard(_ manual: [TrainWatch]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            PlannerBar(title: "Watching", sub: "\(lines.watches.count + manual.count) for you")
+            ForEach(lines.watches) { w in
+                boardRow(line: w.line, train: false, title: w.headsign.isEmpty ? "Bus \(w.line)" : w.headsign,
+                         sub: "from \(Fmt.place(w.stopName)) · \(w.status)",
+                         warn: w.status.contains("late") || w.status.contains("early") || w.status.contains("cancelled")) { lines.stop(w.id) }
+            }
+            ForEach(manual) { w in
+                boardRow(line: trainBadge(w.label), train: true, title: w.label,
+                         sub: "from \(w.from) · " + (w.cancelled ? "Cancelled" : w.track.isEmpty ? "platform not known yet" : "platform \(w.track)"),
+                         warn: w.cancelled) { trains.remove(w.key) }
+            }
+            Text("You get a notification when it runs late, leaves early, changes platform or is cancelled. Bus lines stop by themselves once you’re on board.")
+                .font(BoardInk.sans(9.5, .regular)).foregroundStyle(Color.white.opacity(0.65)).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+    private func boardRow(line: String, train: Bool, title: String, sub: String, warn: Bool, stop: @escaping () -> Void) -> some View {
+        HStack(spacing: 8) {
+            Text(line).font(BoardInk.sans(12)).foregroundStyle(train ? Color(hex: 0x1A1A1A) : BoardInk.navy).lineLimit(1).minimumScaleFactor(0.6)
+                .frame(width: 38, height: 20).background(train ? BoardInk.yellow : BoardInk.route, in: RoundedRectangle(cornerRadius: 2))
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title).font(BoardInk.sans(13)).foregroundStyle(.white).lineLimit(1).minimumScaleFactor(0.7)
+                Text(sub).font(BoardInk.sans(10.5, warn ? .bold : .regular)).foregroundStyle(warn ? BoardInk.late : BoardInk.green).lineLimit(2)
+            }
+            Spacer(minLength: 4)
+            Button(action: stop) {
+                Text("Stop").font(BoardInk.sans(11)).foregroundStyle(.white)
+                    .padding(.horizontal, 10).padding(.vertical, 5).background(Color.white.opacity(0.16), in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Stop watching \(title)")
+        }
+        .padding(.vertical, 4)
+        .overlay(alignment: .bottom) { Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1) }
+    }
+    private func trainBadge(_ label: String) -> String {
+        let l = label.lowercased()
+        return l.contains("sprinter") ? "SPR" : l.contains("intercity") ? "IC" : "Train"
+    }
+
     private func row(title: String, sub: String, warn: Bool, stop: @escaping () -> Void) -> some View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 2) {
