@@ -3019,7 +3019,7 @@ const extrasAt=(()=>{
   const benchM=mat(0x2a2f44),legM=mat(0x16181f,{metalness:.5,roughness:.5}),binM=mat(0x434b5e,{metalness:.35,roughness:.55}),binTopM=mat(0x1a1d26);
   const bench=z=>{add(new T.BoxGeometry(.5,.07,2.2),benchM,-2.0,.5,z);add(new T.BoxGeometry(.07,.5,2.2),benchM,-2.24,.78,z);[-.9,.9].forEach(o=>add(new T.BoxGeometry(.42,.5,.07),legM,-2.02,.25,z+o));};
   const bin=z=>{add(new T.CylinderGeometry(.21,.19,.75,10),binM,-1.98,.38,z);add(new T.CylinderGeometry(.23,.23,.07,10),binTopM,-1.98,.79,z);};
-  for(let i=3;i<24;i++){const pz=-8-i*6;if(i%2) bench(pz+3);else bin(pz-1.1);}
+  for(let i=3;i<24;i++){const pz=-8-i*6;if(i===9) continue;if(i%2) bench(pz+3);else bin(pz-1.1);}
 
   // Posters between the pillars, billboards on the far wall, the station's name, a clock and the exit.
   const P=[
@@ -3046,7 +3046,7 @@ const extrasAt=(()=>{
   // (on your side it stops for the exit and the lift)
   [[8.17,-Math.PI/2,1.1,Z0,Z1],[-3.08,Math.PI/2,.95,Z0,-1.5],[-3.08,Math.PI/2,.95,-5.95,Z1]].forEach(([x,ry,y,za,zb])=>{const len=za-zb,tt=tiles.clone();tt.needsUpdate=true;tt.repeat.set(len/1.2,1);const o=new T.Mesh(new T.PlaneGeometry(len,.34),new T.MeshStandardMaterial({map:tt,roughness:.6}));o.position.set(x,y,(za+zb)/2);o.rotation.y=ry;scene.add(o);});
   const nameTex=tex(512,110,(x,w,h)=>{x.fillStyle='#fff';x.font='700 64px Helvetica, Arial, sans-serif';x.textAlign='center';x.textBaseline='middle';x.fillText('HALTEWEKKER',w/2,h/2+3);});
-  for(let i=0;i<5;i++){const z=-29-i*18;add(new T.BoxGeometry(.06,.6,2.6),signM,-3.22,3.4,z);flat(2.4,.52,nameTex,-3.18,3.4,z,Math.PI/2,true);}
+  for(let i=0;i<5;i++){const z=-29-i*18;if(z===-65) continue;add(new T.BoxGeometry(.06,.6,2.6),signM,-3.22,3.4,z);flat(2.4,.52,nameTex,-3.18,3.4,z,Math.PI/2,true);}
   // a hanging exit sign and a clock over the platform
   const exitTex=tex(512,120,(x,w,h)=>{x.fillStyle='#1b7a3d';x.fillRect(0,0,w,h);x.fillStyle='#fff';x.font='700 54px Helvetica, Arial, sans-serif';x.textBaseline='middle';x.fillText('← Uitgang · Exit',28,h/2+3);});
   add(new T.BoxGeometry(2.1,.48,.05),mat(0x0f1218),.7,4.55,-21);flat(2.0,.44,exitTex,.7,4.55,-20.97,0,true);
@@ -3203,12 +3203,150 @@ const extrasAt=(()=>{
     {kind:0,h:1.76,off:25.3,fade:true,pts:[[V(-.6,0,-26),0],[V(-.6,0,-4.0),1.3,'walk'],[ATLIFT,1.2,'walk'],[INLIFT,.9,'walk'],[V(-2.93,0,LZ),.01/3.4,'stand']]},   // gets into the lift
     {kind:1,h:1.64,off:.6,fade:true,pts:[[INLIFT,0],[ATLIFT,1.0,'walk'],[V(-.6,0,-4.0),1.2,'walk'],[V(-.6,0,-34),1.3,'walk']]},   // comes out of it
     {kind:0,h:1.8,off:3,fade:true,pts:[[V(.2,0,-58),0],[V(.2,0,-97),1.35,'walk']]},
-    {kind:2,h:1.7,off:11,fade:true,pts:[[V(-.9,0,-96),0],[V(-.9,0,-57),1.35,'walk']]},
+    {kind:2,h:1.7,off:11,fade:true,pts:[[V(-.45,0,-96),0],[V(-.45,0,-57),1.35,'walk']]},
   ];
   routes.forEach(r=>{r.sprite=mkPerson(r.kind,r.h);let t=0,d=0;r.seg=[];for(let i=1;i<r.pts.length;i++){const a=r.pts[i-1][0],b=r.pts[i][0],len=a.distanceTo(b),dt=len/r.pts[i][1];r.seg.push({a,b,t0:t,dt,d0:d,len,mode:r.pts[i][2]});t+=dt;d+=len;}r.total=t;});
   // People waiting, and one on a bench.
   const waiting=[[0,1.76,.7,-22],[1,1.64,-.3,-27.5],[2,1.7,.9,-41],[0,1.82,-.5,-52]].map(([k,h,x,z])=>{const s=mkPerson(k,h);s.material.map=kinds[k][0];s.position.set(x,h/2,z);s.userData.x=x;return s;});
   const sitter=new T.Sprite(new T.SpriteMaterial({map:sitting(),transparent:true,depthWrite:false}));sitter.scale.set(.56,1.4,1);sitter.position.set(-1.95,.62,-35);scene.add(sitter);
+  // Dirt, the way a real underground station gets it: dust and soft stains on the walls, leak streaks running down
+  // from the ceiling, a dark band where the floor gets mopped against the wall, brake dust low on the track wall,
+  // chewing gum and spills on the floor, scuffs at the foot of each pillar. All seeded, so every render is the same.
+  {let sd=31;const rnd=()=>{sd=(sd*16807)%2147483647;return sd/2147483647;};
+   const blobs=(x,w,h,n,r0,r1,a0,a1,y0,y1,col)=>{for(let i=0;i<n;i++){const cx=rnd()*w,cy=y0+rnd()*(y1-y0),r=r0+rnd()*(r1-r0),a=a0+rnd()*(a1-a0),q=.5+rnd()*.6;
+     [-w,0,w].forEach(o=>{const g=x.createRadialGradient(cx+o,cy,0,cx+o,cy,r);g.addColorStop(0,`rgba(${col},${a})`);g.addColorStop(1,`rgba(${col},0)`);x.fillStyle=g;x.beginPath();x.ellipse(cx+o,cy,r,r*q,0,0,7);x.fill();});}};
+   const grain=(x,w,h,n,a,y0,y1)=>{for(let i=0;i<n;i++){x.fillStyle=`rgba(40,34,28,${rnd()*a})`;x.fillRect(rnd()*w,y0+rnd()*(y1-y0),1+rnd()*1.5,1+rnd()*1.5);}};
+   const repeatUV=(o,fn)=>{const p=o.geometry.attributes.position,uv=o.geometry.attributes.uv;for(let i=0;i<p.count;i++){const [u,v]=fn(p.getX(i),p.getY(i),p.getZ(i));uv.setXY(i,u,v);}uv.needsUpdate=true;};
+   // the walls: one picture covers 23.7 m of wall, from 1.5 m under the platform up to 6 m
+   const WT=23.7,Y0=-1.5,YH=7.5,wy=y=>(Y0+YH-y)/YH*512;
+   const wallDirt=tex(1024,512,(x,w,h)=>{sd=31;x.fillStyle='#fff';x.fillRect(0,0,w,h);
+     blobs(x,w,h,70,30,150,.04,.09,0,h,'70,60,48');                                    // soft stains everywhere
+     grain(x,w,h,9000,.12,0,h);
+     // the mop line: darker towards the floor, with a ragged top
+     for(let i=0;i<w;i+=3){const top=wy(.35+rnd()*.5+Math.sin(i/37)*.08),g=x.createLinearGradient(0,top,0,wy(0));g.addColorStop(0,'rgba(52,44,36,0)');g.addColorStop(1,`rgba(52,44,36,${.28+rnd()*.12})`);x.fillStyle=g;x.fillRect(i,top,3,wy(0)-top);}
+     // brake dust at the bottom of the wall across the track
+     {const g=x.createLinearGradient(0,wy(-.2),0,h);g.addColorStop(0,'rgba(48,36,30,0)');g.addColorStop(1,'rgba(48,36,30,.45)');x.fillStyle=g;x.fillRect(0,wy(-.2),w,h-wy(-.2));}
+     // leaks from the ceiling: a stain where the water comes through, then streaks running down
+     for(let i=0;i<16;i++){const sx=rnd()*w,len=(1+rnd()*2.6)*68,top=wy(5.45),sr=16+rnd()*14,n=1+Math.floor(rnd()*4),st=[];
+       for(let k=0;k<n;k++) st.push([(rnd()-.5)*18,1.5+rnd()*5,len*(.4+rnd()*.6),.18+rnd()*.16,.06+rnd()*.06,[0,1,2,3,4,5].map(()=>rnd()-.5)]);
+       [-w,0,w].forEach(o=>{const cx=sx+o,sg=x.createRadialGradient(cx,top+4,0,cx,top+4,sr);sg.addColorStop(0,'rgba(66,54,40,.22)');sg.addColorStop(1,'rgba(66,54,40,0)');x.fillStyle=sg;x.fillRect(cx-40,top-30,80,70);
+         st.forEach(([dx,wd,ll,a0,a1,j])=>{const xx=cx+dx,g=x.createLinearGradient(0,top,0,top+ll);
+           g.addColorStop(0,`rgba(62,52,40,${a0})`);g.addColorStop(.7,`rgba(62,52,40,${a1})`);g.addColorStop(1,'rgba(62,52,40,0)');x.fillStyle=g;
+           x.beginPath();x.moveTo(xx-wd/2,top);x.bezierCurveTo(xx-wd/2+j[0]*6,top+ll*.4,xx+j[1]*6,top+ll*.8,xx,top+ll);x.bezierCurveTo(xx+j[2]*4,top+ll*.8,xx+wd/2+j[3]*6,top+ll*.4,xx+wd/2,top);x.fill();});});}
+     // the strip above the walls is what the ceiling uses: just soft stains there
+     x.fillStyle='#fff';x.fillRect(0,0,w,wy(5.62));blobs(x,w,h,60,12,60,.05,.11,0,wy(5.62),'64,56,46');grain(x,w,h,2500,.1,0,wy(5.62));});
+   wallDirt.wrapS=T.RepeatWrapping;
+   scene.children.filter(o=>o.isMesh&&o.material===wallM).forEach(o=>{const q=o.geometry.parameters;
+     if(q.width===16) repeatUV(o,(px,py)=>[py/WT,1-(wy(5.62)*(.15+.7*(px+8)/16))/512]);          // the ceiling
+     else{const cy=o.position.y;repeatUV(o,(px,py)=>[px/WT,1-wy(py+cy)/512]);}});
+   wallM.map=wallDirt;wallM.needsUpdate=true;
+   // the platform floor: 7.3 m squares of chewing gum, spills and wear
+   const FT=7.3,floorDirt=tex(512,512,(x,w,h)=>{sd=77;x.fillStyle='#fff';x.fillRect(0,0,w,h);
+     blobs(x,w,h,40,20,90,.05,.1,0,h,'60,54,46');grain(x,w,h,7000,.14,0,h);
+     for(let i=0;i<9;i++){const cx=rnd()*w,cy=rnd()*h;x.fillStyle=`rgba(56,48,38,${.08+rnd()*.08})`;x.beginPath();for(let k=0;k<9;k++){const a=k/9*6.283,r=(8+rnd()*16);x[k?'lineTo':'moveTo'](cx+Math.cos(a)*r*1.4,cy+Math.sin(a)*r);}x.closePath();x.fill();}   // old spills
+     for(let i=0;i<260;i++){const cx=rnd()*w,cy=rnd()*h,r=.9+rnd()*1.8;x.fillStyle=`rgba(38,38,42,${.22+rnd()*.22})`;x.beginPath();x.arc(cx,cy,r,0,7);x.fill();x.fillStyle='rgba(90,90,96,.3)';x.beginPath();x.arc(cx-r*.25,cy-r*.25,r*.45,0,7);x.fill();}   // chewing gum
+     for(let i=0;i<30;i++){x.strokeStyle=`rgba(50,46,40,${.05+rnd()*.07})`;x.lineWidth=.6+rnd();const sx=rnd()*w,sy=rnd()*h,a=rnd()*6.283,l=10+rnd()*50;x.beginPath();x.moveTo(sx,sy);x.lineTo(sx+Math.cos(a)*l,sy+Math.sin(a)*l);x.stroke();}});
+   floorDirt.wrapS=floorDirt.wrapT=T.RepeatWrapping;
+   scene.children.filter(o=>o.isMesh&&o.material===floorM).forEach(o=>repeatUV(o,(px,py,pz)=>[(px+py)/FT,pz/FT]));
+   floorM.map=floorDirt;floorM.needsUpdate=true;
+   // the pillars: scuffed and kicked at the bottom, hands at shoulder height
+   const pillarDirt=tex(128,256,(x,w,h)=>{sd=5;x.fillStyle='#fff';x.fillRect(0,0,w,h);const py=y=>h-(y+.55)/5.5*h;
+     blobs(x,w,h,12,8,30,.05,.1,0,h,'60,52,44');grain(x,w,h,1500,.14,0,h);
+     {const g=x.createLinearGradient(0,py(.75),0,py(0));g.addColorStop(0,'rgba(50,42,34,0)');g.addColorStop(1,'rgba(50,42,34,.38)');x.fillStyle=g;x.fillRect(0,py(.75),w,py(0)-py(.75));}
+     for(let i=0;i<26;i++){x.fillStyle=`rgba(30,26,24,${.1+rnd()*.15})`;x.fillRect(rnd()*w,py(.05+rnd()*.4),2+rnd()*8,1+rnd()*2);}     // shoe scuffs
+     blobs(x,w,h,10,4,10,.06,.12,py(1.7),py(1.1),'58,50,42');});                                           // hands
+   pillarM.map=pillarDirt;pillarM.needsUpdate=true;}
+
+  // Far down the platform: a frites stall built round a pillar. A striped awning, a lit hatch with the cook inside,
+  // a chalkboard, someone waiting, and a neon sign on the roof ("& koffie" flickers now and then, like old neon does).
+  const stallAt=(()=>{
+    const XA=-3.28,XB=-1.45,ZF=-59.8,ZB=-64.2,CX=(XA+XB)/2,W=XB-XA,D=ZF-ZB,CZ=(ZF+ZB)/2,IN=-61.4;
+    const red=mat(0x9b1f26,{roughness:.5,metalness:.1}),cream=mat(0xeee4cb),steel=mat(0xaeb4bd,{metalness:.6,roughness:.3}),dark=mat(0x15171d,{metalness:.3,roughness:.6});
+    const litM=map=>new T.MeshBasicMaterial({map,fog:false});
+    const glow=(map,color,o)=>new T.MeshBasicMaterial({map,color,transparent:true,opacity:o,blending:T.AdditiveBlending,depthWrite:false,fog:false});
+    const plane=(w,h,m,x,y,z,rx,ry)=>{const o=new T.Mesh(new T.PlaneGeometry(w,h),m);o.position.set(x,y,z);o.rotation.set(rx||0,ry||0,0);scene.add(o);return o;};
+    // the body: red below the counter, cream above, a steel kick plate and counter
+    add(new T.BoxGeometry(W,1.0,D),red,CX,.5,CZ);add(new T.BoxGeometry(W+.012,.14,D+.012),steel,CX,.07,CZ);add(new T.BoxGeometry(W+.012,.07,D+.012),cream,CX,.8,CZ);
+    add(new T.BoxGeometry(W+.14,.05,D+.14),steel,CX+.07,1.025,CZ+.07);
+    add(new T.BoxGeometry(.22,1.05,.08),cream,XA+.11,1.575,ZF-.04);add(new T.BoxGeometry(.14,1.05,.08),cream,XB-.07,1.575,ZF-.04);   // posts round the front hatch
+    add(new T.BoxGeometry(.08,1.05,IN-ZB+.1),cream,XB-.04,1.575,(IN+ZB)/2);add(new T.BoxGeometry(W,1.05,.06),cream,CX,1.575,ZB+.03);  // the closed back half
+    // the band round the top with its name, and the roof
+    const band=(w,txt)=>tex(Math.round(w*200),80,(x,cw,ch)=>{x.fillStyle='#eee4cb';x.fillRect(0,0,cw,ch);x.fillStyle='#9b1f26';x.fillRect(0,6,cw,5);x.fillRect(0,ch-11,cw,5);
+      x.font='700 40px Helvetica, Arial, sans-serif';x.textAlign='center';x.textBaseline='middle';x.fillText(txt,cw/2,ch/2+2);});
+    const bandM=new T.MeshStandardMaterial({map:band(D,'FRITES · SNACKS · KOFFIE · FRITES'),roughness:.6}),bandF=new T.MeshStandardMaterial({map:band(W,'SNACKBAR'),roughness:.6});
+    add(new T.BoxGeometry(W,.4,D),[bandM,cream,cream,cream,bandF,cream],CX,2.3,CZ);
+    add(new T.BoxGeometry(W+.08,.06,D+.08),dark,CX,2.53,CZ);
+    // inside: tiled walls with shelves and bottles, the fryer, a light under the roof (lit, so it shows through the haze)
+    const tiles=(x,w,h)=>{x.fillStyle='#d9b77e';x.fillRect(0,0,w,h);x.strokeStyle='rgba(120,90,50,.35)';x.lineWidth=1.5;for(let i=0;i<w;i+=22){x.beginPath();x.moveTo(i,0);x.lineTo(i,h);x.stroke();}for(let j=0;j<h;j+=22){x.beginPath();x.moveTo(0,j);x.lineTo(w,j);x.stroke();}};
+    const back=tex(342,208,(x,w,h)=>{tiles(x,w,h);
+      x.fillStyle='#232326';x.fillRect(14,10,w-28,44);x.fillStyle='#ffd24a';x.font='700 19px Helvetica, Arial, sans-serif';x.textAlign='center';x.textBaseline='middle';x.fillText('FRIET · KROKET · FRIKANDEL',w/2,24);
+      x.fillStyle='#f3efe4';x.font='15px Helvetica, Arial, sans-serif';x.fillText('met mayo, curry of saté',w/2,43);
+      [96,150].forEach(y=>{x.fillStyle='#7c6a55';x.fillRect(10,y,w-20,6);for(let i=0;i<14;i++){const bx=18+i*22,c=['#c0392b','#f1c40f','#f4f1e8','#27ae60','#8e5a2b'][(i*7+y)%5];x.fillStyle=c;x.fillRect(bx,y-24-(i%3)*3,12,24+(i%3)*3);x.fillStyle='#222';x.fillRect(bx+3,y-28-(i%3)*3,6,5);}});
+      x.fillStyle='rgba(255,240,200,.35)';x.fillRect(0,0,w,8);});
+    const side=tex(320,208,(x,w,h)=>{tiles(x,w,h);x.fillStyle='#f4ecd8';x.fillRect(150,30,120,90);x.fillStyle='#9b1f26';x.font='700 18px Helvetica, Arial, sans-serif';x.textAlign='center';x.fillText('MENU',210,52);
+      x.fillStyle='#333';x.font='13px Helvetica, Arial, sans-serif';['Friet  3,50','Kroket  2,75','Koffie  2,20'].forEach((s,i)=>x.fillText(s,210,74+i*17));});
+    plane(W-.12,1.04,litM(back),CX,1.575,IN+.03,0,0);
+    plane(ZF-IN,1.04,litM(side),XA+.2,1.575,(ZF+IN)/2,0,Math.PI/2);
+    plane(W-.1,ZF-IN,new T.MeshBasicMaterial({color:0xcfae78,fog:false}),CX,2.09,(ZF+IN)/2,Math.PI/2,0);
+    add(new T.BoxGeometry(W-.4,.03,.06),new T.MeshBasicMaterial({color:0xfff4d6,fog:false}),CX,2.07,-60.3);
+    add(new T.BoxGeometry(.46,.24,.56),steel,XA+.31,1.17,-60.75);add(new T.BoxGeometry(.4,.01,.5),new T.MeshBasicMaterial({color:0x8a6a22,fog:false}),XA+.31,1.295,-60.75);
+    [-.12,.12].forEach(o=>add(new T.BoxGeometry(.04,.04,.22),dark,XA+.48,1.33,-60.75+o));
+    add(new T.BoxGeometry(.26,.16,.22),dark,XB-.32,1.13,ZF-.25);                                           // the till
+    [[0xc0392b,-2.9],[0xf1c40f,-2.84],[0xf4f1e8,-2.78]].forEach(([c,bx])=>add(new T.CylinderGeometry(.03,.03,.16,8),mat(c),bx,1.13,ZF+.02));   // ketchup, mustard, mayo
+    // the cook: a silhouette in a white hat and apron, going back and forth between the fryer and the hatch
+    const cookTex=tex(FW,FH,(x)=>{const ink='rgba(9,11,16,.95)';x.fillStyle=ink;x.strokeStyle=ink;x.lineCap='round';
+      x.beginPath();x.arc(48,38,13,0,7);x.fill();x.fillRect(43,48,10,10);
+      x.fillStyle='#d8d2c4';x.fillRect(37,17,22,11);[[41,12,8],[55,12,8],[48,7,9]].forEach(([a,b,r])=>{x.beginPath();x.arc(a,b,r,0,7);x.fill();});
+      x.fillStyle=ink;x.beginPath();x.moveTo(25,56);x.lineTo(71,56);x.lineTo(66,152);x.lineTo(30,152);x.closePath();x.fill();
+      x.lineWidth=10;[[-1],[1]].forEach(([s])=>{x.beginPath();x.moveTo(48+s*21,62);x.lineTo(48+s*27,96);x.lineTo(48+s*15,110);x.stroke();});
+      x.fillStyle='#cfc8b8';x.fillRect(35,80,26,70);x.fillStyle=ink;x.lineWidth=13;[[40,160,40,232],[56,160,56,232]].forEach(([a,b,c,d])=>{x.beginPath();x.moveTo(a,b);x.lineTo(c,d);x.stroke();});});
+    const cook=new T.Sprite(new T.SpriteMaterial({map:cookTex,transparent:true,fog:false}));cook.scale.set(.7,1.76,1);cook.position.set(-2.5,1.0,-61.15);scene.add(cook);
+    // striped awnings over both hatches, with a scalloped edge
+    const stripes=tex(64,8,(x,w,h)=>{x.fillStyle='#b3242c';x.fillRect(0,0,w,h);x.fillStyle='#f1ece0';x.fillRect(w/2,0,w/2,h);});
+    const scallop=tex(64,32,(x,w,h)=>{x.fillStyle='#b3242c';x.fillRect(0,0,w/2,h*.55);x.fillStyle='#f1ece0';x.fillRect(w/2,0,w/2,h*.55);
+      x.fillStyle='#b3242c';x.beginPath();x.arc(w/4,h*.55,w/4,0,Math.PI);x.fill();x.fillStyle='#f1ece0';x.beginPath();x.arc(w*3/4,h*.55,w/4,0,Math.PI);x.fill();});
+    const awn=(wd,px,pz,ry)=>{const g=new T.Group(),a=.38,dp=.62,st=stripes.clone(),sc=scallop.clone();[st,sc].forEach(q=>{q.wrapS=T.RepeatWrapping;q.repeat.set(wd/.36,1);q.needsUpdate=true;});
+      const top=new T.Mesh(new T.PlaneGeometry(wd,dp),new T.MeshStandardMaterial({map:st,side:T.DoubleSide,roughness:.7}));top.rotation.x=-Math.PI/2+a;top.position.set(0,-Math.sin(a)*dp/2,Math.cos(a)*dp/2);g.add(top);
+      const val=new T.Mesh(new T.PlaneGeometry(wd,.17),new T.MeshStandardMaterial({map:sc,transparent:true,alphaTest:.5,side:T.DoubleSide,roughness:.7}));val.position.set(0,-Math.sin(a)*dp-.085,Math.cos(a)*dp);g.add(val);
+      g.position.set(px,2.13,pz);g.rotation.y=ry;scene.add(g);};
+    awn(W+.06,CX+.03,ZF,0);awn(ZF-IN+.1,XB,(ZF+IN)/2,Math.PI/2);
+    // the chalkboard out front
+    const chalk=tex(256,384,(x,w,h)=>{x.fillStyle='#7a5532';x.fillRect(0,0,w,h);x.fillStyle='#24302b';x.fillRect(14,14,w-28,h-28);x.fillStyle='#f1efe6';x.textAlign='center';
+      x.font='700 34px Helvetica, Arial, sans-serif';x.fillText('VERS!',w/2,62);x.font='24px "Courier Prime", monospace';['Friet    3,50','Kroket   2,75','Koffie   2,20','Stroopw. 1,50'].forEach((s,i)=>x.fillText(s,w/2,120+i*46));
+      x.strokeStyle='#f1efe6';x.lineWidth=3;x.beginPath();x.arc(w/2,322,22,.2,Math.PI-.2);x.stroke();x.fillRect(w/2-10,300,5,7);x.fillRect(w/2+6,300,5,7);});
+    {const g=new T.Group(),bm=new T.MeshStandardMaterial({map:chalk,roughness:.9});[0,Math.PI].forEach(ry=>{const p=new T.Mesh(new T.PlaneGeometry(.5,.78),bm);p.geometry.translate(0,-.39,0);p.rotation.set(-.2,ry,0,'YXZ');g.add(p);});
+     g.position.set(XB+.45,.78,ZF+1.0);g.rotation.y=-.35;scene.add(g);}
+    // someone waiting at the side hatch
+    const buyer=mkPerson(1,1.64);buyer.position.set(XB+.36,.82,-60.7);
+    // the neon sign on the roof: a pink border, a cone of fries and FRITES, and a cyan "& koffie" underneath
+    // (it sticks out over the corner towards the platform, so the pillars further up don't hide it)
+    add(new T.BoxGeometry(2.64,1.22,.05),dark,-1.6,3.22,ZF+.01);[-2.7,-1.55].forEach(px=>add(new T.BoxGeometry(.05,.1,.05),dark,px,2.6,ZF+.01));
+    const tube=(x,col,core,draw,wd)=>{x.save();x.lineCap=x.lineJoin='round';x.strokeStyle=col;x.shadowColor=col;
+      x.shadowBlur=30;x.lineWidth=wd*1.6;draw();x.shadowBlur=14;x.lineWidth=wd;draw();x.shadowBlur=0;x.strokeStyle=core;x.lineWidth=wd*.42;draw();x.restore();};
+    const fritesTex=tex(1024,466,(x,w,h)=>{
+      tube(x,'#ff3d9e','#ffd6ec',()=>{x.beginPath();x.roundRect?x.roundRect(22,22,w-44,h-44,40):x.rect(22,22,w-44,h-44);x.stroke();},8);
+      tube(x,'#ffd23d','#fff6c9',()=>{[[96,150,84,64],[118,150,116,52],[140,150,146,60],[162,150,174,70]].forEach(([a,b,c,d])=>{x.beginPath();x.moveTo(a,b);x.lineTo(c,d);x.stroke();});},9);
+      tube(x,'#ff3d9e','#ffd6ec',()=>{x.beginPath();x.moveTo(70,150);x.lineTo(190,150);x.lineTo(130,268);x.closePath();x.stroke();},9);
+      tube(x,'#ff3d9e','#ffd6ec',()=>{x.font='700 178px Helvetica, Arial, sans-serif';x.textBaseline='alphabetic';x.strokeText('FRITES',232,254);},8);});
+    const koffieTex=tex(640,144,(x,w,h)=>{
+      tube(x,'#3ee8ff','#e3fdff',()=>{x.beginPath();x.moveTo(40,52);x.lineTo(50,112);x.lineTo(100,112);x.lineTo(110,52);x.closePath();x.stroke();x.beginPath();x.arc(116,80,14,-1.3,1.3);x.stroke();
+        [58,76,94].forEach(sx=>{x.beginPath();x.moveTo(sx,40);x.quadraticCurveTo(sx+8,30,sx,20);x.stroke();});},6);
+      tube(x,'#3ee8ff','#e3fdff',()=>{x.font='italic 700 92px Helvetica, Arial, sans-serif';x.textBaseline='middle';x.strokeText('& koffie',160,78);},5);});
+    const halo=tex(128,128,(x,w,h)=>{const g=x.createRadialGradient(64,64,0,64,64,64);g.addColorStop(0,'rgba(255,255,255,1)');g.addColorStop(.45,'rgba(255,255,255,.35)');g.addColorStop(1,'rgba(255,255,255,0)');x.fillStyle=g;x.fillRect(0,0,w,h);});
+    plane(4.2,2.8,glow(halo,0xff4fa3,.3),-1.45,3.22,ZF+.1);
+    const kHalo=plane(2.3,.9,glow(halo,0x3ee8ff,.22),-1.6,2.865,ZF+.11);
+    const fritesM=glow(fritesTex,0xffffff,1);plane(2.6,1.18,fritesM,-1.6,3.22,ZF+.13);
+    const koffieM=glow(koffieTex,0xffffff,1);plane(1.77,.4,koffieM,-1.6,2.865,ZF+.15);
+    // the light it throws: pink on the wall, the pillar and the ceiling, warm on the floor in front of the hatches
+    const pink=new T.PointLight(0xff4f9e,2.2,9,1.5);pink.position.set(-1.4,3.3,ZF+.9);scene.add(pink);
+    plane(5.5,3.4,glow(halo,0xff4fa3,.16),-3.08,3.3,ZF+2.2,0,Math.PI/2);
+    plane(5,5,glow(halo,0xff4fa3,.14),-1.9,5.28,ZF+.8,Math.PI/2,0);
+    plane(4.6,3.4,glow(halo,0xff6fb0,.15),-2.0,.075,ZF+1.6,-Math.PI/2,0);
+    plane(2.6,2.6,glow(halo,0xffb066,.26),XB+.55,.08,-60.6,-Math.PI/2,0);
+    const off=[[6.2,6.32],[6.45,6.52],[6.7,7.35],[19.8,19.9],[20.05,20.12],[27.1,27.2]];
+    return t=>{const o=off.some(([a,b])=>t>=a&&t<b)?.12:1;koffieM.opacity=o;kHalo.material.opacity=.22*o;fritesM.opacity=.94+.06*Math.sin(t*6.283*2);
+      const c=(Math.sin(t/LOOP*6.283*3)+1)/2;cook.position.x=-2.95+c*.75;buyer.position.x=XB+.36+Math.sin(t/LOOP*6.283*2)*.03;};
+  })();
 
   return function(time){
     const t=((time%LOOP)+LOOP)%LOOP;
@@ -3226,6 +3364,7 @@ const extrasAt=(()=>{
     if(!painted&&(!document.fonts||document.fonts.status==='loaded')){painted=true;repaint.forEach(f=>f());}
     // the lift doors
     {const o=doorOpen(t)*(DW-.04);doorL.position.z=LZ-DW/2-o;doorR.position.z=LZ+DW/2+o;}
+    stallAt(t);
     waiting.forEach((s,i)=>{s.position.x=s.userData.x+Math.sin(t/LOOP*6.283*3+i)*.03;});
   };
 })();
