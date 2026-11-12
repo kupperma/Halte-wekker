@@ -32,6 +32,54 @@ enum MapSpot {
     }
 }
 
+/// The hanging board over the platform in the station video: the app writes your next transfers on it.
+enum BoardSpot {
+    static let x0 = 0.3512, x1 = 0.7119, y0 = 0.3102, y1 = 0.3679
+    static let design = CGSize(width: 298, height: 100)
+    static func rect(in size: CGSize) -> CGRect {
+        let s = max(size.width / MapSpot.video.width, size.height / MapSpot.video.height)
+        let vw = MapSpot.video.width * s, vh = MapSpot.video.height * s
+        let ox = (size.width - vw) / 2, oy = (size.height - vh) / 2
+        return CGRect(x: ox + x0 * vw, y: oy + y0 * vh, width: (x1 - x0) * vw, height: (y1 - y0) * vh)
+    }
+}
+
+struct BoardLine: Hashable {
+    let line: String
+    let to: String
+    let time: String
+    let note: String?
+}
+
+/// Amber and white on dark blue, like a station display.
+struct TransferBoard: View {
+    let rows: [BoardLine]
+    var body: some View {
+        let amber = Color(hex: 0xFFB43A)
+        VStack(alignment: .leading, spacing: 3) {
+            Text("NEXT TRANSFERS").font(.system(size: 14, weight: .bold, design: .monospaced)).foregroundStyle(amber)
+            Rectangle().fill(amber.opacity(0.35)).frame(height: 1.2)
+            ForEach(Array(rows.prefix(3).enumerated()), id: \.offset) { _, r in
+                HStack(spacing: 6) {
+                    Text(r.line).frame(width: 40, alignment: .leading)
+                    Text(r.to).lineLimit(1).minimumScaleFactor(0.7)
+                    Spacer(minLength: 2)
+                    Text(r.time)
+                    if let n = r.note { Text(n).foregroundStyle(amber).frame(width: 30, alignment: .trailing) }
+                }
+                .font(.system(size: 13.5, weight: .bold, design: .monospaced)).foregroundStyle(.white)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10).padding(.vertical, 6)
+        .frame(width: BoardSpot.design.width, height: BoardSpot.design.height, alignment: .topLeading)
+        .background(Color(hex: 0x06122B))
+        .shadow(color: Color(hex: 0x6FA0FF).opacity(0.35), radius: 6)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Next transfers: " + rows.map { "\($0.line) to \($0.to) at \($0.time)" }.joined(separator: ", "))
+    }
+}
+
 // MARK: the stage behind it all
 
 struct HomeStage: View {
@@ -40,6 +88,7 @@ struct HomeStage: View {
     let moving: Bool
     let moveToken: Int
     let loopToken: Int
+    var board: [BoardLine] = []
 
     var body: some View {
         ZStack {
@@ -70,6 +119,19 @@ struct HomeStage: View {
             }
             .opacity(stage == .station || stage == .leaving ? 1 : 0)
             .animation(.easeInOut(duration: 1.5), value: stage)
+            // your next transfers on the board over the platform
+            if !board.isEmpty {
+                GeometryReader { g in
+                    let r = BoardSpot.rect(in: g.size)
+                    TransferBoard(rows: board)
+                        .scaleEffect(r.width / BoardSpot.design.width, anchor: .topLeading)
+                        .frame(width: r.width, height: r.height, alignment: .topLeading)
+                        .position(x: r.midX, y: r.midY)
+                        .brightness(-0.12)                 // under the station's dimmer light
+                }
+                .opacity(stage == .station ? 1 : 0)
+                .animation(.easeInOut(duration: 0.5), value: stage)
+            }
             FilmGrain()
         }
         .ignoresSafeArea()

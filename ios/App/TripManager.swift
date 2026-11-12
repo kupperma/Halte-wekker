@@ -1,6 +1,8 @@
 import ActivityKit
 import CoreLocation
 import Foundation
+import LocalAuthentication
+import UIKit
 import UserNotifications
 
 /// The bus or train you're on, once it's recognised.
@@ -15,7 +17,7 @@ struct Vehicle: Equatable {
 /// recognises the vehicle you're on, keeps the arrival time up to date and drives the Live Activity.
 /// With "Start trips by itself" on, it watches your stations and starts a trip when you leave on a bus or train.
 @MainActor
-final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
+final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, UNUserNotificationCenterDelegate {
     enum Phase: Equatable { case idle, sleeping, awake, alarm(approach: Bool), transfer, finished }
 
     /// A direction you picked yourself sticks for 3 hours, then it follows the clock again.
@@ -48,6 +50,10 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
     @Published var soundKind: AlarmSound.Kind { didSet { sound.kind = soundKind } }
     @Published var pauseMusic: Bool = UserDefaults.standard.bool(forKey: "pauseMusic") {
         didSet { UserDefaults.standard.set(pauseMusic, forKey: "pauseMusic"); sound.pauseMusic = pauseMusic }
+    }
+    /// If you're using your phone when it would ring, you're awake: one notification instead of the alarm.
+    @Published var quietWhenInUse: Bool = UserDefaults.standard.object(forKey: "quietWhenInUse") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(quietWhenInUse, forKey: "quietWhenInUse") }
     }
     @Published var autoHome: Bool = UserDefaults.standard.object(forKey: "autoHome") as? Bool ?? true {
         didSet { UserDefaults.standard.set(autoHome, forKey: "autoHome"); updateWatching() }
@@ -138,6 +144,11 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
         DispatchQueue.main.async { [weak self] in self?.updateKeepAlive() }
         music.onChange = { [weak self] in self?.pushActivity(force: true) }
         LineWatchStore.shared.onChange = { [weak self] in self?.updateKeepAlive() }
+        AlarmControl.stop = { [weak self] in self?.stopAlarm() }
+        // "Stop alarm" right on the alarm notification.
+        let stop = UNNotificationAction(identifier: "STOP", title: "Stop alarm", options: [])
+        UNUserNotificationCenter.current().setNotificationCategories([UNNotificationCategory(identifier: "ALARM", actions: [stop], intentIdentifiers: [], options: [])])
+        UNUserNotificationCenter.current().delegate = self
         sound.pauseMusic = pauseMusic
         WatchStore.shared.holdAlerts = { [weak self] in self?.phase == .sleeping }
         WatchStore.shared.chime = { [weak self] in
@@ -337,15 +348,46 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
 
     private func ring(approach: Bool) {
         setBackup(0)
-        phase = .alarm(approach: approach)
-        sound.ring(announcement: announcement(approach: approach))
         let c = UNMutableNotificationContent()
         c.title = approach ? "Wake up" : "Get off now"
         c.body = approach ? "\(leg?.to.short ?? "Your stop") in about \(Fmt.distance(distance ?? 0))." : "You’re at \(leg?.to.short ?? "your stop")."
         c.sound = .default
         c.interruptionLevel = .timeSensitive
+        // Using your phone right now? Then you're awake: one notification is enough.
+        if quietWhenInUse && phoneInUse() {
+            c.body += approach ? " Get ready to get off." : ""
+            UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "heads-up-\(approach)", content: c, trigger: nil)) { _ in }
+            if approach && (ringAtStop || forceArrival) { phase = .awake; pushActivity(force: true); WatchStore.shared.showNext() } else { legDone() }
+            return
+        }
+        phase = .alarm(approach: approach)
+        sound.ring(announcement: announcement(approach: approach))
+        c.categoryIdentifier = "ALARM"
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "alarm", content: c, trigger: nil))
         pushActivity(force: true)
+    }
+
+    /// Unlocked and in use. (Without a passcode the phone never says it's locked, so then it always rings.)
+    private func phoneInUse() -> Bool {
+        guard UIApplication.shared.isProtectedDataAvailable else { return false }
+        return LAContext().canEvaluatePolicy(.deviceOwnerAuthentication, error: nil)
+    }
+
+    // MARK: notifications
+
+    /// "Stop alarm" on the notification (or tapping it while it rings).
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler done: @escaping () -> Void) {
+        let id = response.notification.request.identifier, action = response.actionIdentifier
+        Task { @MainActor in
+            if action == "STOP" || (id == "alarm" && action == UNNotificationDefaultActionIdentifier) { self.stopAlarm() }
+            done()
+        }
+    }
+
+    /// With the app open: the alarm and platform alerts are already on screen; show the rest as banners.
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler done: @escaping (UNNotificationPresentationOptions) -> Void) {
+        let id = notification.request.identifier
+        done(id == "alarm" || id.hasPrefix("platform-") ? [] : [.banner, .list, .sound])
     }
 
     func testAlarm() {
@@ -750,7 +792,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
                      arrival: arrival, finalName: finalName, nextText: nextText, awake: awake, goingHome: direction == .home,
                      kicker: kicker, stopName: leg?.to.spoken ?? "", progress: (progress() * 100).rounded() / 100,
                      legFrom: legFrom, legTo: legTo, song: song?.title, artist: song?.artist, songPlaying: song?.playing ?? false,
-                     musicApp: song?.app)
+                     musicApp: song?.app, ringing: { () -> Bool in if case .alarm = phase { return true }; return false }())
     }
 
     private func startActivity() {
@@ -761,7 +803,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
     private func pushActivity(force: Bool) {
         guard let activity else { return }
         let s = state
-        let key = "\(s.legTitle)|\(s.distanceText)|\(s.arrival?.timeIntervalSince1970 ?? 0)|\(s.awake)|\(Int(s.progress * 50))|\(s.song ?? "")|\(s.songPlaying)"
+        let key = "\(s.legTitle)|\(s.distanceText)|\(s.arrival?.timeIntervalSince1970 ?? 0)|\(s.awake)|\(Int(s.progress * 50))|\(s.song ?? "")|\(s.songPlaying)|\(s.ringing)"
         guard force || (key != lastActivityKey && Date().timeIntervalSince(lastActivity) > 8) else { return }
         lastActivity = Date(); lastActivityKey = key
         Task { await activity.update(ActivityContent(state: s, staleDate: nil)) }
@@ -771,9 +813,9 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
     func resetAll() {
         if isRiding { endTrip() }
         let d = UserDefaults.standard
-        for k in ["busKm", "trainKm", "ringAtStop", "announce", "movingStation", "autoStart", "sound", "pauseMusic", "autoHome", "kmMem", "dir", "dirAt", "autoHomeDay"] { d.removeObject(forKey: k) }
+        for k in ["busKm", "trainKm", "ringAtStop", "announce", "movingStation", "autoStart", "sound", "pauseMusic", "autoHome", "kmMem", "dir", "dirAt", "autoHomeDay", "quietWhenInUse"] { d.removeObject(forKey: k) }
         busKm = 2; trainKm = 5; ringAtStop = true; announce = true; movingStation = true; autoStart = true
-        soundKind = .steam; pauseMusic = false; autoHome = true; kmMem = [:]; lastScore = nil
+        soundKind = .steam; pauseMusic = false; autoHome = true; quietWhenInUse = true; kmMem = [:]; lastScore = nil
         direction = Self.savedDirection()
         Ratings.shared.reset(); ScoreBook.shared.reset(); WatchStore.shared.reset(); StopsStore.shared.reset(); LineWatchStore.shared.reset()
         music.disconnectSpotify(); music.source = .off

@@ -35,7 +35,8 @@ const signM=new T.MeshBasicMaterial({color:0x1d3f9a});
 const extrasAt=(()=>{
   const LOOP=30;                                    // everything that moves repeats every 30 s, so the video loops
   const Z0=10,Z1=-200,L=Z0-Z1,ZC=(Z0+Z1)/2;
-  const tex=(w,h,draw)=>{const c=document.createElement('canvas');c.width=w;c.height=h;draw(c.getContext('2d'),w,h);const t=new T.CanvasTexture(c);t.anisotropy=4;return t;};
+  const repaint=[];let painted=false;
+  const tex=(w,h,draw)=>{const c=document.createElement('canvas');c.width=w;c.height=h;const x=c.getContext('2d');draw(x,w,h);const t=new T.CanvasTexture(c);t.anisotropy=4;repaint.push(()=>{x.clearRect(0,0,w,h);draw(x,w,h);t.needsUpdate=true;});return t;};
   const flat=(w,h,map,x,y,z,ry,basic)=>{const m=basic?new T.MeshBasicMaterial({map,transparent:true}):new T.MeshStandardMaterial({map,roughness:.8,transparent:true});const o=new T.Mesh(new T.PlaneGeometry(w,h),m);o.position.set(x,y,z);o.rotation.y=ry||0;scene.add(o);return o;};
   const floorStrip=(w,map,x)=>{const o=new T.Mesh(new T.PlaneGeometry(w,L),new T.MeshStandardMaterial({map,roughness:.9}));o.rotation.x=-Math.PI/2;o.position.set(x,.065,ZC);scene.add(o);};
 
@@ -87,7 +88,53 @@ const extrasAt=(()=>{
   add(new T.BoxGeometry(.04,1.0,.04),legM,.7,4.9,-33);
   // the exit: a lit doorway in the wall near you
   add(new T.BoxGeometry(.24,2.7,2.2),mat(0x05060a),-3.22,1.35,-2.6);
-  add(new T.BoxGeometry(.05,.34,1.2),new T.MeshBasicMaterial({color:0x1fa34a}),-3.12,2.95,-2.6);
+  const runner=tex(256,128,(x,w,h)=>{x.fillStyle='#14a24a';x.fillRect(0,0,w,h);x.fillStyle='#fff';x.strokeStyle='#fff';x.lineCap='round';x.lineJoin='round';
+    x.fillRect(156,18,64,92);x.fillStyle='#14a24a';x.fillRect(164,26,48,84);x.fillStyle='#fff';
+    x.beginPath();x.arc(104,28,11,0,7);x.fill();x.lineWidth=13;
+    [[[98,44],[84,76]],[[84,76],[106,90],[110,112]],[[84,76],[68,94],[48,94]],[[96,50],[118,60],[134,48]],[[96,50],[74,56],[62,44]]].forEach(pts=>{x.beginPath();pts.forEach(([a,b],i)=>i?x.lineTo(a,b):x.moveTo(a,b));x.stroke();});
+    x.lineWidth=9;x.beginPath();x.moveTo(18,64);x.lineTo(44,64);x.stroke();x.beginPath();x.moveTo(30,52);x.lineTo(44,64);x.lineTo(30,76);x.stroke();});
+  const exitSign=(x,y,z,ry)=>{add(new T.BoxGeometry(ry?.05:1.06,.56,ry?1.06:.05),mat(0x0f1218),x,y,z);flat(1.0,.5,runner,x+(ry?.03:0),y,z+(ry?0:.03),ry||0,true);};
+  exitSign(-3.14,2.95,-2.6,Math.PI/2);exitSign(-3.14,2.95,-56,Math.PI/2);
+  add(new T.BoxGeometry(1.06,.56,.05),mat(0x0f1218),.7,4.6,-48);flat(1.0,.5,runner,.7,4.6,-47.97,0,true);[-.4,.4].forEach(o=>add(new T.BoxGeometry(.03,.6,.03),legM,.7+o,5.15,-48));
+
+  // A glass lift against the wall; its cabin goes up and down (someone gets in, someone comes out).
+  const LX=-.95,LZ=-19,LW=1.05,LD=1.9,LTOP=6.2;
+  const liftFrame=mat(0x59627a,{metalness:.6,roughness:.35});
+  [[-1,-1],[1,-1],[-1,1],[1,1]].forEach(([a,b])=>add(new T.BoxGeometry(.07,5.5,.07),liftFrame,LX+a*LW/2,2.75,LZ+b*LD/2));
+  const liftGlass=new T.MeshStandardMaterial({color:0xa9d2ff,transparent:true,opacity:.16,roughness:.1,metalness:.2,depthWrite:false});
+  add(new T.BoxGeometry(.02,5.5,LD),liftGlass,LX+LW/2,2.75,LZ);add(new T.BoxGeometry(.02,5.5,LD),liftGlass,LX-LW/2,2.75,LZ);add(new T.BoxGeometry(LW+.1,.05,LD+.1),mat(0x050608),LX,5.44,LZ);add(new T.BoxGeometry(LW,5.5,.02),liftGlass,LX,2.75,LZ+LD/2);add(new T.BoxGeometry(LW,5.5,.02),liftGlass,LX,2.75,LZ-LD/2);
+  const cab=new T.Group();scene.add(cab);
+  const cabM=new T.MeshStandardMaterial({color:0xfff1d6,emissive:0xffd9a0,emissiveIntensity:.95,roughness:.6});
+  const cf=new T.Mesh(new T.BoxGeometry(LW-.12,.08,LD-.12),liftFrame);cab.add(cf);
+  const cr=new T.Mesh(new T.BoxGeometry(LW-.12,.08,LD-.12),cabM);cr.position.y=2.3;cab.add(cr);
+  const cbk=new T.Mesh(new T.BoxGeometry(.04,2.3,LD-.12),cabM);cbk.position.set(-LW/2+.08,1.15,0);cab.add(cbk);
+  cab.position.set(LX,0,LZ);
+  const liftIcon=tex(128,128,(x,w,h)=>{x.fillStyle='#1d4f9a';x.fillRect(0,0,w,h);x.fillStyle='#fff';x.fillRect(30,22,68,84);x.fillStyle='#1d4f9a';x.fillRect(38,30,52,68);x.fillStyle='#fff';
+    x.beginPath();x.moveTo(64,36);x.lineTo(76,52);x.lineTo(52,52);x.fill();x.beginPath();x.moveTo(64,92);x.lineTo(76,76);x.lineTo(52,76);x.fill();});
+  flat(.4,.4,liftIcon,LX,2.75,LZ+LD/2+.03,0,true);
+  const sstep=u=>u<=0?0:u>=1?1:u*u*(3-2*u);
+  const cabY=t=>t<6?0:t<11?LTOP*sstep((t-6)/5):t<19?LTOP:t<24?LTOP*(1-sstep((t-19)/5)):0;
+
+  // Glowing boards over the platform with the next transfers. The nearest one is left blank: the app writes
+  // your real connections on it (the website draws them right into the scene).
+  const drawBoard=(x,w,h,rows,title)=>{x.fillStyle='#06122b';x.fillRect(0,0,w,h);
+    x.textBaseline='middle';x.fillStyle='#ffb43a';x.font='700 26px "Courier Prime",monospace';if(title) x.fillText(title,18,26);
+    x.fillStyle='rgba(255,180,58,.35)';x.fillRect(18,46,w-36,2);
+    (rows||[]).slice(0,3).forEach((r,i)=>{const y=76+i*34;x.font='700 25px "Courier Prime",monospace';x.fillStyle='#fff';x.textAlign='left';x.fillText(String(r.line).slice(0,4),18,y);x.fillText(String(r.to).slice(0,14),100,y);
+      x.textAlign='right';x.fillText(r.time,w-(r.note?96:18),y);if(r.note){x.fillStyle='#ffb43a';x.fillText(String(r.note).slice(0,5),w-18,y);}x.textAlign='left';});};
+  let liveRows=null;
+  const liveBoard=tex(512,176,(x,w,h)=>drawBoard(x,w,h,liveRows,liveRows?'NEXT TRANSFERS':''));
+  window.stationBoard=rows=>{liveRows=rows&&rows.length?rows:null;drawBoard(liveBoard.image.getContext('2d'),512,176,liveRows,liveRows?'NEXT TRANSFERS':'');liveBoard.needsUpdate=true;if(window.__stageKick) window.__stageKick();};
+  const sample=tex(512,176,(x,w,h)=>drawBoard(x,w,h,[{line:'IC',to:'Breda',time:'08:41'},{line:'305',to:'Eindhoven',time:'08:47',note:'+2'},{line:'SPR',to:'Tilburg',time:'08:52'}],'DEPARTURES'));
+  const BOARD={x:1.2,y:4.3,w:2.56,h:.86};
+  const hangBoard=(z,map)=>{add(new T.BoxGeometry(BOARD.w+.14,BOARD.h+.12,.14),mat(0x0b0c10,{metalness:.5,roughness:.4}),BOARD.x,BOARD.y,z);
+    const scr=new T.Mesh(new T.PlaneGeometry(BOARD.w,BOARD.h),new T.MeshBasicMaterial({map}));scr.position.set(BOARD.x,BOARD.y,z+.075);scene.add(scr);
+    [-1.0,1.0].forEach(o=>add(new T.BoxGeometry(.03,.75,.03),legM,BOARD.x+o,5.15,z));};
+  hangBoard(-8,liveBoard);hangBoard(-40,sample);hangBoard(-72,sample);
+  // Where the live board sits on screen from the platform camera (0…1 of the picture), for the app to write on it.
+  window.boardRect=()=>{const c=cam.clone();c.position.set(.1,2.05,6.5);c.lookAt(2.3,1.5,-30);c.updateMatrixWorld();
+    const pts=[[-1,-1],[1,-1],[-1,1],[1,1]].map(([a,b])=>new T.Vector3(BOARD.x+a*BOARD.w/2,BOARD.y+b*BOARD.h/2,-8+.075).project(c));
+    const xs=pts.map(p=>(p.x+1)/2),ys=pts.map(p=>(1-p.y)/2);return {x0:Math.min(...xs),x1:Math.max(...xs),y0:Math.min(...ys),y1:Math.max(...ys)};};
 
   // Two escalators against the wall (they really move): up into the ceiling on the left, down on the right.
   const RUN=9.5,RISE=5.5,LEN=Math.hypot(RUN,RISE),SIN=RISE/LEN,COS=RUN/LEN,BZ=-6,UPX=-2.8,DNX=-1.9;
@@ -134,7 +181,7 @@ const extrasAt=(()=>{
     {kind:1,h:1.66,off:13,pts:[[dnTop,0],[dnBottom,ESC_V,'ride'],[V(-2.3,0,-4.1),1.25,'walk'],[EXIT,1.25,'walk']]},
     {kind:2,h:1.72,off:5,pts:[[EXIT,0],[V(-2.8,0,-4.8),1.3,'walk'],[upBottom,1.1,'walk'],[upTop,ESC_V,'ride']]},
     {kind:1,h:1.62,off:19,pts:[[EXIT,0],[V(-2.8,0,-4.9),1.25,'walk'],[upBottom,1.0,'walk'],[upTop,ESC_V,'ride']]},
-    {kind:2,h:1.74,off:8,fade:true,pts:[[EXIT,0],[V(-.6,0,-7),1.35,'walk'],[V(-.6,0,-40),1.35,'walk']]},
+    {kind:2,h:1.74,off:8,fade:true,pts:[[EXIT,0],[V(.25,0,-7),1.35,'walk'],[V(.25,0,-40),1.35,'walk']]},
     {kind:0,h:1.79,off:23,fade:true,pts:[[V(.5,0,-41),0],[V(.5,0,-7),1.35,'walk'],[EXIT,1.35,'walk']]},
     {kind:0,h:1.8,off:3,fade:true,pts:[[V(.2,0,-58),0],[V(.2,0,-97),1.35,'walk']]},
     {kind:2,h:1.7,off:11,fade:true,pts:[[V(-.9,0,-96),0],[V(-.9,0,-57),1.35,'walk']]},
@@ -142,6 +189,7 @@ const extrasAt=(()=>{
   routes.forEach(r=>{r.sprite=mkPerson(r.kind,r.h);let t=0,d=0;r.seg=[];for(let i=1;i<r.pts.length;i++){const a=r.pts[i-1][0],b=r.pts[i][0],len=a.distanceTo(b),dt=len/r.pts[i][1];r.seg.push({a,b,t0:t,dt,d0:d,len,mode:r.pts[i][2]});t+=dt;d+=len;}r.total=t;});
   // People waiting, and one on a bench.
   const waiting=[[0,1.76,.7,-22],[1,1.64,-.3,-27.5],[2,1.7,.9,-41],[0,1.82,-.5,-52]].map(([k,h,x,z])=>{const s=mkPerson(k,h);s.material.map=kinds[k][0];s.position.set(x,h/2,z);s.userData.x=x;return s;});
+  const liftIn=mkPerson(0,1.76),liftOut=mkPerson(1,1.64);
   const sitter=new T.Sprite(new T.SpriteMaterial({map:sitting(),transparent:true,depthWrite:false}));sitter.scale.set(.56,1.4,1);sitter.position.set(-1.95,.62,-35);scene.add(sitter);
 
   return function(time){
@@ -157,6 +205,17 @@ const extrasAt=(()=>{
       const walked=g.d0+g.len*f;s.material.map=kinds[r.kind][g.mode==='ride'?0:Math.floor(walked/.4)%4];
       s.material.opacity=r.fade?Math.min(1,r.pts[0][0].z<-20?u/2:1,r.pts[r.pts.length-1][0].z<-20?(r.total-u)/2:1):1;
     });
+    if(!painted&&(!document.fonts||document.fonts.status==='loaded')){painted=true;repaint.forEach(f=>f());}
+    // the lift
+    const cy=cabY(t);cab.position.y=cy;
+    {const ua=((t-19)%LOOP+LOOP)%LOOP,s=liftIn,A=V(.3,0,-60),D=V(LX,0,LZ+LD/2+.5),I=V(LX,0,LZ);
+      if(ua<15.5){const f=ua/15.5,p=A.clone().lerp(D,f);s.position.set(p.x,s.userData.h/2,p.z);s.material.map=kinds[0][Math.floor(A.distanceTo(p)/.4)%4];s.material.opacity=Math.min(1,ua/2);s.visible=true;}
+      else if(ua<16.3){const p=D.clone().lerp(I,(ua-15.5)/.8);s.position.set(p.x,s.userData.h/2,p.z);s.material.map=kinds[0][Math.floor((ua*3))%4];s.material.opacity=1;s.visible=true;}
+      else{s.position.set(LX,cy+.06+s.userData.h/2,LZ);s.material.map=kinds[0][0];s.visible=cy<5.4;}}
+    {const ub=((t-19)%LOOP+LOOP)%LOOP,s=liftOut,D=V(LX,0,LZ+LD/2+.5),F=V(.3,0,-70);
+      if(ub<5){s.position.set(LX,cy+.06+s.userData.h/2,LZ);s.material.map=kinds[1][0];s.material.opacity=1;s.visible=cy<5.4;}
+      else if(ub<6){const p=V(LX,0,LZ).lerp(D,ub-5);s.position.set(p.x,s.userData.h/2,p.z);s.material.map=kinds[1][Math.floor(ub*3)%4];s.visible=true;}
+      else{const f=(ub-6)/24,p=D.clone().lerp(F,f);s.position.set(p.x,s.userData.h/2,p.z);s.material.map=kinds[1][Math.floor(D.distanceTo(p)/.4)%4];s.material.opacity=Math.min(1,(30-ub)/2);s.visible=true;}}
     waiting.forEach((s,i)=>{s.position.x=s.userData.x+Math.sin(t/LOOP*6.283*3+i)*.03;});
   };
 })();

@@ -1,4 +1,5 @@
 import ActivityKit
+import AppIntents
 import SwiftUI
 import UIKit
 import WidgetKit
@@ -50,6 +51,20 @@ struct SongLine: View {
     }
 }
 
+/// Stops the alarm without opening the app.
+struct StopButton: View {
+    var size: CGFloat = 15
+    var body: some View {
+        Button(intent: StopAlarmIntent()) {
+            Label("Stop alarm", systemImage: "bell.slash.fill")
+                .font(HWFont.display(size)).foregroundStyle(Color(hex: 0x1A0C08))
+                .frame(maxWidth: .infinity).padding(.vertical, 5)
+                .background(HWPalette.warn, in: RoundedRectangle(cornerRadius: 4))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 /// The lock screen: a small version of the ride screen, with the song you're listening to.
 struct LockScreenTrip: View {
     let s: TripAttributes.ContentState
@@ -92,7 +107,8 @@ struct LockScreenTrip: View {
             MetroTrack(progress: s.progress, home: s.goingHome)
                 .frame(height: 24)
                 .id(s.stopName)                              // a new leg: a new metro rolls in
-            if s.song != nil { SongLine(s: s) }
+            if s.ringing { StopButton(size: 15) }
+            else if s.song != nil { SongLine(s: s) }
             else if riding(s), let n = s.nextText { Text(n).font(HWFont.body(11)).foregroundStyle(HWPalette.muted).lineLimit(1) }
         }
         .padding(.horizontal, 16).padding(.vertical, 12)
@@ -132,7 +148,8 @@ struct TripLiveActivity: Widget {
                             Countdown(to: s.legTo ?? s.arrival).font(HWFont.body(12, bold: true)).foregroundStyle(p.accent).frame(maxWidth: 70, alignment: .trailing)
                         }
                         MetroTrack(progress: s.progress, home: s.goingHome).frame(height: 18).id(s.stopName)
-                        if s.song != nil { SongLine(s: s, size: 10) }
+                        if s.ringing { StopButton(size: 14) }
+                        else if s.song != nil { SongLine(s: s, size: 10) }
                         else if let n = s.nextText { Text(n).font(HWFont.body(11)).foregroundStyle(HWPalette.muted).lineLimit(1) }
                     }
                 }

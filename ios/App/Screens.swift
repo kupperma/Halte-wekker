@@ -52,7 +52,7 @@ struct HomeView: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            HomeStage(home: home, stage: stage, moving: trip.movingStation && scene == .active, moveToken: moveToken, loopToken: loopToken)
+            HomeStage(home: home, stage: stage, moving: trip.movingStation && scene == .active, moveToken: moveToken, loopToken: loopToken, board: boardLines)
             // face to face with the map on the wall
             GeometryReader { g in
                 let r = MapSpot.rect(in: g.size)
@@ -135,6 +135,16 @@ struct HomeView: View {
             try? await Task.sleep(nanoseconds: 1_600_000_000)
             guard stage == .returning else { return }
             withAnimation(.easeOut(duration: 0.3)) { stage = .map }
+        }
+    }
+
+    /// Your next trip's rides for the board over the platform.
+    private var boardLines: [BoardLine] {
+        guard let t = live.next[safe: live.pick] ?? live.next.first else { return [] }
+        return t.rides.prefix(3).map { r in
+            let to = Fmt.place(r.toStop)
+            return BoardLine(line: r.line, to: to == "BUas" ? "BUas" : to, time: Fmt.hhmm(r.departure),
+                             note: r.cancelled ? "X" : r.live && r.delay >= 1 ? "+\(r.delay)" : nil)
         }
     }
 
@@ -947,6 +957,7 @@ struct SettingsView: View {
                         Button("Allow location Always") { trip.askForAlways() }.foregroundStyle(pal.accent)
                     }
                     Toggle(isOn: $trip.announce) { label("Station announcement", "A jingle and a voice that names your stop, before the alarm.") }
+                    Toggle(isOn: $trip.quietWhenInUse) { label("Just a notification when I’m on my phone", "If your phone is unlocked and in use when it would ring, you’re awake: you get one notification instead of the alarm. Locked, it rings as usual. (Only with a passcode on your phone.)") }
                     Toggle(isOn: $trip.ringAtStop) { label("Ring again at the stop", "A second alarm when you arrive, in case you dozed off again.") }
                     Toggle(isOn: $trip.autoHome) { label("Switch to Home at school", "When you reach BUas, the app switches to going home once that day. Switch back whenever you like.") }
                     Toggle(isOn: $trip.movingStation) { label("Moving station", "The station and train behind the home and ride screens. It pauses when the screen is off. Off shows a still picture.") }
@@ -964,7 +975,7 @@ struct SettingsView: View {
                     }
                     Text(trip.pauseMusic ? "The loudest option: your music stops while it rings. To start it again, press play on your earbuds."
                                          : "The alarm plays over your music, a little louder than it.").font(HWFont.body(12)).foregroundStyle(HWPalette.muted)
-                } header: { Text("Alarm") } footer: { Text("The alarm also rings in silent mode. Keep the volume up or wear earbuds.") }
+                } header: { Text("Alarm") } footer: { Text("The alarm also rings in silent mode. Keep the volume up or wear earbuds. You can stop it from the lock screen: tap Stop alarm on the trip, or on the notification.") }
                 Section {
                     Picker("Show music from", selection: $music.source) {
                         ForEach(MusicSource.allCases) { m in Text(m.title).tag(m) }
