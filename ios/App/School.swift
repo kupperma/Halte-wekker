@@ -18,11 +18,11 @@ final class SchoolAlarm: ObservableObject {
     private let d = UserDefaults.standard
 
     @Published var on: Bool { didSet { d.set(on, forKey: "school.on"); if on { Task { await self.start() } } else { stop() } } }
-    @Published var calendarIds: Set<String> { didSet { d.set(Array(calendarIds), forKey: "school.cals"); Task { await self.refresh(force: true) } } }
+    @Published var calendarIds: Set<String> { didSet { d.set(Array(calendarIds), forKey: "school.cals"); settingsChanged() } }
     /// How early you want to be at BUas before class.
-    @Published var earlyMinutes: Int { didSet { d.set(earlyMinutes, forKey: "school.early"); Task { await self.refresh(force: true) } } }
+    @Published var earlyMinutes: Int { didSet { d.set(earlyMinutes, forKey: "school.early"); settingsChanged() } }
     /// How long before you have to leave it wakes you.
-    @Published var wakeMinutes: Int { didSet { d.set(wakeMinutes, forKey: "school.wake"); Task { await self.refresh(force: true) } } }
+    @Published var wakeMinutes: Int { didSet { d.set(wakeMinutes, forKey: "school.wake"); settingsChanged() } }
     @Published private(set) var allowed = false
     @Published private(set) var note: String?
     /// True when it rings as a real alarm (iOS 26 and later); otherwise it's loud notifications.
@@ -151,12 +151,36 @@ final class SchoolAlarm: ObservableObject {
 
     /// Plan the week again: every 15 minutes for today and tomorrow, every few hours for the days after, and right away
     /// when the timetable or the settings change. An alarm that has gone off is never touched again.
-    func refresh(force: Bool = false) async {
+    /// A setting changed (how early, when to wake, which calendars): plan again as soon as you stop tapping.
+    private func settingsChanged() {
+        debounce?.cancel()
+        debounce = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 700_000_000)
+            guard !Task.isCancelled else { return }
+            await self?.refresh(force: true, now: true)
+        }
+    }
+    private var debounce: Task<Void, Never>?
+    private var running = false
+    private var again = false
+
+    /// One plan at a time: a change that comes in while it's planning runs again right after, so none is lost.
+    func refresh(force: Bool = false, now immediate: Bool = false) async {
         guard on else { return }
+        if running { if force || immediate { again = true }; return }
+        guard immediate || Date().timeIntervalSince(lastPlan) > (force ? 30 : 5 * 60) else { return }
+        running = true
+        repeat {
+            again = false
+            lastPlan = Date()
+            await plan(force: force || immediate)
+        } while again && on
+        running = false
+    }
+
+    private func plan(force: Bool) async {
         allowed = EKEventStore.authorizationStatus(for: .event) == .fullAccess
         guard allowed else { note = "Allow calendar access to read your timetable."; return }
-        guard Date().timeIntervalSince(lastPlan) > (force ? 30 : 5 * 60) else { return }
-        lastPlan = Date()
         let classes = firstClasses()
         let now = Date()
         let oldNext = next
