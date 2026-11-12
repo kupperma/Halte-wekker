@@ -6,6 +6,7 @@ struct RootView: View {
     @EnvironmentObject var watch: WatchStore
     @EnvironmentObject var go: GoStore
     @ObservedObject private var notices = Notices.shared
+    @ObservedObject private var morning = Morning.shared
     @State private var browsing = false         // at a change: looking at the map and the boards for a bit
     var body: some View {
         Group {
@@ -30,6 +31,21 @@ struct RootView: View {
             }
         }
         .animation(.easeInOut(duration: 0.25), value: watch.alert)
+        // after the school alarm: the morning screen, with your photo
+        .overlay {
+            if morning.showing {
+                MorningView(go: { p in
+                    withAnimation(.easeInOut(duration: 0.35)) { morning.showing = false }
+                    if trip.phase == .idle {
+                        if trip.direction != .toSchool { trip.pick(.toSchool) }
+                        go.open(to: .buas, from: trip.lastFix, deadline: p.beThere, label: "your \(Fmt.hhmm(p.classStart)) class")
+                    }
+                })
+                .transition(.opacity)
+                .zIndex(5)
+            }
+        }
+        .animation(.easeInOut(duration: 0.35), value: morning.showing)
         // notifications pop up inside the app too, while it's open
         .overlay(alignment: .top) {
             if let n = notices.current {
@@ -1488,7 +1504,7 @@ struct RideView: View {
         rideStats(eta: eta).padding(.horizontal, 14)
         if !trip.stopMarks.isEmpty || trip.legTo != nil { stopChips.padding(.horizontal, 14).padding(.top, 10) }
         if trip.phase == .awake {
-            Text(trip.ringAtStop ? "You’re awake. It rings once more at the stop." : "You’re awake. Get your things ready.")
+            Text(trip.ringAtStop ? "You’re awake. A chime when you’re there." : "You’re awake. Get your things ready.")
                 .font(HWFont.body(13, bold: true)).foregroundStyle(Paper.late).frame(maxWidth: .infinity).padding(.top, 8)
         }
         if let line = afterLine { Text(line).font(HWFont.body(12)).foregroundStyle(Paper.muted).frame(maxWidth: .infinity).multilineTextAlignment(.center).padding(.horizontal, 14).padding(.top, 8) }
@@ -1928,6 +1944,10 @@ struct SettingsView: View {
                     } footer: { Text("Fastest trip with the map and notifications, being recognised on the bus, the ride ring, the alarm and arriving, all pretend.") }
                 }
                 SchoolAlarmSection()
+                MorningSection(preview: {
+                    dismissSettings()
+                    Task { @MainActor in try? await Task.sleep(nanoseconds: 500_000_000); Morning.shared.showing = true }
+                })
                 FreezeSection()
                 Section {
                     Toggle(isOn: $trip.autoStart) { label("Start trips by itself", "Notices when you leave your stop or station on a bus or train, and starts the alarm. Needs location set to Always.") }
@@ -1936,7 +1956,7 @@ struct SettingsView: View {
                     }
                     Toggle(isOn: $trip.announce) { label("Station announcement", "A jingle and a voice that names your stop, before the alarm.") }
                     Toggle(isOn: $trip.quietWhenInUse) { label("Just a notification when I’m on my phone", "If your phone is unlocked and in use when it would ring, you’re awake: you get one notification instead of the alarm. Locked, it rings as usual. (Only with a passcode on your phone.)") }
-                    Toggle(isOn: $trip.ringAtStop) { label("Ring again at the stop", "A second alarm when you arrive, in case you dozed off again.") }
+                    Toggle(isOn: $trip.ringAtStop) { label("Chime at the stop", "The station jingle, the announcement and a notification when you arrive. No second alarm to stop: the leg ends by itself.") }
                     Toggle(isOn: $trip.autoHome) { label("Switch to Home at school", "When you reach BUas, the app switches to going home once that day. Switch back whenever you like.") }
                     Toggle(isOn: $trip.movingStation) { label("Moving station", "The station and train behind the home and ride screens. It pauses when the screen is off. Off shows a still picture.") }
                 } header: { Text("Trips") }

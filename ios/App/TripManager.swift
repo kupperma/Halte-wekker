@@ -328,6 +328,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         always = location.authorizationStatus == .authorizedAlways
         Task { await NoticeLog.shared.collectDelivered() }       // off the lock screen, into the app's list
         Task { await SchoolAlarm.shared.refresh(force: true) }    // the timetable may have changed: plan the school alarm again
+        Morning.shared.checkAfterAlarm()                          // just woke up from the school alarm: the morning screen
         if let a = awaySince, Date().timeIntervalSince(a) > 30 * 60 { guessDirection = true }
         awaySince = nil
         followClock()
@@ -385,7 +386,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         if phase == .sleeping && good && d <= wakeKm * 1000 {
             if Date().timeIntervalSince(legStart) < 20 { phase = .awake; forceArrival = true } else { ring(approach: true) }
         } else if phase == .awake && d <= arriveM && loc.horizontalAccuracy <= 600 {
-            if ringAtStop || forceArrival { ring(approach: false) } else { legDone() }
+            if ringAtStop || forceArrival { arrive() } else { legDone() }
         }
         refreshEta(force: false)
         pushActivity(force: false)
@@ -393,6 +394,22 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     }
 
     // MARK: alarm + announcement
+
+    /// At the stop: the jingle and the announcement once, and a notification. The leg ends by itself: no second alarm.
+    private func arrive() {
+        let place = leg?.to.short ?? "your stop"
+        let text = announcement(approach: false)
+        let then = nextText
+        legDone()
+        sound.chime(announcement: text)
+        let c = UNMutableNotificationContent()
+        c.title = "You’re at \(place)"
+        c.body = then ?? (phase == .finished ? "Get off here: your trip is done." : "Get off here.")
+        c.sound = .default
+        c.interruptionLevel = .timeSensitive
+        c.userInfo = ["kind": "ok"]
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "arrived-\(Int(Date().timeIntervalSince1970))", content: c, trigger: nil)) { _ in }
+    }
 
     private func announcement(approach: Bool) -> String? {
         guard announce, let leg else { return nil }

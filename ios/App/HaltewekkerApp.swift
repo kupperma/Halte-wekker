@@ -27,6 +27,7 @@ struct HaltewekkerApp: App {
                     let t = trip
                     near.onPosition = { t.guessFromPlace($0); t.maybeAutoHome($0) }
                     Task { await NoticeLog.shared.collectDelivered() }
+                    Morning.shared.checkAfterAlarm()
                 }
         }
         .backgroundTask(.appRefresh(SchoolAlarm.backgroundId)) {

@@ -75,6 +75,29 @@ final class AlarmSound: NSObject, AVSpeechSynthesizerDelegate {
         }
     }
 
+    /// At the stop: the jingle and the announcement once, and a buzz. No alarm after it, nothing to stop.
+    func chime(announcement: String?) {
+        stop()
+        let s = AVAudioSession.sharedInstance()
+        try? s.setCategory(.playback, mode: .spokenAudio, options: [.mixWithOthers, .duckOthers])
+        try? s.setActive(true)
+        AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
+        jingle = try? AVAudioPlayer(data: Synth.wav(Synth.jingle()))
+        jingle?.play()
+        guard let text = announcement, !text.isEmpty else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) { [weak self] in self?.stop() }
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+            guard let self else { return }
+            let u = AVSpeechUtterance(string: text)
+            u.voice = Self.voice
+            u.rate = 0.48; u.pitchMultiplier = 1.05; u.volume = 1
+            self.afterSpeech = { [weak self] in self?.stop() }
+            self.speech.speak(u)
+        }
+    }
+
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in let f = self?.afterSpeech; self?.afterSpeech = nil; f?() }
     }

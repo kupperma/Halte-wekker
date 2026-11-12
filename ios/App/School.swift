@@ -375,11 +375,13 @@ enum WakeAlarm {
         #if canImport(AlarmKit)
         if #available(iOS 26.0, *), await requestPermission() {
             let stop = AlarmButton(text: "Stop", textColor: .white, systemImageName: "stop.circle.fill")
-            let alert = AlarmPresentation.Alert(title: LocalizedStringResource(stringLiteral: title), stopButton: stop)
+            // Open: stops it and opens the app on your morning screen
+            let open = AlarmButton(text: "Open", textColor: .black, systemImageName: "sun.max.fill")
+            let alert = AlarmPresentation.Alert(title: LocalizedStringResource(stringLiteral: title), stopButton: stop, secondaryButton: open, secondaryButtonBehavior: .custom)
             let attributes = AlarmAttributes<WakeMetadata>(presentation: AlarmPresentation(alert: alert), metadata: WakeMetadata(), tintColor: Color(hex: 0xF0D722))
             let id = UUID()
             do {
-                _ = try await AlarmManager.shared.schedule(id: id, configuration: .alarm(schedule: .fixed(date), attributes: attributes))
+                _ = try await AlarmManager.shared.schedule(id: id, configuration: .alarm(schedule: .fixed(date), attributes: attributes, secondaryIntent: OpenMorningIntent()))
                 return id.uuidString
             } catch {}
         }
