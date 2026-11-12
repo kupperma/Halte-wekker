@@ -20,7 +20,7 @@ enum BoardInk {
     static let amberDim = Color(hex: 0x8A5A1A)
     static let amberSoft = Color(hex: 0xD08A2A)
     static let led = Color(hex: 0x07070A)
-    static let strip = Color(hex: 0x1F4FA0)
+    static let strip = Color(hex: 0x100C07)          // the LED board's header: warm black
     static let blueTop = Color(hex: 0x1D55C8)
     static let blueBottom = Color(hex: 0x0F3EA8)
     static let band = Color(hex: 0x0B2F86)
@@ -80,17 +80,19 @@ struct LEDStrip: View {
             let k = g.size.width / 346
             let stripH = g.size.height * 0.16
             VStack(spacing: 0) {
+                // the header: warm black with amber letters and a thin amber rule, part of the same LED board
                 HStack {
                     Text("Departures")
                     Spacer(minLength: 4)
                     Text(title)
                 }
-                .font(BoardInk.sans(10.5 * k)).foregroundStyle(.white).lineLimit(1)
+                .font(BoardInk.sans(10.5 * k)).foregroundStyle(BoardInk.amber).lineLimit(1)
+                .shadow(color: BoardInk.amber.opacity(0.7), radius: 2 * k)
                 .padding(.horizontal, 8 * k)
                 .frame(height: stripH)
                 .frame(maxWidth: .infinity)
                 .background(BoardInk.strip)
-                .overlay(alignment: .top) { Color(hex: 0x5F8FD8).frame(height: max(1, stripH * 0.08)) }
+                .overlay(alignment: .bottom) { BoardInk.amber.opacity(0.55).frame(height: max(1, stripH * 0.06)) }
                 TimelineView(.periodic(from: .now, by: 8)) { tl in
                     let pages = max(1, (rows.count + perPage - 1) / perPage)
                     let page = Int(tl.date.timeIntervalSinceReferenceDate / 8) % pages

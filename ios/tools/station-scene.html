@@ -935,8 +935,10 @@ function ledA3(x,W,H){ledPanel(x,W,H,362,95,q=>{q.font='bold 8px '+MONO;q.fillSt
     q.font='bold 8px '+MONO;q.fillStyle=kind==='gone'?AMBD:'#d08a2a';q.fillText(via.split(' · ').slice(0,2).join(', '),120,y+1);q.fillStyle=kind==='gone'?AMBD:AMB;q.font='bold 9px '+MONO;q.fillText(pl,282,y);
     q.font='bold 8px '+MONO;q.fillText(kind==='cancel'?'Cancelled':kind==='gone'?'Departed':exp?exp:'On time',306,y+1);});
 });}
-function stripA(w,h,left,right){return mk(w,h,(x,W,H)=>{x.fillStyle='#1f4fa0';x.fillRect(0,0,W,H);x.fillStyle='#5f8fd8';x.fillRect(0,0,W,Math.max(4,H*.07));x.fillStyle='#fff';x.font=`700 ${Math.round(H*.55)}px ${SANS}`;x.textBaseline='middle';x.fillText(left,22,H*.56);
-  if(right){const [t,at]=right;x.textAlign='left';x.fillText(t,W*at,H*.56);}});}
+// the header over the LED strip: warm black with amber letters and a thin amber rule, part of the same board
+function stripA(w,h,left,right){return mk(w,h,(x,W,H)=>{x.fillStyle='#100c07';x.fillRect(0,0,W,H);x.fillStyle='rgba(255,180,58,.55)';x.fillRect(0,H-Math.max(3,H*.06),W,Math.max(3,H*.06));
+  x.save();x.shadowColor='rgba(255,170,50,.8)';x.shadowBlur=H*.25;x.fillStyle='#ffb43a';x.font=`700 ${Math.round(H*.55)}px ${SANS}`;x.textBaseline='middle';x.fillText(left,22,H*.5);
+  if(right){const [t,at]=right;x.textAlign='left';x.fillText(t,W*at,H*.5);}x.restore();});}
 // the planner, compact (A2) and tall with "your trip" on top (A3)
 function plannerCompact(x,W,H){const k=W/346;blueBg(x,W,H);tabs(x,k,W,1);let y=34*k;headBar(x,k,346,y,'Local bus services','Veghel');y+=30*k;
   const s=BUS_STOPS[0];stopTitle(x,k,y,s.stop);y+=15*k;colLabels(x,k,y,[['Walk time',10],['Route',58],['Destination',100],['Due',262,'right'],['Time',336,'right']]);y+=15*k;s.rows.forEach((r,i)=>{busRow(x,k,346,y,r,i===0?s.walk:'');y+=23*k;});
