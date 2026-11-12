@@ -39,7 +39,7 @@ extension HomeSection {
     static let board: [HomeSection] = [.fastest, .lines, .planned, .more]
     var tab: String {
         switch self {
-        case .fastest: return "FASTEST"
+        case .fastest: return "TRIPS"
         case .lines: return "ALL LINES"
         case .planned: return "PLANNED"
         case .more: return "MORE"

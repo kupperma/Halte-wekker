@@ -111,6 +111,10 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     }
     func km(for l: Leg) -> Double { kmMem["\(l.mode.rawValue):\(l.to.key)"] ?? (l.mode == .bus ? busKm : trainKm) }
     var here: CLLocationCoordinate2D? { location.location?.coordinate }
+    /// Your last GPS fix.
+    var lastFix: CLLocation? { samples.last ?? location.location }
+    /// The Fastest trip screen is open: it needs GPS (also locked) to plan from where you are and notice when you get on.
+    private(set) var going = false
 
     private static func savedDirection() -> Direction {
         let d = UserDefaults.standard
@@ -151,6 +155,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         DispatchQueue.main.async { [weak self] in self?.updateKeepAlive() }
         music.onChange = { [weak self] in self?.pushActivity(force: true) }
         LineWatchStore.shared.onChange = { [weak self] in self?.updateKeepAlive() }
+        GoStore.shared.trip = self
         AlarmControl.stop = { [weak self] in self?.stopAlarm() }
         // "Stop alarm" right on the alarm notification.
         let stop = UNNotificationAction(identifier: "STOP", title: "Stop alarm", options: [])
@@ -266,7 +271,13 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     /// and notices when you get on that bus.
     func updateKeepAlive() {
         guard phase == .idle else { return }
-        if !LineWatchStore.shared.watches.isEmpty {
+        if going {
+            location.desiredAccuracy = kCLLocationAccuracyBest; location.distanceFilter = 10
+            location.allowsBackgroundLocationUpdates = true
+            location.showsBackgroundLocationIndicator = true
+            if location.authorizationStatus == .notDetermined { location.requestWhenInUseAuthorization() }
+            location.startUpdatingLocation()
+        } else if !LineWatchStore.shared.watches.isEmpty {
             location.desiredAccuracy = kCLLocationAccuracyHundredMeters; location.distanceFilter = 30
             location.allowsBackgroundLocationUpdates = true
             location.showsBackgroundLocationIndicator = true
@@ -276,6 +287,12 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             location.stopUpdatingLocation()
             location.allowsBackgroundLocationUpdates = false
         }
+    }
+
+    /// The Fastest trip screen opened or closed.
+    func setGo(_ on: Bool) {
+        going = on
+        updateKeepAlive()
     }
 
     /// When the app comes back to the screen: start the Live Activity if a trip started by itself in the background.
@@ -463,7 +480,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     }
 
     /// Compares where you've been in the last minutes with where every nearby bus or train should have been.
-    private func matchVehicle(mode: Mode?, excluding: Set<String> = []) async -> (vehicle: Vehicle, meters: Double)? {
+    func matchVehicle(mode: Mode?, excluding: Set<String> = []) async -> (vehicle: Vehicle, meters: Double)? {
         let recent = samples.filter { $0.timestamp > Date().addingTimeInterval(-150) && $0.horizontalAccuracy < 150 }
         guard let last = recent.last, recent.count >= 2 else { return nil }
         let speed = max(last.speed, recent.first.map { last.distance(from: $0) / max(1, last.timestamp.timeIntervalSince($0.timestamp)) } ?? 0)

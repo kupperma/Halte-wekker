@@ -4,10 +4,12 @@ import SwiftUI
 struct RootView: View {
     @EnvironmentObject var trip: TripManager
     @EnvironmentObject var watch: WatchStore
+    @EnvironmentObject var go: GoStore
     @State private var browsing = false         // at a change: looking at the map and the boards for a bit
     var body: some View {
         Group {
             switch trip.phase {
+            case .idle where go.isOpen: GoView().transition(.opacity)
             case .idle: HomeView()
             case .alarm: AlarmView()
             case .transfer where browsing:
@@ -16,7 +18,11 @@ struct RootView: View {
             default: RideView()
             }
         }
-        .onChange(of: trip.phase) { _, p in if p != .transfer { browsing = false } }
+        .onChange(of: trip.phase) { _, p in
+            if p != .transfer { browsing = false }
+            if p != .idle && go.isOpen { go.close() }        // a trip started: the ride screen takes over
+        }
+        .animation(.easeInOut(duration: 0.35), value: go.isOpen)
         .overlay {
             if let a = watch.alert {
                 PlatformAlertView(alert: a, pal: .of(home: trip.direction == .home)) { watch.dismiss() }.transition(.opacity)
@@ -66,6 +72,7 @@ struct HomeView: View {
     @EnvironmentObject var stops: StopsStore
     @EnvironmentObject var scores: ScoreBook
     @EnvironmentObject var lines: LineWatchStore
+    @EnvironmentObject var goStore: GoStore
     @Environment(\.scenePhase) private var scene
     @State private var settings = false
     @State private var planning = false
@@ -158,6 +165,8 @@ struct HomeView: View {
     /// Pick a line on the map: step back from the wall and walk over to the boards.
     private func go(_ s: HomeSection) {
         guard stage == .map else { return }
+        // Fastest trip: straight to the screen that gets you there (not the boards)
+        if s == .fastest && trip.phase == .idle { openGo(); return }
         section = s
         picked = nil
         if s == .more { open.insert("scores") }
@@ -172,6 +181,11 @@ struct HomeView: View {
                 planning = true
             }
         }
+    }
+
+    /// The hands-free Fastest trip screen, to where you're going now.
+    private func openGo() {
+        withAnimation(.easeInOut(duration: 0.35)) { goStore.open(to: live.destination(trip.direction), from: near.position) }
     }
 
     /// Back to the map: walk back over to the wall.
@@ -441,6 +455,22 @@ struct HomeView: View {
     /// "Fastest" on the planner, in the same style as All lines: pick one of the next connections, see it ride by ride
     /// (tap a ride for its page), wake up for it, or start one of your routes.
     @ViewBuilder private var boardFastestContent: some View {
+        if trip.phase == .idle {
+            Button(action: openGo) {
+                HStack(spacing: 8) {
+                    Image(systemName: "bolt.fill")
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("FASTEST TRIP · HANDS-FREE").font(BoardInk.sans(12)).tracking(0.6)
+                        Text("Shows what to take, watches it, starts by itself").font(BoardInk.sans(10, .regular)).opacity(0.85)
+                    }
+                    Spacer(minLength: 4)
+                    Image(systemName: "chevron.right").font(.system(size: 11, weight: .bold))
+                }
+                .foregroundStyle(.white).padding(.horizontal, 10).padding(.vertical, 8)
+                .background(Color(hex: 0x2F9E5B), in: RoundedRectangle(cornerRadius: 4))
+            }
+            .buttonStyle(.plain)
+        }
         if live.next.isEmpty {
             Text(live.nextError ?? "Finding your next connections…").font(BoardInk.sans(12, .regular)).foregroundStyle(Color.white.opacity(0.85))
         } else {
@@ -1269,64 +1299,128 @@ struct RideView: View {
     // MARK: on board
 
     @ViewBuilder private var riding: some View {
-        Spacer()
-        legKicker
-        Text(trip.vehicle == nil ? "NOW RIDING" : trip.pickedByHand ? "YOU PICKED" : "YOU’RE ON").font(HWFont.body(11)).tracking(1.8).foregroundStyle(HWPalette.ink.opacity(0.75)).padding(.top, 8)
-        Text(trip.vehicle.map { "\($0.title) to \(trip.leg?.to.short ?? "")" } ?? (trip.leg?.title ?? ""))
-            .font(HWFont.display(24)).foregroundStyle(HWPalette.ink)
-        if trip.vehicle == nil { Text("Looking for the bus or train you’re on…").font(HWFont.body(12)).foregroundStyle(HWPalette.muted) }
-        let parts = trip.distance.map { Fmt.distanceParts($0) } ?? ("–", "")
-        let extras = (music.song == nil ? 0 : 1) + (trip.vehicle == nil ? 0 : 1)
-        VStack(spacing: 4) {
-            Text(parts.0).font(HWFont.display(extras == 0 ? 104 : extras == 1 ? 88 : 74)).foregroundStyle(HWPalette.ink).monospacedDigit()
-                .shadow(color: pal.accent.opacity(0.45), radius: 22).contentTransition(.numericText())
-            Text("\(parts.1.uppercased()) TO \((trip.leg?.to.short ?? "").uppercased())").font(HWFont.display(13)).tracking(3).foregroundStyle(pal.accent)
+        let v = trip.vehicle
+        let to = trip.leg?.to.short ?? ""
+        let eta = trip.legArrival ?? trip.legTo
+        legKicker.padding(.top, 14)
+        Text(v == nil ? "NOW RIDING" : trip.pickedByHand ? "YOU PICKED" : "YOU’RE ON").font(HWFont.body(11)).tracking(1.8).foregroundStyle(HWPalette.ink.opacity(0.75)).padding(.top, 4)
+        HStack(spacing: 8) {
+            if let v {
+                Text(v.line).font(BoardInk.sans(17)).lineLimit(1).minimumScaleFactor(0.6)
+                    .foregroundStyle(v.isTrain ? Color(hex: 0x1A1A1A) : BoardInk.navy)
+                    .padding(.horizontal, 7).frame(minWidth: 40).frame(height: 28)
+                    .background(v.isTrain ? BoardInk.yellow : BoardInk.route, in: RoundedRectangle(cornerRadius: 4))
+            }
+            Text(v.map { "\($0.title) to \(to)" } ?? (trip.leg?.title ?? "")).font(HWFont.display(24)).foregroundStyle(HWPalette.ink).lineLimit(1).minimumScaleFactor(0.6)
         }
-        .frame(maxWidth: .infinity).padding(.top, 12)
-        // the metro drives along as you get closer, like a song's progress bar
+        if v == nil { Text("Looking for the bus or train you’re on…").font(HWFont.body(12)).foregroundStyle(HWPalette.muted).padding(.top, 2) }
+        Spacer(minLength: 8)
+        // the countdown: a ring that fills up as you go, with your bus or train riding round it
         TimelineView(.periodic(from: .now, by: 2)) { ctx in
-            MetroTrack(progress: trip.progress(at: ctx.date), home: trip.direction == .home, stops: trip.stopMarks.map(\.fraction)).frame(height: 34)
+            RideRing(progress: trip.progress(at: ctx.date), stops: trip.stopMarks.map(\.fraction), train: v?.isTrain ?? (trip.leg?.mode == .train), accent: pal.accent) {
+                ringCenter(eta: eta, to: to, now: ctx.date)
+            }
         }
         .id(trip.index)
-        .padding(.top, 10)
-        HStack {
-            Text(trip.legFrom.map { Fmt.hhmm($0) } ?? (trip.leg?.from.short ?? ""))
-            Spacer()
-            Text(trip.legTo.map { "\(Fmt.hhmm($0)) \(trip.leg?.to.short ?? "")" } ?? (trip.leg?.to.short ?? ""))
+        .frame(maxWidth: .infinity)
+        Spacer(minLength: 8)
+        rideStats(eta: eta)
+        if !trip.stopMarks.isEmpty || trip.legTo != nil { stopChips.padding(.top, 10) }
+        if trip.phase == .awake {
+            Text(trip.ringAtStop ? "You’re awake. It rings once more at the stop." : "You’re awake. Get your things ready.")
+                .font(HWFont.body(13, bold: true)).foregroundStyle(pal.accent).frame(maxWidth: .infinity).padding(.top, 8)
         }
-        .font(HWFont.body(11)).foregroundStyle(HWPalette.muted).padding(.top, 4)
-        if !trip.stopMarks.isEmpty { StopLabels(marks: trip.stopMarks, pal: pal).padding(.top, 4) }
-        Text(trip.phase == .awake ? (trip.ringAtStop ? "You’re awake. It rings once more at the stop." : "You’re awake. Get your things ready.")
-                                  : "It rings at \(Fmt.distance(trip.wakeKm * 1000)) from the stop.")
-            .font(HWFont.body(13)).foregroundStyle(HWPalette.muted).frame(maxWidth: .infinity).padding(.top, 8)
-        if trip.arrival != nil || trip.vehicle != nil {
-            VStack(alignment: .leading, spacing: 3) {
-                if let a = trip.arrival { Text("\(trip.finalName) around \(Fmt.hhmm(a))").font(HWFont.display(22)).foregroundStyle(HWPalette.ink) }
-                if let n = trip.nextText { Text(n).font(HWFont.body(12)).foregroundStyle(HWPalette.muted) }
-                if let v = trip.vehicle { vehicleLines(v) }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading).brass(pal, pad: 16).padding(.top, 14)
-        }
-        if let song = music.song { SongCard(song: song, pal: pal).padding(.top, 10) }
-        Spacer()
+        if let line = afterLine { Text(line).font(HWFont.body(12)).foregroundStyle(HWPalette.ink.opacity(0.85)).frame(maxWidth: .infinity).multilineTextAlignment(.center).padding(.top, 8) }
+        if let song = music.song { SongPill(song: song, pal: pal).padding(.top, 10) }
+        Spacer(minLength: 8)
     }
 
-    /// "On bus 305: arrives Eindhoven 08:12, in 14 min" · "Going 54 km/h · next stop Erp 07:58" · how it knows.
-    @ViewBuilder private func vehicleLines(_ v: Vehicle) -> some View {
-        let what = v.isTrain ? v.title : "bus \(v.line)"
-        if let la = trip.legArrival {
-            let m = Fmt.mins(la.timeIntervalSinceNow)
-            Text("On \(what): arrives \(trip.leg?.to.short ?? "") \(Fmt.hhmm(la)), \(m == 0 ? "now" : "in \(m) min")")
-                .font(HWFont.body(13, bold: true)).foregroundStyle(pal.accent)
-        } else {
-            Text("On \(what)").font(HWFont.body(13, bold: true)).foregroundStyle(pal.accent)
+    /// In the ring: the minutes to your stop (or the distance, before the times are known).
+    @ViewBuilder private func ringCenter(eta: Date?, to: String, now: Date) -> some View {
+        VStack(spacing: 2) {
+            if let eta, eta > now.addingTimeInterval(-120) {
+                let m = Fmt.mins(eta.timeIntervalSince(now))
+                Text("\(m)").font(HWFont.display(m >= 100 ? 64 : 82)).foregroundStyle(HWPalette.ink).monospacedDigit()
+                    .contentTransition(.numericText()).shadow(color: pal.accent.opacity(0.45), radius: 18)
+                Text("MIN TO \(to.uppercased())").font(HWFont.display(12)).tracking(2).foregroundStyle(pal.accent).lineLimit(1).minimumScaleFactor(0.6)
+                Text("there at \(Fmt.hhmm(eta))").font(HWFont.body(14)).foregroundStyle(HWPalette.ink.opacity(0.9)).padding(.top, 2)
+            } else {
+                let parts = trip.distance.map { Fmt.distanceParts($0) } ?? ("–", "")
+                Text(parts.0).font(HWFont.display(70)).foregroundStyle(HWPalette.ink).monospacedDigit()
+                    .contentTransition(.numericText()).shadow(color: pal.accent.opacity(0.45), radius: 18)
+                Text("\(parts.1.uppercased()) TO \(to.uppercased())").font(HWFont.display(12)).tracking(2).foregroundStyle(pal.accent).lineLimit(1).minimumScaleFactor(0.6)
+            }
         }
-        let speed = trip.speed.flatMap { $0 > 1 ? "Going \(Int(($0 * 3.6).rounded())) km/h" : nil }
-        let stop = trip.nextStop.flatMap { s in s.arrival.map { "next stop \(Fmt.place(s.name)) \(Fmt.hhmm($0))" } }
-        let line = [speed, stop].compactMap { $0 }.joined(separator: " · ")
-        if !line.isEmpty { Text(line.prefix(1).uppercased() + line.dropFirst()).font(HWFont.body(12)).foregroundStyle(HWPalette.ink.opacity(0.85)) }
-        Text(trip.pickedByHand ? "You picked it in the list." : trip.matchMeters.map { "Recognised: its live position is \($0) m from yours." } ?? "Recognised from its live position.")
-            .font(HWFont.body(11)).foregroundStyle(HWPalette.muted)
+        .frame(width: 180)
+    }
+
+    /// Three tiles under the ring: how far, how fast, the next stop.
+    private func rideStats(eta: Date?) -> some View {
+        let speed = trip.speed.flatMap { $0 > 1 ? "\(Int(($0 * 3.6).rounded())) km/h" : nil }
+        let next = trip.nextStop
+        let minutesInRing = eta.map { $0 > Date().addingTimeInterval(-120) } ?? false
+        return HStack(spacing: 8) {
+            // the ring shows the minutes: the distance goes here (or the other way round)
+            if minutesInRing, let d = trip.distance {
+                statTile(Fmt.distance(d), "to go")
+            } else if !minutesInRing, let a = trip.arrival {
+                statTile(Fmt.hhmm(a), "there around")
+            }
+            statTile(speed ?? "–", speed == nil ? "standing still" : "speed")
+            if let n = next, let t = n.arrival {
+                statTile(Fmt.hhmm(t), "next: \(Fmt.place(n.name))")
+            } else if let m = trip.matchMeters {
+                statTile("\(m) m", "recognised")
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func statTile(_ big: String, _ small: String) -> some View {
+        VStack(spacing: 1) {
+            Text(big).font(HWFont.display(19)).foregroundStyle(HWPalette.ink).lineLimit(1).minimumScaleFactor(0.6).monospacedDigit()
+            Text(small).font(HWFont.body(11)).foregroundStyle(HWPalette.muted).lineLimit(1).minimumScaleFactor(0.7)
+        }
+        .frame(maxWidth: .infinity).padding(.vertical, 9).padding(.horizontal, 6)
+        .background(Color.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.white.opacity(0.1), lineWidth: 1))
+    }
+
+    /// The stops along the way as chips you can scroll: the next one lit, the ones you passed faded, yours in yellow.
+    private var stopChips: some View {
+        let now = Date()
+        let marks = trip.stopMarks
+        let next = marks.firstIndex { ($0.time ?? .distantFuture) > now }
+        return ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(Array(marks.enumerated()), id: \.offset) { i, m in
+                        let passed = (m.time ?? .distantFuture) <= now
+                        Text("\(m.name)\(m.time.map { " " + Fmt.hhmm($0) } ?? "")").font(HWFont.body(12, bold: i == next))
+                            .foregroundStyle(i == next ? Color(hex: 0x2A1208) : HWPalette.ink.opacity(passed ? 0.45 : 0.9))
+                            .padding(.horizontal, 10).padding(.vertical, 6)
+                            .background(i == next ? AnyShapeStyle(pal.accent) : AnyShapeStyle(Color.white.opacity(0.1)), in: Capsule())
+                            .id(i)
+                    }
+                    Text("\(trip.leg?.to.short ?? "")\(trip.legTo.map { " " + Fmt.hhmm($0) } ?? "")").font(HWFont.body(12, bold: true))
+                        .foregroundStyle(Color(hex: 0x2A1A00)).padding(.horizontal, 10).padding(.vertical, 6)
+                        .background(BoardInk.yellow, in: Capsule())
+                }
+            }
+            .onAppear { if let next { proxy.scrollTo(max(0, next - 1), anchor: .leading) } }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Stops along the way: " + marks.map { "\($0.name)\($0.time.map { " at " + Fmt.hhmm($0) } ?? "")" }.joined(separator: ", "))
+    }
+
+    /// After the ring: where the whole trip ends and when, the next leg, and how it knows the bus.
+    private var afterLine: String? {
+        var parts: [String] = []
+        if trip.legs.count > 1, let a = trip.arrival { parts.append("\(trip.finalName) around \(Fmt.hhmm(a))") }
+        if let n = trip.nextText { parts.append(n) }
+        if trip.pickedByHand { parts.append("You picked it in the list") }
+        else if trip.nextStop != nil, let m = trip.matchMeters { parts.append("Recognised: \(m) m from you") }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 }
 
@@ -1398,6 +1492,77 @@ struct SongCard: View {
                 .symbolEffect(.variableColor.iterative, isActive: song.playing)
         }
         .brass(pal, pad: 12)
+    }
+}
+
+/// What you're listening to, small, under the ring.
+struct SongPill: View {
+    let song: Song
+    let pal: HWPalette
+    var body: some View {
+        HStack(spacing: 10) {
+            Group {
+                if let img = song.image { Image(uiImage: img).resizable().scaledToFill() }
+                else if let u = song.artURL {
+                    AsyncImage(url: u) { $0.resizable().scaledToFill() } placeholder: { Color.white.opacity(0.15) }
+                } else { ZStack { Color.white.opacity(0.15); Image(systemName: "music.note").font(.system(size: 13)).foregroundStyle(pal.accent) } }
+            }
+            .frame(width: 36, height: 36).clipShape(Circle())
+            .overlay(Circle().stroke(Color.white.opacity(0.3), lineWidth: 1))
+            VStack(alignment: .leading, spacing: 1) {
+                Text(song.title).font(HWFont.display(14)).foregroundStyle(HWPalette.ink).lineLimit(1)
+                Text([song.artist, song.app].filter { !$0.isEmpty }.joined(separator: " · ")).font(HWFont.body(11)).foregroundStyle(HWPalette.muted).lineLimit(1)
+            }
+            Spacer(minLength: 4)
+            Image(systemName: song.playing ? "waveform" : "pause.fill").font(.system(size: 14, weight: .semibold)).foregroundStyle(pal.accent)
+                .symbolEffect(.variableColor.iterative, isActive: song.playing)
+                .padding(.trailing, 6)
+        }
+        .padding(6)
+        .background(Color.white.opacity(0.1), in: Capsule())
+        .overlay(Capsule().stroke(Color.white.opacity(0.12), lineWidth: 1))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(song.playing ? "Now playing" : "Paused"): \(song.title)\(song.artist.isEmpty ? "" : " by \(song.artist)")")
+    }
+}
+
+/// The countdown ring on the ride screen: it fills up as you go, with a little bus (or train) riding round it to where
+/// you are now, and a dot for each stop along the way.
+struct RideRing<Center: View>: View {
+    let progress: Double
+    let stops: [Double]
+    let train: Bool
+    let accent: Color
+    var size: CGFloat = 250
+    @ViewBuilder let center: () -> Center
+    var body: some View {
+        let p = min(1, max(0, progress))
+        let line: CGFloat = 14
+        let r = (size - line) / 2
+        ZStack {
+            Circle().fill(RadialGradient(colors: [Color(hex: 0x1C0F0C).opacity(0.85), Color(hex: 0x0A0606).opacity(0.75)], center: .center, startRadius: 10, endRadius: size / 2))
+                .padding(line)
+            Circle().stroke(Color.white.opacity(0.14), lineWidth: line)
+            Circle().trim(from: 0, to: p).stroke(accent, style: StrokeStyle(lineWidth: line, lineCap: .round)).rotationEffect(.degrees(-90))
+                .shadow(color: accent.opacity(0.5), radius: 8)
+            ForEach(Array(stops.enumerated()), id: \.offset) { _, f in
+                Circle().fill(f <= p ? Color(hex: 0x2A1208) : Color.white.opacity(0.9)).frame(width: 7, height: 7)
+                    .offset(y: -r).rotationEffect(.degrees(f * 360))
+            }
+            // the bus or train, upright, at the end of the filled part
+            Image(systemName: train ? "tram.fill" : "bus.fill").font(.system(size: 15, weight: .bold)).foregroundStyle(Color(hex: 0x2A1208))
+                .frame(width: 34, height: 34).background(Color.white, in: Circle())
+                .overlay(Circle().stroke(accent, lineWidth: 3))
+                .shadow(color: .black.opacity(0.45), radius: 4, y: 2)
+                .rotationEffect(.degrees(-p * 360))
+                .offset(y: -r)
+                .rotationEffect(.degrees(p * 360))
+            center()
+        }
+        .frame(width: size, height: size)
+        .animation(.easeInOut(duration: 2), value: p)
+        .accessibilityElement(children: .combine)
+        .accessibilityValue("Trip \(Int(p * 100)) percent done")
     }
 }
 
