@@ -177,6 +177,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         music.onChange = { [weak self] in self?.pushActivity(force: true) }
         LineWatchStore.shared.onChange = { [weak self] in self?.updateKeepAlive() }
         GoStore.shared.trip = self
+        SchoolAlarm.shared.trip = self
         NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in self?.awaySince = Date() }
         }
@@ -324,6 +325,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     func appBecameActive() {
         always = location.authorizationStatus == .authorizedAlways
         Task { await NoticeLog.shared.collectDelivered() }       // off the lock screen, into the app's list
+        Task { await SchoolAlarm.shared.refresh(force: true) }    // the timetable may have changed: plan the school alarm again
         if let a = awaySince, Date().timeIntervalSince(a) > 30 * 60 { guessDirection = true }
         awaySince = nil
         followClock()

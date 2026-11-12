@@ -173,6 +173,7 @@ struct HomeView: View {
                     near.locate(ask: true)                       // where you are decides where your trips start
                     await live.refresh(trip.direction, at: near.position)
                     await planner.refresh()
+                    await SchoolAlarm.shared.refresh()
                     await watch.check()
                 }
                 try? await Task.sleep(nanoseconds: 30_000_000_000)
@@ -254,6 +255,9 @@ struct HomeView: View {
         return "Every bus and train, live"
     }
     private var plannedSub: String {
+        if let n = SchoolAlarm.shared.next, SchoolAlarm.shared.on, let a = n.alarm, a > Date() {
+            return "Alarm \(SchoolAlarm.dayWord(a)) \(Fmt.hhmm(a)) · first class \(Fmt.hhmm(n.classStart))"
+        }
         if let a = planner.arrive {
             return "\(a.dayLabel) · \(a.out ? "BUas" : "home") by \(a.time)" + (planner.arriveChosen.map { " · leave \(Fmt.hhmm($0.start))" } ?? "")
         }
@@ -832,6 +836,8 @@ struct HomeView: View {
     }
 
     @ViewBuilder private var plannedContent: some View {
+        // the school alarm: from your timetable, the trip to your first class and the alarm before it
+        SchoolAlarmCard(setUp: { settings = true })
         // be there by a time: the trip that leaves the latest and still gets you there
         if planner.arrive != nil {
             ArrivePass(edit: { planByArrival = true; planning = true }, wake: { t in
@@ -1878,6 +1884,7 @@ struct SettingsView: View {
                         }
                     } footer: { Text("Fastest trip with the map and notifications, being recognised on the bus, the ride ring, the alarm and arriving, all pretend.") }
                 }
+                SchoolAlarmSection()
                 Section {
                     Toggle(isOn: $trip.autoStart) { label("Start trips by itself", "Notices when you leave your stop or station on a bus or train, and starts the alarm. Needs location set to Always.") }
                     if trip.autoStart && !trip.always {

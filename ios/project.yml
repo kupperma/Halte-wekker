@@ -5,8 +5,8 @@ options:
     iOS: "17.0"
 settings:
   base:
-    MARKETING_VERSION: "0.10.6"
-    CURRENT_PROJECT_VERSION: "45"
+    MARKETING_VERSION: "0.11.0"
+    CURRENT_PROJECT_VERSION: "46"
     SWIFT_VERSION: "5.0"
     CODE_SIGNING_ALLOWED: "NO"
     CODE_SIGNING_REQUIRED: "NO"
@@ -28,6 +28,10 @@ targets:
         NSLocationAlwaysAndWhenInUseUsageDescription: Haltewekker keeps following you while the phone is locked, so it can wake you before your stop.
         NSSupportsLiveActivities: true
         NSAppleMusicUsageDescription: Haltewekker shows the song you’re playing on the ride screen and the lock screen.
+        NSCalendarsFullAccessUsageDescription: Haltewekker reads your school timetable (only the calendars you pick) to plan the trip to your first class and set your wake-up alarm.
+        NSCalendarsUsageDescription: Haltewekker reads your school timetable (only the calendars you pick) to plan the trip to your first class and set your wake-up alarm.
+        NSAlarmKitUsageDescription: Haltewekker wakes you for school, an hour before you have to leave for your first class.
+        UIDesignRequiresCompatibility: true
         CFBundleURLTypes:
           - CFBundleURLName: nl.haltewekker.app
             CFBundleURLSchemes: [haltewekker]
