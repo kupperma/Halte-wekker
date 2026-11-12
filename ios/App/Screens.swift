@@ -53,6 +53,7 @@ struct HomeView: View {
     @State private var choosingDestination = false
     @State private var nearShift: [String: Int] = [:]     // how far back or forward you've gone at each stop near you
     @State private var walkTo: WalkTarget?                 // the walk to a stop, on a map
+    @State private var liveTrack: LiveTrackTarget?         // a bus or train you tapped, live on a map
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -87,6 +88,7 @@ struct HomeView: View {
         .onChange(of: stage) { _, s in Handoff.fromBoards = s == .station }
         .onChange(of: near.position?.coordinate.latitude) { _, _ in Task { await live.refresh(trip.direction, at: near.position) } }
         .sheet(item: $walkTo) { WalkMapSheet(target: $0).presentationDetents([.large]) }
+        .sheet(item: $liveTrack) { LiveBusSheet(target: $0).presentationDetents([.large]) }
         .sheet(isPresented: $choosingDestination) {
             DestinationSheet { d in
                 live.go(to: d)
@@ -337,7 +339,7 @@ struct HomeView: View {
         case .train(let t):
             let f = t.trip.first
             TrainPage(p: t, info: ns.rail(f), tracked: watch.isWatched(f, from: t.from), nsMissing: ns.available == false, pal: pal,
-                      walk: walkAction(f), back: { withAnimation(.easeInOut(duration: 0.2)) { picked = nil } },
+                      walk: walkAction(f), liveMap: liveAction(f), back: { withAnimation(.easeInOut(duration: 0.2)) { picked = nil } },
                       track: { _ = watch.toggle(t.trip, from: t.from, to: t.to) })
         case .bus(let d):
             let ride = live.boardRides["\(d.stopId)|\(d.tripId)"]
@@ -349,6 +351,8 @@ struct HomeView: View {
                     train: isTrain,
                     walk: live.nearStops.first(where: { $0.id == d.stopId }).map { s in { walkTo = WalkTarget(name: Fmt.place(d.stopName), lat: s.lat, lon: s.lon, rail: isTrain,
                         catchText: "the \(isTrain ? Transit.trainLabel(d.line) : d.line) to \(Fmt.place(d.headsign)) at \(Fmt.hhmm(d.time))", leaves: d.time) } },
+                    liveMap: { liveTrack = LiveTrackTarget(tripId: d.tripId, line: isTrain ? Transit.trainLabel(d.line) : d.line, headsign: d.headsign,
+                                                           stopName: d.stopName, time: d.cancelled ? d.scheduled : d.time, rail: isTrain) },
                     tracked: lines.isWatched(stopId: d.stopId, line: d.line, headsign: d.headsign),
                     back: { withAnimation(.easeInOut(duration: 0.2)) { picked = nil } },
                     track: { lines.toggle(stopId: d.stopId, stopName: d.stopName, line: d.line, headsign: d.headsign, tripId: d.tripId, delay: d.live ? d.delay : nil) })
@@ -358,21 +362,21 @@ struct HomeView: View {
                     time: f.departure, scheduled: f.scheduledDeparture, live: f.live, cancelled: f.cancelled, status: RideText.status(f, nil).text,
                     ride: "\(t.trip.rideLabel) · arrives \(Fmt.place(t.trip.last.toStop)) \(Fmt.hhmm(t.trip.last.arrival))",
                     rank: RankInfo.of(t.trip),
-                    walk: walkAction(f),
+                    walk: walkAction(f), liveMap: liveAction(f),
                     tracked: lines.isWatched(stopId: f.fromId, line: f.line, headsign: f.headsign),
                     back: { withAnimation(.easeInOut(duration: 0.2)) { picked = nil } },
                     track: { lines.toggle(stopId: f.fromId, stopName: f.fromStop, line: f.line, headsign: f.headsign, tripId: f.tripId, delay: f.live ? f.delay : nil) })
         case .ride(let r):
             if r.isTrain, let pt = trainTrip(r) {
                 TrainPage(p: pt, info: ns.rail(r), tracked: watch.isWatched(r, from: pt.from), nsMissing: ns.available == false, pal: pal,
-                          walk: walkAction(r), back: { withAnimation(.easeInOut(duration: 0.2)) { picked = nil } },
+                          walk: walkAction(r), liveMap: liveAction(r), back: { withAnimation(.easeInOut(duration: 0.2)) { picked = nil } },
                           track: { _ = watch.toggle(pt.trip, from: pt.from, to: pt.to) })
             } else {
                 BusPage(line: r.line, to: r.headsign.isEmpty ? Fmt.place(r.toStop) : r.headsign, stop: Fmt.place(r.fromStop),
                         time: r.departure, scheduled: r.scheduledDeparture, live: r.live, cancelled: r.cancelled, status: RideText.status(r, ns.rail(r)).text,
                         ride: "\(r.rideMinutes) min ride · arrives \(Fmt.place(r.toStop)) \(Fmt.hhmm(r.arrival))",
                         rank: RankInfo.of(r),
-                        walk: walkAction(r),
+                        walk: walkAction(r), liveMap: liveAction(r),
                         tracked: lines.isWatched(stopId: r.fromId, line: r.line, headsign: r.headsign),
                         back: { withAnimation(.easeInOut(duration: 0.2)) { picked = nil } },
                         track: { lines.toggle(stopId: r.fromId, stopName: r.fromStop, line: r.line, headsign: r.headsign, tripId: r.tripId, delay: r.live ? r.delay : nil) })
@@ -555,6 +559,11 @@ struct HomeView: View {
                           catchText: "the \(r.line) to \(Fmt.place(r.headsign.isEmpty ? r.toStop : r.headsign)) at \(Fmt.hhmm(r.departure))", leaves: r.departure)
     }
     private func walkAction(_ r: Ride) -> (() -> Void)? { walkTarget(r).map { w in { walkTo = w } } }
+    /// Where a ride's bus or train is now, on a live map (from the stop where you get on).
+    private func liveAction(_ r: Ride) -> () -> Void {
+        { liveTrack = LiveTrackTarget(tripId: r.tripId, line: r.line, headsign: r.headsign.isEmpty ? Fmt.place(r.toStop) : r.headsign,
+                                      stopName: r.fromStop, time: r.departure, rail: r.isTrain) }
+    }
 
     private func shiftButton(_ t: String, enabled: Bool, _ go: @escaping () -> Void) -> some View {
         Button { withAnimation(.easeInOut(duration: 0.2)) { go() } } label: {

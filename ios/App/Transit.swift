@@ -318,7 +318,34 @@ enum Transit {
         return out
     }
 
-    static func decodePolyline(_ s: String) -> [CLLocationCoordinate2D] {
+    /// A bus or train's whole trip with its live times and the road it takes, for the live map.
+    static func liveTrip(_ tripId: String) async -> LiveTrip? {
+        guard let json = try? await get("/v5/trip", [.init(name: "tripId", value: tripId)]) as? [String: Any],
+              let legs = json["legs"] as? [[String: Any]], !legs.isEmpty else { return nil }
+        var stops: [LiveTrip.Stop] = [], path: [CLLocationCoordinate2D] = [], live = false, line = "", head = ""
+        func stop(_ o: [String: Any]?) -> LiveTrip.Stop? {
+            guard let o, let la = o["lat"] as? Double, let lo = o["lon"] as? Double else { return nil }
+            return LiveTrip.Stop(name: (o["name"] as? String) ?? "", coordinate: .init(latitude: la, longitude: lo),
+                                 arrival: date(o["arrival"]), departure: date(o["departure"]),
+                                 scheduled: date(o["scheduledArrival"]) ?? date(o["scheduledDeparture"]))
+        }
+        for l in legs {
+            line = (l["routeShortName"] as? String) ?? line
+            head = (l["headsign"] as? String) ?? head
+            live = live || ((l["realTime"] as? Bool) ?? false)
+            if stops.isEmpty, let x = stop(l["from"] as? [String: Any]) { stops.append(x) }
+            for o in (l["intermediateStops"] as? [[String: Any]]) ?? [] { if let x = stop(o) { stops.append(x) } }
+            if let x = stop(l["to"] as? [String: Any]) { stops.append(x) }
+            if let g = l["legGeometry"] as? [String: Any], let pts = g["points"] as? String {
+                path += decodePolyline(pts, precision: (g["precision"] as? Int) ?? 5)
+            }
+        }
+        guard stops.count >= 2 else { return nil }
+        return LiveTrip(line: line, headsign: head, live: live, stops: stops, path: path)
+    }
+
+    static func decodePolyline(_ s: String, precision: Int = 5) -> [CLLocationCoordinate2D] {
+        let scale = pow(10.0, Double(precision))
         var pts: [CLLocationCoordinate2D] = [], lat = 0, lng = 0
         let b = Array(s.utf8); var i = 0
         while i < b.count {
@@ -333,7 +360,7 @@ enum Transit {
                 vals[k] = (r & 1) != 0 ? ~(r >> 1) : (r >> 1)
             }
             lat += vals[0]; lng += vals[1]
-            pts.append(.init(latitude: Double(lat) / 1e5, longitude: Double(lng) / 1e5))
+            pts.append(.init(latitude: Double(lat) / scale, longitude: Double(lng) / scale))
         }
         return pts
     }

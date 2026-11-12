@@ -127,10 +127,11 @@ struct WalkMapSheet: View {
 /// "Show the way" next to a stop, on the boards.
 struct WalkButton: View {
     var title = "Show the way"
+    var icon = "figure.walk"
     let go: () -> Void
     var body: some View {
         Button(action: go) {
-            Label(title, systemImage: "figure.walk").font(BoardInk.sans(11)).foregroundStyle(BoardInk.navy)
+            Label(title, systemImage: icon).font(BoardInk.sans(11)).foregroundStyle(BoardInk.navy)
                 .padding(.horizontal, 10).padding(.vertical, 5).background(Color.white, in: Capsule())
         }
         .buttonStyle(.plain)
