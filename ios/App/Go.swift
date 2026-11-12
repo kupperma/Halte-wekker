@@ -45,21 +45,37 @@ final class GoStore: ObservableObject {
     // MARK: open and close
 
     /// Open the screen and start watching the way to `d`.
-    func open(to d: Place, from loc: CLLocation?) {
+    func open(to d: Place, from loc: CLLocation?, deadline dl: Date? = nil, label: String? = nil, autoKey: String? = nil) {
         fallback = loc
+        deadline = dl; deadlineLabel = label; self.autoKey = autoKey
         isOpen = true
         begin(d)
+    }
+
+    /// A trip you planned (a class, a Be there by time): be there by this, leaving as late as possible.
+    @Published private(set) var deadline: Date?
+    @Published private(set) var deadlineLabel: String?     // "your 09:00 class"
+    private var autoKey: String?                             // opened by itself for this trip: closing it means not again
+
+    /// The app opened around the time to leave for a trip you planned: open this screen for it (once; not again after you
+    /// close it).
+    func openForPlan(to d: Place, from loc: CLLocation?, deadline dl: Date, label: String, key: String) {
+        guard !isOpen, UserDefaults.standard.string(forKey: "go.closedPlan") != key else { return }
+        open(to: d, from: loc, deadline: dl, label: label, autoKey: key)
     }
 
     /// Somewhere else to go (from the menu at the top).
     func retarget(_ d: Place) {
         guard isOpen, d != dest || !watching else { return }
+        if d != dest { deadline = nil; deadlineLabel = nil }          // somewhere else: not the planned trip any more
         begin(d)
     }
 
     /// Out of the screen: everything stops, and its notifications go.
     func close() {
         stopWatching()
+        if let k = autoKey { UserDefaults.standard.set(k, forKey: "go.closedPlan") }
+        autoKey = nil; deadline = nil; deadlineLabel = nil
         isOpen = false
         clearPosted()
         demoTask?.cancel(); demoTask = nil
@@ -130,18 +146,35 @@ final class GoStore: ObservableObject {
             return
         }
         let d = dest
-        let found = await Transit.tripsFrom(loc.coordinate, to: d, count: 8, keep: 8)
+        var found = await Transit.tripsFrom(loc.coordinate, to: d, count: 8, keep: 8)
+        if let dl = deadline {
+            // a planned trip: also the latest ones that still get you there in time
+            var seen = Set(found.map(\.id))
+            for b in d.ids {
+                let late = await Transit.plan(from: "\(loc.coordinate.latitude),\(loc.coordinate.longitude)", to: b, modes: nil, at: dl, count: 5, maxTransfers: 4, arriveBy: true)
+                found += late.filter { $0.first.departure >= now.addingTimeInterval(-60) && seen.insert($0.id).inserted }
+            }
+        }
         guard watching, dest == d else { return }
         // One empty answer keeps what you had (that hasn't left).
         let list = found.isEmpty ? ([best].compactMap { $0 } + others).filter { $0.first.departure > now } : found
         // The ones you can still make: not cancelled, and you'd have had to set off at most a minute and a half ago.
         let ok = list.filter { !$0.first.cancelled && $0.start >= now.addingTimeInterval(-90) }
         var pick = ok.min(by: Self.sooner)
-        // Stay with the one you're catching unless another gets you there at least a minute sooner.
+        if let dl = deadline {
+            // be there by a time: the one that leaves the latest and still makes it (or else the soonest there)
+            let onTime = ok.filter { $0.end <= dl.addingTimeInterval(60) }
+            pick = onTime.max(by: { ($0.start, -$0.rides.count) < ($1.start, -$1.rides.count) }) ?? pick
+        }
+        // Stay with the one you're catching unless another is clearly better: a minute sooner there (or, for a planned
+        // trip, still in time and leaving two minutes later).
         if let cur = best, let p = pick, p.first.tripId != cur.first.tripId,
-           let same = ok.filter({ $0.first.tripId == cur.first.tripId }).min(by: Self.sooner),
-           p.end > same.end.addingTimeInterval(-60) {
-            pick = same
+           let same = ok.filter({ $0.first.tripId == cur.first.tripId }).min(by: Self.sooner) {
+            if let dl = deadline {
+                if same.end <= dl.addingTimeInterval(60) && p.start < same.start.addingTimeInterval(120) { pick = same }
+            } else if p.end > same.end.addingTimeInterval(-60) {
+                pick = same
+            }
         }
         guard let p = pick else {
             if !found.isEmpty || best == nil {
@@ -196,6 +229,8 @@ final class GoStore: ObservableObject {
             tell("\(Self.title(o)) at \(Fmt.hhmm(o.scheduledDeparture)) is cancelled", "Take \(take) instead · \(dest.short) \(Fmt.hhmm(new.end))", kind: "cancelled")
         } else if old.start < now.addingTimeInterval(-90) {
             tell("Too late for \(Self.what(o))", "Take \(take) instead · \(dest.short) \(Fmt.hhmm(new.end))", kind: "late")
+        } else if let dl = deadline, new.start > old.start {
+            tell("You can leave later: \(Self.title(f)) at \(Fmt.hhmm(f.departure))", "Leave by \(Fmt.hhmm(new.start)) · still at \(dest.short) \(Fmt.hhmm(new.end)), in time for \(deadlineLabel ?? Fmt.hhmm(dl))", kind: "ok")
         } else {
             let oldNow = found.filter { $0.first.tripId == o.tripId }.min(by: { $0.end < $1.end }) ?? old
             let gain = Fmt.mins(oldNow.end.timeIntervalSince(new.end))
@@ -576,7 +611,7 @@ struct GoView: View {
             PaperBand(home: trip.direction == .home) {
                 HStack(alignment: .bottom) {
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(goingHome ? "Fastest way home" : "Fastest way to \(destWord)").font(BoardInk.sans(10)).tracking(1.6).textCase(.uppercase).opacity(0.85)
+                        Text(go.deadlineLabel.map { "For \($0)" } ?? (goingHome ? "Fastest way home" : "Fastest way to \(destWord)")).font(BoardInk.sans(10)).tracking(1.6).textCase(.uppercase).opacity(0.85)
                         Text("\(destWord) at \(Fmt.hhmm(t.end))").font(HWFont.display(26)).lineLimit(1).minimumScaleFactor(0.6)
                         Text("\(Fmt.rideText(Double(mins)))\(changes)").font(BoardInk.sans(11, .medium)).opacity(0.85)
                     }

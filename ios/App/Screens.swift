@@ -175,6 +175,7 @@ struct HomeView: View {
                     await planner.refresh()
                     await SchoolAlarm.shared.refresh()
                     await watch.check()
+                    autoGo()
                 }
                 try? await Task.sleep(nanoseconds: 30_000_000_000)
             }
@@ -182,6 +183,7 @@ struct HomeView: View {
         .onChange(of: scene) { _, s in
             if s == .active {
                 trip.appBecameActive()
+                autoGo()
                 Task { await live.refresh(trip.direction); await planner.refresh(); await watch.check(force: true) }
             }
         }
@@ -203,6 +205,43 @@ struct HomeView: View {
             try? await Task.sleep(nanoseconds: 280_000_000)          // the map comes down, the sheets go up
             guard stage == .leaving else { return }
             withAnimation(.spring(response: 0.45, dampingFraction: 0.9)) { stage = .station }
+        }
+    }
+
+    /// Around the time to leave for a trip you planned (your first class, or a Be there by time): the hands-free screen
+    /// for it opens by itself, and starts the ride once you're on the bus. Once per trip: closing it means not again.
+    private func autoGo() {
+        guard trip.phase == .idle, !goStore.isOpen else { return }
+        let now = Date()
+        let school = SchoolAlarm.shared
+        // from when the alarm rings (or 45 minutes before you leave) until just after the first bus has left
+        if school.on, let n = school.next, let l = n.leave, let t = n.trip,
+           now > min(l.addingTimeInterval(-45 * 60), n.alarm ?? l), now < t.first.departure.addingTimeInterval(5 * 60) {
+            if trip.direction != .toSchool { trip.pick(.toSchool) }
+            withAnimation(.easeInOut(duration: 0.35)) {
+                goStore.openForPlan(to: .buas, from: near.position, deadline: n.beThere, label: "your \(Fmt.hhmm(n.classStart)) class",
+                                    key: "school-\(Fmt.ymd.string(from: n.classStart))")
+            }
+            return
+        }
+        if let a = planner.arrive, let T = a.when, let t = planner.arriveChosen,
+           now > t.start.addingTimeInterval(-45 * 60), now < t.first.departure.addingTimeInterval(5 * 60) {
+            if trip.direction != (a.out ? .toSchool : .home) { trip.pick(a.out ? .toSchool : .home) }
+            withAnimation(.easeInOut(duration: 0.35)) {
+                goStore.openForPlan(to: a.out ? .buas : .veghel, from: near.position, deadline: T, label: "\(a.out ? "BUas" : "home") by \(a.time)",
+                                    key: "arrive-\(a.date)-\(a.time)")
+            }
+        }
+    }
+
+    /// Hands-free now, for the school alarm's trip or the Be there by plan.
+    private func openPlanGo(school: Bool) {
+        if school, let n = SchoolAlarm.shared.next {
+            if trip.direction != .toSchool { trip.pick(.toSchool) }
+            withAnimation(.easeInOut(duration: 0.35)) { goStore.open(to: .buas, from: near.position, deadline: n.beThere, label: "your \(Fmt.hhmm(n.classStart)) class") }
+        } else if let a = planner.arrive, let T = a.when {
+            if trip.direction != (a.out ? .toSchool : .home) { trip.pick(a.out ? .toSchool : .home) }
+            withAnimation(.easeInOut(duration: 0.35)) { goStore.open(to: a.out ? .buas : .veghel, from: near.position, deadline: T, label: "\(a.out ? "BUas" : "home") by \(a.time)") }
         }
     }
 
@@ -831,10 +870,13 @@ struct HomeView: View {
 
     @ViewBuilder private var plannedContent: some View {
         // the school alarm: from your timetable, the trip to your first class and the alarm before it
-        SchoolAlarmCard(setUp: { settings = true })
+        SchoolAlarmCard(setUp: { settings = true }, go: { openPlanGo(school: true) }, wake: { t in
+            if trip.direction != .toSchool { trip.pick(.toSchool) }
+            if let r = RoutePlan.from(t) { trip.start(r) }
+        })
         // be there by a time: the trip that leaves the latest and still gets you there
         if planner.arrive != nil {
-            ArrivePass(edit: { planByArrival = true; planning = true }, wake: { t in
+            ArrivePass(edit: { planByArrival = true; planning = true }, go: { openPlanGo(school: false) }, wake: { t in
                 if let a = planner.arrive { trip.pick(a.out ? .toSchool : .home) }
                 if let via = t.via, let r = RoutePlan.all.first(where: { $0.station.short == via }) { startReq = StartRequest(route: r) }
                 else if let r = RoutePlan.from(t) { trip.start(r) }

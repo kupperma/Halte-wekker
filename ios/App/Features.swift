@@ -951,6 +951,7 @@ struct TipsList: View {
 struct ArrivePass: View {
     @EnvironmentObject var planner: Planner
     let edit: () -> Void
+    var go: () -> Void = {}
     let wake: (DoorTrip) -> Void
     var body: some View {
         if let a = planner.arrive {
@@ -1005,11 +1006,7 @@ struct ArrivePass: View {
                     }
                     Rectangle().fill(Paper.rule).frame(height: 1)
                     TripLine(trip: t, others: planner.arriveOptions.filter { $0.id != t.id }, dest: dest)
-                    Button { wake(t) } label: {
-                        Text("WAKE ME ON THIS TRIP").font(HWFont.display(14)).tracking(0.8).foregroundStyle(.white)
-                            .frame(maxWidth: .infinity).padding(.vertical, 12).background(Paper.green, in: RoundedRectangle(cornerRadius: 6))
-                    }
-                    .buttonStyle(.plain)
+                    PlanButtons(go: go, wake: { wake(t) })
                     Text("Leaves the latest and still gets you there in time. A reminder comes ten minutes before you have to leave.")
                         .font(BoardInk.sans(10.5, .regular)).foregroundStyle(Paper.muted).fixedSize(horizontal: false, vertical: true)
                 } else if let e = planner.arriveError {

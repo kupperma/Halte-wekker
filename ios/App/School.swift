@@ -495,6 +495,8 @@ struct SchoolCalendarsView: View {
 struct SchoolAlarmCard: View {
     @ObservedObject private var school = SchoolAlarm.shared
     let setUp: () -> Void
+    var go: () -> Void = {}
+    var wake: (DoorTrip) -> Void = { _ in }
     var body: some View {
         if school.on, let n = school.next {
             VStack(alignment: .leading, spacing: 10) {
@@ -523,6 +525,7 @@ struct SchoolAlarmCard: View {
                     if let t = n.trip {
                         Rectangle().fill(Paper.rule).frame(height: 1)
                         TripLine(trip: t, others: [], dest: "BUas")
+                        PlanButtons(go: go, wake: { wake(t) })
                     }
                 } else {
                     Text(school.note ?? "Planning the trip…").font(BoardInk.sans(12.5)).foregroundStyle(Paper.muted)
@@ -642,5 +645,29 @@ struct AlarmCheck: View {
             }
         }
         .onAppear { onPhone = WakeAlarm.setOnPhone() }
+    }
+}
+
+/// Under a planned trip: hands-free (it starts the ride by itself once you're on the bus), or start the alarm now.
+struct PlanButtons: View {
+    let go: () -> Void
+    let wake: () -> Void
+    var body: some View {
+        VStack(spacing: 6) {
+            Button(action: go) {
+                Label("GO HANDS-FREE", systemImage: "bolt.fill").font(HWFont.display(14)).tracking(0.8).foregroundStyle(.white)
+                    .frame(maxWidth: .infinity).padding(.vertical, 12).background(Paper.green, in: RoundedRectangle(cornerRadius: 6))
+            }
+            .buttonStyle(.plain)
+            Button(action: wake) {
+                Text("Wake me on this trip now").font(BoardInk.sans(12.5)).foregroundStyle(Paper.navy)
+                    .frame(maxWidth: .infinity).padding(.vertical, 9)
+                    .background(Paper.navy.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Paper.navy.opacity(0.3), lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+            Text("Hands-free shows the walk and the bus, tells you if it changes, and starts the ride by itself once you’re on. It also opens by itself when you open the app around the time to leave.")
+                .font(BoardInk.sans(10.5, .regular)).foregroundStyle(Paper.muted).fixedSize(horizontal: false, vertical: true)
+        }
     }
 }
