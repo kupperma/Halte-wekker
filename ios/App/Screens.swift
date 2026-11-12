@@ -170,12 +170,18 @@ struct HomeView: View {
         .task(id: trip.direction) {
             while !Task.isCancelled {
                 if scene == .active {
+                    Watchdog.shared.mark("finding where you are")
                     near.locate(ask: true)                       // where you are decides where your trips start
+                    Watchdog.shared.mark("loading the live times")
                     await live.refresh(trip.direction, at: near.position)
+                    Watchdog.shared.mark("planning your planned trips")
                     await planner.refresh()
+                    Watchdog.shared.mark("planning the school alarms")
                     await SchoolAlarm.shared.refresh()
+                    Watchdog.shared.mark("checking watched trains")
                     await watch.check()
                     autoGo()
+                    Watchdog.shared.mark("showing the home screen")
                 }
                 try? await Task.sleep(nanoseconds: 30_000_000_000)
             }
@@ -1921,6 +1927,7 @@ struct SettingsView: View {
                     } footer: { Text("Fastest trip with the map and notifications, being recognised on the bus, the ride ring, the alarm and arriving, all pretend.") }
                 }
                 SchoolAlarmSection()
+                FreezeSection()
                 Section {
                     Toggle(isOn: $trip.autoStart) { label("Start trips by itself", "Notices when you leave your stop or station on a bus or train, and starts the alarm. Needs location set to Always.") }
                     if trip.autoStart && !trip.always {

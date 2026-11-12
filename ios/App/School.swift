@@ -14,7 +14,14 @@ import AlarmKit
 final class SchoolAlarm: ObservableObject {
     static let shared = SchoolAlarm()
     weak var trip: TripManager?
-    private let store = EKEventStore()
+    /// The calendar store, made in the background the first time it's needed (it loads your calendars).
+    private var storeObj: EKEventStore?
+    private func calendarStore() async -> EKEventStore {
+        if let s = storeObj { return s }
+        let s = await Task.detached { EKEventStore() }.value
+        storeObj = s
+        return s
+    }
     private let d = UserDefaults.standard
 
     @Published var on: Bool { didSet { d.set(on, forKey: "school.on"); if on { Task { await self.start() } } else { stop() } } }
@@ -70,17 +77,43 @@ final class SchoolAlarm: ObservableObject {
         earlyMinutes = d.object(forKey: "school.early") as? Int ?? 10
         wakeMinutes = d.object(forKey: "school.wake") as? Int ?? 60
         allowed = EKEventStore.authorizationStatus(for: .event) == .fullAccess
-        realAlarm = WakeAlarm.available
         week = (d.data(forKey: "school.week").flatMap { try? JSONDecoder().decode([Planned].self, from: $0) } ?? [])
             .filter { $0.classStart > Date().addingTimeInterval(-2 * 86400) }
         updateNext()
-        // the timetable changed (TimeEdit synced): plan again
+        // the timetable changed (TimeEdit synced): plan again, once a burst of changes has settled
         observer = NotificationCenter.default.addObserver(forName: .EKEventStoreChanged, object: nil, queue: .main) { _ in
-            Task { @MainActor in await SchoolAlarm.shared.refresh(force: true) }
+            Task { @MainActor in SchoolAlarm.shared.timetableChanged() }
+        }
+        // asking iOS about alarms can be slow right after installing: not while the app starts
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            self.realAlarm = await Task.detached { WakeAlarm.available }.value
         }
     }
 
     private func save() { d.set(try? JSONEncoder().encode(week), forKey: "school.week") }
+
+    private var changeDebounce: Task<Void, Never>?
+    /// TimeEdit (or anything) changed a calendar: wait until the changes stop, then plan once.
+    func timetableChanged() {
+        guard on else { return }
+        changeDebounce?.cancel()
+        changeDebounce = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            guard !Task.isCancelled else { return }
+            await self?.refresh(force: true)
+        }
+    }
+
+    /// The calendars that look like your timetable (worked out in the background).
+    @Published private(set) var schoolLike: Set<String> = []
+    func findSchoolLike() async {
+        let st = await calendarStore()
+        let ids = await Task.detached { () -> Set<String> in
+            return Set(st.calendars(for: .event).filter { SchoolAlarm.looksLikeSchool($0, in: st) }.map(\.calendarIdentifier))
+        }.value
+        schoolLike = ids
+    }
 
     /// The next school day (whose class is still ahead), for the screens.
     @Published private(set) var next: Day?
@@ -92,17 +125,18 @@ final class SchoolAlarm: ObservableObject {
     /// Turned on: ask for the calendar and the alarm, pick the school calendar, plan.
     func start() async {
         if !allowed {
-            allowed = (try? await store.requestFullAccessToEvents()) ?? false
+            allowed = (try? await calendarStore().requestFullAccessToEvents()) ?? false
         }
         guard allowed else { note = "Allow calendar access to read your timetable."; return }
-        if calendarIds.isEmpty { calendarIds = suggested() }
+        if calendarIds.isEmpty { calendarIds = await suggested() }
         realAlarm = await WakeAlarm.requestPermission()
         await refresh(force: true)
     }
 
     /// Turned off: every alarm that hasn't rung goes.
     private func stop() {
-        for p in week where !p.rang { WakeAlarm.cancel(p.alarmId, day: p.day) }
+        let gone = week.filter { !$0.rang }.map { ($0.alarmId, $0.day) }
+        Task.detached { for (id, day) in gone { WakeAlarm.cancel(id, day: day) } }
         week = []; trips = [:]; save()
         next = nil; note = nil
     }
@@ -110,10 +144,12 @@ final class SchoolAlarm: ObservableObject {
     // MARK: the timetable
 
     /// Your calendars (to pick the school one).
-    var calendars: [EKCalendar] { allowed ? store.calendars(for: .event).sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending } : [] }
+    var calendars: [EKCalendar] { allowed ? (storeObj?.calendars(for: .event) ?? []).sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending } : [] }
 
     /// Does this look like the school timetable? Its name (TimeEdit, BUas, rooster), or its events (TimeEdit links, BUas rooms).
-    func looksLikeSchool(_ c: EKCalendar) -> Bool {
+    func looksLikeSchool(_ c: EKCalendar) -> Bool { schoolLike.contains(c.calendarIdentifier) }
+
+    nonisolated static func looksLikeSchool(_ c: EKCalendar, in store: EKEventStore) -> Bool {
         let name = (c.title + " " + c.source.title).lowercased()
         if ["timeedit", "buas", "rooster", "breda university", "school", "timetable"].contains(where: { name.contains($0) }) { return true }
         let now = Date()
@@ -124,25 +160,31 @@ final class SchoolAlarm: ObservableObject {
         }
     }
 
-    func suggested() -> Set<String> { Set(store.calendars(for: .event).filter(looksLikeSchool).map(\.calendarIdentifier)) }
+    func suggested() async -> Set<String> { await findSchoolLike(); return schoolLike }
 
     /// The first class of each day with school in the next week, by day (yyyy-MM-dd). Only the calendars you picked;
     /// all-day and cancelled ones don't count.
-    private func firstClasses() -> [String: EKEvent] {
-        let cals = store.calendars(for: .event).filter { calendarIds.contains($0.calendarIdentifier) }
-        guard !cals.isEmpty else { return [:] }
-        let now = Date(), startOfToday = Calendar.current.startOfDay(for: now)
-        let evs = store.events(matching: store.predicateForEvents(withStart: startOfToday, end: startOfToday.addingTimeInterval(8 * 86400), calendars: cals))
-            .filter { !$0.isAllDay && $0.status != .canceled && !Self.isCancelled($0.title ?? "") }
-        var out: [String: EKEvent] = [:]
-        for e in evs {
-            let k = Fmt.ymd.string(from: e.startDate)
-            if out[k].map({ e.startDate < $0.startDate }) ?? true { out[k] = e }
-        }
-        return out
+    struct Lesson: Sendable { let title: String?; let location: String?; let startDate: Date }
+
+    private func firstClasses() async -> [String: Lesson] {
+        let st = await calendarStore(), ids = calendarIds
+        return await Task.detached { () -> [String: Lesson] in
+            let cals = st.calendars(for: .event).filter { ids.contains($0.calendarIdentifier) }
+            guard !cals.isEmpty else { return [:] }
+            let now = Date(), startOfToday = Calendar.current.startOfDay(for: now)
+            let evs = st.events(matching: st.predicateForEvents(withStart: startOfToday, end: startOfToday.addingTimeInterval(8 * 86400), calendars: cals))
+                .filter { !$0.isAllDay && $0.status != .canceled && !SchoolAlarm.isCancelled($0.title ?? "") }
+            var out: [String: Lesson] = [:]
+            let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; f.timeZone = TimeZone(identifier: "Europe/Amsterdam"); f.locale = Locale(identifier: "en_US_POSIX")
+            for e in evs {
+                let k = f.string(from: e.startDate)
+                if out[k].map({ e.startDate < $0.startDate }) ?? true { out[k] = Lesson(title: e.title, location: e.location, startDate: e.startDate) }
+            }
+            return out
+        }.value
     }
 
-    private static func isCancelled(_ t: String) -> Bool {
+    nonisolated static func isCancelled(_ t: String) -> Bool {
         let l = t.lowercased()
         return ["cancelled", "canceled", "geannuleerd", "vervalt", "vervallen"].contains { l.contains($0) }
     }
@@ -181,13 +223,13 @@ final class SchoolAlarm: ObservableObject {
     private func plan(force: Bool) async {
         allowed = EKEventStore.authorizationStatus(for: .event) == .fullAccess
         guard allowed else { note = "Allow calendar access to read your timetable."; return }
-        let classes = firstClasses()
+        let classes = await firstClasses()
         let now = Date()
         let oldNext = next
         var changed = false, added: [Planned] = []
         // days whose first class is gone from the timetable: their alarm goes (if it hasn't rung)
         for p in week where classes[p.day] == nil && !p.rang && p.classStart > now {
-            WakeAlarm.cancel(p.alarmId, day: p.day)
+            await WakeAlarm.cancelInBackground(p.alarmId, day: p.day)
             week.removeAll { $0.day == p.day }; trips[p.day] = nil; changed = true
         }
         for k in classes.keys.sorted() {
@@ -216,7 +258,7 @@ final class SchoolAlarm: ObservableObject {
             // move the alarm only if its minute changed; set none if it's already too late for one
             let sameMinute = p.alarm.map { Int($0.timeIntervalSince1970 / 60) == Int(alarmAt.timeIntervalSince1970 / 60) } ?? false
             if !(sameMinute && p.alarmId != nil) {
-                WakeAlarm.cancel(p.alarmId, day: k)
+                await WakeAlarm.cancelInBackground(p.alarmId, day: k)
                 p.alarmId = nil
                 p.alarm = alarmAt
                 if alarmAt > now.addingTimeInterval(60) {
@@ -231,7 +273,6 @@ final class SchoolAlarm: ObservableObject {
         week.removeAll { $0.classStart < now.addingTimeInterval(-2 * 86400) }
         week.sort { $0.classStart < $1.classStart }
         save()
-        realAlarm = WakeAlarm.available
         updateNext()
         note = classes.isEmpty ? (calendarIds.isEmpty ? "Pick your school calendar." : "No classes found in the next week.") : nil
         if changed { tell(added: added, oldNext: oldNext) }
@@ -390,10 +431,15 @@ enum WakeAlarm {
     static func test() async -> Date? {
         let at = Date().addingTimeInterval(60)
         let old = UserDefaults.standard.string(forKey: "school.testId")
-        cancel(old, day: "test")
+        await cancelInBackground(old, day: "test")
         let id = await schedule(at: at, day: "test", title: "Test alarm", body: "Your school alarm works")
         UserDefaults.standard.set(id, forKey: "school.testId")
         return id == nil ? nil : at
+    }
+
+    /// The same, off the main thread (asking iOS can be slow).
+    static func cancelInBackground(_ id: String?, day: String) async {
+        await Task.detached { cancel(id, day: day) }.value
     }
 
     /// Take a day's alarm away (only ever called for one that hasn't rung).
@@ -488,6 +534,7 @@ struct SchoolCalendarsView: View {
         .scrollContentBackground(.hidden)
         .background(PaperFill().ignoresSafeArea())
         .navigationTitle("School calendar")
+        .task { await school.findSchoolLike() }
     }
 }
 
@@ -610,8 +657,8 @@ struct AlarmCheck: View {
     @State private var testAt: Date?
     @State private var failed = false
     @State private var onPhone: [Date] = []
+    @State private var perm: (ok: Bool, text: String) = (true, "Checking the alarm…")
     var body: some View {
-        let perm = WakeAlarm.permission
         VStack(alignment: .leading, spacing: 6) {
             Label(perm.text, systemImage: perm.ok ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
                 .font(HWFont.body(12, bold: true)).foregroundStyle(perm.ok ? Paper.ok : Paper.late)
@@ -628,7 +675,7 @@ struct AlarmCheck: View {
                 Task {
                     testAt = await WakeAlarm.test()
                     failed = testAt == nil
-                    onPhone = WakeAlarm.setOnPhone()
+                    await load()
                 }
             } label: {
                 Label("Test the alarm: it rings in 1 minute", systemImage: "alarm.waves.left.and.right.fill")
@@ -644,7 +691,16 @@ struct AlarmCheck: View {
                     .font(HWFont.body(11.5)).foregroundStyle(Paper.late).fixedSize(horizontal: false, vertical: true)
             }
         }
-        .onAppear { onPhone = WakeAlarm.setOnPhone() }
+        .task { await load() }
+    }
+
+    /// What iOS says about the alarms, asked off the main thread (it can be slow right after installing).
+    private func load() async {
+        let r = await Task.detached { () -> ((Bool, String), [Date]) in
+            return (WakeAlarm.permission, WakeAlarm.setOnPhone())
+        }.value
+        perm = (r.0.0, r.0.1)
+        onPhone = r.1
     }
 }
 

@@ -167,6 +167,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     override init() {
         soundKind = AlarmSound.Kind(rawValue: UserDefaults.standard.string(forKey: "sound") ?? "") ?? .steam
         super.init()
+        Watchdog.shared.mark("starting the trip engine (location, notifications)")
         location.delegate = self
         location.desiredAccuracy = kCLLocationAccuracyBest
         location.distanceFilter = 25
@@ -323,6 +324,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
 
     /// When the app comes back to the screen: start the Live Activity if a trip started by itself in the background.
     func appBecameActive() {
+        Watchdog.shared.mark("coming back to the screen")
         always = location.authorizationStatus == .authorizedAlways
         Task { await NoticeLog.shared.collectDelivered() }       // off the lock screen, into the app's list
         Task { await SchoolAlarm.shared.refresh(force: true) }    // the timetable may have changed: plan the school alarm again
