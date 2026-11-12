@@ -38,6 +38,9 @@ const extrasAt=(()=>{
   const repaint=[];let painted=false;
   const tex=(w,h,draw)=>{const c=document.createElement('canvas');c.width=w;c.height=h;const x=c.getContext('2d');draw(x,w,h);const t=new T.CanvasTexture(c);t.anisotropy=4;repaint.push(()=>{x.clearRect(0,0,w,h);draw(x,w,h);t.needsUpdate=true;});return t;};
   const flat=(w,h,map,x,y,z,ry,basic)=>{const m=basic?new T.MeshBasicMaterial({map,transparent:true}):new T.MeshStandardMaterial({map,roughness:.8,transparent:true});const o=new T.Mesh(new T.PlaneGeometry(w,h),m);o.position.set(x,y,z);o.rotation.y=ry||0;scene.add(o);return o;};
+  const hole=(cx,cz,w,d)=>{add(new T.BoxGeometry(w,1.4,d),mat(0x030405),cx,5.9,cz);                 // a real opening: dark, above the ceiling's bumps
+    const trim=mat(0x7d8596,{metalness:.6,roughness:.35});add(new T.BoxGeometry(w+.1,.07,.07),trim,cx,5.2,cz+d/2);add(new T.BoxGeometry(w+.1,.07,.07),trim,cx,5.2,cz-d/2);
+    add(new T.BoxGeometry(.07,.07,d),trim,cx-w/2,5.2,cz);add(new T.BoxGeometry(.07,.07,d),trim,cx+w/2,5.2,cz);};
   const floorStrip=(w,map,x)=>{const o=new T.Mesh(new T.PlaneGeometry(w,L),new T.MeshStandardMaterial({map,roughness:.9}));o.rotation.x=-Math.PI/2;o.position.set(x,.065,ZC);scene.add(o);};
 
   // The white guide line for blind people, and the black-and-white warning squares in front of it (towards the train).
@@ -74,7 +77,8 @@ const extrasAt=(()=>{
   for(let i=0;i<10;i++){flat(2.2,.55,plate,8.15,2.9,-13-i*10,-Math.PI/2,true);}
   const tiles=tex(256,32,(x,w,h)=>{x.fillStyle='#c9cfd8';x.fillRect(0,0,w,h);x.fillStyle='#8f99a8';for(let i=0;i<w;i+=32)x.fillRect(i,0,2,h);x.fillRect(0,h-3,w,3);x.fillRect(0,0,w,2);});
   tiles.wrapS=T.RepeatWrapping;tiles.repeat.set(L/1.2,1);
-  [[8.17,-Math.PI/2,1.1],[-3.1,Math.PI/2,.95]].forEach(([x,ry,y])=>{const o=new T.Mesh(new T.PlaneGeometry(L,.34),new T.MeshStandardMaterial({map:tiles,roughness:.6}));o.position.set(x,y,ZC);o.rotation.y=ry;scene.add(o);});
+  // (on your side it stops for the exit and the lift)
+  [[8.17,-Math.PI/2,1.1,Z0,Z1],[-3.08,Math.PI/2,.95,Z0,-1.3],[-3.08,Math.PI/2,.95,-6.0,Z1]].forEach(([x,ry,y,za,zb])=>{const len=za-zb,tt=tiles.clone();tt.needsUpdate=true;tt.repeat.set(len/1.2,1);const o=new T.Mesh(new T.PlaneGeometry(len,.34),new T.MeshStandardMaterial({map:tt,roughness:.6}));o.position.set(x,y,(za+zb)/2);o.rotation.y=ry;scene.add(o);});
   const nameTex=tex(512,110,(x,w,h)=>{x.fillStyle='#fff';x.font='700 64px Helvetica, Arial, sans-serif';x.textAlign='center';x.textBaseline='middle';x.fillText('HALTEWEKKER',w/2,h/2+3);});
   for(let i=0;i<5;i++){const z=-29-i*18;add(new T.BoxGeometry(.06,.6,2.6),signM,-3.22,3.4,z);flat(2.4,.52,nameTex,-3.18,3.4,z,Math.PI/2,true);}
   // a hanging exit sign and a clock over the platform
@@ -98,20 +102,23 @@ const extrasAt=(()=>{
   add(new T.BoxGeometry(1.06,.56,.05),mat(0x0f1218),.7,4.6,-48);flat(1.0,.5,runner,.7,4.6,-47.97,0,true);[-.4,.4].forEach(o=>add(new T.BoxGeometry(.03,.6,.03),legM,.7+o,5.15,-48));
 
   // A glass lift against the wall; its cabin goes up and down (someone gets in, someone comes out).
-  const LX=-.95,LZ=-19,LW=1.05,LD=1.9,LTOP=6.2;
+  const LX=-2.72,LZ=-4.85,LW=1.05,LD=1.9,LTOP=6.2;
   const liftFrame=mat(0x59627a,{metalness:.6,roughness:.35});
   [[-1,-1],[1,-1],[-1,1],[1,1]].forEach(([a,b])=>add(new T.BoxGeometry(.07,5.5,.07),liftFrame,LX+a*LW/2,2.75,LZ+b*LD/2));
   const liftGlass=new T.MeshStandardMaterial({color:0xa9d2ff,transparent:true,opacity:.16,roughness:.1,metalness:.2,depthWrite:false});
-  add(new T.BoxGeometry(.02,5.5,LD),liftGlass,LX+LW/2,2.75,LZ);add(new T.BoxGeometry(.02,5.5,LD),liftGlass,LX-LW/2,2.75,LZ);add(new T.BoxGeometry(LW+.1,.05,LD+.1),mat(0x050608),LX,5.44,LZ);add(new T.BoxGeometry(LW,5.5,.02),liftGlass,LX,2.75,LZ+LD/2);add(new T.BoxGeometry(LW,5.5,.02),liftGlass,LX,2.75,LZ-LD/2);
+  add(new T.BoxGeometry(.02,5.5,LD),liftGlass,LX+LW/2,2.75,LZ);hole(LX,LZ,LW+.1,LD+.1);add(new T.BoxGeometry(LW,5.5,.02),liftGlass,LX,2.75,LZ+LD/2);add(new T.BoxGeometry(LW,5.5,.02),liftGlass,LX,2.75,LZ-LD/2);
   const cab=new T.Group();scene.add(cab);
-  const cabM=new T.MeshStandardMaterial({color:0xfff1d6,emissive:0xffd9a0,emissiveIntensity:.95,roughness:.6});
+  const cabM=new T.MeshStandardMaterial({color:0xf3e2c0,emissive:0xffcf8a,emissiveIntensity:.6,roughness:.6});
   const cf=new T.Mesh(new T.BoxGeometry(LW-.12,.08,LD-.12),liftFrame);cab.add(cf);
   const cr=new T.Mesh(new T.BoxGeometry(LW-.12,.08,LD-.12),cabM);cr.position.y=2.3;cab.add(cr);
   const cbk=new T.Mesh(new T.BoxGeometry(.04,2.3,LD-.12),cabM);cbk.position.set(-LW/2+.08,1.15,0);cab.add(cbk);
+  const cabGlass=new T.MeshStandardMaterial({color:0xffe6b8,emissive:0xffcf8a,emissiveIntensity:.35,transparent:true,opacity:.38,roughness:.2,depthWrite:false});
+  [-1,1].forEach(sd=>{const w=new T.Mesh(new T.BoxGeometry(LW-.12,2.3,.04),cabGlass);w.position.set(0,1.15,sd*(LD/2-.08));cab.add(w);});
+  const door=new T.Mesh(new T.BoxGeometry(.05,2.36,.08),liftFrame);[-1,1].forEach(sd=>{const d=door.clone();d.position.set(LW/2-.06,1.15,sd*.42);cab.add(d);});
   cab.position.set(LX,0,LZ);
   const liftIcon=tex(128,128,(x,w,h)=>{x.fillStyle='#1d4f9a';x.fillRect(0,0,w,h);x.fillStyle='#fff';x.fillRect(30,22,68,84);x.fillStyle='#1d4f9a';x.fillRect(38,30,52,68);x.fillStyle='#fff';
     x.beginPath();x.moveTo(64,36);x.lineTo(76,52);x.lineTo(52,52);x.fill();x.beginPath();x.moveTo(64,92);x.lineTo(76,76);x.lineTo(52,76);x.fill();});
-  flat(.4,.4,liftIcon,LX,2.75,LZ+LD/2+.03,0,true);
+  flat(.4,.4,liftIcon,LX+LW/2+.03,2.75,LZ+LD/2-.3,Math.PI/2,true);
   const sstep=u=>u<=0?0:u>=1?1:u*u*(3-2*u);
   const cabY=t=>t<6?0:t<11?LTOP*sstep((t-6)/5):t<19?LTOP:t<24?LTOP*(1-sstep((t-19)/5)):0;
 
@@ -136,15 +143,27 @@ const extrasAt=(()=>{
     const pts=[[-1,-1],[1,-1],[-1,1],[1,1]].map(([a,b])=>new T.Vector3(BOARD.x+a*BOARD.w/2,BOARD.y+b*BOARD.h/2,-8+.075).project(c));
     const xs=pts.map(p=>(p.x+1)/2),ys=pts.map(p=>(1-p.y)/2);return {x0:Math.min(...xs),x1:Math.max(...xs),y0:Math.min(...ys),y1:Math.max(...ys)};};
 
-  // Two escalators against the wall (they really move): up into the ceiling on the left, down on the right.
-  const RUN=9.5,RISE=5.5,LEN=Math.hypot(RUN,RISE),SIN=RISE/LEN,COS=RUN/LEN,BZ=-6,UPX=-2.8,DNX=-1.9;
-  const onSlope=(s,x)=>new T.Vector3(x,s*SIN,BZ-s*COS);
-  add(new T.BoxGeometry(2.0,.05,4.6),mat(0x050608),-2.35,5.44,BZ-RUN+1.6);             // the opening
+  // Two escalators against the wall (they really move): up into an opening in the ceiling on the left, down on the right.
+  // Each starts with a flat bit at floor level, like a real one, before it climbs.
+  const RUN=9.5,RISE=5.5,LEN=Math.hypot(RUN,RISE),SIN=RISE/LEN,COS=RUN/LEN,FLAT=1.2,BZ=-8.2,BASE=.12,UPX=-2.8,DNX=-1.9;
+  const onSlope=(s,x)=>new T.Vector3(x,BASE+s*SIN,BZ-s*COS);
+  const along=(s,x)=>s<FLAT?new T.Vector3(x,BASE,BZ+FLAT-s):onSlope(s-FLAT,x);      // the whole way: flat, then up
+  const PATH=FLAT+LEN;
+  hole(-2.35,-16,2.1,5.2);
   const slopeBox=(w,h,x,yOff,m)=>{const o=new T.Mesh(new T.BoxGeometry(w,h,LEN),m);const c=onSlope(LEN/2,x);o.position.set(c.x,c.y+yOff,c.z);o.rotation.x=Math.atan2(RISE,RUN);scene.add(o);return o;};
   const truss=mat(0x1b1f2a,{metalness:.4,roughness:.5}),rail=mat(0x0b0c10,{roughness:.4}),glass=new T.MeshStandardMaterial({color:0x9fc6ff,transparent:true,opacity:.18,roughness:.1,metalness:.2});
-  [UPX,DNX].forEach(cx=>{slopeBox(.95,.5,cx,-.32,truss);[cx-.45,cx+.45].forEach(x=>{slopeBox(.03,.9,x,.5,glass);slopeBox(.07,.07,x,.97,rail);});});
+  const plateM=mat(0x9aa1ad,{metalness:.7,roughness:.3}),combM=mat(0xf4c542,{emissive:0x3a2a00});
+  [UPX,DNX].forEach(cx=>{
+    slopeBox(.95,.5,cx,-.32,truss);
+    // the flat start: a base, the comb plate you step on from, glass sides and handrails that curve round at the end
+    add(new T.BoxGeometry(.98,BASE,FLAT+.6),truss,cx,BASE/2,BZ+FLAT/2+.3);
+    add(new T.BoxGeometry(.9,.02,.42),plateM,cx,BASE+.01,BZ+FLAT+.35);add(new T.BoxGeometry(.9,.022,.05),combM,cx,BASE+.012,BZ+FLAT+.12);
+    [cx-.45,cx+.45].forEach(x=>{slopeBox(.03,.9,x,.5,glass);slopeBox(.07,.07,x,.97,rail);
+      add(new T.BoxGeometry(.03,.9,FLAT+.35),glass,x,BASE+.5,BZ+FLAT/2+.17);add(new T.BoxGeometry(.07,.07,FLAT+.35),rail,x,BASE+.97,BZ+FLAT/2+.17);
+      const end=new T.Mesh(new T.TorusGeometry(.2,.035,6,12,Math.PI),rail);end.rotation.set(0,Math.PI/2,-Math.PI/2);end.position.set(x,BASE+.77,BZ+FLAT+.35);scene.add(end);});
+  });
   const stepM=mat(0x8a909c,{metalness:.55,roughness:.35}),stepEdge=mat(0xf4c542,{emissive:0x3a2a00});
-  const SP=.375,NS=29,ESC_V=.5,CYC=NS*SP;                                              // a step every 0.75 s: 40 in a 30 s loop
+  const SP=.375,NS=Math.ceil(PATH/SP),ESC_V=.5,CYC=NS*SP;                             // a step every 0.75 s: 40 in a 30 s loop
   const mkSteps=()=>{const out=[];for(let i=0;i<NS;i++){const g=new T.Group();g.add(new T.Mesh(new T.BoxGeometry(.82,.06,.34),stepM));const e=new T.Mesh(new T.BoxGeometry(.82,.02,.03),stepEdge);e.position.set(0,.04,.16);g.add(e);scene.add(g);out.push(g);}return out;};
   const upSteps=mkSteps(),downSteps=mkSteps();
   // People: silhouettes with a four-frame walk.
@@ -175,14 +194,14 @@ const extrasAt=(()=>{
   const mkPerson=(kind,h)=>{const m=new T.SpriteMaterial({map:kinds[kind][0],transparent:true,depthWrite:false});const s=new T.Sprite(m);s.scale.set(h*.4,h,1);s.userData={kind,h};scene.add(s);return s;};
   // A path: points with how fast to go there and how ("walk" shows steps, "ride" stands still on the escalator).
   const V=(x,y,z)=>new T.Vector3(x,y,z);
-  const upBottom=onSlope(0,UPX),upTop=onSlope(LEN,UPX),dnBottom=onSlope(0,DNX),dnTop=onSlope(LEN,DNX),EXIT=V(-3.7,0,-2.6);
+  const upStart=along(0,UPX),upBottom=onSlope(0,UPX),upTop=onSlope(LEN,UPX),dnStart=along(0,DNX),dnBottom=onSlope(0,DNX),dnTop=onSlope(LEN,DNX),EXIT=V(-3.7,0,-2.6),PAST=V(-2.0,0,-3.2),SIDE=V(-1.95,0,-6.4);
   const routes=[
-    {kind:0,h:1.78,off:0,pts:[[dnTop,0],[dnBottom,ESC_V,'ride'],[V(-2.1,0,-4.3),1.3,'walk'],[EXIT,1.3,'walk']]},
-    {kind:1,h:1.66,off:13,pts:[[dnTop,0],[dnBottom,ESC_V,'ride'],[V(-2.3,0,-4.1),1.25,'walk'],[EXIT,1.25,'walk']]},
-    {kind:2,h:1.72,off:5,pts:[[EXIT,0],[V(-2.8,0,-4.8),1.3,'walk'],[upBottom,1.1,'walk'],[upTop,ESC_V,'ride']]},
-    {kind:1,h:1.62,off:19,pts:[[EXIT,0],[V(-2.8,0,-4.9),1.25,'walk'],[upBottom,1.0,'walk'],[upTop,ESC_V,'ride']]},
-    {kind:2,h:1.74,off:8,fade:true,pts:[[EXIT,0],[V(.25,0,-7),1.35,'walk'],[V(.25,0,-40),1.35,'walk']]},
-    {kind:0,h:1.79,off:23,fade:true,pts:[[V(.5,0,-41),0],[V(.5,0,-7),1.35,'walk'],[EXIT,1.35,'walk']]},
+    {kind:0,h:1.78,off:0,pts:[[dnTop,0],[dnBottom,ESC_V,'ride'],[dnStart,ESC_V,'ride'],[SIDE,1.3,'walk'],[PAST,1.3,'walk'],[EXIT,1.3,'walk']]},
+    {kind:1,h:1.66,off:13,pts:[[dnTop,0],[dnBottom,ESC_V,'ride'],[dnStart,ESC_V,'ride'],[SIDE,1.25,'walk'],[PAST,1.25,'walk'],[EXIT,1.25,'walk']]},
+    {kind:2,h:1.72,off:5,pts:[[EXIT,0],[PAST,1.3,'walk'],[SIDE,1.3,'walk'],[upStart,1.1,'walk'],[upBottom,ESC_V,'ride'],[upTop,ESC_V,'ride']]},
+    {kind:1,h:1.62,off:18,pts:[[EXIT,0],[PAST,1.25,'walk'],[SIDE,1.25,'walk'],[upStart,1.0,'walk'],[upBottom,ESC_V,'ride'],[upTop,ESC_V,'ride']]},
+    {kind:2,h:1.74,off:8,fade:true,pts:[[EXIT,0],[PAST,1.35,'walk'],[V(.25,0,-7),1.35,'walk'],[V(.25,0,-40),1.35,'walk']]},
+    {kind:0,h:1.79,off:23,fade:true,pts:[[V(.5,0,-41),0],[V(.5,0,-7),1.35,'walk'],[PAST,1.35,'walk'],[EXIT,1.35,'walk']]},
     {kind:0,h:1.8,off:3,fade:true,pts:[[V(.2,0,-58),0],[V(.2,0,-97),1.35,'walk']]},
     {kind:2,h:1.7,off:11,fade:true,pts:[[V(-.9,0,-96),0],[V(-.9,0,-57),1.35,'walk']]},
   ];
@@ -195,24 +214,24 @@ const extrasAt=(()=>{
   return function(time){
     const t=((time%LOOP)+LOOP)%LOOP;
     // escalator steps glide up, one every 0.75 s
-    const place=(g,i,dir,x)=>{const s=(((i*SP+dir*ESC_V*t)%CYC)+CYC)%CYC*LEN/CYC;const p=onSlope(s,x);g.position.set(p.x,p.y+.02,p.z);g.visible=s<LEN-.15;};
+    const place=(g,i,dir,x)=>{const s=(((i*SP+dir*ESC_V*t)%CYC)+CYC)%CYC*PATH/CYC;const p=along(s,x);g.position.set(p.x,p.y+.02,p.z);g.visible=s<PATH-.15;};
     upSteps.forEach((g,i)=>place(g,i,1,UPX));downSteps.forEach((g,i)=>place(g,i,-1,DNX));
     routes.forEach(r=>{
       const u=((t-r.off)%LOOP+LOOP)%LOOP,s=r.sprite;
       if(u>r.total){s.visible=false;return;}
       const g=r.seg.find(q=>u<=q.t0+q.dt)||r.seg[r.seg.length-1],f=Math.min(1,(u-g.t0)/g.dt);
-      const p=g.a.clone().lerp(g.b,f);s.position.set(p.x,p.y+r.h/2,p.z);s.visible=true;
+      const p=g.a.clone().lerp(g.b,f);s.position.set(p.x,p.y+r.h/2+(g.mode==='ride'?.05:0),p.z);s.visible=true;
       const walked=g.d0+g.len*f;s.material.map=kinds[r.kind][g.mode==='ride'?0:Math.floor(walked/.4)%4];
       s.material.opacity=r.fade?Math.min(1,r.pts[0][0].z<-20?u/2:1,r.pts[r.pts.length-1][0].z<-20?(r.total-u)/2:1):1;
     });
     if(!painted&&(!document.fonts||document.fonts.status==='loaded')){painted=true;repaint.forEach(f=>f());}
     // the lift
     const cy=cabY(t);cab.position.y=cy;
-    {const ua=((t-19)%LOOP+LOOP)%LOOP,s=liftIn,A=V(.3,0,-60),D=V(LX,0,LZ+LD/2+.5),I=V(LX,0,LZ);
+    {const ua=((t-19)%LOOP+LOOP)%LOOP,s=liftIn,A=V(.4,0,-24),D=V(LX+LW/2+.4,0,LZ),I=V(LX,0,LZ);
       if(ua<15.5){const f=ua/15.5,p=A.clone().lerp(D,f);s.position.set(p.x,s.userData.h/2,p.z);s.material.map=kinds[0][Math.floor(A.distanceTo(p)/.4)%4];s.material.opacity=Math.min(1,ua/2);s.visible=true;}
       else if(ua<16.3){const p=D.clone().lerp(I,(ua-15.5)/.8);s.position.set(p.x,s.userData.h/2,p.z);s.material.map=kinds[0][Math.floor((ua*3))%4];s.material.opacity=1;s.visible=true;}
       else{s.position.set(LX,cy+.06+s.userData.h/2,LZ);s.material.map=kinds[0][0];s.visible=cy<5.4;}}
-    {const ub=((t-19)%LOOP+LOOP)%LOOP,s=liftOut,D=V(LX,0,LZ+LD/2+.5),F=V(.3,0,-70);
+    {const ub=((t-19)%LOOP+LOOP)%LOOP,s=liftOut,D=V(LX+LW/2+.4,0,LZ),F=V(.3,0,-34);
       if(ub<5){s.position.set(LX,cy+.06+s.userData.h/2,LZ);s.material.map=kinds[1][0];s.material.opacity=1;s.visible=cy<5.4;}
       else if(ub<6){const p=V(LX,0,LZ).lerp(D,ub-5);s.position.set(p.x,s.userData.h/2,p.z);s.material.map=kinds[1][Math.floor(ub*3)%4];s.visible=true;}
       else{const f=(ub-6)/24,p=D.clone().lerp(F,f);s.position.set(p.x,s.userData.h/2,p.z);s.material.map=kinds[1][Math.floor(D.distanceTo(p)/.4)%4];s.material.opacity=Math.min(1,(30-ub)/2);s.visible=true;}}
