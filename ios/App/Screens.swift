@@ -50,6 +50,7 @@ struct HomeView: View {
     @State private var moveToken = 0
     @State private var loopToken = 0
     @State private var picked: BoardPick?            // the line you tapped on a board
+    @State private var choosingDestination = false
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -82,6 +83,13 @@ struct HomeView: View {
         }
         .animation(.easeInOut(duration: 0.3), value: trip.toast)
         .onChange(of: stage) { _, s in Handoff.fromBoards = s == .station }
+        .onChange(of: near.position?.coordinate.latitude) { _, _ in Task { await live.refresh(trip.direction, at: near.position) } }
+        .sheet(isPresented: $choosingDestination) {
+            DestinationSheet { d in
+                live.go(to: d)
+                Task { await live.refresh(trip.direction, at: near.position, force: true) }
+            }
+        }
         .onAppear { Handoff.fromBoards = stage == .station }
         .sheet(isPresented: $settings) { SettingsView().presentationDetents([.large]) }
         .sheet(isPresented: $planning) { PlanSheet() }
@@ -91,10 +99,10 @@ struct HomeView: View {
         .task(id: trip.direction) {
             while !Task.isCancelled {
                 if scene == .active {
-                    await live.refresh(trip.direction)
+                    near.locate(ask: true)                       // where you are decides where your trips start
+                    await live.refresh(trip.direction, at: near.position)
                     await planner.refresh()
                     await watch.check()
-                    if near.on || (trip.autoHome && trip.direction == .toSchool) { near.locate() }
                 }
                 try? await Task.sleep(nanoseconds: 30_000_000_000)
             }
@@ -153,7 +161,7 @@ struct HomeView: View {
     private var fastestSub: String {
         guard let t = live.next.first else { return live.nextError == nil ? "Finding your next connection…" : "No trips found right now" }
         let m = Fmt.mins(t.first.departure.timeIntervalSinceNow)
-        return "Leaves \(Fmt.hhmm(t.first.departure))\(m <= 90 ? " (in \(m) min)" : "") · \(home ? "home" : "BUas") \(Fmt.hhmm(t.end))"
+        return "Leaves \(Fmt.hhmm(t.first.departure))\(m <= 90 ? " (in \(m) min)" : "") · \(live.custom?.short ?? (home ? "home" : "BUas")) \(Fmt.hhmm(t.end))"
     }
     private var linesSub: String {
         if let w = lines.watches.first { return "Watching \(w.line): \(w.status)" }
@@ -185,16 +193,28 @@ struct HomeView: View {
             }
             .buttonStyle(.plain).accessibilityLabel("Back to the map")
             Spacer(minLength: 4)
-            Button(action: toggleDirection) {
+            // where you're going: school, home, or somewhere you pick
+            Menu {
+                Button { goTo(.toSchool) } label: { Label("To school (BUas)", systemImage: "graduationcap.fill") }
+                Button { goTo(.home) } label: { Label("Home (Veghel)", systemImage: "house.fill") }
+                if !live.recents.isEmpty {
+                    Section("Recent") {
+                        ForEach(live.recents) { d in
+                            Button { live.go(to: d); Task { await live.refresh(trip.direction, at: near.position, force: true) } } label: { Label(d.name, systemImage: "mappin") }
+                        }
+                    }
+                }
+                Button { choosingDestination = true } label: { Label("Somewhere else…", systemImage: "magnifyingglass") }
+            } label: {
                 HStack(spacing: 5) {
-                    Text(trip.direction.word).font(HWFont.display(13)).tracking(1.6)
-                    Image(systemName: "arrow.up.arrow.down").font(.system(size: 11, weight: .bold))
+                    Text(live.custom.map { $0.short.uppercased() } ?? trip.direction.word).font(HWFont.display(13)).tracking(1.2)
+                        .lineLimit(1).minimumScaleFactor(0.7).frame(maxWidth: 150)
+                    Image(systemName: "chevron.down").font(.system(size: 10, weight: .bold))
                 }
                 .foregroundStyle(.white).padding(.horizontal, 10).padding(.vertical, 8)
                 .background(BoardInk.band.opacity(0.92), in: Capsule()).overlay(Capsule().stroke(Color.white.opacity(0.22), lineWidth: 1))
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(home ? "Going home. Tap to switch to going to Breda." : "Going to Breda. Tap to switch to going home.")
+            .accessibilityLabel("Where you’re going: \(live.custom?.short ?? (home ? "home" : "school")). Tap to change.")
             Button { settings = true } label: {
                 Image(systemName: "gearshape").font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
                     .frame(width: 34, height: 34).background(BoardInk.band.opacity(0.92), in: Circle()).overlay(Circle().stroke(Color.white.opacity(0.22), lineWidth: 1))
@@ -207,7 +227,7 @@ struct HomeView: View {
     /// What the app writes on the two screens on the wall: the trains on the LED strip, the rest on the planner.
     private func wallBoards(_ led: CGRect, _ plan: CGRect) -> some View {
         ZStack(alignment: .topLeading) {
-            LEDStrip(title: home ? "Trains home" : "Trains to Breda", rows: ledRows, tap: tapTrain)
+            LEDStrip(title: ledTitle, rows: live.anywhere ? nearLedRows : ledRows, tap: live.anywhere ? tapNearTrain : tapTrain)
                 .frame(width: led.width, height: led.height)
                 .position(x: led.midX, y: led.midY)
             PlannerScreen(section: section, pick: pickSection) { plannerContent }
@@ -233,6 +253,36 @@ struct HomeView: View {
             return LEDTrain(id: p.id, time: Fmt.hhmm(f.scheduledDeparture), to: "\(to) \(f.line)", via: via, platform: track,
                             status: status, gone: gone, picked: isPicked)
         }
+    }
+
+    private var ledTitle: String {
+        guard live.anywhere else { return home ? "Trains home" : "Trains to Breda" }
+        return live.nearStops.first(where: \.rail).map { "Trains from \(Fmt.place($0.name))" } ?? "No station near you"
+    }
+
+    /// From anywhere: the trains from the station near you.
+    private var nearLedRows: [LEDTrain] {
+        let rail = Set(live.nearStops.filter(\.rail).map(\.id))
+        let station = live.nearStops.first(where: \.rail).map { Fmt.place($0.name) } ?? ""
+        let now = Date()
+        return live.nearBoard.filter { rail.contains($0.stopId) && $0.time > now.addingTimeInterval(-15 * 60) }.prefix(12).map { d in
+            let gone = !d.cancelled && d.time < now.addingTimeInterval(-60)
+            let status = d.cancelled ? "Cancelled" : gone ? "Departed" : (d.live && d.delay >= 1) ? Fmt.hhmm(d.time) : d.live ? "On time" : "Planned"
+            var isPicked = false
+            if case .bus(let b) = picked, b.id == d.id { isPicked = true }
+            return LEDTrain(id: d.id, time: Fmt.hhmm(d.scheduled), to: "\(Fmt.place(d.headsign)) \(Transit.trainLabel(d.line))", via: "from \(station)",
+                            platform: d.platform ?? "", status: status, gone: gone, picked: isPicked)
+        }
+    }
+
+    private func tapNearTrain(_ id: String) {
+        if let d = live.nearBoard.first(where: { $0.id == id }) { tapBus(d) }
+    }
+
+    /// Back to school or home (from the menu at the top).
+    private func goTo(_ d: Direction) {
+        live.go(to: nil)
+        if trip.direction != d { toggleDirection() } else { Task { await live.refresh(d, at: near.position, force: true) } }
     }
 
     private func pickSection(_ s: HomeSection) {
@@ -284,10 +334,12 @@ struct HomeView: View {
                       track: { _ = watch.toggle(t.trip, from: t.from, to: t.to) })
         case .bus(let d):
             let ride = live.boardRides["\(d.stopId)|\(d.tripId)"]
-            BusPage(line: d.line, to: d.headsign, stop: d.stopName, time: d.cancelled ? d.scheduled : d.time, scheduled: d.scheduled,
+            let isTrain = live.nearStops.contains { $0.rail && $0.id == d.stopId }
+            BusPage(line: isTrain ? Transit.trainLabel(d.line) : d.line, to: d.headsign, stop: d.stopName, time: d.cancelled ? d.scheduled : d.time, scheduled: d.scheduled,
                     live: d.live, cancelled: d.cancelled, status: BoardRow.status(d),
                     ride: ride.map { "\(Fmt.rideText($0.minutes)) ride to \($0.station) station, arrives \(Fmt.hhmm($0.arrival))" },
                     rank: ride.map { RankInfo(grade: d.cancelled ? nil : $0.grade, minutes: $0.minutes, best: $0.best, stretch: "\(Fmt.place(d.stopName)) → \($0.station)") },
+                    train: isTrain,
                     tracked: lines.isWatched(stopId: d.stopId, line: d.line, headsign: d.headsign),
                     back: { withAnimation(.easeInOut(duration: 0.2)) { picked = nil } },
                     track: { lines.toggle(stopId: d.stopId, stopName: d.stopName, line: d.line, headsign: d.headsign, tripId: d.tripId, delay: d.live ? d.delay : nil) })
@@ -354,8 +406,10 @@ struct HomeView: View {
                 }
             }
             if let t = live.next[safe: live.pick] ?? live.next.first {
-                let r = t.via.flatMap { via in RoutePlan.all.first(where: { $0.station.short == via }) }
-                PlannerBar(title: t.via.map { "Your trip · via \($0)" } ?? "Your trip", sub: "\(home ? "home" : "at BUas") \(Fmt.hhmm(t.end))")
+                let r = live.anywhere ? RoutePlan.from(t) : t.via.flatMap { via in RoutePlan.all.first(where: { $0.station.short == via }) }
+                let dest = live.destination(trip.direction).short
+                PlannerBar(title: live.here != nil ? "Your trip · from here" : t.via.map { "Your trip · via \($0)" } ?? "Your trip",
+                           sub: live.anywhere ? "at \(dest) \(Fmt.hhmm(t.end))" : "\(home ? "home" : "at BUas") \(Fmt.hhmm(t.end))")
                 ForEach(Array(t.rides.enumerated()), id: \.offset) { i, ride in
                     if i > 0 {
                         let prev = t.rides[i - 1]
@@ -367,7 +421,7 @@ struct HomeView: View {
                 }
                 if let r {
                     Button { trip.start(r) } label: {
-                        Text("WAKE ME UP · VIA \(r.station.short.uppercased())").font(BoardInk.sans(12)).tracking(0.6).foregroundStyle(.white)
+                        Text(live.anywhere ? "WAKE ME UP · TO \(r.station.short.uppercased())" : "WAKE ME UP · VIA \(r.station.short.uppercased())").font(BoardInk.sans(12)).tracking(0.6).foregroundStyle(.white)
                             .frame(maxWidth: .infinity).padding(.vertical, 9).background(Color(hex: 0x2F9E5B), in: RoundedRectangle(cornerRadius: 4))
                     }
                     .buttonStyle(.plain)
@@ -396,8 +450,67 @@ struct HomeView: View {
         }
     }
 
-    /// "All lines" on the planner: your trip, then the buses (the trains are on the LED strip above).
     @ViewBuilder private var boardLinesContent: some View {
+        if live.anywhere { anywhereLinesContent } else { usualLinesContent }
+    }
+
+    /// From anywhere: your fastest trip from where you are, and what leaves from the stops around you.
+    @ViewBuilder private var anywhereLinesContent: some View {
+        let dest = live.destination(trip.direction).short
+        if let t = live.next[safe: live.pick] ?? live.next.first {
+            let r = RoutePlan.from(t)
+            PlannerTripCard(trip: t, home: home, wakeTitle: r.map { _ in "Wake me up · to \(dest)" }, arrive: "at \(dest) \(Fmt.hhmm(t.end))",
+                            title: live.here == nil ? "Your trip · fastest" : "Your trip · from here") {
+                if let r { trip.start(r) }
+            }
+            if t.first.walkBefore > 0 {
+                Label("First a \(t.first.walkBefore) min walk to \(Fmt.place(t.first.fromStop))", systemImage: "figure.walk")
+                    .font(BoardInk.sans(11.5, .semibold)).foregroundStyle(Color.white.opacity(0.85))
+            }
+        } else {
+            Text(live.nextError ?? "Finding the fastest way to \(dest)…").font(BoardInk.sans(12, .regular)).foregroundStyle(Color.white.opacity(0.85))
+        }
+        nearYou
+        RankLegend()
+        WatchingCard(pal: pal, board: true)
+        Text("The trips and stops follow where you are. Pick where you’re going with the button at the top. Tap any line for more: it’s tracked for you from then on.")
+            .font(BoardInk.sans(9.5, .regular)).foregroundStyle(Color.white.opacity(0.65))
+    }
+
+    /// The stops around you: the nearest bus stops (both sides) and the nearest station, with what leaves next.
+    /// The ones that are part of your trip are marked.
+    @ViewBuilder private var nearYou: some View {
+        let rail = Set(live.nearStops.filter(\.rail).map(\.id))
+        let mine = Set(live.next.flatMap(\.rides).map(\.tripId))
+        let names = live.nearStops.map(\.name).reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
+        let dest = live.destination(trip.direction).short
+        PlannerBar(title: "Near you", sub: live.here == nil ? nil : "from where you are")
+        if live.nearStops.isEmpty {
+            Text(live.here == nil ? "Turn location on for Haltewekker to see the stops around you." : "Looking for the stops around you…")
+                .font(BoardInk.sans(12, .regular)).foregroundStyle(Color.white.opacity(0.85))
+        }
+        ForEach(names, id: \.self) { name in
+            let here = live.nearStops.filter { $0.name == name }
+            let ids = Set(here.map(\.id))
+            let isRail = !ids.isDisjoint(with: rail)
+            let rows = Array(live.nearBoard.filter { ids.contains($0.stopId) && ($0.time > Date().addingTimeInterval(-5 * 60) || $0.cancelled) }.prefix(6))
+            PlannerStop(name: "\(Fmt.place(name)) · \(Fmt.distance(here.map(\.meters).min() ?? 0))", rail: isRail)
+            if rows.isEmpty {
+                Text("Nothing leaving here soon.").font(BoardInk.sans(11, .regular)).foregroundStyle(Color.white.opacity(0.75))
+            } else {
+                PlannerColumns()
+                ForEach(rows) { d in
+                    PlannerBusRow(line: isRail ? Transit.trainLabel(d.line) : d.line, to: Fmt.place(d.headsign), time: d.cancelled ? d.scheduled : d.time,
+                                  scheduled: d.scheduled, live: d.live, cancelled: d.cancelled, train: isRail,
+                                  note: mine.contains(d.tripId) ? "Part of your trip to \(dest)" : d.platform.map { "platform \($0)" },
+                                  watched: lines.isWatched(stopId: d.stopId, line: d.line, headsign: d.headsign), picked: picked == .bus(d)) { tapBus(d) }
+                }
+            }
+        }
+    }
+
+    /// "All lines" on the planner: your trip, then the buses (the trains are on the LED strip above).
+    @ViewBuilder private var usualLinesContent: some View {
         if let t = live.next[safe: live.pick] ?? live.next.first {
             let r = t.via.flatMap { via in RoutePlan.all.first(where: { $0.station.short == via }) }
             PlannerTripCard(trip: t, home: home, wakeTitle: r.map { "Wake me up · via \($0.station.short)" }) {
@@ -582,6 +695,7 @@ struct HomeView: View {
     // MARK: pieces
 
     private func toggleDirection() {
+        live.go(to: nil)                                    // school or home again, not somewhere you picked
         withAnimation(.easeInOut(duration: 0.6)) { trip.pick(home ? .toSchool : .home) }
         Task { await live.refresh(trip.direction, force: true) }
     }
@@ -951,7 +1065,7 @@ struct RideView: View {
 
     private var boardingTitle: String {
         guard let l = trip.leg else { return "" }
-        if trip.index == 0 && trip.route?.single == nil { return trip.direction == .toSchool ? "Next buses towards BUas" : "Next trains home" }
+        if trip.index == 0 && trip.route?.isFixed == true { return trip.direction == .toSchool ? "Next buses towards BUas" : "Next trains home" }
         return "Next \(l.mode == .train ? "trains" : "buses") to \(l.to.short)"
     }
 
@@ -1238,7 +1352,7 @@ struct ArrivalView: View {
                         .frame(maxWidth: .infinity, alignment: .leading).brass(pal, pad: 16)
                         TransferList(all: trip.upcoming, updated: trip.upcomingAt, error: trip.upcomingError, mode: n.mode, dest: n.mode == .train ? n.to.short : "Veghel", pal: pal).brass(pal, pad: 14)
                     } else {
-                        Text(trip.route?.single != nil ? "You’re at \(trip.arrivedAt ?? "your stop")" : trip.direction == .home ? "You’re home" : "You’re in Breda")
+                        Text(trip.route?.isFixed == false ? "You’re at \(trip.arrivedAt ?? trip.route?.station.short ?? "your stop")" : trip.direction == .home ? "You’re home" : "You’re in Breda")
                             .font(HWFont.display(34)).foregroundStyle(HWPalette.ink)
                         Text("Trip finished.").font(HWFont.body(14)).foregroundStyle(HWPalette.muted)
                         if let s = trip.lastScore { ScoreCard(result: s, pal: pal).frame(maxWidth: .infinity, alignment: .leading).brass(pal, pad: 18) }

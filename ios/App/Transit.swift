@@ -22,6 +22,10 @@ struct Ride: Identifiable, Hashable {
     var num: String = ""        // the train number ("3561"), for NS
     var headsign: String = ""
     var plannedPlatform: String? = nil
+    var fromLat: Double? = nil      // where the stops are, for a trip that isn't one of your two routes
+    var fromLon: Double? = nil
+    var toLat: Double? = nil
+    var toLon: Double? = nil
     var delay: Int { live ? Int((departure.timeIntervalSince(scheduledDeparture) / 60).rounded()) : 0 }
     var rideMinutes: Int { Fmt.mins(arrival.timeIntervalSince(departure)) }
     var badge: String { isTrain ? line : "BUS \(line)" }
@@ -171,7 +175,8 @@ enum Transit {
                               platform: (from["track"] as? String) ?? (from["scheduledTrack"] as? String),
                               live: (l["realTime"] as? Bool) ?? false, cancelled: (l["cancelled"] as? Bool) ?? false, walkBefore: walk,
                               num: Self.text(l["tripShortName"]), headsign: (l["headsign"] as? String) ?? "",
-                              plannedPlatform: (from["scheduledTrack"] as? String) ?? (from["track"] as? String)))
+                              plannedPlatform: (from["scheduledTrack"] as? String) ?? (from["track"] as? String),
+                              fromLat: from["lat"] as? Double, fromLon: from["lon"] as? Double, toLat: to["lat"] as? Double, toLon: to["lon"] as? Double))
         }
         guard !rides.isEmpty, let s = date(it["startTime"]), let e = date(it["endTime"]) else { return nil }
         return DoorTrip(rides: rides, start: s, end: e)
@@ -197,6 +202,48 @@ enum Transit {
             var seen = Set<String>()
             return all.filter { seen.insert($0.id).inserted }.sorted { $0.first.departure < $1.first.departure }
         }
+    }
+
+    /// Door-to-door trips from where you are to a place, without the ones a later trip beats.
+    static func tripsFrom(_ c: CLLocationCoordinate2D, to: Place) async -> [DoorTrip] {
+        let now = Date()
+        var all: [DoorTrip] = []
+        for b in to.ids {
+            all += await plan(from: "\(c.latitude),\(c.longitude)", to: b, modes: nil, at: now.addingTimeInterval(-120), count: 5, maxTransfers: 4)
+        }
+        var seen = Set<String>()
+        all = all.filter { $0.first.departure >= now.addingTimeInterval(-60) && seen.insert($0.id).inserted }.sorted { $0.first.departure < $1.first.departure }
+        let kept = all.filter { t in !all.contains { $0.id != t.id && $0.first.departure >= t.first.departure && $0.end < t.end } }
+        return Array(kept.prefix(5))
+    }
+
+    /// A stop near you: a bus stop, or a train station (by the station, not one platform).
+    struct NearStop: Identifiable, Hashable {
+        let id: String
+        let name: String
+        let lat: Double
+        let lon: Double
+        let rail: Bool
+        let meters: Double
+    }
+
+    /// The stops within about 1.3 km of you, nearest first.
+    static func nearStops(_ c: CLLocationCoordinate2D) async -> [NearStop] {
+        let dLat = 0.012, dLon = 0.019
+        let q: [URLQueryItem] = [.init(name: "min", value: "\(c.latitude - dLat),\(c.longitude - dLon)"),
+                                 .init(name: "max", value: "\(c.latitude + dLat),\(c.longitude + dLon)")]
+        guard let list = try? await get("/v1/map/stops", q) as? [[String: Any]] else { return [] }
+        let here = CLLocation(latitude: c.latitude, longitude: c.longitude)
+        var seen = Set<String>()
+        return list.compactMap { m -> NearStop? in
+            guard let id = m["stopId"] as? String, let name = m["name"] as? String, let la = m["lat"] as? Double, let lo = m["lon"] as? Double else { return nil }
+            let modes = (m["modes"] as? [String]) ?? []
+            let rail = modes.contains { $0.contains("RAIL") || $0 == "LONG_DISTANCE" || $0 == "HIGHSPEED" }
+            let key = rail ? ((m["parentId"] as? String) ?? id) : id            // one entry per station
+            guard seen.insert(key).inserted else { return nil }
+            return NearStop(id: key, name: name, lat: la, lon: lo, rail: rail, meters: here.distance(from: CLLocation(latitude: la, longitude: lo)))
+        }
+        .sorted { $0.meters < $1.meters }
     }
 
     /// Next door-to-door trips, without the ones a later trip beats.

@@ -55,12 +55,44 @@ struct Leg: Hashable {
     var title: String { "\(mode.title) to \(to.short)" }
 }
 
+/// Somewhere you picked to go yourself (a stop or a station).
+struct Destination: Codable, Hashable, Identifiable {
+    let id: String
+    let name: String
+    let lat: Double
+    let lon: Double
+    var short: String { Fmt.place(name) }
+    var place: Place {
+        Place(key: "d:\(id)", name: name, short: short, ids: [id], coordinate: .init(latitude: lat, longitude: lon), spoken: short)
+    }
+}
+
 /// Your two routes. Going home is the same route backwards.
 struct RoutePlan: Identifiable, Hashable {
     let id: String
     let name: String
     let station: Place
     var single: Leg? = nil          // "Wake me at a single stop": one leg, no route
+    var custom: [Leg]? = nil        // a trip from where you are (or to somewhere you picked): its rides, one leg each
+
+    /// One of your two routes (not a single stop, not a trip from somewhere else).
+    var isFixed: Bool { single == nil && custom == nil }
+
+    /// The rides of a planned trip as a route the alarm can follow, leg by leg. Nil if a stop's position is missing.
+    static func from(_ t: DoorTrip) -> RoutePlan? {
+        var legs: [Leg] = []
+        for r in t.rides {
+            guard let fa = r.fromLat, let fo = r.fromLon, let ta = r.toLat, let to = r.toLon else { return nil }
+            let a = Place(key: "s:\(r.fromId)", name: r.fromStop, short: Fmt.place(r.fromStop), ids: [r.fromId],
+                          coordinate: .init(latitude: fa, longitude: fo), spoken: Fmt.place(r.fromStop))
+            let bName = Fmt.place(r.toStop)
+            let b = Place(key: "s:\(r.toStop)|\(ta),\(to)", name: r.toStop, short: bName, ids: ["\(ta),\(to)"],
+                          coordinate: .init(latitude: ta, longitude: to), spoken: bName)
+            legs.append(Leg(mode: r.isTrain ? .train : .bus, from: a, to: b))
+        }
+        guard let last = legs.last else { return nil }
+        return RoutePlan(id: "trip-\(t.id)", name: "To \(last.to.short)", station: last.to, custom: legs)
+    }
 
     static func stop(_ p: Place, mode: Mode, from: Place) -> RoutePlan {
         RoutePlan(id: "stop-\(p.key)", name: p.name, station: p, single: Leg(mode: mode, from: from, to: p))
@@ -73,6 +105,7 @@ struct RoutePlan: Identifiable, Hashable {
     static func via(_ station: Place) -> RoutePlan? { all.first { $0.station == station } }
 
     func legs(_ dir: Direction) -> [Leg] {
+        if let custom { return custom }
         if let single { return [single] }
         switch dir {
         case .toSchool:

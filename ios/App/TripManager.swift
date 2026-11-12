@@ -101,7 +101,10 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
 
     var leg: Leg? { index < legs.count ? legs[index] : nil }
     var wakeKm: Double { leg.map(km(for:)) ?? busKm }
-    var finalName: String { route?.single != nil ? (leg?.to.short ?? "") : direction == .home ? "Home" : "Breda" }
+    var finalName: String {
+        if let r = route, !r.isFixed { return r.custom != nil ? r.station.short : (leg?.to.short ?? "") }
+        return direction == .home ? "Home" : "Breda"
+    }
     func km(for l: Leg) -> Double { kmMem["\(l.mode.rawValue):\(l.to.key)"] ?? (l.mode == .bus ? busKm : trainKm) }
     var here: CLLocationCoordinate2D? { location.location?.coordinate }
 
@@ -222,7 +225,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         } else {
             phase = .finished
             location.stopUpdatingLocation()
-            if let r = route, r.single == nil, startedAtLeg == 0, let s = tripStart {
+            if let r = route, r.isFixed, startedAtLeg == 0, let s = tripStart {
                 lastScore = ScoreBook.shared.log(route: r, home: direction == .home, start: s)
             }
         }
@@ -492,7 +495,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     /// Where this leg can take you: on the first leg of a route either station (it follows the one you take).
     private var legDestinations: [Place] {
         guard let l = leg else { return [] }
-        return index == 0 && route?.single == nil ? RoutePlan.all.map { $0.legs(direction)[0].to } : [l.to]
+        return index == 0 && route?.isFixed == true ? RoutePlan.all.map { $0.legs(direction)[0].to } : [l.to]
     }
 
     /// Does this bus or train still reach `dest` from where you are now?
@@ -536,7 +539,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         else { LineWatchStore.shared.boarded(line: v.line) }
         let stops: [TripStop]
         if let known { stops = known } else { stops = await Transit.tripStops(v.tripId) }
-        if index == 0, let r = route, r.single == nil {
+        if index == 0, let r = route, r.isFixed {
             let names = stops.map { $0.name.lowercased() }
             func goes(_ p: Place) -> Bool { names.contains { $0.contains(p == .denBosch ? "hertogenbosch" : "eindhoven") } }
             let fromList = upcoming.first(where: { $0.trip.first.tripId == v.tripId })?.to
@@ -615,7 +618,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         var target: (from: Place, to: [Place], mode: Mode)?
         if phase == .transfer, let n = legs[safe: index + 1] { target = (n.from, [n.to], n.mode) }
         else if (phase == .sleeping || phase == .awake) && vehicle == nil, let l = leg {
-            let both = index == 0 && route?.single == nil
+            let both = index == 0 && route?.isFixed == true
             target = (l.from, both ? RoutePlan.all.map { $0.legs(direction)[0].to } : [l.to], l.mode)
         }
         guard let t = target else { return }

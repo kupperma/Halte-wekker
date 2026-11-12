@@ -330,9 +330,10 @@ struct PlannerBar: View {
 /// A stop's name, with the yellow bus dot.
 struct PlannerStop: View {
     let name: String
+    var rail = false
     var body: some View {
         HStack(spacing: 6) {
-            Image(systemName: "bus.fill").font(.system(size: 7, weight: .bold)).foregroundStyle(BoardInk.navy)
+            Image(systemName: rail ? "tram.fill" : "bus.fill").font(.system(size: 7, weight: .bold)).foregroundStyle(BoardInk.navy)
                 .frame(width: 15, height: 15).background(BoardInk.yellow, in: Circle())
             Text(name).font(BoardInk.sans(13)).foregroundStyle(.white).lineLimit(1).minimumScaleFactor(0.8)
         }
@@ -363,6 +364,7 @@ struct PlannerBusRow: View {
     let live: Bool
     let cancelled: Bool
     var grade: String? = nil        // the route box takes the colour of its speed rank
+    var train = false               // a train from the station near you: a yellow box
     var note: String? = nil
     let watched: Bool
     let picked: Bool
@@ -373,9 +375,10 @@ struct PlannerBusRow: View {
         let late = live && !cancelled && abs(time.timeIntervalSince(scheduled)) >= 60
         Button(action: tap) {
             HStack(spacing: 0) {
-                Text(line).font(BoardInk.sans(13)).foregroundStyle(grade.map { RatingStyle.ink($0) } ?? BoardInk.navy).lineLimit(1).minimumScaleFactor(0.6)
+                Text(line).font(BoardInk.sans(13)).foregroundStyle(train ? Color(hex: 0x1A1A1A) : (grade.map { RatingStyle.ink($0) } ?? BoardInk.navy))
+                    .lineLimit(1).minimumScaleFactor(0.6)
                     .frame(width: 38, height: 20)
-                    .background(grade.map { RatingStyle.fill($0) } ?? AnyShapeStyle(BoardInk.route), in: RoundedRectangle(cornerRadius: 2))
+                    .background(train ? AnyShapeStyle(BoardInk.yellow) : (grade.map { RatingStyle.fill($0) } ?? AnyShapeStyle(BoardInk.route)), in: RoundedRectangle(cornerRadius: 2))
                     .padding(.trailing, 8)
                 if cancelled {
                     Text("Cancelled · \(to)").font(BoardInk.sans(12)).foregroundStyle(BoardInk.navy).lineLimit(1).minimumScaleFactor(0.7)
@@ -423,14 +426,16 @@ struct PlannerTripCard: View {
     let trip: DoorTrip
     let home: Bool
     let wakeTitle: String?
+    var arrive: String? = nil       // "at Tilburg 10:12" for a trip from where you are
+    var title = "Your trip · fastest"
     let wake: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("Your trip · fastest").font(BoardInk.sans(13))
+                Text(title).font(BoardInk.sans(13))
                 Spacer(minLength: 4)
-                Text("\(home ? "home" : "at BUas") \(Fmt.hhmm(trip.end))").font(BoardInk.sans(13))
+                Text(arrive ?? "\(home ? "home" : "at BUas") \(Fmt.hhmm(trip.end))").font(BoardInk.sans(13)).lineLimit(1).minimumScaleFactor(0.7)
             }
             .foregroundStyle(BoardInk.navy)
             HStack(spacing: 5) {
@@ -632,6 +637,7 @@ struct BusPage: View {
     let status: String
     let ride: String?
     var rank: RankInfo? = nil
+    var train = false
     let tracked: Bool
     let back: () -> Void
     let track: () -> Void
@@ -641,12 +647,13 @@ struct BusPage: View {
         VStack(alignment: .leading, spacing: 10) {
             PageTop(tracked: tracked, back: back, track: track)
             HStack(spacing: 8) {
-                Text(line).font(BoardInk.sans(15)).foregroundStyle(g.map { RatingStyle.ink($0) } ?? BoardInk.navy).lineLimit(1)
+                Text(line).font(BoardInk.sans(15)).foregroundStyle(train ? Color(hex: 0x1A1A1A) : (g.map { RatingStyle.ink($0) } ?? BoardInk.navy)).lineLimit(1)
+                    .minimumScaleFactor(0.6)
                     .frame(width: 44, height: 26)
-                    .background(g.map { RatingStyle.fill($0) } ?? AnyShapeStyle(BoardInk.route), in: RoundedRectangle(cornerRadius: 2))
+                    .background(train ? AnyShapeStyle(BoardInk.yellow) : (g.map { RatingStyle.fill($0) } ?? AnyShapeStyle(BoardInk.route)), in: RoundedRectangle(cornerRadius: 2))
                 VStack(alignment: .leading, spacing: 1) {
                     Text(to).font(BoardInk.sans(22)).foregroundStyle(.white).lineLimit(1).minimumScaleFactor(0.6)
-                    Text("Bus \(line) · from \(stop)").font(BoardInk.sans(11, .regular)).foregroundStyle(Color.white.opacity(0.8)).lineLimit(1)
+                    Text("\(train ? "Train" : "Bus") \(line) · from \(stop)").font(BoardInk.sans(11, .regular)).foregroundStyle(Color.white.opacity(0.8)).lineLimit(1)
                 }
             }
             HStack(alignment: .center, spacing: 10) {
@@ -663,7 +670,7 @@ struct BusPage: View {
                 Text(ride).font(BoardInk.sans(12, .regular)).foregroundStyle(.white)
             }
             PlannerBar(title: "How busy")
-            Text("There’s no busyness forecast for buses.").font(BoardInk.sans(11, .regular)).foregroundStyle(Color.white.opacity(0.8))
+            Text(train ? "There’s no busyness forecast for this train here." : "There’s no busyness forecast for buses.").font(BoardInk.sans(11, .regular)).foregroundStyle(Color.white.opacity(0.8))
             TrackingNote(tracked: tracked, text: "Watching the \(line): you’re told when the next one runs late, leaves early or is cancelled, until you’re on it.")
         }
     }
@@ -674,4 +681,65 @@ private func leaves(_ d: Date) -> String {
     let m = Int((d.timeIntervalSinceNow / 60).rounded())
     if m <= -1 { return "left \(-m) min ago" }
     return m == 0 ? "leaves now" : "leaves in \(m) min"
+}
+
+// MARK: going somewhere you pick
+
+/// Pick where you're going yourself: search a stop, station or town, or take one of your recent ones.
+struct DestinationSheet: View {
+    @EnvironmentObject var live: LiveStore
+    @Environment(\.dismiss) private var dismiss
+    let picked: (Destination) -> Void
+    @State private var q = ""
+    @State private var hits: [Transit.StopHit] = []
+    @State private var searching = false
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    TextField("A stop, station or town", text: $q)
+                        .textInputAutocapitalization(.words).autocorrectionDisabled()
+                }
+                if !hits.isEmpty {
+                    Section("Stops and stations") {
+                        ForEach(hits) { h in
+                            Button { pick(Destination(id: h.id, name: h.name, lat: h.lat, lon: h.lon)) } label: {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(h.name).font(BoardInk.sans(15)).foregroundStyle(.white)
+                                    if !h.town.isEmpty { Text(h.town).font(BoardInk.sans(12, .regular)).foregroundStyle(Color.white.opacity(0.7)) }
+                                }
+                            }
+                        }
+                    }
+                } else if searching {
+                    Section { ProgressView() }
+                }
+                if !live.recents.isEmpty {
+                    Section("Recent") {
+                        ForEach(live.recents) { d in
+                            Button { pick(d) } label: { Text(d.name).font(BoardInk.sans(15)).foregroundStyle(.white) }
+                        }
+                    }
+                }
+            }
+            .scrollContentBackground(.hidden)
+            .background(LinearGradient(colors: [BoardInk.blueTop, BoardInk.blueBottom], startPoint: .top, endPoint: .bottom).ignoresSafeArea())
+            .navigationTitle("Where to?")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
+            .task(id: q) {
+                let t = q.trimmingCharacters(in: .whitespaces)
+                guard t.count >= 2 else { hits = []; searching = false; return }
+                searching = true
+                try? await Task.sleep(nanoseconds: 350_000_000)             // wait until you stop typing
+                guard !Task.isCancelled else { return }
+                let r = await Transit.findStops(t)
+                guard !Task.isCancelled else { return }
+                hits = r; searching = false
+            }
+        }
+    }
+
+    private func pick(_ d: Destination) { picked(d); dismiss() }
 }
