@@ -136,8 +136,8 @@ final class LiveStore: ObservableObject {
         guard !nearStops.isEmpty else { return }
         // the last few that left, and the next ones (asked for apart, or a busy stop fills the list with ones that left)
         let ids = nearStops.map(\.id)
-        async let past = Transit.board(stopIds: ids, from: Date().addingTimeInterval(-20 * 60), n: 6)
-        async let next = Transit.board(stopIds: ids, from: Date().addingTimeInterval(-60), n: 20)
+        async let past = Transit.board(stopIds: ids, from: Date().addingTimeInterval(-20 * 60), n: 6, stops: true)
+        async let next = Transit.board(stopIds: ids, from: Date().addingTimeInterval(-60), n: 20, stops: true)
         let (p, n) = await (past, next)
         // the sides of a stop can each list the same bus: keep it once
         var seen = Set<String>()
@@ -230,7 +230,7 @@ final class LiveStore: ObservableObject {
         }
         var empty = false
         if dir == .toSchool {
-            async let b = Transit.board(stopIds: veghel.ids, from: now, n: 40)
+            async let b = Transit.board(stopIds: veghel.ids, from: now, n: 40, stops: true)
             async let t1 = panel(.eindhoven, .breda, "RAIL", 8, 1)
             async let t2 = panel(.denBosch, .breda, "RAIL", 8, 1)
             async let u = panel(.breda, .buas, "BUS", 12, 0)

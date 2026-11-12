@@ -733,7 +733,7 @@ struct TransferList: View {
                               time: f.departure, scheduled: f.scheduledDeparture, live: f.live, cancelled: f.cancelled || info?.cancelled == true,
                               grade: rail ? nil : (t.rides.count == 1 ? f.grade : t.last.grade), train: rail,
                               note: "\(t.rideLabel) · arrives \(Fmt.hhmm(t.last.arrival))\(plat.map { " · platform \($0)" } ?? "")",
-                              watched: rail && watch.isWatched(f, from: p.from), picked: mine.contains(f.tripId)) {
+                              heading: Heading.of(f), watched: rail && watch.isWatched(f, from: p.from), picked: mine.contains(f.tripId)) {
                     if rail { _ = watch.toggle(t, from: p.from, to: p.to) }
                 }
             }

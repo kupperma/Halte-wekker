@@ -64,7 +64,33 @@ struct BoardDeparture: Identifiable, Hashable {
     let live: Bool
     let cancelled: Bool
     let platform: String?
+    var heading: Heading? = nil         // which way it goes from here
     var delay: Int { live ? Int((time.timeIntervalSince(scheduled) / 60).rounded()) : 0 }
+}
+
+/// Which way a bus or train goes from a stop: the compass direction (0 is north, 90 east), and the next places it passes.
+struct Heading: Hashable {
+    let degrees: Double
+    var via: String? = nil              // "De Muntelaar → Uden"
+    /// "NE"
+    var compass: String {
+        let names = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
+        let d = (degrees.truncatingRemainder(dividingBy: 360) + 360).truncatingRemainder(dividingBy: 360)
+        return names[Int((d + 22.5) / 45) % 8]
+    }
+    /// "northeast"
+    var spoken: String {
+        ["N": "north", "NE": "northeast", "E": "east", "SE": "southeast", "S": "south", "SW": "southwest", "W": "west", "NW": "northwest"][compass] ?? compass
+    }
+    static func bearing(_ a: CLLocationCoordinate2D, _ b: CLLocationCoordinate2D) -> Double {
+        let dx = (b.longitude - a.longitude) * cos(a.latitude * .pi / 180), dy = b.latitude - a.latitude
+        return (atan2(dx, dy) * 180 / .pi + 360).truncatingRemainder(dividingBy: 360)
+    }
+    /// From a ride's stop to where you get off.
+    static func of(_ r: Ride) -> Heading? {
+        guard let a = r.fromLat, let o = r.fromLon, let ta = r.toLat, let to = r.toLon else { return nil }
+        return Heading(degrees: bearing(.init(latitude: a, longitude: o), .init(latitude: ta, longitude: to)))
+    }
 }
 
 /// A stop-to-stop piece of a running vehicle, from the live map (used to find the bus or train you're on).
@@ -212,7 +238,8 @@ enum Transit {
             all += await plan(from: "\(c.latitude),\(c.longitude)", to: b, modes: nil, at: now.addingTimeInterval(-120), count: count, maxTransfers: 4)
         }
         var seen = Set<String>()
-        all = all.filter { $0.first.departure >= now.addingTimeInterval(-60) && seen.insert($0.id).inserted }.sorted { $0.first.departure < $1.first.departure }
+        all = all.filter { $0.first.departure >= now.addingTimeInterval(-60) && $0.start >= now.addingTimeInterval(-90) && seen.insert($0.id).inserted }
+            .sorted { $0.first.departure < $1.first.departure }
         let kept = all.filter { t in !all.contains { $0.id != t.id && $0.first.departure >= t.first.departure && $0.end < t.end } }
         return Array(kept.prefix(keep))
     }
@@ -257,12 +284,13 @@ enum Transit {
     }
 
     /// The departure board of stops. `from` a time in the past also gives the ones that already left (or were cancelled).
-    static func board(stopIds: [String], from: Date? = nil, n: Int = 30) async -> [BoardDeparture] {
+    static func board(stopIds: [String], from: Date? = nil, n: Int = 30, stops: Bool = false) async -> [BoardDeparture] {
         await withTaskGroup(of: [BoardDeparture].self) { g in
             for id in stopIds {
                 g.addTask {
                     var q: [URLQueryItem] = [.init(name: "stopId", value: id), .init(name: "n", value: String(n))]
                     if let from { q.append(.init(name: "time", value: iso.string(from: from))) }
+                    if stops { q.append(.init(name: "fetchStops", value: "true")) }      // its next stops: which way it goes
                     guard let json = try? await get("/v6/stoptimes", q) as? [String: Any],
                           let list = json["stopTimes"] as? [[String: Any]] else { return [] }
                     return list.compactMap { st in
@@ -272,7 +300,8 @@ enum Transit {
                                               line: (st["routeShortName"] as? String) ?? "?", headsign: (st["headsign"] as? String) ?? "",
                                               time: t, scheduled: date(p["scheduledDeparture"]) ?? t, live: (st["realTime"] as? Bool) ?? false,
                                               cancelled: ((st["cancelled"] as? Bool) ?? false) || ((st["tripCancelled"] as? Bool) ?? false) || ((p["cancelled"] as? Bool) ?? false),
-                                              platform: (p["track"] as? String) ?? (p["scheduledTrack"] as? String))
+                                              platform: (p["track"] as? String) ?? (p["scheduledTrack"] as? String),
+                                              heading: heading(st, p))
                     }
                 }
             }
@@ -280,6 +309,30 @@ enum Transit {
             for await r in g { all += r }
             return all.sorted { $0.time < $1.time }
         }
+    }
+
+    /// Which way a departure goes: towards its next stops a kilometre or so on (or else its last stop), and their names.
+    private static func heading(_ st: [String: Any], _ p: [String: Any]) -> Heading? {
+        guard let la = p["lat"] as? Double, let lo = p["lon"] as? Double else { return nil }
+        let here = CLLocation(latitude: la, longitude: lo)
+        var next: [(name: String, c: CLLocationCoordinate2D)] = ((st["nextStops"] as? [[String: Any]]) ?? []).compactMap { s in
+            guard let a = s["lat"] as? Double, let o = s["lon"] as? Double else { return nil }
+            return (name: (s["name"] as? String) ?? "", c: CLLocationCoordinate2D(latitude: a, longitude: o))
+        }
+        let fromStops = !next.isEmpty
+        if next.isEmpty, let t = st["tripTo"] as? [String: Any], let a = t["lat"] as? Double, let o = t["lon"] as? Double {
+            next = [(name: (t["name"] as? String) ?? "", c: CLLocationCoordinate2D(latitude: a, longitude: o))]
+        }
+        func far(_ c: CLLocationCoordinate2D) -> Double { here.distance(from: CLLocation(latitude: c.latitude, longitude: c.longitude)) }
+        guard let ahead = next.first(where: { far($0.c) > 900 }) ?? next.last, far(ahead.c) > 60 else { return nil }
+        guard fromStops else { return Heading(degrees: Heading.bearing(here.coordinate, ahead.c)) }
+        // "via": the next stop (its own name in this town, or the town), then the next town it reaches
+        let town: (String) -> String = { $0.components(separatedBy: ",").first?.trimmingCharacters(in: .whitespaces) ?? $0 }
+        let hereTown = town((p["name"] as? String) ?? "")
+        var labels: [String] = []
+        if let f = next.first { labels.append(town(f.name) == hereTown ? Fmt.place(f.name) : town(f.name)) }
+        if let o = next.first(where: { town($0.name) != hereTown && town($0.name) != labels.first }) { labels.append(town(o.name)) }
+        return Heading(degrees: Heading.bearing(here.coordinate, ahead.c), via: labels.isEmpty ? nil : labels.joined(separator: " → "))
     }
 
     /// Vehicles running near a point right now.

@@ -152,7 +152,7 @@ final class GoStore: ObservableObject {
         }
         let prev = best
         best = p
-        others = Array(ok.filter { $0.first.tripId != p.first.tripId }.sorted(by: Self.sooner).prefix(3))
+        others = Array(ok.filter { $0.first.tripId != p.first.tripId }.sorted(by: Self.sooner).prefix(5))
         error = nil
         updated = now
         if let prev, prev.first.tripId != p.first.tripId {
@@ -521,7 +521,7 @@ struct GoView: View {
             howToGetThere(t)
             if t.rides.count > 1 { thenCard(t) }
             watchingCard(t)
-            if !go.others.isEmpty { othersCard }
+            if !go.others.isEmpty { compareCard(t) }
         } else {
             message(icon: go.error == nil ? "location.magnifyingglass" : "exclamationmark.triangle.fill",
                     title: go.error == nil ? "Finding your fastest way" : "Nothing found yet",
@@ -743,29 +743,58 @@ struct GoView: View {
         .glass()
     }
 
-    private var othersCard: some View {
+    /// The other ways side by side with the fastest: when you'd leave, how long it takes door to door, when you're there,
+    /// and how much later than the fastest.
+    private func compareCard(_ best: DoorTrip) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            kicker("Other ways", "if you miss it").padding(.bottom, 4)
-            ForEach(go.others) { o in
-                HStack(spacing: 8) {
-                    Text(Fmt.hhmm(o.first.departure)).font(BoardInk.sans(14)).foregroundStyle(.white).monospacedDigit().frame(width: 46, alignment: .leading)
-                    HStack(spacing: 3) {
-                        ForEach(Array(o.rides.enumerated()), id: \.offset) { _, r in
-                            Text(r.line).font(BoardInk.sans(10.5)).lineLimit(1).foregroundStyle(r.isTrain ? Color(hex: 0x1A1A1A) : BoardInk.navy)
-                                .padding(.horizontal, 5).frame(height: 17)
-                                .background(r.isTrain ? BoardInk.yellow : BoardInk.route, in: RoundedRectangle(cornerRadius: 3))
-                        }
-                    }
-                    Text("from \(Fmt.place(o.first.fromStop))").font(BoardInk.sans(11, .regular)).foregroundStyle(Color.white.opacity(0.75)).lineLimit(1).minimumScaleFactor(0.7)
-                    Spacer(minLength: 4)
-                    Text("→ \(Fmt.hhmm(o.end))").font(BoardInk.sans(12)).foregroundStyle(.white)
-                }
-                .padding(.vertical, 8)
-                .overlay(alignment: .bottom) { Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1) }
+            kicker("Compare", "if you take another one").padding(.bottom, 6)
+            HStack {
+                Text("LEAVE").frame(width: 50, alignment: .leading)
+                Text("TAKE")
+                Spacer(minLength: 4)
+                Text("TRIP").frame(width: 64, alignment: .trailing)
+                Text("THERE").frame(width: 62, alignment: .trailing)
             }
+            .font(BoardInk.sans(9)).tracking(1).foregroundStyle(Color.white.opacity(0.55)).padding(.bottom, 2)
+            compareRow(best, best)
+            ForEach(go.others) { o in compareRow(o, best) }
         }
         .padding(14)
         .glass()
+    }
+
+    private func compareRow(_ o: DoorTrip, _ best: DoorTrip) -> some View {
+        let fastest = o.id == best.id
+        let later = Fmt.mins(o.end.timeIntervalSince(best.end))
+        let changes = o.rides.count - 1
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Text(Fmt.hhmm(o.start)).font(BoardInk.sans(14)).foregroundStyle(.white).monospacedDigit().frame(width: 50, alignment: .leading)
+                HStack(spacing: 3) {
+                    ForEach(Array(o.rides.enumerated()), id: \.offset) { _, r in
+                        Text(r.line).font(BoardInk.sans(10.5)).lineLimit(1).foregroundStyle(r.isTrain ? Color(hex: 0x1A1A1A) : BoardInk.navy)
+                            .padding(.horizontal, 5).frame(height: 17)
+                            .background(r.isTrain ? BoardInk.yellow : BoardInk.route, in: RoundedRectangle(cornerRadius: 3))
+                    }
+                }
+                Spacer(minLength: 4)
+                Text(Fmt.rideText(o.end.timeIntervalSince(o.start) / 60)).font(BoardInk.sans(12, .semibold)).foregroundStyle(Color.white.opacity(0.9))
+                    .lineLimit(1).minimumScaleFactor(0.7).frame(width: 64, alignment: .trailing)
+                Text(Fmt.hhmm(o.end)).font(BoardInk.sans(14)).foregroundStyle(.white).monospacedDigit().frame(width: 62, alignment: .trailing)
+            }
+            HStack(spacing: 6) {
+                Text("\(GoStore.what(o.first)) \(Fmt.hhmm(o.first.departure)) from \(Fmt.place(o.first.fromStop))\(changes > 0 ? " · \(changes) change\(changes > 1 ? "s" : "")" : "")")
+                    .font(BoardInk.sans(10.5, .regular)).foregroundStyle(Color.white.opacity(0.7)).lineLimit(1).minimumScaleFactor(0.7)
+                Spacer(minLength: 4)
+                Text(fastest ? "fastest" : later == 0 ? "same time" : "+\(later) min")
+                    .font(BoardInk.sans(11)).foregroundStyle(fastest ? BoardInk.navy : later == 0 ? .white : Color(hex: 0x2A1A00))
+                    .padding(.horizontal, 7).padding(.vertical, 2)
+                    .background(fastest ? BoardInk.green : later == 0 ? Color.white.opacity(0.2) : BoardInk.late, in: Capsule())
+            }
+        }
+        .padding(.vertical, 8)
+        .overlay(alignment: .bottom) { Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1) }
+        .accessibilityElement(children: .combine)
     }
 
     // MARK: bottom

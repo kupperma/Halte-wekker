@@ -337,7 +337,8 @@ struct HomeView: View {
             let status = d.cancelled ? "Cancelled" : gone ? "Departed" : (d.live && d.delay >= 1) ? Fmt.hhmm(d.time) : d.live ? "On time" : "Planned"
             var isPicked = false
             if case .bus(let b) = picked, b.id == d.id { isPicked = true }
-            return LEDTrain(id: d.id, time: Fmt.hhmm(d.scheduled), to: "\(Fmt.place(d.headsign)) \(Transit.trainLabel(d.line))", via: "from \(station)",
+            return LEDTrain(id: d.id, time: Fmt.hhmm(d.scheduled), to: "\(Fmt.place(d.headsign)) \(Transit.trainLabel(d.line))",
+                            via: d.heading.map { h in "\(h.compass)\(h.via.map { " via " + $0 } ?? " from \(station)")" } ?? "from \(station)",
                             platform: d.platform ?? "", status: status, gone: gone, picked: isPicked)
         }
     }
@@ -582,6 +583,9 @@ struct HomeView: View {
     @ViewBuilder private var nearYou: some View {
         let rail = Set(live.nearStops.filter(\.rail).map(\.id))
         let mine = Set(live.next.flatMap(\.rides).map(\.tripId))
+        // when you'd be there if you took this bus first, to compare with the fastest
+        let ends = live.next.reduce(into: [String: Date]()) { m, t in if (m[t.first.tripId] ?? .distantFuture) > t.end { m[t.first.tripId] = t.end } }
+        let fastest = live.next.map(\.end).min()
         let names = live.nearStops.map(\.name).reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
         let dest = live.destination(trip.direction).short
         PlannerBar(title: "Near you", sub: live.here == nil ? nil : "from where you are")
@@ -625,11 +629,19 @@ struct HomeView: View {
                 ForEach(rows) { d in
                     PlannerBusRow(line: isRail ? Transit.trainLabel(d.line) : d.line, to: Fmt.place(d.headsign), time: d.cancelled ? d.scheduled : d.time,
                                   scheduled: d.scheduled, live: d.live, cancelled: d.cancelled, train: isRail,
-                                  note: mine.contains(d.tripId) ? "Part of your trip to \(dest)" : d.platform.map { "platform \($0)" },
+                                  note: compareNote(ends[d.tripId], fastest, dest) ?? (mine.contains(d.tripId) ? "Part of your trip to \(dest)" : d.platform.map { "platform \($0)" }),
+                                  heading: d.heading,
                                   watched: lines.isWatched(stopId: d.stopId, line: d.line, headsign: d.headsign), picked: picked == .bus(d)) { tapBus(d) }
                 }
             }
         }
+    }
+
+    /// "BUas 19:04 · 14 min later than the fastest", "BUas 18:50 · the fastest"
+    private func compareNote(_ end: Date?, _ fastest: Date?, _ dest: String) -> String? {
+        guard let end, let fastest else { return nil }
+        let d = Fmt.mins(end.timeIntervalSince(fastest))
+        return "\(dest) \(Fmt.hhmm(end)) · " + (d == 0 ? "the fastest" : "\(d) min later than the fastest")
     }
 
     /// Wake me up for a trip from anywhere; on a bus or train, the alarm starts with the one you're on.
@@ -707,7 +719,7 @@ struct HomeView: View {
                 let ride = live.boardRides["\(d.stopId)|\(d.tripId)"]
                 PlannerBusRow(line: d.line, to: d.headsign, time: d.cancelled ? d.scheduled : d.time, scheduled: d.scheduled, live: d.live, cancelled: d.cancelled,
                               grade: d.cancelled ? nil : ride?.grade, note: ride.map { "\(Fmt.rideText($0.minutes)) to \($0.station) station, arrives \(Fmt.hhmm($0.arrival))" },
-                              watched: lines.isWatched(stopId: d.stopId, line: d.line, headsign: d.headsign), picked: picked == .bus(d)) { tapBus(d) }
+                              heading: d.heading, watched: lines.isWatched(stopId: d.stopId, line: d.line, headsign: d.headsign), picked: picked == .bus(d)) { tapBus(d) }
             }
         }
     }
@@ -730,7 +742,7 @@ struct HomeView: View {
             ForEach(fallback) { r in
                 PlannerBusRow(line: r.line, to: r.headsign.isEmpty ? Fmt.place(r.toStop) : r.headsign, time: r.departure, scheduled: r.scheduledDeparture,
                               live: r.live, cancelled: r.cancelled, grade: r.grade, note: "\(r.rideMinutes) min ride · arrives \(Fmt.hhmm(r.arrival))",
-                              watched: lines.isWatched(stopId: r.fromId, line: r.line, headsign: r.headsign), picked: picked == .ride(r)) { tapRide(r) }
+                              heading: Heading.of(r), watched: lines.isWatched(stopId: r.fromId, line: r.line, headsign: r.headsign), picked: picked == .ride(r)) { tapRide(r) }
             }
             Text("From your next trips; the full list comes in on the next refresh.").font(BoardInk.sans(9.5, .regular)).foregroundStyle(Color.white.opacity(0.65))
         } else if list.isEmpty {
@@ -741,7 +753,7 @@ struct HomeView: View {
                 let f = p.trip.first
                 PlannerBusRow(line: f.line, to: f.headsign.isEmpty ? Fmt.place(p.trip.last.toStop) : f.headsign, time: f.departure, scheduled: f.scheduledDeparture,
                               live: f.live, cancelled: f.cancelled, grade: p.trip.rides.count == 1 ? f.grade : p.trip.last.grade, note: "\(p.trip.rideLabel) · arrives \(Fmt.hhmm(p.trip.last.arrival))",
-                              watched: lines.isWatched(stopId: f.fromId, line: f.line, headsign: f.headsign), picked: picked == .busTrip(p)) { tapBusTrip(p) }
+                              heading: Heading.of(f), watched: lines.isWatched(stopId: f.fromId, line: f.line, headsign: f.headsign), picked: picked == .busTrip(p)) { tapBusTrip(p) }
             }
         }
     }

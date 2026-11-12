@@ -366,6 +366,7 @@ struct PlannerBusRow: View {
     var grade: String? = nil        // the route box takes the colour of its speed rank
     var train = false               // a train from the station near you: a yellow box
     var note: String? = nil
+    var heading: Heading? = nil     // which way it goes: an arrow, the compass direction and where it goes next
     let watched: Bool
     let picked: Bool
     let tap: () -> Void
@@ -379,7 +380,16 @@ struct PlannerBusRow: View {
                     .lineLimit(1).minimumScaleFactor(0.6)
                     .frame(width: 38, height: 20)
                     .background(train ? AnyShapeStyle(BoardInk.yellow) : (grade.map { RatingStyle.fill($0) } ?? AnyShapeStyle(BoardInk.route)), in: RoundedRectangle(cornerRadius: 2))
-                    .padding(.trailing, 8)
+                    .padding(.trailing, heading == nil ? 8 : 6)
+                if let h = heading {
+                    // the way it drives, on a map with north up
+                    Image(systemName: "location.north.fill").font(.system(size: 10, weight: .bold)).foregroundStyle(BoardInk.yellow)
+                        .rotationEffect(.degrees(h.degrees))
+                        .frame(width: 20, height: 20).background(Color.black.opacity(0.28), in: Circle())
+                        .overlay(Circle().stroke(Color.white.opacity(0.25), lineWidth: 1))
+                        .padding(.trailing, 7)
+                        .accessibilityLabel("Going \(h.spoken)")
+                }
                 if cancelled {
                     Text("Cancelled · \(to)").font(BoardInk.sans(12)).foregroundStyle(BoardInk.navy).lineLimit(1).minimumScaleFactor(0.7)
                         .padding(.horizontal, 6).frame(maxWidth: .infinity, minHeight: 20, alignment: .leading).background(Color.white)
@@ -387,6 +397,10 @@ struct PlannerBusRow: View {
                 } else {
                     VStack(alignment: .leading, spacing: 1) {
                         Text(to).font(BoardInk.sans(14)).foregroundStyle(.white).lineLimit(1).minimumScaleFactor(0.7)
+                        if let h = heading {
+                            Text("\(h.compass)\(h.via.map { " · via \($0)" } ?? "")").font(BoardInk.sans(9.5, .semibold))
+                                .foregroundStyle(BoardInk.yellow.opacity(0.9)).lineLimit(1).minimumScaleFactor(0.8)
+                        }
                         if let note { Text(note).font(BoardInk.sans(9.5, .regular)).foregroundStyle(Color.white.opacity(0.75)).lineLimit(1) }
                     }
                     Spacer(minLength: 4)
