@@ -60,6 +60,9 @@ struct NSDeparture {
     let plannedTrack: String
     let actualTrack: String
     let cancelled: Bool
+    var actual: Date? = nil
+    /// Minutes late (negative: early).
+    var delay: Int { guard let a = actual, let p = planned else { return 0 }; return Int((a.timeIntervalSince(p) / 60).rounded()) }
 }
 
 @MainActor
@@ -114,7 +117,7 @@ final class NSStore: ObservableObject {
             NSDeparture(num: Transit.text((x["product"] as? [String: Any])?["number"]), planned: Self.time(x["plannedDateTime"]),
                         plannedTrack: Transit.text(x["plannedTrack"]),
                         actualTrack: Transit.text(x["actualTrack"]).isEmpty ? Transit.text(x["plannedTrack"]) : Transit.text(x["actualTrack"]),
-                        cancelled: (x["cancelled"] as? Bool) ?? false)
+                        cancelled: (x["cancelled"] as? Bool) ?? false, actual: Self.time(x["actualDateTime"]))
         }
         boards[code] = (Date(), list); available = true
         return list

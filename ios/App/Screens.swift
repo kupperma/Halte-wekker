@@ -34,6 +34,7 @@ struct HomeView: View {
     @EnvironmentObject var near: NearMe
     @EnvironmentObject var stops: StopsStore
     @EnvironmentObject var scores: ScoreBook
+    @EnvironmentObject var lines: LineWatchStore
     @Environment(\.scenePhase) private var scene
     @State private var settings = false
     @State private var planning = false
@@ -60,6 +61,7 @@ struct HomeView: View {
                         nextPass
                         planButton
                     }
+                    WatchingCard(pal: pal)
 
                     sectionTitle("Wake me up")
                     VStack(spacing: 0) {
@@ -346,26 +348,34 @@ struct HomeView: View {
     private func trainHint(_ list: [PanelTrip]) -> String {
         if ns.available == false { return "Platform changes need the NS key in your relay (see the GitHub page)." }
         let crowd = list.contains { (ns.rail($0.trip.first)?.crowd ?? 0) > 0 }
-        return "Tap a train to get an alarm if its platform changes." + (crowd ? " People icons: how busy NS expects the train, from 1 (quiet) to 3 (very busy)." : "")
+        return "Tap a train to get an alarm if its platform changes or it runs late." + (crowd ? " People icons: how busy NS expects the train, from 1 (quiet) to 3 (very busy)." : "")
     }
 
     private func tripsFold(_ key: String, _ title: String, icon: String, _ all: [PanelTrip]) -> some View {
-        let list = Array(all.filter { $0.trip.first.departure > Date().addingTimeInterval(-60) && nearOK($0) }.prefix(6))
+        let since = Date().addingTimeInterval(live.showEarlier ? -30 * 60 : -60)
+        let list = Array(all.filter { $0.trip.first.departure > since && nearOK($0) }.prefix(live.showEarlier ? 12 : 6))
         let mine = planner.chosen?.tripIds ?? []
         return fold(key, title, icon: icon, next: list.first.map { "\($0.trip.first.line) · \(Fmt.hhmm($0.trip.first.departure))" } ?? "") {
             if list.isEmpty {
                 Text(live.panelsUpdated == nil ? "Loading…" : "Nothing coming up right now.").font(HWFont.body(12)).foregroundStyle(HWPalette.muted).padding(.vertical, 12)
             }
             ForEach(list) { p in
-                let t = p.trip, rail = t.first.isTrain
-                Button { if rail { watch.toggle(t, from: p.from, to: p.to) } } label: {
-                    TripRow(trip: t, pal: pal, head: head(key, p), extra: extra(key, p), info: rail ? ns.rail(t.first) : nil,
-                            watched: rail && watch.isWatched(t.first, from: p.from), mine: mine.contains(t.first.tripId))
+                let t = p.trip, f = t.first, rail = f.isTrain
+                let lineOn = !rail && lines.isWatched(stopId: f.fromId, line: f.line, headsign: f.headsign)
+                Button {
+                    if rail { watch.toggle(t, from: p.from, to: p.to) }
+                    else { lines.toggle(stopId: f.fromId, stopName: f.fromStop, line: f.line, headsign: f.headsign, tripId: f.tripId, delay: f.live ? f.delay : nil) }
+                } label: {
+                    TripRow(trip: t, pal: pal, head: head(key, p), extra: extra(key, p), info: rail ? ns.rail(f) : nil,
+                            watched: rail ? watch.isWatched(f, from: p.from) : lineOn, mine: mine.contains(f.tripId))
                 }
                 .buttonStyle(.plain)
                 divider
             }
-            if key == "train" { Text(trainHint(list)).font(HWFont.body(11)).foregroundStyle(HWPalette.muted).padding(.top, 8) }
+            Button(live.showEarlier ? "Hide earlier ones" : "Show earlier ones") { withAnimation { live.showEarlier.toggle() } }
+                .font(HWFont.body(12, bold: true)).foregroundStyle(pal.accent).padding(.top, 8)
+            Text(key == "train" ? trainHint(list) : "Tap a bus to watch its line: you get told when it runs late, leaves early or is cancelled.")
+                .font(HWFont.body(11)).foregroundStyle(HWPalette.muted).padding(.top, 4)
             if let u = live.panelsUpdated { Text("Updated at \(Fmt.hhmm(u)).").font(HWFont.body(10)).foregroundStyle(HWPalette.muted).padding(.top, 4) }
         }
     }
@@ -380,18 +390,6 @@ struct HomeView: View {
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(on ? .isSelected : [])
-    }
-
-    private func boardStatus(_ d: BoardDeparture, showStop: Bool) -> String {
-        var st: String
-        if d.cancelled { st = "cancelled" }
-        else if !d.live { st = "timetable time" }
-        else if d.delay >= 1 { st = "\(d.delay) min late, planned \(Fmt.hhmm(d.scheduled))" }
-        else if d.delay <= -1 { st = "\(-d.delay) min early, planned \(Fmt.hhmm(d.scheduled))" }
-        else { st = "on time" }
-        if let p = d.platform, !p.isEmpty { st += ", platform \(p)" }
-        let s = st.prefix(1).uppercased() + st.dropFirst()
-        return showStop ? "\(StopsStore.shared.boardStops.first { $0.id == d.stopId }?.short ?? Fmt.place(d.stopName)) · \(s)" : s
     }
 
     private func boardFold() -> some View {
@@ -412,12 +410,13 @@ struct HomeView: View {
                             ForEach(stops.boardStops) { s in chip(s.short, live.stopFilter == s.id) { live.stopFilter = s.id } }
                         }
                     }
-                    if !stops.lines.isEmpty {
-                        HStack(spacing: 6) {
+                    HStack(spacing: 6) {
+                        if !stops.lines.isEmpty {
                             chip("My lines", live.lineFilter == "mine") { live.lineFilter = "mine" }
                             ForEach(stops.lines, id: \.self) { l in chip(l, live.lineFilter == l) { live.lineFilter = l } }
-                            chip("All buses", live.lineFilter == "all") { live.lineFilter = "all" }
                         }
+                        chip("All buses", live.lineFilter == "all") { live.lineFilter = "all" }
+                        chip("Earlier", live.showEarlier) { withAnimation { live.showEarlier.toggle() } }
                     }
                 }
                 .padding(.vertical, 8)
@@ -426,30 +425,17 @@ struct HomeView: View {
                 Text(live.panelsUpdated == nil ? "Loading…" : "No buses coming up for this choice right now.").font(HWFont.body(12)).foregroundStyle(HWPalette.muted).padding(.vertical, 12)
             }
             ForEach(list) { d in
-                let ride = live.boardRides["\(d.stopId)|\(d.tripId)"]
-                HStack(alignment: .top, spacing: 10) {
-                    Text(d.line).font(HWFont.display(13)).foregroundStyle(HWPalette.ink).frame(width: 44).padding(.vertical, 4)
-                        .overlay(RoundedRectangle(cornerRadius: 2).stroke(HWPalette.ink, lineWidth: 1.5))
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack(spacing: 6) {
-                            if let g = ride?.grade, !d.cancelled { Coin(grade: g, size: 22) }
-                            Text(d.headsign).font(HWFont.display(16)).foregroundStyle(HWPalette.ink)
-                        }
-                        Text(boardStatus(d, showStop: many && live.stopFilter == "all"))
-                            .font(HWFont.body(12, bold: d.live)).foregroundStyle(d.delay != 0 || d.cancelled ? HWPalette.warn : d.live ? HWPalette.ok : HWPalette.muted)
-                        if let r = ride, !d.cancelled {
-                            Text("\(Fmt.rideText(r.minutes)) ride to \(r.station) station, arrives \(Fmt.hhmm(r.arrival))").font(HWFont.body(12)).foregroundStyle(HWPalette.ink.opacity(0.8))
-                        }
-                    }
-                    Spacer()
-                    VStack(alignment: .trailing, spacing: 2) {
-                        Text(Fmt.hhmm(d.time)).font(HWFont.display(23)).foregroundStyle(pal.accent).strikethrough(d.cancelled)
-                        Text(Fmt.mins(d.time.timeIntervalSinceNow) == 0 ? "now" : "in \(Fmt.mins(d.time.timeIntervalSinceNow)) min").font(HWFont.body(12)).foregroundStyle(HWPalette.muted)
-                    }
+                let mine = stops.boardStops.first(where: { $0.id == d.stopId })
+                let stopName = mine?.name ?? d.stopName
+                let label: String? = many && live.stopFilter == "all" ? (mine?.short ?? Fmt.place(d.stopName)) : nil
+                BoardRow(d: d, ride: live.boardRides["\(d.stopId)|\(d.tripId)"], stopLabel: label,
+                         watched: lines.isWatched(stopId: d.stopId, line: d.line, headsign: d.headsign), pal: pal) {
+                    lines.toggle(stopId: d.stopId, stopName: stopName, line: d.line, headsign: d.headsign, tripId: d.tripId, delay: d.live ? d.delay : nil)
                 }
-                .padding(.vertical, 10)
                 divider
             }
+            Text("Tap the bell to watch a line: you get told when the next one runs late, leaves early or is cancelled, until you’re on it.")
+                .font(HWFont.body(11)).foregroundStyle(HWPalette.muted).padding(.top, 8)
         }
     }
 }
@@ -493,11 +479,17 @@ struct TripRow: View {
             Spacer(minLength: 4)
             VStack(alignment: .trailing, spacing: 2) {
                 Text(Fmt.hhmm(r.departure)).font(HWFont.display(23)).foregroundStyle(pal.accent).strikethrough(gone)
-                Text(Fmt.mins(r.departure.timeIntervalSinceNow) == 0 ? "now" : "in \(Fmt.mins(r.departure.timeIntervalSinceNow)) min").font(HWFont.body(12)).foregroundStyle(HWPalette.muted)
+                Text(whenText(r)).font(HWFont.body(12)).foregroundStyle(HWPalette.muted)
             }
         }
         .padding(.vertical, 10)
+        .opacity(!gone && r.departure < Date().addingTimeInterval(-60) ? 0.55 : 1)
         .contentShape(Rectangle())
+    }
+    private func whenText(_ r: Ride) -> String {
+        let m = Int((r.departure.timeIntervalSinceNow / 60).rounded())
+        if m <= -1 { return "left \(-m) min ago" }
+        return m == 0 ? "now" : "in \(m) min"
     }
 }
 
@@ -508,7 +500,9 @@ struct RideView: View {
     @EnvironmentObject var music: NowPlaying
     @EnvironmentObject var ns: NSStore
     @EnvironmentObject var planner: Planner
+    @EnvironmentObject var lines: LineWatchStore
     @Environment(\.scenePhase) private var scene
+    @State private var earlier = false
     var pal: HWPalette { .of(home: trip.direction == .home) }
     var body: some View {
         ZStack {
@@ -560,7 +554,13 @@ struct RideView: View {
 
     @ViewBuilder private var boarding: some View {
         let rail = trip.leg?.mode == .train
-        let list = Array(trip.upcoming.filter { $0.trip.first.departure > Date().addingTimeInterval(-90) }.prefix(8))
+        let now = Date()
+        let list = Array(trip.upcoming.filter { $0.trip.first.departure > now.addingTimeInterval(earlier ? -30 * 60 : -90) }.prefix(earlier ? 12 : 8))
+        // Buses: the stop's own board, so cancelled ones and the ones that just left show too.
+        let board = Array(trip.upcomingBoard.filter { d in
+            earlier ? d.scheduled > now.addingTimeInterval(-30 * 60) || d.time > now.addingTimeInterval(-30 * 60)
+                    : d.time > now.addingTimeInterval(-90) || (d.cancelled && d.scheduled > now.addingTimeInterval(-15 * 60))
+        }.prefix(earlier ? 14 : 9))
         let mine = planner.chosen?.tripIds ?? []
         legKicker.padding(.top, 18)
         Text("WAITING TO BOARD").font(HWFont.body(11)).tracking(1.8).foregroundStyle(HWPalette.ink.opacity(0.75)).padding(.top, 8)
@@ -569,9 +569,27 @@ struct RideView: View {
             .font(HWFont.body(12)).foregroundStyle(HWPalette.muted).padding(.top, 4)
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                if list.isEmpty {
+                HStack {
+                    Spacer()
+                    Button(earlier ? "Hide earlier ones" : "Show earlier ones") { withAnimation { earlier.toggle() } }
+                        .font(HWFont.body(12, bold: true)).foregroundStyle(pal.accent)
+                }
+                if list.isEmpty && board.isEmpty {
                     Text(trip.upcomingError ?? "Looking up the next \(rail ? "trains" : "buses")…").font(HWFont.body(12)).foregroundStyle(HWPalette.muted).padding(.vertical, 12)
                 }
+                if !rail && !board.isEmpty {
+                    ForEach(board) { d in
+                        let p = trip.upcoming.first(where: { $0.trip.first.tripId == d.tripId })
+                        let ride: BoardRide? = p.map { BoardRide(minutes: $0.trip.rideMinutes, station: $0.to.short, arrival: $0.trip.last.arrival, grade: $0.trip.first.grade) }
+                        BoardRow(d: d, ride: ride, stopLabel: Fmt.place(d.stopName),
+                                 watched: lines.isWatched(stopId: d.stopId, line: d.line, headsign: d.headsign), pal: pal) {
+                            lines.toggle(stopId: d.stopId, stopName: d.stopName, line: d.line, headsign: d.headsign, tripId: d.tripId, delay: d.live ? d.delay : nil)
+                        }
+                        .onTapGesture { if !d.cancelled { trip.choose(board: d) } }
+                        .accessibilityAction(named: "I’m on this one") { if !d.cancelled { trip.choose(board: d) } }
+                        Rectangle().fill(.white.opacity(0.06)).frame(height: 1)
+                    }
+                } else {
                 ForEach(list) { p in
                     let t = p.trip
                     Button { trip.choose(p) } label: {
@@ -584,6 +602,8 @@ struct RideView: View {
                     .accessibilityHint("Tap if you’re on this one")
                     Rectangle().fill(.white.opacity(0.06)).frame(height: 1)
                 }
+                }
+                if !rail { Text("Tap the bell to get told when a bus runs late, leaves early or is cancelled.").font(HWFont.body(11)).foregroundStyle(HWPalette.muted).padding(.top, 6) }
                 if let u = trip.upcomingAt { Text("Updated at \(Fmt.hhmm(u)).").font(HWFont.body(10)).foregroundStyle(HWPalette.muted).padding(.top, 6) }
             }
         }

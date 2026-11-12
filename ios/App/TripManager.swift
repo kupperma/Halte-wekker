@@ -60,6 +60,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
     @Published private(set) var upcoming: [PanelTrip] = []
     @Published private(set) var upcomingAt: Date?
     @Published private(set) var upcomingError: String?
+    @Published private(set) var upcomingBoard: [BoardDeparture] = []    // buses: the stop's board, with cancelled and departed ones
     // Once it knows which bus or train you're on.
     @Published private(set) var vehicleStops: [TripStop] = []
     @Published private(set) var matchMeters: Int?            // how far its live position was from yours
@@ -88,6 +89,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
     private var upcomingKey = ""
     private var upcomingBusy = false
     private var lastVehicleRefresh = Date.distantPast
+    private var lastIdleMatch = Date.distantPast
+    private var idleBest: String?
     private let arriveM = 450.0
 
     var leg: Leg? { index < legs.count ? legs[index] : nil }
@@ -132,7 +135,9 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
         location.activityType = .otherNavigation
         location.pausesLocationUpdatesAutomatically = false
         always = location.authorizationStatus == .authorizedAlways
+        DispatchQueue.main.async { [weak self] in self?.updateKeepAlive() }
         music.onChange = { [weak self] in self?.pushActivity(force: true) }
+        LineWatchStore.shared.onChange = { [weak self] in self?.updateKeepAlive() }
         sound.pauseMusic = pauseMusic
         WatchStore.shared.holdAlerts = { [weak self] in self?.phase == .sleeping }
         WatchStore.shared.chime = { [weak self] in
@@ -174,6 +179,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
         arrival = nil; next = nil; legArrival = nil; legFrom = nil; legTo = nil
         vehicle = v
         vehicleStops = []; matchMeters = nil; pickedByHand = false; startDistance = nil
+        location.desiredAccuracy = kCLLocationAccuracyBest; location.distanceFilter = 25
         location.allowsBackgroundLocationUpdates = true
         location.showsBackgroundLocationIndicator = true
         location.startUpdatingLocation()
@@ -231,10 +237,27 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
         location.allowsBackgroundLocationUpdates = false
         phase = .idle
         route = nil; legs = []; distance = nil; arrival = nil; next = nil; vehicle = nil; legArrival = nil; arrivedAt = nil
-        upcoming = []; upcomingAt = nil; upcomingError = nil; upcomingKey = ""; vehicleStops = []; matchMeters = nil; speed = nil; startDistance = nil
+        upcoming = []; upcomingAt = nil; upcomingError = nil; upcomingKey = ""; upcomingBoard = []; vehicleStops = []; matchMeters = nil; speed = nil; startDistance = nil
         legFrom = nil; legTo = nil; maxDistance = nil
         let a = activity; activity = nil
         Task { await a?.end(nil, dismissalPolicy: .immediate) }
+        updateKeepAlive()
+    }
+
+    /// While you watch a bus line (and no trip runs), cheap location keeps the app awake to check it,
+    /// and notices when you get on that bus.
+    func updateKeepAlive() {
+        guard phase == .idle else { return }
+        if !LineWatchStore.shared.watches.isEmpty {
+            location.desiredAccuracy = kCLLocationAccuracyHundredMeters; location.distanceFilter = 30
+            location.allowsBackgroundLocationUpdates = true
+            location.showsBackgroundLocationIndicator = true
+            if location.authorizationStatus == .notDetermined { location.requestWhenInUseAuthorization() }
+            location.startUpdatingLocation()
+        } else if watchLeft == nil {
+            location.stopUpdatingLocation()
+            location.allowsBackgroundLocationUpdates = false
+        }
     }
 
     /// When the app comes back to the screen: start the Live Activity if a trip started by itself in the background.
@@ -274,6 +297,15 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
         samples.removeAll { $0.timestamp < Date().addingTimeInterval(-240) }
         if loc.speed >= 0 { speed = loc.speed }
         if phase == .transfer { Task { await loadUpcoming() } }
+        if phase == .idle, !LineWatchStore.shared.watches.isEmpty, Date().timeIntervalSince(lastIdleMatch) > 20 {
+            lastIdleMatch = Date()
+            Task {
+                guard let m = await self.matchVehicle(mode: .bus) else { self.idleBest = nil; return }
+                let watched = LineWatchStore.shared.watches.contains { $0.line == m.vehicle.line }
+                if watched && (m.meters < 250 || self.idleBest == m.vehicle.tripId) { LineWatchStore.shared.boarded(line: m.vehicle.line); self.idleBest = nil }
+                else { self.idleBest = m.vehicle.tripId }
+            }
+        }
         guard let leg, phase == .sleeping || phase == .awake else { return }
         startDistance = loc.distance(from: CLLocation(latitude: leg.from.coordinate.latitude, longitude: leg.from.coordinate.longitude))
         if vehicle == nil { Task { await loadUpcoming() } }
@@ -396,6 +428,14 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
         return best.map { (vehicle: $0.0, meters: $0.1) }
     }
 
+    /// "I'm on this one", picked on the stop's board.
+    func choose(board d: BoardDeparture) {
+        if let p = upcoming.first(where: { $0.trip.first.tripId == d.tripId }) { choose(p); return }
+        detectTask?.cancel()
+        pickedByHand = true
+        Task { await vehicleFound(Vehicle(tripId: d.tripId, line: d.line, isTrain: false), meters: nil) }
+    }
+
     /// "I'm on this one": you picked it in the list.
     func choose(_ p: PanelTrip) {
         let f = p.trip.first
@@ -409,6 +449,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
     private func vehicleFound(_ v: Vehicle, meters: Double? = nil, dest: Place? = nil) async {
         vehicle = v
         if let meters { matchMeters = Int(meters) }
+        if v.isTrain { WatchStore.shared.boarded(num: upcoming.first(where: { $0.trip.first.tripId == v.tripId })?.trip.first.num ?? "") }
+        else { LineWatchStore.shared.boarded(line: v.line) }
         let stops = await Transit.tripStops(v.tripId)
         if index == 0, let r = route, r.single == nil {
             let names = stops.map { $0.name.lowercased() }
@@ -463,7 +505,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
         }
         guard let t = target else { return }
         let k = "\(t.from.key)>\(t.to.map(\.key).joined(separator: ","))>\(t.mode.rawValue)>\(index)"
-        if k != upcomingKey { upcomingKey = k; upcoming = []; upcomingAt = nil; upcomingError = nil }
+        if k != upcomingKey { upcomingKey = k; upcoming = []; upcomingAt = nil; upcomingError = nil; upcomingBoard = [] }
         guard !upcomingBusy, force || upcomingAt.map({ Date().timeIntervalSince($0) >= 60 }) ?? true else { return }
         upcomingBusy = true
         defer { upcomingBusy = false }
@@ -471,10 +513,18 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
         let from = t.from.key == "veghel" ? StopsStore.shared.veghel : t.from
         var all: [PanelTrip] = []
         for dest in t.to {
-            let l = await Transit.plan(from: from, to: dest, modes: rail ? "RAIL" : "BUS", at: Date().addingTimeInterval(-60), count: rail ? 8 : 6, maxTransfers: rail ? 1 : 0)
+            let l = await Transit.plan(from: from, to: dest, modes: rail ? "RAIL" : "BUS", at: Date().addingTimeInterval(-30 * 60), count: rail ? 10 : 10, maxTransfers: rail ? 1 : 0)
             Ratings.shared.learn(from, dest, l)
             all += l.map { PanelTrip(trip: $0, from: from, to: dest) }
         }
+        // For buses also the stop's own board: it shows cancelled buses (the planner leaves them out) and the ones that left.
+        if !rail {
+            let names = t.to.map(\.short) + t.to.map(\.name)
+            let ids = Set(all.map { $0.trip.first.tripId })
+            let b = await Transit.board(stopIds: from.ids, from: Date().addingTimeInterval(-30 * 60), n: 40)
+            guard k == upcomingKey else { return }
+            upcomingBoard = b.filter { d in ids.contains(d.tripId) || names.contains { !$0.isEmpty && d.headsign.localizedCaseInsensitiveContains($0) } }
+        } else { upcomingBoard = [] }
         guard k == upcomingKey else { return }
         upcomingAt = Date()
         guard !all.isEmpty else {
@@ -680,7 +730,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate {
         busKm = 2; trainKm = 5; ringAtStop = true; announce = true; movingStation = true; autoStart = true
         soundKind = .steam; pauseMusic = false; autoHome = true; kmMem = [:]; lastScore = nil
         direction = Self.savedDirection()
-        Ratings.shared.reset(); ScoreBook.shared.reset(); WatchStore.shared.reset(); StopsStore.shared.reset()
+        Ratings.shared.reset(); ScoreBook.shared.reset(); WatchStore.shared.reset(); StopsStore.shared.reset(); LineWatchStore.shared.reset()
         music.disconnectSpotify(); music.source = .off
     }
 

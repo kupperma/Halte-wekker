@@ -17,7 +17,7 @@ struct HaltewekkerApp: App {
                 .environmentObject(trip).environmentObject(live).environmentObject(trip.music)
                 .environmentObject(planner).environmentObject(near)
                 .environmentObject(NSStore.shared).environmentObject(WatchStore.shared)
-                .environmentObject(ScoreBook.shared).environmentObject(StopsStore.shared)
+                .environmentObject(ScoreBook.shared).environmentObject(StopsStore.shared).environmentObject(LineWatchStore.shared)
                 .onOpenURL { url in Task { await trip.music.finish(url) } }      // back from the Spotify sign-in page
                 .onAppear {
                     let t = trip

@@ -31,6 +31,8 @@ final class LiveStore: ObservableObject {
     @Published var pick = 0
     @Published var lineFilter = "mine"          // "mine", one line, or "all"
     @Published var stopFilter = "all"           // "all" or a board stop id
+    /// Also show the ones that left in the last half hour (and cancelled ones), to see what happened.
+    @Published var showEarlier = false
     private var loadedFor: Direction?
     private var busy = false
     private var lastPanels = Date.distantPast
@@ -40,11 +42,15 @@ final class LiveStore: ObservableObject {
     /// The board after the chips: your lines (or one, or all) at your stops (or one).
     var boardShown: [BoardDeparture] {
         let lines = stops.lines
-        var l = board.filter { $0.time > Date().addingTimeInterval(-60) }
+        let now = Date()
+        var l = board.filter { d in
+            showEarlier ? d.time > now.addingTimeInterval(-30 * 60) || d.scheduled > now.addingTimeInterval(-30 * 60)
+                        : d.time > now.addingTimeInterval(-60) || (d.cancelled && d.scheduled > now.addingTimeInterval(-15 * 60))
+        }
         if stopFilter != "all" { l = l.filter { $0.stopId == stopFilter } }
         if lineFilter == "mine" && !lines.isEmpty { l = l.filter { lines.contains($0.line) } }
         else if lineFilter != "mine" && lineFilter != "all" { l = l.filter { $0.line == lineFilter } }
-        return Array(l.prefix(12))
+        return Array(l.prefix(showEarlier ? 24 : 12))
     }
 
     func refresh(_ dir: Direction, force: Bool = false) async {
@@ -62,7 +68,7 @@ final class LiveStore: ObservableObject {
         // The lists per leg every two minutes (Transitous is volunteer-run).
         guard force || Date().timeIntervalSince(lastPanels) > 120 else { return }
         lastPanels = Date()
-        let now = Date().addingTimeInterval(-60)
+        let now = Date().addingTimeInterval(-30 * 60)          // from half an hour ago, for "Show earlier"
         let veghel = stops.veghel
         func panel(_ a: Place, _ b: Place, _ modes: String, _ n: Int, _ maxT: Int) async -> [PanelTrip] {
             let l = await Transit.plan(from: a, to: b, modes: modes, at: now, count: n, maxTransfers: maxT)
@@ -75,10 +81,10 @@ final class LiveStore: ObservableObject {
                 .sorted { $0.trip.first.departure < $1.trip.first.departure }
         }
         if dir == .toSchool {
-            async let b = Transit.board(stopIds: veghel.ids)
-            async let t1 = panel(.eindhoven, .breda, "RAIL", 5, 1)
-            async let t2 = panel(.denBosch, .breda, "RAIL", 5, 1)
-            async let u = panel(.breda, .buas, "BUS", 8, 0)
+            async let b = Transit.board(stopIds: veghel.ids, from: now, n: 40)
+            async let t1 = panel(.eindhoven, .breda, "RAIL", 8, 1)
+            async let t2 = panel(.denBosch, .breda, "RAIL", 8, 1)
+            async let u = panel(.breda, .buas, "BUS", 12, 0)
             async let g = boardGrades(veghel)
             let (bb, a, c, d, gg) = await (b, t1, t2, u, g)
             guard loadedFor == dir else { return }
@@ -87,11 +93,11 @@ final class LiveStore: ObservableObject {
             trains = keepBest(a + c)
             buas = keepBest(d)
         } else {
-            async let u = panel(.buas, .breda, "BUS", 8, 0)
-            async let t1 = panel(.breda, .eindhoven, "RAIL", 5, 1)
-            async let t2 = panel(.breda, .denBosch, "RAIL", 5, 1)
-            async let v1 = panel(.denBosch, veghel, "BUS", 5, 0)
-            async let v2 = panel(.eindhoven, veghel, "BUS", 5, 0)
+            async let u = panel(.buas, .breda, "BUS", 12, 0)
+            async let t1 = panel(.breda, .eindhoven, "RAIL", 8, 1)
+            async let t2 = panel(.breda, .denBosch, "RAIL", 8, 1)
+            async let v1 = panel(.denBosch, veghel, "BUS", 8, 0)
+            async let v2 = panel(.eindhoven, veghel, "BUS", 8, 0)
             let (uu, a, c, d, e) = await (u, t1, t2, v1, v2)
             guard loadedFor == dir else { return }
             buas = keepBest(uu)

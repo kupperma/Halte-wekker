@@ -15,6 +15,7 @@ struct TrainWatch: Codable, Identifiable, Equatable {
     var track: String
     var cancelled: Bool
     let auto: Bool              // added by a planned trip
+    var told: Int? = nil        // the delay you were last told about
 }
 
 struct PlatformAlert: Identifiable, Equatable {
@@ -84,6 +85,8 @@ final class WatchStore: ObservableObject {
     }
 
     func remove(_ key: String) { watches.removeAll { $0.key == key }; persist() }
+    /// You're on this train: stop watching it.
+    func boarded(num: String) { guard !num.isEmpty else { return }; watches.removeAll { $0.num == num }; persist() }
     func removeAuto() { watches.removeAll { $0.auto }; persist() }
     func reset() { watches = []; queue = []; alert = nil; persist() }
 
@@ -106,6 +109,16 @@ final class WatchStore: ObservableObject {
             if m.cancelled && !w.cancelled {
                 watches[i].cancelled = true; changed = true
                 queue.append(PlatformAlert(cancelled: true, label: w.label, from: w.from, was: "", now: ""))
+            }
+            // Running late: tell you when it changes by 2 min or more (from 3 min late).
+            let dl = m.delay, last = watches[i].told ?? 0
+            if !m.cancelled, now < (m.actual ?? w.target), (dl >= 3 && abs(dl - last) >= 2) || (dl < 3 && last >= 3) {
+                watches[i].told = dl; changed = true
+                let c = UNMutableNotificationContent()
+                c.title = dl >= 3 ? "\(w.label): \(dl) min late" : "\(w.label): back on time"
+                c.body = dl >= 3 ? "It now leaves \(w.from) at \(Fmt.hhmm(m.actual ?? w.target))\(w.track.isEmpty ? "" : ", platform \(w.track)")." : "It leaves \(w.from) on time again."
+                c.sound = .default
+                UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "delay-\(w.key)-\(dl)", content: c, trigger: nil)) { _ in }
             }
             let tr = m.actualTrack
             if !tr.isEmpty && !w.track.isEmpty && tr != w.track {

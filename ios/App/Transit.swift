@@ -209,11 +209,14 @@ enum Transit {
         return Array(kept.prefix(4))
     }
 
-    static func board(stopIds: [String]) async -> [BoardDeparture] {
+    /// The departure board of stops. `from` a time in the past also gives the ones that already left (or were cancelled).
+    static func board(stopIds: [String], from: Date? = nil, n: Int = 30) async -> [BoardDeparture] {
         await withTaskGroup(of: [BoardDeparture].self) { g in
             for id in stopIds {
                 g.addTask {
-                    guard let json = try? await get("/v6/stoptimes", [.init(name: "stopId", value: id), .init(name: "n", value: "30")]) as? [String: Any],
+                    var q: [URLQueryItem] = [.init(name: "stopId", value: id), .init(name: "n", value: String(n))]
+                    if let from { q.append(.init(name: "time", value: iso.string(from: from))) }
+                    guard let json = try? await get("/v6/stoptimes", q) as? [String: Any],
                           let list = json["stopTimes"] as? [[String: Any]] else { return [] }
                     return list.compactMap { st in
                         let p = st["place"] as? [String: Any] ?? [:]
@@ -221,7 +224,7 @@ enum Transit {
                         return BoardDeparture(tripId: (st["tripId"] as? String) ?? "", stopId: id, stopName: (p["name"] as? String) ?? "",
                                               line: (st["routeShortName"] as? String) ?? "?", headsign: (st["headsign"] as? String) ?? "",
                                               time: t, scheduled: date(p["scheduledDeparture"]) ?? t, live: (st["realTime"] as? Bool) ?? false,
-                                              cancelled: ((st["cancelled"] as? Bool) ?? false) || ((st["tripCancelled"] as? Bool) ?? false),
+                                              cancelled: ((st["cancelled"] as? Bool) ?? false) || ((st["tripCancelled"] as? Bool) ?? false) || ((p["cancelled"] as? Bool) ?? false),
                                               platform: (p["track"] as? String) ?? (p["scheduledTrack"] as? String))
                     }
                 }

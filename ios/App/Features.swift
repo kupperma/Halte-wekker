@@ -714,6 +714,7 @@ struct LiveSettingsSheet: View {
 // MARK: at a transfer: what leaves next from here
 
 struct TransferList: View {
+    @State private var earlier = false
     let all: [PanelTrip]
     let updated: Date?
     let error: String?
@@ -726,7 +727,7 @@ struct TransferList: View {
     var body: some View {
         let what = mode == .train ? "trains" : "buses"
         let mine = planner.chosen?.tripIds ?? []
-        let list = Array(all.filter { $0.trip.first.departure > Date().addingTimeInterval(-60) }.prefix(6))
+        let list = Array(all.filter { $0.trip.first.departure > Date().addingTimeInterval(earlier ? -30 * 60 : -60) }.prefix(earlier ? 10 : 6))
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text("Next \(what) to \(dest)").font(HWFont.display(18)).foregroundStyle(HWPalette.ink)
@@ -749,8 +750,116 @@ struct TransferList: View {
                 .buttonStyle(.plain)
                 Rectangle().fill(.white.opacity(0.06)).frame(height: 1)
             }
-            if mode == .train { Text("Tap a train to get an alarm if its platform changes.").font(HWFont.body(11)).foregroundStyle(HWPalette.muted).padding(.top, 8) }
+            Button(earlier ? "Hide earlier ones" : "Show earlier ones") { withAnimation { earlier.toggle() } }
+                .font(HWFont.body(12, bold: true)).foregroundStyle(pal.accent).padding(.top, 8)
+            if mode == .train { Text("Tap a train to get an alarm if its platform changes or it runs late.").font(HWFont.body(11)).foregroundStyle(HWPalette.muted).padding(.top, 4) }
         }
+    }
+}
+
+// MARK: a departure on a stop's board
+
+struct BoardRow: View {
+    let d: BoardDeparture
+    var ride: BoardRide? = nil          // how long to the station, and the rating
+    var stopLabel: String? = nil        // when the board has several stops
+    var watched = false
+    let pal: HWPalette
+    var onBell: (() -> Void)? = nil
+
+    static func status(_ d: BoardDeparture) -> String {
+        var st: String
+        if d.cancelled { st = "cancelled" }
+        else if !d.live { st = "timetable time" }
+        else if d.delay >= 1 { st = "\(d.delay) min late, planned \(Fmt.hhmm(d.scheduled))" }
+        else if d.delay <= -1 { st = "\(-d.delay) min early, planned \(Fmt.hhmm(d.scheduled))" }
+        else { st = "on time" }
+        if let p = d.platform, !p.isEmpty, !d.cancelled { st += ", platform \(p)" }
+        return st.prefix(1).uppercased() + st.dropFirst()
+    }
+    static func when(_ d: BoardDeparture) -> String {
+        let m = Int((d.time.timeIntervalSinceNow / 60).rounded())
+        if d.cancelled { return m < 0 ? "was due" : "" }
+        if m <= -1 { return "left \(-m) min ago" }
+        return m == 0 ? "now" : "in \(m) min"
+    }
+
+    var body: some View {
+        let gone = !d.cancelled && d.time < Date().addingTimeInterval(-60)
+        HStack(alignment: .top, spacing: 10) {
+            Text(d.line).font(HWFont.display(13)).foregroundStyle(HWPalette.ink).frame(width: 44).padding(.vertical, 4)
+                .overlay(RoundedRectangle(cornerRadius: 2).stroke(HWPalette.ink, lineWidth: 1.5))
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    if let g = ride?.grade, !d.cancelled { Coin(grade: g, size: 22) }
+                    Text(d.headsign).font(HWFont.display(16)).foregroundStyle(HWPalette.ink)
+                }
+                if watched { SmallTag(text: "WATCHING", icon: "bell.fill", pal: pal) }
+                Text([stopLabel, Self.status(d)].compactMap { $0 }.joined(separator: " · "))
+                    .font(HWFont.body(12, bold: d.live || d.cancelled))
+                    .foregroundStyle(d.delay != 0 || d.cancelled ? HWPalette.warn : d.live ? HWPalette.ok : HWPalette.muted)
+                if let r = ride, !d.cancelled {
+                    Text("\(Fmt.rideText(r.minutes)) ride to \(r.station) station, arrives \(Fmt.hhmm(r.arrival))").font(HWFont.body(12)).foregroundStyle(HWPalette.ink.opacity(0.8))
+                }
+            }
+            Spacer(minLength: 4)
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(Fmt.hhmm(d.cancelled ? d.scheduled : d.time)).font(HWFont.display(23)).foregroundStyle(d.cancelled ? HWPalette.warn : pal.accent).strikethrough(d.cancelled)
+                Text(Self.when(d)).font(HWFont.body(12)).foregroundStyle(HWPalette.muted)
+                if let onBell {
+                    Button(action: onBell) {
+                        Image(systemName: watched ? "bell.fill" : "bell").font(.system(size: 15, weight: .semibold)).foregroundStyle(watched ? pal.accent : pal.brass)
+                            .frame(width: 36, height: 30)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(watched ? "Stop watching the \(d.line)" : "Watch the \(d.line): get told when it's late, early or cancelled")
+                }
+            }
+        }
+        .padding(.vertical, 10)
+        .opacity(gone ? 0.55 : 1)
+        .contentShape(Rectangle())
+    }
+}
+
+/// What you're watching right now: bus lines and trains, with how they're doing.
+struct WatchingCard: View {
+    @EnvironmentObject var lines: LineWatchStore
+    @EnvironmentObject var trains: WatchStore
+    let pal: HWPalette
+    var body: some View {
+        let manual = trains.watches.filter { !$0.auto && $0.target > Date().addingTimeInterval(-20 * 60) }
+        if !lines.watches.isEmpty || !manual.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Image(systemName: "bell.badge.fill").foregroundStyle(pal.accent)
+                    Text("Watching").font(HWFont.display(18)).foregroundStyle(HWPalette.ink)
+                    Spacer()
+                }
+                ForEach(lines.watches) { w in
+                    row(title: "\(w.line)\(w.headsign.isEmpty ? "" : " to \(w.headsign)") · \(Fmt.place(w.stopName))", sub: w.status,
+                        warn: w.status.contains("late") || w.status.contains("early") || w.status.contains("cancelled")) { lines.stop(w.id) }
+                }
+                ForEach(manual) { w in
+                    row(title: "\(w.label) · \(w.from)", sub: w.cancelled ? "Cancelled" : w.track.isEmpty ? "Platform not known yet" : "Platform \(w.track)",
+                        warn: w.cancelled) { trains.remove(w.key) }
+                }
+                Text("You get a notification when it runs late, leaves early, changes platform or is cancelled. Bus lines stop by themselves once you’re on board.")
+                    .font(HWFont.body(11)).foregroundStyle(HWPalette.muted)
+            }
+            .brass(pal, pad: 14)
+        }
+    }
+    private func row(title: String, sub: String, warn: Bool, stop: @escaping () -> Void) -> some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(HWFont.display(15)).foregroundStyle(HWPalette.ink)
+                Text(sub).font(HWFont.body(12, bold: warn)).foregroundStyle(warn ? HWPalette.warn : HWPalette.ok)
+            }
+            Spacer()
+            Button("Stop", action: stop).font(HWFont.body(12, bold: true)).foregroundStyle(pal.accent)
+        }
+        .padding(.vertical, 4)
     }
 }
 
