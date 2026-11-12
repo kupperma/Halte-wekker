@@ -188,7 +188,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
 
     private func beginLeg(vehicle v: Vehicle? = nil, stops: [TripStop]? = nil) {
         phase = .sleeping
-        distance = nil; forceArrival = false; maxDistance = nil
+        distance = nil; forceArrival = false; maxDistance = legSpan
         legStart = Date()
         arrival = nil; next = nil; legArrival = nil; legFrom = nil; legTo = nil
         vehicle = v
@@ -545,7 +545,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             let fromList = upcoming.first(where: { $0.trip.first.tripId == v.tripId })?.to
             let to = dest ?? fromList ?? (goes(r.station) ? r.station : RoutePlan.all.map(\.station).first(where: goes))
             if let to, to != r.station, let nr = RoutePlan.via(to) {
-                route = nr; legs = nr.legs(direction); distance = nil; maxDistance = nil
+                route = nr; legs = nr.legs(direction); distance = nil; maxDistance = legSpan
             }
         }
         applyStops(stops)
@@ -781,6 +781,13 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     }
 
     /// How far along this leg you are, 0…1: by the clock when the times are known, else by distance.
+    /// How far this leg's two ends are apart: the least the leg can be (also when you start it halfway, on board).
+    private var legSpan: Double? {
+        guard let l = leg else { return nil }
+        return CLLocation(latitude: l.from.coordinate.latitude, longitude: l.from.coordinate.longitude)
+            .distance(from: CLLocation(latitude: l.to.coordinate.latitude, longitude: l.to.coordinate.longitude))
+    }
+
     func progress(at now: Date = Date()) -> Double {
         switch phase {
         case .transfer, .finished: return 1
@@ -791,8 +798,9 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         if let d = distance, let m = maxDistance, m > 200 { byDistance = 1 - d / m }
         if let a = legFrom, let b = legTo, b.timeIntervalSince(a) > 60 {
             let t = now.timeIntervalSince(a) / b.timeIntervalSince(a)
-            // a late vehicle: don't let the clock run ahead of where you really are
-            if let bd = byDistance, t > bd + 0.25 { return min(1, max(0, bd)) }
+            // a late vehicle: don't let the clock run ahead of where you really are (once we know which one you're on,
+            // its own live times already have the delay in them)
+            if vehicle == nil, let bd = byDistance, t > bd + 0.25 { return min(1, max(0, bd)) }
             return min(0.98, max(0, t))
         }
         return min(1, max(0, byDistance ?? 0))

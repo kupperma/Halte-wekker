@@ -1304,14 +1304,19 @@ struct RideView: View {
 struct StopLabels: View {
     let marks: [StopMark]
     let pal: HWPalette
-    private static func width(_ m: StopMark) -> CGFloat { CGFloat(max(m.name.count, 5)) * 6.2 + 8 }
+    /// A shorter name where it helps ("Tilburg Univ.").
+    private static func short(_ n: String) -> String {
+        n.replacingOccurrences(of: "Universiteit", with: "Univ.").replacingOccurrences(of: " Centraal", with: " C.")
+    }
+    private static func width(_ m: StopMark) -> CGFloat { CGFloat(max(short(m.name).count, 5)) * 6.2 + 8 }
+    private static func x(_ m: StopMark, _ w: CGFloat) -> CGFloat { min(w - width(m) / 2, max(width(m) / 2, MetroTrack.x(m.fraction) * w)) }
+    /// Up to three rows, so names close together don't run into each other.
     private static func rows(_ marks: [StopMark], _ w: CGFloat) -> [Int] {
-        var last: [CGFloat?] = [nil, nil], out: [Int] = []
+        var last: [CGFloat] = [-.infinity, -.infinity, -.infinity], out: [Int] = []
         for m in marks {
-            let x = MetroTrack.x(m.fraction) * w, half = width(m) / 2
-            var row = 0
-            if let l = last[0], x - half < l + 6 { row = (last[1].map { x - half >= $0 + 6 } ?? true) ? 1 : 0 }
-            last[row] = x + half
+            let px = Self.x(m, w), half = width(m) / 2
+            let row = (0..<3).first { px - half >= last[$0] + 6 } ?? (0..<3).min { last[$0] < last[$1] } ?? 0
+            last[row] = px + half
             out.append(row)
         }
         return out
@@ -1324,15 +1329,15 @@ struct StopLabels: View {
                 ForEach(Array(marks.enumerated()), id: \.offset) { i, m in
                     let passed = (m.time ?? .distantFuture) <= now
                     VStack(spacing: 0) {
-                        Text(m.name).font(HWFont.body(10, bold: true)).lineLimit(1).fixedSize()
+                        Text(Self.short(m.name)).font(HWFont.body(10, bold: true)).lineLimit(1).fixedSize()
                         if let t = m.time { Text(Fmt.hhmm(t)).font(HWFont.body(9)) }
                     }
                     .foregroundStyle(i == next ? pal.accent : HWPalette.ink.opacity(passed ? 0.4 : 0.85))
-                    .position(x: min(w - Self.width(m) / 2, max(Self.width(m) / 2, MetroTrack.x(m.fraction) * w)), y: rows[i] == 0 ? 13 : 39)
+                    .position(x: Self.x(m, w), y: 13 + CGFloat(rows[i]) * 26)
                 }
             }
         }
-        .frame(height: Self.rows(marks, 340).contains(1) ? 52 : 26)
+        .frame(height: 26 + 26 * CGFloat(Self.rows(marks, 340).max() ?? 0))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Stops along the way: " + marks.map { "\($0.name)\($0.time.map { " at " + Fmt.hhmm($0) } ?? "")" }.joined(separator: ", "))
     }
