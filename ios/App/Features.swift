@@ -728,31 +728,28 @@ struct TransferList: View {
         let what = mode == .train ? "trains" : "buses"
         let mine = planner.chosen?.tripIds ?? []
         let list = Array(all.filter { $0.trip.first.departure > Date().addingTimeInterval(earlier ? -30 * 60 : -60) }.prefix(earlier ? 10 : 6))
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text("Next \(what) to \(dest)").font(HWFont.display(18)).foregroundStyle(HWPalette.ink)
-                Spacer()
-                if let u = updated { Text("Updated \(Fmt.hhmm(u))").font(HWFont.body(11)).foregroundStyle(HWPalette.muted) }
-            }
-            .padding(.bottom, 6)
+        VStack(alignment: .leading, spacing: 6) {
+            PlannerBar(title: "Next \(what) to \(dest)", sub: updated.map { "updated \(Fmt.hhmm($0))" })
             if list.isEmpty {
                 Text(error ?? (updated == nil ? "Looking up the next \(what)…" : "No \(what) to \(dest) coming up."))
-                    .font(HWFont.body(12)).foregroundStyle(HWPalette.muted).padding(.vertical, 10)
+                    .font(BoardInk.sans(12, .regular)).foregroundStyle(Color.white.opacity(0.85)).padding(.vertical, 6)
+            } else {
+                PlannerColumns()
             }
             ForEach(list) { p in
-                let t = p.trip, rail = t.first.isTrain
-                let head = rail ? "\(t.first.name.isEmpty ? "Train" : t.first.name) to \(p.to.short)" : "To \(Fmt.place(t.last.toStop))"
-                let extra = "\(t.rideLabel) · \(t.changes.isEmpty ? "" : "change at \(t.changes.joined(separator: ", ")) · ")arrives \(Fmt.hhmm(t.last.arrival))"
-                Button { if rail { watch.toggle(t, from: p.from, to: p.to) } } label: {
-                    TripRow(trip: t, pal: pal, head: head, extra: extra, info: ns.rail(t.first), watched: watch.isWatched(t.first, from: p.from),
-                            mine: mine.contains(t.first.tripId))
+                let t = p.trip, f = t.first, rail = f.isTrain, info = ns.rail(f)
+                let plat = info?.track ?? f.platform
+                PlannerBusRow(line: f.line, to: rail ? (f.headsign.isEmpty ? p.to.short : Fmt.place(f.headsign)) : Fmt.place(t.last.toStop),
+                              time: f.departure, scheduled: f.scheduledDeparture, live: f.live, cancelled: f.cancelled || info?.cancelled == true,
+                              grade: rail ? nil : (t.rides.count == 1 ? f.grade : t.last.grade), train: rail,
+                              note: "\(t.rideLabel) · arrives \(Fmt.hhmm(t.last.arrival))\(plat.map { " · platform \($0)" } ?? "")",
+                              watched: rail && watch.isWatched(f, from: p.from), picked: mine.contains(f.tripId)) {
+                    if rail { _ = watch.toggle(t, from: p.from, to: p.to) }
                 }
-                .buttonStyle(.plain)
-                Rectangle().fill(.white.opacity(0.06)).frame(height: 1)
             }
             Button(earlier ? "Hide earlier ones" : "Show earlier ones") { withAnimation { earlier.toggle() } }
-                .font(HWFont.body(12, bold: true)).foregroundStyle(pal.accent).padding(.top, 8)
-            if mode == .train { Text("Tap a train to get an alarm if its platform changes or it runs late.").font(HWFont.body(11)).foregroundStyle(HWPalette.muted).padding(.top, 4) }
+                .font(BoardInk.sans(12, .semibold)).foregroundStyle(.white).padding(.top, 4)
+            if mode == .train { Text("Tap a train to be told if its platform changes or it runs late.").font(BoardInk.sans(10, .regular)).foregroundStyle(Color.white.opacity(0.65)) }
         }
     }
 }

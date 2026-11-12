@@ -1432,43 +1432,7 @@ struct ArrivalView: View {
             RadialGradient(colors: [pal.paper, HWPalette.bg], center: .top, startRadius: 20, endRadius: 600).ignoresSafeArea()
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    ZStack(alignment: .leading) {
-                        Text("0").font(HWFont.display(92)).foregroundStyle(HWPalette.ink).shadow(color: pal.accent.opacity(0.5), radius: 24)
-                            .rotation3DEffect(.degrees(spin), axis: (x: 0, y: 1, z: 0))
-                        ForEach(0..<16, id: \.self) { i in
-                            let a = Double(i) / 16 * 2 * .pi, r = 70.0 + Double((i * 37) % 40)
-                            Image(systemName: "sparkle").font(.system(size: 12)).foregroundStyle(Color(hex: 0xF4C542))
-                                .offset(x: 30 + (burst ? cos(a) * r : 0), y: burst ? sin(a) * r * 0.8 : 0)
-                                .opacity(burst ? 0 : 1).scaleEffect(burst ? 1.4 : 0.4)
-                        }
-                    }
-                    .padding(.top, 40)
-                    Text("YOU’RE AT \((trip.arrivedAt ?? "").uppercased())").font(HWFont.display(13)).tracking(3).foregroundStyle(pal.accent)
-                    if let n = nextLeg {
-                        Text("Change at \(trip.leg?.to.short ?? "")").font(HWFont.display(34)).foregroundStyle(HWPalette.ink)
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("NEXT").font(HWFont.body(11)).tracking(1.8).foregroundStyle(pal.brass)
-                            Text(trip.next.map { "\($0.isTrain ? $0.name : "Bus \($0.line)") at \(Fmt.hhmm($0.departure))" } ?? "\(n.mode.title) to \(n.to.short)")
-                                .font(HWFont.display(22)).foregroundStyle(HWPalette.ink)
-                            if let r = trip.next { Text("To \(n.to.short)\(r.platform.map { " · platform \($0)" } ?? "") · \(r.rideMinutes) min").font(HWFont.body(12)).foregroundStyle(HWPalette.muted) }
-                            Text("It rings at \(Fmt.km(trip.km(for: n))) from the stop.").font(HWFont.body(12)).foregroundStyle(HWPalette.muted)
-                            if let a = trip.arrival { Text("\(trip.finalName) around \(Fmt.hhmm(a))").font(HWFont.body(12, bold: true)).foregroundStyle(pal.accent) }
-                            Text("It starts the next leg by itself once you’re on board: it recognises the \(n.mode == .train ? "train" : "bus") from its live position.").font(HWFont.body(11)).foregroundStyle(HWPalette.muted)
-                            Rectangle().fill(.white.opacity(0.07)).frame(height: 1).padding(.vertical, 4)
-                            Picker("Backup alarm", selection: $backup) {
-                                Text("Backup alarm: off").tag(0)
-                                ForEach([10, 15, 20, 25, 30, 40, 50, 60, 75, 90], id: \.self) { m in Text("Backup alarm after \(m) min").tag(m) }
-                            }
-                            .pickerStyle(.menu).tint(pal.accent).font(HWFont.body(13))
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading).brass(pal, pad: 16)
-                        TransferList(all: trip.upcoming, updated: trip.upcomingAt, error: trip.upcomingError, mode: n.mode, dest: n.mode == .train ? n.to.short : "Veghel", pal: pal).brass(pal, pad: 14)
-                    } else {
-                        Text(trip.route?.isFixed == false ? "You’re at \(trip.arrivedAt ?? trip.route?.station.short ?? "your stop")" : trip.direction == .home ? "You’re home" : "You’re in Breda")
-                            .font(HWFont.display(34)).foregroundStyle(HWPalette.ink)
-                        Text("Trip finished.").font(HWFont.body(14)).foregroundStyle(HWPalette.muted)
-                        if let s = trip.lastScore { ScoreCard(result: s, pal: pal).frame(maxWidth: .infinity, alignment: .leading).brass(pal, pad: 18) }
-                    }
+                    if let n = nextLeg { change(n) } else { arrived }
                 }
                 .padding(24)
             }
@@ -1495,6 +1459,79 @@ struct ArrivalView: View {
                 try? await Task.sleep(nanoseconds: 20_000_000_000)
             }
         }
+    }
+
+    /// You're there: the zero, a little burst, and how the trip went.
+    @ViewBuilder private var arrived: some View {
+        ZStack(alignment: .leading) {
+            Text("0").font(HWFont.display(92)).foregroundStyle(HWPalette.ink).shadow(color: pal.accent.opacity(0.5), radius: 24)
+                .rotation3DEffect(.degrees(spin), axis: (x: 0, y: 1, z: 0))
+            ForEach(0..<16, id: \.self) { i in
+                let a = Double(i) / 16 * 2 * .pi, r = 70.0 + Double((i * 37) % 40)
+                Image(systemName: "sparkle").font(.system(size: 12)).foregroundStyle(Color(hex: 0xF4C542))
+                    .offset(x: 30 + (burst ? cos(a) * r : 0), y: burst ? sin(a) * r * 0.8 : 0)
+                    .opacity(burst ? 0 : 1).scaleEffect(burst ? 1.4 : 0.4)
+            }
+        }
+        .padding(.top, 40)
+        Text(trip.route?.isFixed == false ? "You’re at \(trip.arrivedAt ?? trip.route?.station.short ?? "your stop")" : trip.direction == .home ? "You’re home" : "You’re in Breda")
+            .font(HWFont.display(34)).foregroundStyle(HWPalette.ink)
+        Text("Trip finished.").font(HWFont.body(14)).foregroundStyle(HWPalette.muted)
+        if let s = trip.lastScore { ScoreCard(result: s, pal: pal).frame(maxWidth: .infinity, alignment: .leading).brass(pal, pad: 18) }
+    }
+
+    /// A change: where you are, the next bus or train in one card, and what else leaves.
+    @ViewBuilder private func change(_ n: Leg) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("YOU’RE AT \((trip.arrivedAt ?? trip.leg?.to.short ?? "").uppercased())").font(BoardInk.sans(12)).tracking(1.6).foregroundStyle(pal.accent)
+            Text("Change at \(trip.leg?.to.short ?? "")").font(BoardInk.sans(30)).foregroundStyle(.white).lineLimit(1).minimumScaleFactor(0.7)
+        }
+        .padding(.top, 12)
+        VStack(alignment: .leading, spacing: 10) {
+            PlannerBar(title: "Next", sub: trip.arrival.map { "\(trip.finalName) around \(Fmt.hhmm($0))" })
+            if let r = trip.next {
+                let g = r.isTrain ? nil : r.grade
+                HStack(spacing: 10) {
+                    Text(r.line).font(BoardInk.sans(15)).lineLimit(1).minimumScaleFactor(0.6)
+                        .foregroundStyle(r.isTrain ? Color(hex: 0x1A1A1A) : (g.map { RatingStyle.ink($0) } ?? BoardInk.navy))
+                        .frame(width: 46, height: 26)
+                        .background(r.isTrain ? AnyShapeStyle(BoardInk.yellow) : (g.map { RatingStyle.fill($0) } ?? AnyShapeStyle(BoardInk.route)), in: RoundedRectangle(cornerRadius: 3))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(r.isTrain ? r.name : "Bus \(r.line)") to \(n.to.short)").font(BoardInk.sans(17)).foregroundStyle(.white).lineLimit(1).minimumScaleFactor(0.7)
+                        Text([r.platform.map { "platform \($0)" }, "\(r.rideMinutes) min ride"].compactMap { $0 }.joined(separator: " · "))
+                            .font(BoardInk.sans(12, .regular)).foregroundStyle(Color.white.opacity(0.8))
+                    }
+                    Spacer(minLength: 4)
+                    VStack(alignment: .trailing, spacing: 1) {
+                        Text(Fmt.hhmm(r.departure)).font(BoardInk.sans(24)).foregroundStyle(.white)
+                        Text(inMinutes(r.departure)).font(BoardInk.sans(11, .regular)).foregroundStyle(Color.white.opacity(0.8))
+                    }
+                }
+            } else {
+                Text("\(n.mode.title) to \(n.to.short)").font(BoardInk.sans(17)).foregroundStyle(.white)
+            }
+            HStack {
+                Text("Backup alarm").font(BoardInk.sans(13)).foregroundStyle(.white)
+                Spacer()
+                Picker("Backup alarm", selection: $backup) {
+                    Text("Off").tag(0)
+                    ForEach([10, 15, 20, 25, 30, 40, 50, 60, 75, 90], id: \.self) { m in Text("After \(m) min").tag(m) }
+                }
+                .pickerStyle(.menu).tint(.white).font(BoardInk.sans(13))
+            }
+            .padding(.top, 2)
+            Text("It starts by itself once you’re on board.").font(BoardInk.sans(10.5, .regular)).foregroundStyle(Color.white.opacity(0.65))
+        }
+        .padding(12)
+        .background(LinearGradient(colors: [BoardInk.blueTop, BoardInk.blueBottom], startPoint: .top, endPoint: .bottom), in: RoundedRectangle(cornerRadius: 8))
+        TransferList(all: trip.upcoming, updated: trip.upcomingAt, error: trip.upcomingError, mode: n.mode, dest: n.mode == .train ? n.to.short : "Veghel", pal: pal)
+            .padding(12)
+            .background(LinearGradient(colors: [BoardInk.blueTop, BoardInk.blueBottom], startPoint: .top, endPoint: .bottom), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func inMinutes(_ d: Date) -> String {
+        let m = Int((d.timeIntervalSinceNow / 60).rounded())
+        return m <= -1 ? "left \(-m) min ago" : m == 0 ? "now" : "in \(m) min"
     }
 }
 
