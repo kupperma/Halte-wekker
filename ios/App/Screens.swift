@@ -1165,11 +1165,14 @@ struct RideView: View {
     @State private var panning = Handoff.fromBoards       // started at the boards: turn round to the platform first
     @State private var walkTo: WalkTarget?
     @State private var loopRestart = 0
+    @State private var screenH: CGFloat = 800
     var pal: HWPalette { .of(home: trip.direction == .home) }
+    /// The ring as big as the screen allows.
+    private var ringSize: CGFloat { min(250, max(170, screenH * 0.31 - (trip.phase == .awake ? 60 : 0) - (music.song == nil ? 0 : 20))) }
     var body: some View {
         ZStack {
             // the station shows through: a lighter dim, and the panels are a little see-through
-            StationBackdrop(home: trip.direction == .home, moving: trip.movingStation && scene == .active, dim: 0.42,
+            StationBackdrop(home: trip.direction == .home, moving: trip.movingStation, dim: 0.42,
                             pan: panning ? "pan-\(trip.direction == .home ? "home" : "out")" : nil, restart: loopRestart)
             VStack(alignment: .leading, spacing: 0) {
                 HStack {
@@ -1192,6 +1195,7 @@ struct RideView: View {
             .padding(22)
         }
         .environment(\.seeThrough, true)
+        .background { GeometryReader { g in Color.clear.onAppear { screenH = g.size.height }.onChange(of: g.size.height) { _, h in screenH = h } } }
         .sheet(item: $walkTo) { WalkMapSheet(target: $0).presentationDetents([.large]) }
         .animation(.easeInOut(duration: 0.4), value: trip.waitingToBoard)
         .onAppear {
@@ -1317,7 +1321,7 @@ struct RideView: View {
         Spacer(minLength: 8)
         // the countdown: a ring that fills up as you go, with your bus or train riding round it
         TimelineView(.periodic(from: .now, by: 2)) { ctx in
-            RideRing(progress: trip.progress(at: ctx.date), stops: trip.stopMarks.map(\.fraction), train: v?.isTrain ?? (trip.leg?.mode == .train), accent: pal.accent) {
+            RideRing(progress: trip.progress(at: ctx.date), stops: trip.stopMarks.map(\.fraction), train: v?.isTrain ?? (trip.leg?.mode == .train), accent: pal.accent, size: ringSize) {
                 ringCenter(eta: eta, to: to, now: ctx.date)
             }
         }
@@ -1340,18 +1344,18 @@ struct RideView: View {
         VStack(spacing: 2) {
             if let eta, eta > now.addingTimeInterval(-120) {
                 let m = Fmt.mins(eta.timeIntervalSince(now))
-                Text("\(m)").font(HWFont.display(m >= 100 ? 64 : 82)).foregroundStyle(HWPalette.ink).monospacedDigit()
+                Text("\(m)").font(HWFont.display(ringSize * (m >= 100 ? 0.26 : 0.33))).foregroundStyle(HWPalette.ink).monospacedDigit()
                     .contentTransition(.numericText()).shadow(color: pal.accent.opacity(0.45), radius: 18)
                 Text("MIN TO \(to.uppercased())").font(HWFont.display(12)).tracking(2).foregroundStyle(pal.accent).lineLimit(1).minimumScaleFactor(0.6)
                 Text("there at \(Fmt.hhmm(eta))").font(HWFont.body(14)).foregroundStyle(HWPalette.ink.opacity(0.9)).padding(.top, 2)
             } else {
                 let parts = trip.distance.map { Fmt.distanceParts($0) } ?? ("–", "")
-                Text(parts.0).font(HWFont.display(70)).foregroundStyle(HWPalette.ink).monospacedDigit()
+                Text(parts.0).font(HWFont.display(ringSize * 0.28)).foregroundStyle(HWPalette.ink).monospacedDigit()
                     .contentTransition(.numericText()).shadow(color: pal.accent.opacity(0.45), radius: 18)
                 Text("\(parts.1.uppercased()) TO \(to.uppercased())").font(HWFont.display(12)).tracking(2).foregroundStyle(pal.accent).lineLimit(1).minimumScaleFactor(0.6)
             }
         }
-        .frame(width: 180)
+        .frame(width: ringSize * 0.72)
     }
 
     /// Three tiles under the ring: how far, how fast, the next stop.
@@ -1419,6 +1423,7 @@ struct RideView: View {
         if trip.legs.count > 1, let a = trip.arrival { parts.append("\(trip.finalName) around \(Fmt.hhmm(a))") }
         if let n = trip.nextText { parts.append(n) }
         if trip.pickedByHand { parts.append("You picked it in the list") }
+        else if trip.byTimetable { parts.append("Going by its timetable") }
         else if trip.nextStop != nil, let m = trip.matchMeters { parts.append("Recognised: \(m) m from you") }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
@@ -1500,27 +1505,30 @@ struct SongPill: View {
     let song: Song
     let pal: HWPalette
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 14) {
             Group {
                 if let img = song.image { Image(uiImage: img).resizable().scaledToFill() }
                 else if let u = song.artURL {
                     AsyncImage(url: u) { $0.resizable().scaledToFill() } placeholder: { Color.white.opacity(0.15) }
-                } else { ZStack { Color.white.opacity(0.15); Image(systemName: "music.note").font(.system(size: 13)).foregroundStyle(pal.accent) } }
+                } else { ZStack { Color.white.opacity(0.15); Image(systemName: "music.note").font(.system(size: 22)).foregroundStyle(pal.accent) } }
             }
-            .frame(width: 36, height: 36).clipShape(Circle())
-            .overlay(Circle().stroke(Color.white.opacity(0.3), lineWidth: 1))
-            VStack(alignment: .leading, spacing: 1) {
-                Text(song.title).font(HWFont.display(14)).foregroundStyle(HWPalette.ink).lineLimit(1)
-                Text([song.artist, song.app].filter { !$0.isEmpty }.joined(separator: " · ")).font(HWFont.body(11)).foregroundStyle(HWPalette.muted).lineLimit(1)
+            .frame(width: 64, height: 64).clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.3), lineWidth: 1))
+            .shadow(color: .black.opacity(0.35), radius: 6, y: 3)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("\(song.playing ? "NOW PLAYING" : "PAUSED") · \(song.app.uppercased())").font(HWFont.body(10, bold: true)).tracking(1.4).foregroundStyle(pal.accent)
+                Text(song.title).font(HWFont.display(19)).foregroundStyle(HWPalette.ink).lineLimit(1).minimumScaleFactor(0.7)
+                if !song.artist.isEmpty { Text(song.artist).font(HWFont.body(14)).foregroundStyle(HWPalette.ink.opacity(0.8)).lineLimit(1) }
             }
             Spacer(minLength: 4)
-            Image(systemName: song.playing ? "waveform" : "pause.fill").font(.system(size: 14, weight: .semibold)).foregroundStyle(pal.accent)
+            Image(systemName: song.playing ? "waveform" : "pause.fill").font(.system(size: 20, weight: .semibold)).foregroundStyle(pal.accent)
                 .symbolEffect(.variableColor.iterative, isActive: song.playing)
                 .padding(.trailing, 6)
         }
-        .padding(6)
-        .background(Color.white.opacity(0.1), in: Capsule())
-        .overlay(Capsule().stroke(Color.white.opacity(0.12), lineWidth: 1))
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.white.opacity(0.12), lineWidth: 1))
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(song.playing ? "Now playing" : "Paused"): \(song.title)\(song.artist.isEmpty ? "" : " by \(song.artist)")")
     }

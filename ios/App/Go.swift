@@ -87,7 +87,7 @@ final class GoStore: ObservableObject {
         detect = Task { [weak self] in
             var last: String?
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 12_000_000_000)
+                try? await Task.sleep(nanoseconds: 6_000_000_000)
                 guard let self, self.watching, !Task.isCancelled else { return }
                 last = await self.checkBoarding(last)
             }
@@ -236,7 +236,7 @@ final class GoStore: ObservableObject {
         guard let m = await trip.matchVehicle(mode: nil) else { seen = nil; return nil }
         guard watching, trip.phase == .idle else { return nil }
         // at bus speed, not running for it while it passes you
-        guard (trip.speed ?? 0) >= 4.5 else { return last }
+        guard (trip.speed ?? 0) >= 3.5 else { return last }
         let twice = last == m.vehicle.tripId
         let all = [best].compactMap { $0 } + others
         if let t = all.first(where: { $0.first.tripId == m.vehicle.tripId }), m.meters < 250 || twice {
@@ -301,14 +301,13 @@ final class GoStore: ObservableObject {
 
 // MARK: the screen
 
-/// One look: what to take next, how to get there, and what happens after. It watches everything for you.
+/// One look: a big live map of you, the walk to your stop and the bus or train coming, with see-through cards over it:
+/// what to take next, how to get there, and what happens after. It watches everything for you.
 struct GoView: View {
     @EnvironmentObject var go: GoStore
     @EnvironmentObject var trip: TripManager
     @EnvironmentObject var live: LiveStore
     @EnvironmentObject var ns: NSStore
-    @EnvironmentObject var near: NearMe
-    @Environment(\.scenePhase) private var scene
     @State private var walkTo: WalkTarget?
     @State private var liveTrack: LiveTrackTarget?
     @State private var choosing = false
@@ -316,18 +315,30 @@ struct GoView: View {
     var pal: HWPalette { .of(home: home) }
 
     var body: some View {
-        ZStack {
-            StationBackdrop(home: home, moving: trip.movingStation && scene == .active, dim: 0.5)
-            VStack(spacing: 0) {
-                topBar
-                ScrollView(showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 12) { content }
-                        .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 16)
+        GeometryReader { g in
+            let bar: CGFloat = 50                                   // the buttons along the top
+            let window = max(220, (g.size.height - bar) * 0.47)     // the map you see above the cards
+            ZStack(alignment: .top) {
+                GoMap(ride: go.arrived ? nil : go.best?.first, here: go.here,
+                      top: g.safeAreaInsets.top + bar, bottom: g.safeAreaInsets.top + bar + window)
+                    .ignoresSafeArea()
+                // a little shade under the buttons, so they read on any map
+                LinearGradient(colors: [.black.opacity(0.55), .clear], startPoint: .top, endPoint: .bottom)
+                    .frame(height: g.safeAreaInsets.top + bar + 30).ignoresSafeArea(edges: .top).allowsHitTesting(false)
+                VStack(spacing: 0) {
+                    topBar.frame(height: bar)
+                    ScrollView(showsIndicators: false) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Color.clear.frame(height: window - 6)        // the map shows through here
+                            content
+                        }
+                        .padding(.horizontal, 12).padding(.bottom, 16)
+                    }
+                    bottom
                 }
-                bottom
             }
         }
-        .environment(\.seeThrough, true)
+        .environment(\.colorScheme, .dark)
         .sheet(item: $walkTo) { WalkMapSheet(target: $0).presentationDetents([.large]) }
         .sheet(item: $liveTrack) { LiveBusSheet(target: $0).presentationDetents([.large]) }
         .sheet(isPresented: $choosing) {
@@ -342,14 +353,14 @@ struct GoView: View {
     // MARK: top
 
     private var topBar: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
             Button { withAnimation(.easeInOut(duration: 0.35)) { go.close() } } label: {
                 HStack(spacing: 5) {
                     Image(systemName: "chevron.left").font(.system(size: 12, weight: .bold))
                     Text("MAP").font(HWFont.display(13)).tracking(1.4)
                 }
                 .foregroundStyle(.white).padding(.horizontal, 12).padding(.vertical, 8)
-                .background(BoardInk.band.opacity(0.92), in: Capsule()).overlay(Capsule().stroke(Color.white.opacity(0.22), lineWidth: 1))
+                .background(.ultraThinMaterial, in: Capsule()).overlay(Capsule().stroke(Color.white.opacity(0.22), lineWidth: 1))
             }
             .buttonStyle(.plain).accessibilityLabel("Back to the map. This stops the watching.")
             Spacer(minLength: 4)
@@ -370,7 +381,7 @@ struct GoView: View {
                     Image(systemName: "chevron.down").font(.system(size: 10, weight: .bold))
                 }
                 .foregroundStyle(.white).padding(.horizontal, 10).padding(.vertical, 8)
-                .background(BoardInk.band.opacity(0.92), in: Capsule()).overlay(Capsule().stroke(Color.white.opacity(0.22), lineWidth: 1))
+                .background(.ultraThinMaterial, in: Capsule()).overlay(Capsule().stroke(Color.white.opacity(0.22), lineWidth: 1))
             }
             .accessibilityLabel("Where you’re going: \(destWord). Tap to change.")
             HStack(spacing: 5) {
@@ -378,10 +389,10 @@ struct GoView: View {
                 Text(go.watching ? "WATCHING" : "STOPPED").font(BoardInk.sans(10)).tracking(1)
             }
             .foregroundStyle(.white).padding(.horizontal, 9).padding(.vertical, 8)
-            .background(Color.black.opacity(0.35), in: Capsule())
+            .background(.ultraThinMaterial, in: Capsule())
             .accessibilityElement(children: .combine)
         }
-        .padding(.horizontal, 16).padding(.top, 4)
+        .padding(.horizontal, 12)
     }
 
     private func to(_ d: Direction) {
@@ -396,7 +407,6 @@ struct GoView: View {
         if go.arrived {
             message(icon: "checkmark.circle.fill", title: "You’re at \(destWord)", text: "Nothing to catch: you’re there. It stopped watching.")
         } else if let t = go.best {
-            header(t)
             nextCard(t)
             howToGetThere(t)
             if t.rides.count > 1 { thenCard(t) }
@@ -410,7 +420,7 @@ struct GoView: View {
         if !go.watching && !go.arrived {
             Button { go.again() } label: {
                 Label("Watch again", systemImage: "bell.badge").font(BoardInk.sans(14)).foregroundStyle(.white)
-                    .frame(maxWidth: .infinity).padding(.vertical, 11).background(BoardInk.band, in: RoundedRectangle(cornerRadius: 6))
+                    .frame(maxWidth: .infinity).padding(.vertical, 11).background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
             }
             .buttonStyle(.plain)
         }
@@ -426,27 +436,15 @@ struct GoView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
-        .background(panel)
-        .padding(.top, 30)
+        .glass()
     }
 
-    private var panel: some View {
-        RoundedRectangle(cornerRadius: 10).fill(LinearGradient(colors: [BoardInk.blueTop, BoardInk.blueBottom], startPoint: .top, endPoint: .bottom).opacity(0.9))
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.16), lineWidth: 1))
-    }
-
-    /// "FASTEST WAY HOME" · "Veghel at 16:48" · "52 min, 1 change"
-    private func header(_ t: DoorTrip) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(goingHome ? "FASTEST WAY HOME" : "FASTEST WAY TO \(destWord.uppercased())")
-                .font(BoardInk.sans(11)).tracking(1.8).foregroundStyle(Color.white.opacity(0.75))
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text("\(destWord) at \(Fmt.hhmm(t.end))").font(HWFont.display(30)).foregroundStyle(.white).lineLimit(1).minimumScaleFactor(0.6)
-                Spacer(minLength: 4)
-                let mins = Fmt.mins(t.end.timeIntervalSinceNow)
-                Text("\(Fmt.rideText(Double(mins)))\(t.rides.count > 1 ? " · \(t.rides.count - 1) change\(t.rides.count > 2 ? "s" : "")" : "")")
-                    .font(BoardInk.sans(13, .semibold)).foregroundStyle(Color.white.opacity(0.85))
-            }
+    /// A small heading inside a card.
+    private func kicker(_ t: String, _ sub: String? = nil) -> some View {
+        HStack {
+            Text(t.uppercased()).font(BoardInk.sans(10.5)).tracking(1.6).foregroundStyle(Color.white.opacity(0.7))
+            Spacer(minLength: 4)
+            if let sub { Text(sub).font(BoardInk.sans(11, .semibold)).foregroundStyle(Color.white.opacity(0.85)) }
         }
     }
 
@@ -460,18 +458,29 @@ struct GoView: View {
         let track = info?.track ?? f.platform ?? ""
         let fromLine = "from \(Fmt.place(f.fromStop))" + (track.isEmpty ? "" : " · platform \(track)")
         let toName = Fmt.place(f.headsign.isEmpty ? f.toStop : f.headsign)
-        return VStack(alignment: .leading, spacing: 0) {
-            PlannerBar(title: "Take next", sub: f.isTrain ? "train" : "bus")
+        let mins = Fmt.mins(t.end.timeIntervalSinceNow)
+        let changes = t.rides.count > 1 ? " · \(t.rides.count - 1) change\(t.rides.count > 2 ? "s" : "")" : ""
+        return VStack(alignment: .leading, spacing: 10) {
+            // where it gets you, and when
+            VStack(alignment: .leading, spacing: 1) {
+                Text(goingHome ? "Fastest way home" : "Fastest way to \(destWord)").font(BoardInk.sans(10.5)).tracking(1.6).textCase(.uppercase).foregroundStyle(Color.white.opacity(0.7))
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text("\(destWord) at \(Fmt.hhmm(t.end))").font(HWFont.display(28)).foregroundStyle(.white).lineLimit(1).minimumScaleFactor(0.6)
+                    Spacer(minLength: 4)
+                    Text("\(Fmt.rideText(Double(mins)))\(changes)").font(BoardInk.sans(12, .semibold)).foregroundStyle(Color.white.opacity(0.85)).lineLimit(1)
+                }
+            }
+            Rectangle().fill(Color.white.opacity(0.14)).frame(height: 1)
+            kicker("Take next")
             HStack(alignment: .center, spacing: 12) {
                 Text(f.line).font(BoardInk.sans(22)).lineLimit(1).minimumScaleFactor(0.5)
                     .foregroundStyle(f.isTrain ? Color(hex: 0x1A1A1A) : (g.map { RatingStyle.ink($0) } ?? BoardInk.navy))
                     .frame(width: 62, height: 44)
-                    .background(f.isTrain ? AnyShapeStyle(BoardInk.yellow) : (g.map { RatingStyle.fill($0) } ?? AnyShapeStyle(BoardInk.route)), in: RoundedRectangle(cornerRadius: 4))
+                    .background(f.isTrain ? AnyShapeStyle(BoardInk.yellow) : (g.map { RatingStyle.fill($0) } ?? AnyShapeStyle(BoardInk.route)), in: RoundedRectangle(cornerRadius: 6))
                 VStack(alignment: .leading, spacing: 2) {
                     Text(GoStore.title(f)).font(BoardInk.sans(17)).foregroundStyle(.white).lineLimit(1)
                     Text("to \(toName)").font(BoardInk.sans(13, .regular)).foregroundStyle(Color.white.opacity(0.9)).lineLimit(1).minimumScaleFactor(0.7)
-                    Text(fromLine)
-                        .font(BoardInk.sans(11.5, .regular)).foregroundStyle(Color.white.opacity(0.75)).lineLimit(1).minimumScaleFactor(0.7)
+                    Text(fromLine).font(BoardInk.sans(11.5, .regular)).foregroundStyle(Color.white.opacity(0.75)).lineLimit(1).minimumScaleFactor(0.7)
                 }
                 Spacer(minLength: 4)
                 VStack(alignment: .trailing, spacing: 2) {
@@ -482,22 +491,20 @@ struct GoView: View {
                     }
                 }
             }
-            .padding(.horizontal, 12).padding(.vertical, 12)
             HStack(spacing: 6) {
                 Circle().fill(st.warn ? BoardInk.late : st.ok ? BoardInk.green : Color.white.opacity(0.6)).frame(width: 7, height: 7)
                 Text(st.text).font(BoardInk.sans(12)).foregroundStyle(st.warn ? BoardInk.late : st.ok ? BoardInk.green : Color.white.opacity(0.85)).lineLimit(2)
                 Spacer(minLength: 4)
                 Button { liveTrack = LiveTrackTarget(tripId: f.tripId, line: f.line, headsign: f.headsign.isEmpty ? Fmt.place(f.toStop) : f.headsign,
                                                      stopName: f.fromStop, time: f.departure, rail: f.isTrain) } label: {
-                    Label("Where is it?", systemImage: "dot.radiowaves.left.and.right").font(BoardInk.sans(11)).foregroundStyle(BoardInk.navy)
-                        .padding(.horizontal, 10).padding(.vertical, 5).background(Color.white, in: Capsule())
+                    Label("Its whole route", systemImage: "point.topleft.down.to.point.bottomright.curvepath").font(BoardInk.sans(11)).foregroundStyle(.white)
+                        .padding(.horizontal, 10).padding(.vertical, 5).background(Color.white.opacity(0.16), in: Capsule())
                 }
                 .buttonStyle(.plain)
             }
-            .padding(.horizontal, 12).padding(.bottom, 12)
         }
-        .background(panel)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .padding(14)
+        .glass()
     }
 
     // MARK: how to get there
@@ -513,25 +520,31 @@ struct GoView: View {
                     Image(systemName: "mappin.and.ellipse").font(.system(size: 18, weight: .bold)).foregroundStyle(BoardInk.yellow)
                     VStack(alignment: .leading, spacing: 2) {
                         Text("You’re at the stop").font(BoardInk.sans(15)).foregroundStyle(.white)
-                        Text("Wait here for the \(GoStore.what(f)). It notices by itself when you get on.").font(BoardInk.sans(12, .regular)).foregroundStyle(Color.white.opacity(0.85))
+                        Text("Wait here for the \(GoStore.what(f)): you can see it coming on the map. It notices by itself when you get on.")
+                            .font(BoardInk.sans(12, .regular)).foregroundStyle(Color.white.opacity(0.85)).fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading).padding(12).background(panel)
+                .frame(maxWidth: .infinity, alignment: .leading).padding(14).glass()
             } else {
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(alignment: .center, spacing: 12) {
-                        TimelineView(.periodic(from: .now, by: 10)) { _ in leaveRing(t) }
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(f.walkBefore > 0 ? "\(f.walkBefore) min walk to \(Fmt.place(f.fromStop))" : "Get to \(Fmt.place(f.fromStop))")
-                                .font(BoardInk.sans(15)).foregroundStyle(.white).lineLimit(2).minimumScaleFactor(0.8)
-                            Text(leaveText(t)).font(BoardInk.sans(12)).foregroundStyle(t.start <= Date().addingTimeInterval(60) ? BoardInk.late : BoardInk.green)
-                            WalkButton { walkTo = target }.padding(.top, 2)
-                        }
-                        Spacer(minLength: 0)
+                HStack(alignment: .center, spacing: 12) {
+                    TimelineView(.periodic(from: .now, by: 10)) { _ in leaveRing(t) }
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(f.walkBefore > 0 ? "\(f.walkBefore) min walk to \(Fmt.place(f.fromStop))" : "Get to \(Fmt.place(f.fromStop))")
+                            .font(BoardInk.sans(15)).foregroundStyle(.white).lineLimit(2).minimumScaleFactor(0.8)
+                        Text(leaveText(t)).font(BoardInk.sans(12)).foregroundStyle(t.start <= Date().addingTimeInterval(60) ? BoardInk.late : BoardInk.green)
+                        Text("Follow the dotted line on the map.").font(BoardInk.sans(11, .regular)).foregroundStyle(Color.white.opacity(0.75))
                     }
-                    WalkPreview(target: target) { walkTo = target }
+                    Spacer(minLength: 0)
+                    Button { walkTo = target } label: {
+                        VStack(spacing: 3) {
+                            Image(systemName: "arrow.triangle.turn.up.right.diamond.fill").font(.system(size: 18, weight: .semibold))
+                            Text("Turns").font(BoardInk.sans(10))
+                        }
+                        .foregroundStyle(.white).frame(width: 54, height: 54).background(Color.white.opacity(0.16), in: RoundedRectangle(cornerRadius: 12))
+                    }
+                    .buttonStyle(.plain).accessibilityLabel("The walk, turn by turn")
                 }
-                .padding(12).background(panel)
+                .padding(14).glass()
             }
         }
     }
@@ -559,7 +572,7 @@ struct GoView: View {
                 }
             }
         }
-        .frame(width: 66, height: 66)
+        .frame(width: 62, height: 62)
         .animation(.easeInOut(duration: 0.6), value: fill)
         .accessibilityLabel(s <= 60 ? "Leave now" : "Leave in \(m) minutes")
     }
@@ -568,27 +581,24 @@ struct GoView: View {
 
     private func thenCard(_ t: DoorTrip) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            PlannerBar(title: "Then", sub: "\(destWord) \(Fmt.hhmm(t.end))")
+            kicker("Then", "\(destWord) \(Fmt.hhmm(t.end))")
             ForEach(Array(t.rides.enumerated()).dropFirst(), id: \.offset) { i, ride in
                 let prev = t.rides[i - 1]
                 let ch = Fmt.mins(ride.departure.timeIntervalSince(prev.arrival))
                 Label("\(ch) min to change at \(Fmt.place(prev.toStop))\(ride.walkBefore > 0 ? ", \(ride.walkBefore) min walk" : "")", systemImage: "arrow.triangle.swap")
                     .font(BoardInk.sans(10.5, .semibold)).foregroundStyle(ch - ride.walkBefore < 2 ? BoardInk.late : Color.white.opacity(0.8))
-                    .padding(.horizontal, 10).padding(.top, 4)
+                    .padding(.top, 4)
                 PlannerRideRow(ride: ride, info: ns.rail(ride), picked: false) {
                     liveTrack = LiveTrackTarget(tripId: ride.tripId, line: ride.line, headsign: ride.headsign.isEmpty ? Fmt.place(ride.toStop) : ride.headsign,
                                                 stopName: ride.fromStop, time: ride.departure, rail: ride.isTrain)
                 }
-                .padding(.horizontal, 10)
             }
             if t.walkAfter > 0 {
                 Label("\(t.walkAfter) min walk to \(destWord)", systemImage: "figure.walk").font(BoardInk.sans(11, .semibold)).foregroundStyle(Color.white.opacity(0.8))
-                    .padding(.horizontal, 10)
             }
         }
-        .padding(.bottom, 8)
-        .background(panel)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .padding(14)
+        .glass()
     }
 
     // MARK: it watches for you
@@ -619,13 +629,13 @@ struct GoView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 10).fill(BoardInk.strip.opacity(0.88)).overlay(RoundedRectangle(cornerRadius: 10).stroke(BoardInk.amber.opacity(0.35), lineWidth: 1)))
+        .padding(14)
+        .glass()
     }
 
     private var othersCard: some View {
         VStack(alignment: .leading, spacing: 0) {
-            PlannerBar(title: "Other ways", sub: "if you miss it")
+            kicker("Other ways", "if you miss it").padding(.bottom, 4)
             ForEach(go.others) { o in
                 HStack(spacing: 8) {
                     Text(Fmt.hhmm(o.first.departure)).font(BoardInk.sans(14)).foregroundStyle(.white).monospacedDigit().frame(width: 46, alignment: .leading)
@@ -633,19 +643,19 @@ struct GoView: View {
                         ForEach(Array(o.rides.enumerated()), id: \.offset) { _, r in
                             Text(r.line).font(BoardInk.sans(10.5)).lineLimit(1).foregroundStyle(r.isTrain ? Color(hex: 0x1A1A1A) : BoardInk.navy)
                                 .padding(.horizontal, 5).frame(height: 17)
-                                .background(r.isTrain ? BoardInk.yellow : BoardInk.route, in: RoundedRectangle(cornerRadius: 2))
+                                .background(r.isTrain ? BoardInk.yellow : BoardInk.route, in: RoundedRectangle(cornerRadius: 3))
                         }
                     }
                     Text("from \(Fmt.place(o.first.fromStop))").font(BoardInk.sans(11, .regular)).foregroundStyle(Color.white.opacity(0.75)).lineLimit(1).minimumScaleFactor(0.7)
                     Spacer(minLength: 4)
                     Text("→ \(Fmt.hhmm(o.end))").font(BoardInk.sans(12)).foregroundStyle(.white)
                 }
-                .padding(.horizontal, 10).padding(.vertical, 8)
+                .padding(.vertical, 8)
                 .overlay(alignment: .bottom) { Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1) }
             }
         }
-        .background(panel)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .padding(14)
+        .glass()
     }
 
     // MARK: bottom
@@ -653,7 +663,7 @@ struct GoView: View {
     @ViewBuilder private var bottom: some View {
         if go.arrived || go.best == nil {
             BandButton(title: "Back to the map", pal: pal) { withAnimation(.easeInOut(duration: 0.35)) { go.close() } }
-                .padding(.horizontal, 16).padding(.bottom, 8)
+                .padding(.horizontal, 12).padding(.bottom, 6)
         } else if let t = go.best, RoutePlan.from(t) != nil {
             Button { go.startByHand() } label: {
                 HStack(spacing: 8) {
@@ -661,11 +671,173 @@ struct GoView: View {
                     Text("I’M ON IT · START NOW").font(HWFont.display(14)).tracking(0.8)
                 }
                 .foregroundStyle(.white).frame(maxWidth: .infinity).padding(.vertical, 13)
-                .background(Color(hex: 0x2F9E5B), in: RoundedRectangle(cornerRadius: 6))
+                .background(Color(hex: 0x2F9E5B).opacity(0.92), in: RoundedRectangle(cornerRadius: 14))
+                .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.2), lineWidth: 1))
             }
             .buttonStyle(.plain)
-            .padding(.horizontal, 16).padding(.bottom, 8)
+            .padding(.horizontal, 12).padding(.bottom, 6)
             .accessibilityHint("Only if it hasn’t noticed by itself that you’re on board.")
         }
+    }
+}
+
+extension View {
+    /// The see-through card of the Go screen: frosted glass over the map.
+    func glass(_ radius: CGFloat = 18) -> some View {
+        background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: radius))
+            .background(Color.black.opacity(0.18), in: RoundedRectangle(cornerRadius: radius))
+            .overlay(RoundedRectangle(cornerRadius: radius).stroke(Color.white.opacity(0.16), lineWidth: 1))
+    }
+}
+
+// MARK: the map behind it
+
+/// The big map behind the Go screen: you, the walk to your stop (dotted), the stop, and the bus or train on its way to it,
+/// moving every second. It keeps all of that in view by itself, in the part of the screen above the cards, so you can just
+/// follow it.
+struct GoMap: View {
+    let ride: Ride?
+    let here: CLLocation?
+    let top: CGFloat            // the screen's top part that the buttons cover
+    let bottom: CGFloat         // where the cards start
+    @State private var trip: LiveTrip?
+    @State private var mine: Int?
+    @State private var walk: MKRoute?
+    @State private var walkFrom: CLLocation?
+    @State private var hereNow: CLLocation?
+    @State private var camera: MapCameraPosition = .automatic
+    @State private var size: CGSize = .zero
+    @State private var tick = 0
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { tl in
+            Map(position: $camera, interactionModes: []) { content(tl.date) }
+                .mapStyle(.standard(emphasis: .muted, pointsOfInterest: .excludingAll))
+        }
+        .background { GeometryReader { g in Color.clear.onAppear { size = g.size }.onChange(of: g.size) { _, s in size = s } } }
+        .onAppear { hereNow = here }
+        .onChange(of: here?.timestamp) { _, _ in hereNow = here }
+        .onChange(of: tick) { _, t in if t <= 2 || t % 4 == 0 { fit(Date(), animated: t > 2) } }
+        .onChange(of: size) { _, _ in fit(Date(), animated: false) }
+        .task(id: ride?.tripId ?? "") { await run() }
+    }
+
+    private var stop: CLLocationCoordinate2D? {
+        guard let r = ride, let a = r.fromLat, let o = r.fromLon else { return nil }
+        return .init(latitude: a, longitude: o)
+    }
+
+    @MapContentBuilder private func content(_ now: Date) -> some MapContent {
+        UserAnnotation()
+        if let walk {
+            MapPolyline(walk.polyline).stroke(Color.white, style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round, dash: [0.5, 11]))
+        }
+        if let t = trip, let m = mine, let r = ride {
+            let w = t.position(now)
+            let me = t.metres(ofStop: m)
+            // the road it still has to take to you, and on from there (fainter)
+            let rest = t.road(from: me, to: t.metres(ofStop: t.stops.count - 1))
+            if rest.count > 1 {
+                MapPolyline(coordinates: rest)
+                    .stroke((r.isTrain ? BoardInk.yellow : BoardInk.route).opacity(0.35), style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
+            }
+            if w.metres < me - 5 {
+                MapPolyline(coordinates: t.road(from: w.metres, to: me))
+                    .stroke(r.isTrain ? BoardInk.yellow : BoardInk.route, style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
+            }
+            if !w.done && w.metres <= me + 30 {
+                Annotation("", coordinate: t.coordinate(atMetres: w.metres), anchor: .center) {
+                    HStack(spacing: 4) {
+                        Image(systemName: r.isTrain ? "tram.fill" : "bus.fill").font(.system(size: 12, weight: .bold))
+                        Text(r.line).font(BoardInk.sans(13))
+                    }
+                    .foregroundStyle(r.isTrain ? Color(hex: 0x1A1A1A) : BoardInk.navy)
+                    .padding(.horizontal, 8).padding(.vertical, 5)
+                    .background(r.isTrain ? BoardInk.yellow : BoardInk.route, in: RoundedRectangle(cornerRadius: 7))
+                    .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.white, lineWidth: 2))
+                    .shadow(color: .black.opacity(0.45), radius: 4, y: 2)
+                }
+            }
+        }
+        if let s = stop, let r = ride {
+            Annotation("", coordinate: s, anchor: .bottom) {
+                VStack(spacing: 0) {
+                    HStack(spacing: 5) {
+                        Image(systemName: r.isTrain ? "tram.fill" : "bus.fill").font(.system(size: 11, weight: .bold))
+                        Text("\(r.line) · \(Fmt.hhmm(r.departure))").font(BoardInk.sans(12))
+                    }
+                    .foregroundStyle(BoardInk.navy).padding(.horizontal, 8).padding(.vertical, 5)
+                    .background(Color.white, in: RoundedRectangle(cornerRadius: 7))
+                    Image(systemName: "triangle.fill").font(.system(size: 9)).foregroundStyle(.white).rotationEffect(.degrees(180)).offset(y: -2)
+                    Circle().fill(BoardInk.yellow).frame(width: 12, height: 12).overlay(Circle().stroke(BoardInk.navy, lineWidth: 2))
+                }
+                .shadow(color: .black.opacity(0.4), radius: 4, y: 2)
+            }
+        }
+    }
+
+    /// Its live times every 30 seconds; the walk again every minute (or when you've moved).
+    private func run() async {
+        trip = nil; mine = nil; walk = nil; walkFrom = nil
+        var lastTrip = Date.distantPast
+        while !Task.isCancelled {
+            let now = Date()
+            if let r = ride, now.timeIntervalSince(lastTrip) >= 30 {
+                lastTrip = now
+                if let t = await Transit.liveTrip(r.tripId), !Task.isCancelled {
+                    trip = t
+                    if mine == nil { mine = Self.findMine(t, r) }
+                }
+            }
+            if let s = stop, let h = hereNow, walkFrom.map({ h.distance(from: $0) > 40 || now.timeIntervalSince($0.timestamp) > 60 }) ?? true {
+                walkFrom = h
+                let d = h.distance(from: CLLocation(latitude: s.latitude, longitude: s.longitude))
+                if d > 60 { walk = await Self.walkRoute(to: s) } else { walk = nil }
+            }
+            tick += 1
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+        }
+    }
+
+    private static func walkRoute(to s: CLLocationCoordinate2D) async -> MKRoute? {
+        let req = MKDirections.Request()
+        req.source = MKMapItem.forCurrentLocation()
+        req.destination = MKMapItem(placemark: MKPlacemark(coordinate: s))
+        req.transportType = .walking
+        return try? await MKDirections(request: req).calculate().routes.first
+    }
+
+    /// Your stop on its route: the one nearest where you get on, at about the time you catch it.
+    private static func findMine(_ t: LiveTrip, _ r: Ride) -> Int? {
+        let c = CLLocation(latitude: r.fromLat ?? 0, longitude: r.fromLon ?? 0)
+        let near = t.stops.indices.filter { CLLocation(latitude: t.stops[$0].coordinate.latitude, longitude: t.stops[$0].coordinate.longitude).distance(from: c) < 250 }
+        let pool = near.isEmpty ? t.stops.indices.filter { Fmt.place(t.stops[$0].name) == Fmt.place(r.fromStop) } : near
+        return pool.min { abs((t.departure($0) ?? .distantPast).timeIntervalSince(r.departure)) < abs((t.departure($1) ?? .distantPast).timeIntervalSince(r.departure)) }
+    }
+
+    /// Keep you, your stop and the bus (when it's on its way, not too far) in the window above the cards.
+    private func fit(_ now: Date, animated: Bool) {
+        guard size.width > 0, size.height > 0 else { return }
+        var pts: [CLLocationCoordinate2D] = []
+        if let h = hereNow { pts.append(h.coordinate) }
+        if let s = stop {
+            pts.append(s)
+            if let t = trip, let m = mine {
+                let w = t.position(now), bus = t.coordinate(atMetres: w.metres)
+                let far = CLLocation(latitude: bus.latitude, longitude: bus.longitude).distance(from: CLLocation(latitude: s.latitude, longitude: s.longitude))
+                if !w.done && w.metres <= t.metres(ofStop: m) + 30 && far < 6000 { pts.append(bus) }
+            }
+        }
+        guard let p0 = pts.first else { return }
+        var box = MKMapRect(origin: MKMapPoint(p0), size: MKMapSize(width: 1, height: 1))
+        for p in pts.dropFirst() { box = box.union(MKMapRect(origin: MKMapPoint(p), size: MKMapSize(width: 1, height: 1))) }
+        let ppm = MKMapPointsPerMeterAtLatitude(p0.latitude)
+        var w = max(box.size.width * 1.35, ppm * 420), h = max(box.size.height * 1.35, ppm * 420)
+        let winH = max(120, bottom - top)
+        let aspect = size.width / winH
+        if w / h > aspect { h = w / aspect } else { w = h * aspect }
+        let scale = h / winH                                       // map points per screen point
+        let rect = MKMapRect(x: box.midX - w / 2, y: box.midY - h / 2 - top * scale, width: w, height: size.height * scale)
+        if animated { withAnimation(.easeInOut(duration: 1.2)) { camera = .rect(rect) } } else { camera = .rect(rect) }
     }
 }

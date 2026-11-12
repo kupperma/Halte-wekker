@@ -62,6 +62,15 @@ struct LiveTrip {
         return (metres(ofStop: n - 1), n - 1, true, true, true)
     }
 
+    /// The road between two points, `a` to `b` metres along.
+    func road(from a: Double, to b: Double) -> [CLLocationCoordinate2D] {
+        guard b > a else { return [] }
+        var out = [coordinate(atMetres: a)]
+        for i in cum.indices where cum[i] > a && cum[i] < b && i < path.count { out.append(path[i]) }
+        out.append(coordinate(atMetres: b))
+        return out
+    }
+
     /// The point on the road `m` metres along.
     func coordinate(atMetres m: Double) -> CLLocationCoordinate2D {
         guard path.count >= 2 else { return path.first ?? stops[0].coordinate }

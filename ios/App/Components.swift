@@ -302,7 +302,25 @@ final class LoopingVideoView: UIView {
     private var looper: AVPlayerLooper?
     private var current = ""
     private var restartToken = 0
+    private var wantsPlay = false
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        // iOS pauses video in the background (and while you swipe between apps): carry on when you're back
+        for n in [UIApplication.didBecomeActiveNotification, UIApplication.willEnterForegroundNotification] {
+            NotificationCenter.default.addObserver(self, selector: #selector(resume), name: n, object: nil)
+        }
+    }
+    required init?(coder: NSCoder) { super.init(coder: coder) }
+    deinit { NotificationCenter.default.removeObserver(self) }
+    @objc private func resume() {
+        guard wantsPlay else { return }
+        if player.currentItem == nil, !current.isEmpty, let url = Bundle.main.url(forResource: current, withExtension: "mp4") {
+            looper = AVPlayerLooper(player: player, templateItem: AVPlayerItem(url: url))
+        }
+        player.play()
+    }
     func show(_ name: String, playing: Bool, restart: Int = 0) {
+        wantsPlay = playing
         if restart != restartToken { restartToken = restart; player.seek(to: .zero) }
         if current != name, let url = Bundle.main.url(forResource: name, withExtension: "mp4") {
             current = name

@@ -287,7 +287,7 @@ enum Transit {
         let now = Date()
         let q: [URLQueryItem] = [.init(name: "min", value: "\(c.latitude - radiusDeg),\(c.longitude - radiusDeg * 1.6)"),
                                  .init(name: "max", value: "\(c.latitude + radiusDeg),\(c.longitude + radiusDeg * 1.6)"),
-                                 .init(name: "startTime", value: iso.string(from: now.addingTimeInterval(-90))),
+                                 .init(name: "startTime", value: iso.string(from: now.addingTimeInterval(-150))),
                                  .init(name: "endTime", value: iso.string(from: now.addingTimeInterval(90))),
                                  .init(name: "zoom", value: "15")]
         guard let list = try? await get("/v1/map/trips", q) as? [[String: Any]] else { return [] }

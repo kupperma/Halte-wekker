@@ -67,6 +67,14 @@ struct Destination: Codable, Hashable, Identifiable {
     }
 }
 
+/// The bus or train a leg was planned with.
+struct PlannedRide: Hashable {
+    let tripId: String
+    let line: String
+    let isTrain: Bool
+    let departure: Date
+}
+
 /// Your two routes. Going home is the same route backwards.
 struct RoutePlan: Identifiable, Hashable {
     let id: String
@@ -74,6 +82,7 @@ struct RoutePlan: Identifiable, Hashable {
     let station: Place
     var single: Leg? = nil          // "Wake me at a single stop": one leg, no route
     var custom: [Leg]? = nil        // a trip from where you are (or to somewhere you picked): its rides, one leg each
+    var planned: [PlannedRide]? = nil   // with a custom trip: the ride each leg was planned with
 
     /// One of your two routes (not a single stop, not a trip from somewhere else).
     var isFixed: Bool { single == nil && custom == nil }
@@ -91,7 +100,8 @@ struct RoutePlan: Identifiable, Hashable {
             legs.append(Leg(mode: r.isTrain ? .train : .bus, from: a, to: b))
         }
         guard let last = legs.last else { return nil }
-        return RoutePlan(id: "trip-\(t.id)", name: "To \(last.to.short)", station: last.to, custom: legs)
+        return RoutePlan(id: "trip-\(t.id)", name: "To \(last.to.short)", station: last.to, custom: legs,
+                         planned: t.rides.map { PlannedRide(tripId: $0.tripId, line: $0.line, isTrain: $0.isTrain, departure: $0.departure) })
     }
 
     static func stop(_ p: Place, mode: Mode, from: Place) -> RoutePlan {

@@ -75,6 +75,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     @Published private(set) var vehicleStops: [TripStop] = []
     @Published private(set) var matchMeters: Int?            // how far its live position was from yours
     @Published private(set) var pickedByHand = false
+    @Published private(set) var byTimetable = false         // no live position matched: it took the planned one once you'd clearly left
     @Published private(set) var speed: Double?               // m/s, from GPS
     @Published private(set) var startDistance: Double?       // how far you are from where this leg starts
     @Published private(set) var always = false
@@ -201,7 +202,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         legStart = Date()
         arrival = nil; next = nil; legArrival = nil; legFrom = nil; legTo = nil
         vehicle = v
-        vehicleStops = []; matchMeters = nil; pickedByHand = false; startDistance = nil
+        vehicleStops = []; matchMeters = nil; pickedByHand = false; byTimetable = false; startDistance = nil
         location.desiredAccuracy = kCLLocationAccuracyBest; location.distanceFilter = 25
         location.allowsBackgroundLocationUpdates = true
         location.showsBackgroundLocationIndicator = true
@@ -452,15 +453,30 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         detectTask = Task { [weak self] in
             var lastBest: String?
             var rejected = Set<String>()
+            var wait: UInt64 = 3
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 15_000_000_000)
+                try? await Task.sleep(nanoseconds: wait * 1_000_000_000)
+                wait = 7                                                // first look soon, then every 7 seconds
                 guard let self, !Task.isCancelled else { return }
                 if forNextLeg { guard self.phase == .transfer else { return } }
                 else { guard self.vehicle == nil, self.phase == .sleeping || self.phase == .awake else { return } }
-                let mode = forNextLeg ? self.legs[safe: self.index + 1]?.mode : self.leg?.mode
-                guard let m = await self.matchVehicle(mode: mode, excluding: rejected) else { lastBest = nil; continue }
-                let expected = self.upcoming.contains { $0.trip.first.tripId == m.vehicle.tripId } && m.meters < 300
-                if expected || m.vehicle.tripId == lastBest {
+                let li = forNextLeg ? self.index + 1 : self.index
+                let mode = self.legs[safe: li]?.mode
+                let planned = self.route?.planned?[safe: li]
+                guard let m = await self.matchVehicle(mode: mode, excluding: rejected) else {
+                    lastBest = nil
+                    // No live match (some have no live position): the one it planned, once you've clearly left on it.
+                    if let p = planned, let from = self.legs[safe: li]?.from, self.clearlyLeft(on: p, from: from) {
+                        let v = Vehicle(tripId: p.tripId, line: p.line, isTrain: p.isTrain)
+                        if forNextLeg { if self.phase == .transfer { self.nextLeg(vehicle: v); self.byTimetable = true } }
+                        else { self.byTimetable = true; await self.vehicleFound(v) }
+                        return
+                    }
+                    continue
+                }
+                // One look is enough for one it expects, or one that's right with you; others it wants to see twice.
+                let expected = (self.upcoming.contains { $0.trip.first.tripId == m.vehicle.tripId } || planned?.tripId == m.vehicle.tripId) && m.meters < 350
+                if expected || m.meters < 150 || m.vehicle.tripId == lastBest {
                     // Its own timetable must still have your stop ahead: not one going the other way, not an earlier run.
                     let stops = await Transit.tripStops(m.vehicle.tripId)
                     let dests: [Place] = forNextLeg ? [self.legs[safe: self.index + 1]?.to].compactMap { $0 } : self.legDestinations
@@ -479,13 +495,28 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         }
     }
 
+    /// You've left the start of the leg at bus or train speed, around when the planned one leaves.
+    private func clearlyLeft(on p: PlannedRide, from start: Place) -> Bool {
+        let now = Date()
+        guard now > p.departure.addingTimeInterval(-120), now < p.departure.addingTimeInterval(20 * 60) else { return false }
+        let last3 = samples.suffix(3)
+        guard last3.count == 3, let last = last3.last, last.timestamp > now.addingTimeInterval(-30), last.horizontalAccuracy < 150,
+              last3.allSatisfy({ $0.speed >= 4 }) else { return false }
+        return last.distance(from: CLLocation(latitude: start.coordinate.latitude, longitude: start.coordinate.longitude)) > 400
+    }
+
     /// Compares where you've been in the last minutes with where every nearby bus or train should have been.
     func matchVehicle(mode: Mode?, excluding: Set<String> = []) async -> (vehicle: Vehicle, meters: Double)? {
-        let recent = samples.filter { $0.timestamp > Date().addingTimeInterval(-150) && $0.horizontalAccuracy < 150 }
+        let recent = samples.filter { $0.timestamp > Date().addingTimeInterval(-120) && $0.horizontalAccuracy < 150 }
         guard let last = recent.last, recent.count >= 2 else { return nil }
         let speed = max(last.speed, recent.first.map { last.distance(from: $0) / max(1, last.timestamp.timeIntervalSince($0.timestamp)) } ?? 0)
-        guard speed > 3 else { return nil }                     // not moving: not on board yet
+        guard speed > 2.5 else { return nil }                   // not moving: not on board yet
+        // Each bus or train in pieces from stop to stop: put them together, so it isn't lost when it passes a stop.
         let segs = await Transit.vehicles(near: last.coordinate)
+        let byTrip = Dictionary(grouping: segs, by: { $0.tripId })
+        func at(_ list: [VehicleSegment], _ t: Date) -> CLLocationCoordinate2D? {
+            list.first(where: { t >= $0.departure && t <= $0.arrival })?.position(at: t) ?? list.lazy.compactMap { $0.position(at: t) }.first
+        }
         // Which way you're going, in metres east and north.
         let pts = Array(recent.suffix(4)), a = pts.first!, b = pts.last!
         func vec(_ p: CLLocationCoordinate2D, _ q: CLLocationCoordinate2D) -> (Double, Double) {
@@ -493,17 +524,18 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         }
         let me = vec(a.coordinate, b.coordinate), meLen = hypot(me.0, me.1)
         var best: (Vehicle, Double)?
-        for s in segs {
+        for (id, list) in byTrip {
+            guard let s = list.first else { continue }
             if let mode, (mode == .train) != s.isTrain { continue }
-            if excluding.contains(s.tripId) { continue }
+            if excluding.contains(id) { continue }
             // A bus at the same stop that leaves the other way is not yours.
-            if meLen > 40, let pa = s.position(at: a.timestamp), let pb = s.position(at: b.timestamp) {
+            if meLen > 40, let pa = at(list, a.timestamp), let pb = at(list, b.timestamp) {
                 let v = vec(pa, pb), vLen = hypot(v.0, v.1)
                 if vLen > 40 && (me.0 * v.0 + me.1 * v.1) / (meLen * vLen) < 0.5 { continue }
             }
             var total = 0.0, n = 0.0
             for p in recent.suffix(4) {
-                guard let c = s.position(at: p.timestamp) else { continue }
+                guard let c = at(list, p.timestamp) else { continue }
                 total += p.distance(from: CLLocation(latitude: c.latitude, longitude: c.longitude)); n += 1
             }
             guard n >= 2 else { continue }
