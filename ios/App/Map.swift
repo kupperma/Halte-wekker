@@ -175,51 +175,70 @@ private struct MapFrame: View {
     }
 }
 
-/// Your commute as a network map. The route of your fastest trip is highlighted in yellow.
+/// Your commute as a metro map: the rail corridor Breda–Tilburg–Boxtel with both Intercitys side by side, splitting
+/// at Boxtel to Den Bosch and to Eindhoven, the 306 and 305 to Veghel and the bus to BUas. Your fastest route glows yellow.
 struct NetworkMap: View {
     let via: String?
     var body: some View {
         Canvas { ctx, _ in
+            func P(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: x, y: y) }
             func stroke(_ pts: [CGPoint], _ c: Color, _ w: CGFloat) {
                 var p = Path(); p.move(to: pts[0]); for q in pts.dropFirst() { p.addLine(to: q) }
                 ctx.stroke(p, with: .color(c), style: StrokeStyle(lineWidth: w, lineCap: .round, lineJoin: .round))
             }
-            func P(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: x, y: y) }
+            let TR: CGFloat = 118, D: CGFloat = 3.5
+            let dark = Color(hex: 0x224F86), light = Color(hex: 0x528DBA)
             let glow = Color(red: 1, green: 0.84, blue: 0.25).opacity(0.55)
-            if via == "Eindhoven" { stroke([P(46, 110), P(128, 110), P(188, 174), P(228, 174), P(292, 110)], glow, 14) }
-            else { stroke([P(46, 110), P(128, 110), P(188, 46), P(228, 46), P(292, 110)], glow, 14) }
-            stroke([P(46, 110), P(46, 178)], glow, 14)
-            stroke([P(46, 106.5), P(128, 106.5), P(188, 46.5), P(214, 46.5)], Color(hex: 0x224F86), 5)
-            stroke([P(46, 113.5), P(128, 113.5), P(188, 173.5), P(214, 173.5)], Color(hex: 0x528DBA), 5)
-            stroke([P(214, 46), P(228, 46), P(292, 110)], Color(hex: 0xDA421E), 5)
-            stroke([P(214, 174), P(228, 174), P(292, 110)], Color(hex: 0xF3791D), 5)
-            stroke([P(46, 110), P(46, 178)], Color(hex: 0x8C6DAB), 5)
+            if via == "Eindhoven" { stroke([P(34, TR), P(196, TR), P(258, 180), P(300, 138)], glow, 14) }
+            else { stroke([P(34, TR), P(196, TR), P(244, 70), P(252, 70), P(300, 118), P(300, 138)], glow, 14) }
+            stroke([P(34, TR), P(34, 176)], glow, 14)
+            stroke([P(244, 70), P(244, 44)], dark, 5); stroke([P(258, 180), P(288, 180)], light, 5)       // to Utrecht, to Venlo
+            stroke([P(34, TR - D), P(196, TR - D), P(244, 70)], dark, 5)
+            stroke([P(34, TR + D), P(196, TR + D), P(258, 180)], light, 5)
+            stroke([P(244, 70), P(252, 70), P(300, 118), P(300, 138)], Color(hex: 0xDA421E), 5)
+            stroke([P(258, 180), P(300, 138)], Color(hex: 0xF3791D), 5)
+            stroke([P(34, TR), P(34, 176)], Color(hex: 0x8C6DAB), 5)
+            // ticks for the small stations
+            func tick(_ a: CGFloat, _ b: CGFloat, _ dx: CGFloat, _ dy: CGFloat) {
+                var p = Path(); p.move(to: P(a, b)); p.addLine(to: P(a + dx, b + dy))
+                ctx.stroke(p, with: .color(MapInk.text), lineWidth: 2)
+            }
+            for a in [62, 88, 142, 168] as [CGFloat] { tick(a, TR - D - 2.5, 0, -5) }
+            tick(220, 94, -3.5, -3.5); tick(218, 140, 3.5, -3.5); tick(238, 160, 3.5, -3.5)
+            func pill(_ c: CGPoint, _ w: CGFloat, _ h: CGFloat) {
+                let o = Path(roundedRect: CGRect(x: c.x - w / 2, y: c.y - h / 2, width: w, height: h), cornerRadius: min(w, h) / 2)
+                ctx.fill(o, with: .color(.white)); ctx.stroke(o, with: .color(MapInk.text), lineWidth: 2)
+            }
             func ring(_ c: CGPoint, _ r: CGFloat) {
                 let o = Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: 2 * r, height: 2 * r))
                 ctx.fill(o, with: .color(.white)); ctx.stroke(o, with: .color(MapInk.text), lineWidth: 2)
             }
-            func pill(_ c: CGPoint, _ w: CGFloat, _ h: CGFloat) {
-                let o = Path(roundedRect: CGRect(x: c.x - w / 2, y: c.y - h / 2, width: w, height: h), cornerRadius: w / 2)
-                ctx.fill(o, with: .color(.white)); ctx.stroke(o, with: .color(MapInk.text), lineWidth: 2)
+            pill(P(34, TR), 12, 20); pill(P(116, TR), 12, 20); pill(P(196, TR), 12, 20)
+            ring(P(244, 70), 6); ring(P(258, 180), 6); ring(P(300, 138), 6.5); ring(P(34, 176), 5.5)
+            func name(_ t: String, _ at: CGPoint, _ anchor: UnitPoint, _ size: CGFloat = 10.5, _ w: Font.Weight = .bold) {
+                ctx.draw(Text(t).font(MapInk.sans(size, w)).foregroundColor(MapInk.text), at: at, anchor: anchor)
             }
-            pill(P(46, 110), 13, 22); pill(P(128, 110), 13, 22)
-            ring(P(214, 46), 6); ring(P(214, 174), 6); ring(P(292, 110), 7); ring(P(46, 178), 6)
-            func label(_ t: String, _ at: CGPoint, _ anchor: UnitPoint) {
-                ctx.draw(Text(t).font(MapInk.sans(11, .bold)).foregroundColor(MapInk.text), at: at, anchor: anchor)
+            func angled(_ t: String, _ at: CGPoint) {
+                var c = ctx; c.translateBy(x: at.x, y: at.y); c.rotate(by: .degrees(-45))
+                c.draw(Text(t).font(MapInk.sans(8.6, .medium)).foregroundColor(MapInk.text), at: .zero, anchor: .leading)
             }
-            label("Breda", P(46, 97), .bottom); label("BUas", P(58, 178), .leading); label("Tilburg", P(128, 125), .top)
-            label("Den Bosch", P(214, 37), .bottom); label("Eindhoven", P(214, 184), .top); label("Veghel", P(292, 97), .bottom)
+            name("Breda", P(34, 104), .bottom, 11); name("BUas", P(43, 176), .leading)
+            angled("Gilze-Rijen", P(64, TR - 11)); angled("Tilburg Reeshof", P(90, TR - 11)); angled("Tilburg Univ.", P(144, TR - 11)); angled("Oisterwijk", P(170, TR - 11))
+            name("Tilburg", P(116, 131), .top); name("Boxtel", P(190, 131), .topTrailing, 10)
+            name("Vught", P(227, 96), .leading, 9); name("Den Bosch", P(236, 63), .trailing); name("Utrecht", P(244, 40), .bottom, 8.6, .medium)
+            name("Best", P(224, 139), .leading, 9); name("Beukenlaan", P(232, 164), .trailing, 9); name("Eindhoven", P(258, 192), .top)
+            name("Venlo", P(292, 180), .leading, 8.6, .medium); name("Veghel", P(292, 138), .trailing)
             func badge(_ t: String, _ c: CGPoint, _ col: Color) {
-                let w = CGFloat(t.count) * 7 + 10
-                ctx.fill(Path(roundedRect: CGRect(x: c.x - w / 2, y: c.y - 7.5, width: w, height: 15), cornerRadius: 3), with: .color(col))
-                ctx.draw(Text(t).font(MapInk.sans(9.5, .bold)).foregroundColor(.white), at: P(c.x, c.y + 0.5), anchor: .center)
+                let w = CGFloat(t.count) * 6.6 + 9
+                ctx.fill(Path(CGRect(x: c.x - w / 2, y: c.y - 7, width: w, height: 14)), with: .color(col))
+                ctx.draw(Text(t).font(MapInk.sans(9, .bold)).foregroundColor(.white), at: P(c.x, c.y + 0.5), anchor: .center)
             }
-            badge("306", P(274, 66), Color(hex: 0xDA421E)); badge("305", P(274, 154), Color(hex: 0xF3791D))
-            badge("IC", P(146, 62), Color(hex: 0x224F86)); badge("IC", P(146, 158), Color(hex: 0x528DBA)); badge("BUS", P(72, 144), Color(hex: 0x8C6DAB))
+            badge("IC", P(262, 48), dark); badge("IC", P(246, 128), light); badge("306", P(286, 84), Color(hex: 0xDA421E))
+            badge("305", P(290, 166), Color(hex: 0xF3791D)); badge("BUS", P(52, 152), Color(hex: 0x8C6DAB))
         }
         .frame(width: 318, height: 220)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Network map: bus 306 from Veghel to Den Bosch or bus 305 to Eindhoven, the Intercity via Tilburg to Breda, the bus to BUas.")
+        .accessibilityLabel("Metro map: the train from Breda via Tilburg to Boxtel, then to Den Bosch or Eindhoven; bus 306 from Den Bosch and bus 305 from Eindhoven to Veghel; the bus from Breda to BUas.")
     }
 }
 
