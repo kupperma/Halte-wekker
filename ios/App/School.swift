@@ -254,9 +254,17 @@ final class SchoolAlarm: ObservableObject {
             if best.rides.count > 1 {
                 let earlier = await Transit.earlierWays(onto: best, now: now, at: [0])
                 guard on else { return }
-                let pool = inTime + earlier.filter { $0.end <= beThere.addingTimeInterval(60) && $0.first.departure > now && seen.insert($0.id).inserted }
+                // (no more than 35 minutes before the latest: the planner also lists night buses that get there by morning)
+                let latest = best.start
+                let pool = (inTime + earlier.filter { $0.end <= beThere.addingTimeInterval(60) && $0.first.departure > now && seen.insert($0.id).inserted })
+                    .filter { $0.start >= latest.addingTimeInterval(-35 * 60) }
                 let safe = pool.filter { Risk.penalty($0) < Risk.safe }
-                best = (safe.isEmpty ? pool : safe).max(by: { ($0.start, -$0.rides.count) < ($1.start, -$1.rides.count) }) ?? best
+                if let s = safe.max(by: { ($0.start, -$0.rides.count) < ($1.start, -$1.rides.count) }) {
+                    best = s
+                } else if let least = pool.min(by: { (Risk.penalty($0), -$0.start.timeIntervalSince1970) < (Risk.penalty($1), -$1.start.timeIntervalSince1970) }),
+                          Risk.penalty(least) < Risk.penalty(best) - 1 {
+                    best = least                                            // none safe: the least likely to go wrong
+                }
             }
             trips[k] = best
             let alarmAt = best.start.addingTimeInterval(-Double(wakeMinutes) * 60)

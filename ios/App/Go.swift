@@ -204,7 +204,9 @@ final class GoStore: ObservableObject {
             // be there by a time: the one that leaves the latest and still makes it, with changes you're not likely to
             // miss (or else the soonest there)
             let onTime = ok.filter { $0.end <= dl.addingTimeInterval(60) }
-            let safe = onTime.filter { Risk.penalty($0) < Risk.safe }
+            // a safe one leaves at most 35 minutes before the latest that makes it
+            let latest = onTime.map(\.start).max()
+            let safe = onTime.filter { Risk.penalty($0) < Risk.safe && $0.start >= (latest ?? .distantPast).addingTimeInterval(-35 * 60) }
             pick = (safe.isEmpty ? onTime : safe).max(by: { ($0.start, -$0.rides.count, -Self.outside($0)) < ($1.start, -$1.rides.count, -Self.outside($1)) }) ?? pick
         }
         // Stay with the one you're catching unless another is clearly better: a minute sooner there (or, for a planned

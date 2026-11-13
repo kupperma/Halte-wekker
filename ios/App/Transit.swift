@@ -318,11 +318,11 @@ enum Transit {
         let r = best.rides[k]
         guard let ta = r.toLat, let to = r.toLon, !r.fromId.isEmpty, r.fromId != "onboard" else { return [] }
         let change = CLLocation(latitude: ta, longitude: to)
-        // when you can be there to get on: the walk from where you are (but looking no more than 25 minutes before it),
+        // when you can be there to get on: the walk from where you are (but looking no more than 35 minutes before it),
         // or when the ride before gets you there and the walk across
         let canBoard: Date
         if k == 0 {
-            canBoard = max(now.addingTimeInterval(Double(r.walkBefore) * 60 + 30), r.departure.addingTimeInterval(-25 * 60))
+            canBoard = max(now.addingTimeInterval(Double(r.walkBefore) * 60 + 30), r.departure.addingTimeInterval(-35 * 60))
         } else {
             canBoard = best.rides[k - 1].arrival.addingTimeInterval(Double(max(2, r.walkBefore + 1)) * 60)
         }
