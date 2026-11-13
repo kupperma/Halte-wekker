@@ -141,6 +141,15 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     var here: CLLocationCoordinate2D? { location.location?.coordinate }
     /// Your last GPS fix.
     var lastFix: CLLocation? { samples.last ?? location.location }
+
+    /// Moving like a bus or train in the last three minutes (by the GPS's speed, or between two fixes): standing at a
+    /// stop on board still counts.
+    var movedRecently: Bool {
+        let r = samples.filter { $0.timestamp > Date().addingTimeInterval(-180) && $0.horizontalAccuracy >= 0 && $0.horizontalAccuracy < 150 }
+        if r.contains(where: { $0.speed >= 5 }) { return true }
+        guard let a = r.first, let b = r.last, b.timestamp.timeIntervalSince(a.timestamp) > 20 else { return false }
+        return b.distance(from: a) / b.timestamp.timeIntervalSince(a.timestamp) >= 5
+    }
     /// The Fastest trip screen is open: it needs GPS (also locked) to plan from where you are and notice when you get on.
     private(set) var going = false
 

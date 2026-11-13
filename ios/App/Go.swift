@@ -24,6 +24,8 @@ final class GoStore: ObservableObject {
     @Published private(set) var arrived = false
     @Published private(set) var seen: Vehicle?               // looks like you're on this one (checking)
     @Published private(set) var overdue = false              // the one you're waiting for at its stop is past its time
+    @Published private(set) var onBoard: Vehicle?            // you're on this one already: the plan starts from it
+    @Published private(set) var lookingOnBoard = false       // just opened: checking whether you're on a bus or train
     @Published private(set) var here: CLLocation?
     @Published private(set) var demo = false                 // pretend buses, to try it at home
     private var demoTask: Task<Void, Never>?
@@ -89,13 +91,14 @@ final class GoStore: ObservableObject {
     private func begin(_ d: Place) {
         loop?.cancel(); detect?.cancel()
         dest = d
-        best = nil; others = []; error = nil; updated = nil; notes = []; arrived = false; seen = nil; overdue = false
+        best = nil; others = []; error = nil; updated = nil; notes = []; arrived = false; seen = nil; overdue = false; onBoard = nil
         told = [:]; toldEnd = nil; toldGo = []; missed = nil
         since = Date()
         watching = true
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
         trip?.setGo(true)
         loop = Task { [weak self] in
+            await self?.firstLook()                // on a bus or train already? then it plans from there
             while !Task.isCancelled {
                 guard let self, self.watching else { return }
                 await self.refresh()
@@ -289,12 +292,60 @@ final class GoStore: ObservableObject {
         return b.first(where: { $0.tripId == r.tripId })?.cancelled ?? false
     }
 
+    // MARK: on board already?
+
+    /// Right as it opens: are you on a bus or train already? A fresh GPS fix (a few seconds at most); moving like a bus
+    /// or train (or just were: standing at a stop on board), with one going your way right where its times put it, it
+    /// plans from that one: stay on, or where to change. One more look a few seconds later to be sure you're with it
+    /// (not in a car next to it), and the trip starts by itself. Otherwise it plans from where you are, as before.
+    private func firstLook() async {
+        guard let trip, trip.phase == .idle, !demo, watching else { return }
+        lookingOnBoard = true
+        defer { lookingOnBoard = false }
+        let opened = Date()
+        var fix: CLLocation?
+        for _ in 0..<20 {
+            if let f = trip.lastFix, f.horizontalAccuracy >= 0, f.horizontalAccuracy < 100, f.timestamp > opened.addingTimeInterval(-20) {
+                fix = f
+                if f.timestamp >= opened || f.speed >= 5 { break }
+            }
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            guard watching else { return }
+        }
+        guard let f = fix, f.speed >= 5 || trip.movedRecently else { return }      // not moving like a bus: plan from here
+        let d = dest
+        guard var ob = await LiveStore.onBoardTrips(f, to: d), watching, dest == d, trip.phase == .idle, !ob.1.isEmpty else { return }
+        onBoard = ob.0.vehicle
+        best = ob.1.first; others = Array(ob.1.dropFirst())
+        here = f; updated = Date(); error = nil
+        for _ in 0..<5 {
+            try? await Task.sleep(nanoseconds: 6_000_000_000)
+            guard watching, dest == d, trip.phase == .idle, let v = onBoard else { return }
+            let ranked = await trip.matchVehicles(mode: nil)
+            guard watching, dest == d, trip.phase == .idle else { return }
+            if let me = ranked.first(where: { $0.vehicle.tripId == v.tripId }), let t = best {
+                let close = ranked.filter { $0.vehicle.tripId != v.tripId && $0.meters < me.meters + 300 }.map(\.vehicle)
+                board(t, v, alternatives: ob.1, couldBe: close)
+                return
+            }
+            // another one fits you better: plan from that one, and look once more
+            if let m = ranked.first, let loc = trip.lastFix,
+               let o2 = await LiveStore.onBoardTrips(loc, to: d, tripId: m.vehicle.tripId), !o2.1.isEmpty, watching, dest == d {
+                ob = o2
+                onBoard = o2.0.vehicle
+                best = o2.1.first; others = Array(o2.1.dropFirst()); updated = Date()
+            }
+        }
+        // not seen with it again: it plans from where you are (and still notices when you're on one)
+        onBoard = nil; best = nil; others = []
+    }
+
     // MARK: on board?
 
     /// Every few seconds: is your GPS moving with a bus or train? One look is enough for the one it's watching (or one of the
     /// others it found); any other one has to be the same twice and take you there.
     private func checkBoarding(_ last: String?) async -> String? {
-        guard let trip, trip.phase == .idle, watching else { return nil }
+        guard let trip, trip.phase == .idle, watching, !lookingOnBoard else { return nil }
         let ranked = await trip.matchVehicles(mode: nil)
         guard var m = ranked.first else { seen = nil; return nil }
         guard watching, trip.phase == .idle else { return nil }
@@ -350,7 +401,7 @@ final class GoStore: ObservableObject {
             return
         }
         guard let t = best, let r = RoutePlan.from(t), let trip else { return }
-        trip.start(r)
+        if let v = onBoard, t.first.tripId == v.tripId { trip.start(r, vehicle: v, alternatives: [t] + others) } else { trip.start(r) }
         close()
     }
 
@@ -363,7 +414,7 @@ final class GoStore: ObservableObject {
         demo = true
         isOpen = true
         dest = .breda
-        best = nil; others = []; error = nil; updated = nil; notes = []; arrived = false; seen = nil; overdue = false
+        best = nil; others = []; error = nil; updated = nil; notes = []; arrived = false; seen = nil; overdue = false; onBoard = nil
         here = loc ?? trip?.lastFix
         watching = true
         demoTask = Task { [weak self] in await self?.runDemo() }
@@ -587,6 +638,9 @@ struct GoView: View {
             howToGetThere(t)
             watchingCard(t)
             if !go.others.isEmpty { compareCard(t) }
+        } else if go.lookingOnBoard {
+            message(icon: "bus.fill", title: "Are you on a bus or train?",
+                    text: "Checking how you’re moving. If you’re on one, it plans from there: stay on, or where to change.", spinner: true)
         } else {
             message(icon: go.error == nil ? "location.magnifyingglass" : "exclamationmark.triangle.fill",
                     title: go.error == nil ? "Finding your fastest way" : "Nothing found yet",
@@ -631,7 +685,8 @@ struct GoView: View {
         let st = RideText.status(f, info)
         let g = f.isTrain ? nil : f.grade
         let track = info?.track ?? f.platform ?? ""
-        let fromLine = "from \(Fmt.place(f.fromStop))" + (track.isEmpty ? "" : " · platform \(track)")
+        let aboard = go.onBoard?.tripId == f.tripId && f.fromId == "onboard"
+        let fromLine = aboard ? "stay on until \(Fmt.place(f.toStop))" : "from \(Fmt.place(f.fromStop))" + (track.isEmpty ? "" : " · platform \(track)")
         let toName = Fmt.place(f.headsign.isEmpty ? f.toStop : f.headsign)
         let mins = Fmt.mins(t.end.timeIntervalSinceNow)
         let changes = t.rides.count > 1 ? " · \(t.rides.count - 1) change\(t.rides.count > 2 ? "s" : "")" : ""
@@ -646,13 +701,13 @@ struct GoView: View {
                     }
                     Spacer(minLength: 6)
                     VStack(alignment: .trailing, spacing: 0) {
-                        Text("leave by").font(BoardInk.sans(10.5)).opacity(0.8)
-                        Text(Fmt.hhmm(t.start)).font(HWFont.display(26)).foregroundStyle(Paper.yellow).monospacedDigit()
+                        Text(aboard ? "you’re" : "leave by").font(BoardInk.sans(10.5)).opacity(0.8)
+                        Text(aboard ? "on it" : Fmt.hhmm(t.start)).font(HWFont.display(26)).foregroundStyle(Paper.yellow).monospacedDigit()
                     }
                 }
             }
             .padding(.horizontal, -14).padding(.top, -14)
-            kicker("Take next")
+            kicker(aboard ? "You’re on" : "Take next")
             HStack(alignment: .center, spacing: 12) {
                 LineBullet(line: f.line, train: f.isTrain, grade: g, height: 44, minWidth: 62, font: 22)
                 VStack(alignment: .leading, spacing: 2) {
@@ -661,17 +716,29 @@ struct GoView: View {
                     Text(fromLine).font(BoardInk.sans(11.5, .regular)).foregroundStyle(Paper.muted).lineLimit(1).minimumScaleFactor(0.7)
                 }
                 Spacer(minLength: 4)
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text(Fmt.hhmm(f.cancelled ? f.scheduledDeparture : f.departure)).font(HWFont.display(28)).foregroundStyle(Paper.ink).monospacedDigit()
-                    TimelineView(.periodic(from: .now, by: 15)) { _ in
-                        let m = Int((f.departure.timeIntervalSinceNow / 60).rounded(.down))
-                        Text(m <= 0 ? "now" : "in \(m) min").font(BoardInk.sans(12)).foregroundStyle(m <= 2 ? Paper.late : Paper.muted)
+                if aboard {
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text("off at").font(BoardInk.sans(11)).foregroundStyle(Paper.muted)
+                        Text(Fmt.hhmm(f.arrival)).font(HWFont.display(28)).foregroundStyle(Paper.ink).monospacedDigit()
+                    }
+                } else {
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text(Fmt.hhmm(f.cancelled ? f.scheduledDeparture : f.departure)).font(HWFont.display(28)).foregroundStyle(Paper.ink).monospacedDigit()
+                        TimelineView(.periodic(from: .now, by: 15)) { _ in
+                            let m = Int((f.departure.timeIntervalSinceNow / 60).rounded(.down))
+                            Text(m <= 0 ? "now" : "in \(m) min").font(BoardInk.sans(12)).foregroundStyle(m <= 2 ? Paper.late : Paper.muted)
+                        }
                     }
                 }
             }
             HStack(spacing: 6) {
-                Circle().fill(st.warn ? Paper.late : st.ok ? Paper.ok : Paper.ink.opacity(0.6)).frame(width: 7, height: 7)
-                Text(st.text).font(BoardInk.sans(12)).foregroundStyle(st.warn ? Paper.late : st.ok ? Paper.ok : Paper.ink.opacity(0.85)).lineLimit(2)
+                if aboard {
+                    ProgressView().controlSize(.mini).tint(Paper.navy)
+                    Text("Making sure it’s this one: then your trip starts by itself.").font(BoardInk.sans(12)).foregroundStyle(Paper.ink.opacity(0.85)).lineLimit(2)
+                } else {
+                    Circle().fill(st.warn ? Paper.late : st.ok ? Paper.ok : Paper.ink.opacity(0.6)).frame(width: 7, height: 7)
+                    Text(st.text).font(BoardInk.sans(12)).foregroundStyle(st.warn ? Paper.late : st.ok ? Paper.ok : Paper.ink.opacity(0.85)).lineLimit(2)
+                }
                 Spacer(minLength: 4)
                 Button { liveTrack = LiveTrackTarget(tripId: f.tripId, line: f.line, headsign: f.headsign.isEmpty ? Fmt.place(f.toStop) : f.headsign,
                                                      stopName: f.fromStop, time: f.departure, rail: f.isTrain) } label: {
@@ -706,7 +773,9 @@ struct GoView: View {
 
     @ViewBuilder private func howToGetThere(_ t: DoorTrip) -> some View {
         let f = t.first
-        if let a = f.fromLat, let o = f.fromLon {
+        if f.fromId == "onboard" {
+            EmptyView()                        // you're on it: nothing to walk to
+        } else if let a = f.fromLat, let o = f.fromLon {
             let target = WalkTarget(name: Fmt.place(f.fromStop), lat: a, lon: o, rail: f.isTrain,
                                     catchText: "the \(GoStore.what(f)) at \(Fmt.hhmm(f.departure))", leaves: f.departure)
             let away = go.here.map { $0.distance(from: CLLocation(latitude: a, longitude: o)) } ?? 9999

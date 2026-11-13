@@ -86,6 +86,14 @@ final class LiveStore: ObservableObject {
         for s in segs {
             if let tripId, s.tripId != tripId { continue }
             guard let p = s.position(at: now) else { continue }
+            // going your way, by the GPS's heading while you're moving (not one passing the other way)
+            if tripId == nil, f.course >= 0, f.speed >= 3,
+               let a = s.position(at: now.addingTimeInterval(-15)), let b = s.position(at: now.addingTimeInterval(15)),
+               CLLocation(latitude: a.latitude, longitude: a.longitude).distance(from: CLLocation(latitude: b.latitude, longitude: b.longitude)) > 20 {
+                var turn = abs(Heading.bearing(a, b) - f.course).truncatingRemainder(dividingBy: 360)
+                if turn > 180 { turn = 360 - turn }
+                if turn > 75 { continue }
+            }
             let d = f.distance(from: CLLocation(latitude: p.latitude, longitude: p.longitude))
             if d < (tripId == nil ? 600 : 4000), best == nil || d < best!.1 { best = (s, d) }
         }
