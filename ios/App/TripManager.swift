@@ -430,14 +430,15 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         else if vehicle != nil, cands.isEmpty, Date() >= sameCheckAt { sameCheckAt = Date().addingTimeInterval(30); Task { await checkSameBus() } }
         let d = loc.distance(from: CLLocation(latitude: leg.to.coordinate.latitude, longitude: leg.to.coordinate.longitude))
         distance = d
-        // Still looking for what you're on, at train or bus speed, and more than 2 km further from this leg's stop than
-        // you've been: you're going another way (past Boxtel to Den Bosch, where it planned Eindhoven). Find what you're
-        // on and plan the rest from it.
+        // Further from this leg's stop than you've been, at train or bus speed (800 m when it's near, 2 km else): you're going
+        // another way (past Boxtel to Den Bosch where it planned Eindhoven; on the 306 out of Den Bosch where it thought
+        // you were on a bus into it). It looks at what you're really on, by the road, and plans the rest from it.
         if loc.horizontalAccuracy >= 0 && loc.horizontalAccuracy < 150 {
             legClosest = min(legClosest ?? d, d)
-            if vehicle == nil, !awayLooked, !demo, route?.single == nil, let c = legClosest, d > c + 2000, LiveStore.movingFix(loc) {
+            let gap: Double = (legClosest ?? d) < 3000 ? 800 : 2000
+            if !awayLooked, !demo, route?.single == nil, let c = legClosest, d > c + gap, LiveStore.movingFix(loc) {
                 awayLooked = true
-                Task { await self.goingElsewhere(loc) }
+                Task { await self.wrongWay(loc) }
             }
         }
         if loc.horizontalAccuracy >= 0 && loc.horizontalAccuracy < 250 { maxDistance = max(maxDistance ?? 0, d) }
@@ -712,6 +713,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             if meLen > 40, let pa = at(list, a.timestamp), let pb = at(list, b.timestamp) {
                 let v = vec(pa, pb), vLen = hypot(v.0, v.1)
                 if vLen > 40 && (me.0 * v.0 + me.1 * v.1) / (meLen * vLen) < 0.5 { continue }
+                // standing at a stop by its times (waiting at the bus station) while you ride on: not the one you're on
+                if meLen > 80 && vLen < 15 { continue }
             }
             var total = 0.0, n = 0.0
             for p in recent.suffix(4) {
@@ -1007,20 +1010,58 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         }
     }
 
-    /// Going away from this leg's stop on something it hasn't recognised: the one you're on (the nearest going your way),
-    /// and the rest planned from it. Nothing found: it tries again after another 2 km.
-    private func goingElsewhere(_ loc: CLLocation) async {
-        guard vehicle == nil, let final = legs.last?.to, phase == .sleeping || phase == .awake else { return }
-        guard let ob = await LiveStore.onBoardTrips(loc, to: final, wasMoving: true), let t = ob.1.first, let nr = RoutePlan.from(t),
-              vehicle == nil else {
+    /// Going away from where this leg should take you: what you're really on, found by the road you're on (it may be
+    /// running well off its times, so where its times put it can be kilometres away), and the rest planned from it. The
+    /// one it has is on this road going this way after all (a route that loops round): it carries on. Nothing found: it
+    /// looks again after another stretch.
+    private func wrongWay(_ loc: CLLocation) async {
+        guard let final = legs.last?.to, phase == .sleeping || phase == .awake else { return }
+        let onRoad = await LiveStore.vehiclesByRoad(loc)
+        if let v = vehicle, cands.isEmpty, onRoad.contains(where: { $0.tripId == v.tripId }) {
             legClosest = distance; awayLooked = false
             return
         }
+        // Near a station a lot of lines share the first stretch of road (out of Den Bosch: the 154, 306, 3, 60, 156, 1).
+        // The ones that also go where you're going come first (the 306 passes Veghel, the 154 doesn't); with more than one,
+        // it keeps them all in the running until their roads part.
+        let top = Array(onRoad.filter { $0.tripId != vehicle?.tripId }.prefix(6))
+        let goes: Set<String> = await withTaskGroup(of: String?.self) { g in
+            for r in top { g.addTask { await Self.reaches(r.tripId, final) ? r.tripId : nil } }
+            var out = Set<String>()
+            for await id in g { if let id { out.insert(id) } }
+            return out
+        }
+        let pool = top.filter { goes.contains($0.tripId) }.isEmpty ? Array(top.prefix(3)) : top.filter { goes.contains($0.tripId) }
+        var ob: (LiveStore.OnBoard, [DoorTrip])?
+        if let r = pool.first {
+            ob = await LiveStore.onBoardTrips(loc, to: final, tripId: r.tripId, late: r.late, line: r.line, isTrain: r.isTrain)
+        }
+        if ob == nil { ob = await LiveStore.onBoardTrips(loc, to: final, wasMoving: true) }
+        guard let ob, ob.0.vehicle.tripId != vehicle?.tripId, let t = ob.1.first, let nr = RoutePlan.from(t),
+              phase == .sleeping || phase == .awake else {
+            legClosest = distance; awayLooked = false
+            return
+        }
+        let old = vehicle, v = ob.0.vehicle
+        cands = []; choosing = []
         boardAlternatives = ob.1
         setRoute(nr)
-        await vehicleFound(ob.0.vehicle)
-        tellBus("You’re going another way than planned", "On the \(ob.0.vehicle.title), so the rest is planned from it: off at \(legs.first?.to.short ?? "the next stop"), \(final.short) at \(Fmt.hhmm(t.end)).")
+        await vehicleFound(v)
+        let rest = pool.filter { $0.tripId != v.tripId }.prefix(2).map { Vehicle(tripId: $0.tripId, line: $0.line, isTrain: $0.isTrain) }
+        if !rest.isEmpty { beginChoosing([v] + rest) }
+        tellBus(old.map { "You’re on the \(v.title), not the \($0.title)" } ?? "You’re going another way than planned",
+                "It was taking you the other way, so the rest is planned from the \(v.title): off at \(legs.first?.to.short ?? "the next stop"), \(final.short) at \(Fmt.hhmm(t.end)).")
         pushActivity(force: true)
+    }
+
+    /// Does this trip still get to `p` (within a kilometre and a half), from now on?
+    nonisolated static func reaches(_ tripId: String, _ p: Place) async -> Bool {
+        let stops = await Transit.tripStops(tripId)
+        let target = CLLocation(latitude: p.coordinate.latitude, longitude: p.coordinate.longitude)
+        let now = Date()
+        return stops.contains { s in
+            (s.arrival ?? .distantFuture) > now && target.distance(from: CLLocation(latitude: s.coordinate.latitude, longitude: s.coordinate.longitude)) < 1500
+        }
     }
 
     /// You're on another bus or train than the one planned, and it doesn't go where this leg does: the rest of the trip

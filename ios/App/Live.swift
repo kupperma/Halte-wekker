@@ -114,8 +114,17 @@ final class LiveStore: ObservableObject {
 
     /// `tripId`: plan from that one (the bus it now knows you're on), not just the nearest.
     /// `wasMoving`: you were going at train or bus speed just now (stopped at a signal, or slowing down): not "standing".
-    static func onBoardTrips(_ f: CLLocation, to dest: Place, tripId: String? = nil, wasMoving: Bool = false) async -> (OnBoard, [DoorTrip])? {
+    /// `late` (with `tripId`): it was found by the road you're on, this many seconds off its times: its next stop is the
+    /// next one ahead by its times moved by that much (its timetable position may be kilometres from you).
+    static func onBoardTrips(_ f: CLLocation, to dest: Place, tripId: String? = nil, wasMoving: Bool = false,
+                             late: TimeInterval? = nil, line: String? = nil, isTrain: Bool? = nil) async -> (OnBoard, [DoorTrip])? {
         let now = Date()
+        if let tripId, let late {
+            let stops = await Transit.tripStops(tripId)
+            guard let next = stops.first(where: { ($0.arrival ?? .distantPast).addingTimeInterval(late) > now.addingTimeInterval(20) }) else { return nil }
+            return await plans(from: f, tripId: tripId, line: line ?? "?", isTrain: isTrain ?? false, toName: stops.last?.name ?? "",
+                               stops: stops, next: next, at: (next.arrival ?? now).addingTimeInterval(late), to: dest)
+        }
         let still = f.speed < 3 && !wasMoving       // standing or walking now (or no speed): then it has to be right with you
         let speedNow = wasMoving ? max(f.speed, 15) : f.speed
         let segs = await Transit.vehicles(near: f.coordinate, radiusDeg: tripId == nil && speedNow < 15 ? 0.02 : 0.04)
@@ -140,14 +149,21 @@ final class LiveStore: ObservableObject {
         guard let next = stops.first(where: { ($0.arrival ?? .distantPast) > now.addingTimeInterval(20) }) else { return nil }
         // Standing still and it's coming to where you are: you're at its stop (a bus station by the train station), not on it.
         if tripId == nil, still, f.distance(from: CLLocation(latitude: next.coordinate.latitude, longitude: next.coordinate.longitude)) < 350 { return nil }
-        let at = next.arrival ?? now
+        return await plans(from: f, tripId: seg.tripId, line: seg.line, isTrain: seg.isTrain, toName: seg.toName, stops: stops, next: next, at: next.arrival ?? now, to: dest)
+    }
+
+    /// The ways on from the bus or train you're on: from its next stop, from when it gets there (staying on when it goes
+    /// where a later ride leaves).
+    private static func plans(from f: CLLocation, tripId: String, line: String, isTrain: Bool, toName: String,
+                              stops: [TripStop], next: TripStop, at: Date, to dest: Place) async -> (OnBoard, [DoorTrip])? {
+        let now = Date()
         var its: [DoorTrip] = []
         for b in dest.ids {
             its += await Transit.plan(from: "\(next.coordinate.latitude),\(next.coordinate.longitude)", to: b, modes: nil, at: at.addingTimeInterval(-60), count: 5, maxTransfers: 4)
         }
-        let v = Vehicle(tripId: seg.tripId, line: seg.isTrain ? Transit.trainLabel(seg.line) : seg.line, isTrain: seg.isTrain)
+        let v = Vehicle(tripId: tripId, line: isTrain ? Transit.trainLabel(line) : line, isTrain: isTrain)
         func onIt(to name: String, lat: Double?, lon: Double?, arrival: Date, scheduled: Date) -> Ride {
-            Ride(tripId: seg.tripId, line: v.line, name: seg.line, isTrain: seg.isTrain, departure: now, scheduledDeparture: now,
+            Ride(tripId: tripId, line: v.line, name: line, isTrain: isTrain, departure: now, scheduledDeparture: now,
                  arrival: arrival, scheduledArrival: scheduled, fromStop: "On board", fromId: "onboard", toStop: name, platform: nil,
                  live: true, cancelled: false, walkBefore: 0,
                  fromLat: f.coordinate.latitude, fromLon: f.coordinate.longitude, toLat: lat, toLon: lon)
@@ -156,7 +172,7 @@ final class LiveStore: ObservableObject {
         let all: [DoorTrip] = its.compactMap { t in
             guard t.first.departure >= at.addingTimeInterval(-120) else { return nil }
             var rides = t.rides
-            if rides.first?.tripId == seg.tripId {
+            if rides.first?.tripId == tripId {
                 let r = rides.removeFirst()          // it stays on: the ride you're on goes on to where you get off
                 rides.insert(onIt(to: r.toStop, lat: r.toLat, lon: r.toLon, arrival: r.arrival, scheduled: r.scheduledArrival), at: 0)
             } else if let hit = Self.staysOn(stops, from: next, until: rides) {
@@ -173,7 +189,55 @@ final class LiveStore: ObservableObject {
         .filter { seen.insert($0.id).inserted }
         .sorted { $0.end < $1.end }
         guard !all.isEmpty else { return nil }
-        return (OnBoard(vehicle: v, to: Fmt.place(stops.last?.name ?? seg.toName), next: Fmt.place(next.name)), Array(all.prefix(4)))
+        return (OnBoard(vehicle: v, to: Fmt.place(stops.last?.name ?? toName), next: Fmt.place(next.name)), Array(all.prefix(4)))
+    }
+
+    /// The buses and trains whose road you're on and that go your way, nearest to their own times first. Found by the
+    /// road, not by where their times put them: one running a few minutes late or early (twelve at most) is kilometres
+    /// from its timetable position, but it's on this road, going this way, about now.
+    static func vehiclesByRoad(_ f: CLLocation) async -> [(tripId: String, line: String, isTrain: Bool, late: TimeInterval)] {
+        guard f.course >= 0, f.speed >= 3 else { return [] }
+        let segs = await Transit.vehicles(near: f.coordinate, radiusDeg: 0.012, back: 12 * 60, ahead: 12 * 60)
+        let now = Date()
+        var best: [String: (line: String, isTrain: Bool, late: TimeInterval)] = [:]
+        for s in segs where s.path.count >= 2 {
+            guard let p = project(f.coordinate, on: s.path), p.metres < 100 else { continue }
+            var turn = abs(p.bearing - f.course).truncatingRemainder(dividingBy: 360)
+            if turn > 180 { turn = 360 - turn }
+            guard turn < 60 else { continue }
+            // when its times have it here, and how far off that is from now
+            let t = s.departure.addingTimeInterval(p.fraction * s.arrival.timeIntervalSince(s.departure))
+            let late = now.timeIntervalSince(t)
+            guard abs(late) < 12 * 60 else { continue }
+            if best[s.tripId].map({ abs(late) < abs($0.late) }) ?? true {
+                best[s.tripId] = (s.isTrain ? Transit.trainLabel(s.line) : s.line, s.isTrain, late)
+            }
+        }
+        return best.map { (tripId: $0.key, line: $0.value.line, isTrain: $0.value.isTrain, late: $0.value.late) }.sorted { abs($0.late) < abs($1.late) }
+    }
+
+    /// Where a point is along a road: how far from it, how far along (0 to 1), and which way the road runs there.
+    nonisolated static func project(_ c: CLLocationCoordinate2D, on path: [CLLocationCoordinate2D]) -> (metres: Double, fraction: Double, bearing: Double)? {
+        guard path.count >= 2 else { return nil }
+        let kx = cos(c.latitude * .pi / 180) * 111_320, ky = 110_540.0
+        var lens: [Double] = [], total = 0.0
+        for i in 1..<path.count {
+            let dx = (path[i].longitude - path[i - 1].longitude) * kx, dy = (path[i].latitude - path[i - 1].latitude) * ky
+            let l = (dx * dx + dy * dy).squareRoot()
+            lens.append(l); total += l
+        }
+        guard total > 0 else { return nil }
+        var best = (d: Double.greatestFiniteMagnitude, along: 0.0, seg: 1), acc = 0.0
+        for i in 1..<path.count {
+            let ax = (path[i - 1].longitude - c.longitude) * kx, ay = (path[i - 1].latitude - c.latitude) * ky
+            let bx = (path[i].longitude - c.longitude) * kx, by = (path[i].latitude - c.latitude) * ky
+            let dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy
+            let u = l2 > 0 ? max(0, min(1, -(ax * dx + ay * dy) / l2)) : 0
+            let px = ax + u * dx, py = ay + u * dy, d = (px * px + py * py).squareRoot()
+            if d < best.d { best = (d, acc + u * lens[i - 1], i) }
+            acc += lens[i - 1]
+        }
+        return (best.d, best.along / total, Heading.bearing(path[best.seg - 1], path[best.seg]))
     }
 
     /// Where you're going: your pick, or school or home.

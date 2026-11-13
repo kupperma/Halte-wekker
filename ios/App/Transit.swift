@@ -593,12 +593,13 @@ enum Transit {
     }
 
     /// Vehicles running near a point right now.
-    static func vehicles(near c: CLLocationCoordinate2D, radiusDeg: Double = 0.02) async -> [VehicleSegment] {
+    /// `back`/`ahead`: the stretch of time (by their timetables) to look at, around now.
+    static func vehicles(near c: CLLocationCoordinate2D, radiusDeg: Double = 0.02, back: TimeInterval = 150, ahead: TimeInterval = 90) async -> [VehicleSegment] {
         let now = Date()
         let q: [URLQueryItem] = [.init(name: "min", value: "\(c.latitude - radiusDeg),\(c.longitude - radiusDeg * 1.6)"),
                                  .init(name: "max", value: "\(c.latitude + radiusDeg),\(c.longitude + radiusDeg * 1.6)"),
-                                 .init(name: "startTime", value: iso.string(from: now.addingTimeInterval(-150))),
-                                 .init(name: "endTime", value: iso.string(from: now.addingTimeInterval(90))),
+                                 .init(name: "startTime", value: iso.string(from: now.addingTimeInterval(-back))),
+                                 .init(name: "endTime", value: iso.string(from: now.addingTimeInterval(ahead))),
                                  .init(name: "zoom", value: "15")]
         guard let list = try? await get("/v1/map/trips", q) as? [[String: Any]] else { return [] }
         return list.compactMap { s in
