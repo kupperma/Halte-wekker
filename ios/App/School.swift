@@ -246,8 +246,17 @@ final class SchoolAlarm: ObservableObject {
             guard on else { return }
             var seen = Set<String>()
             let inTime = all.filter { $0.end <= beThere.addingTimeInterval(60) && $0.first.departure > now && seen.insert($0.id).inserted }
-            guard let best = inTime.max(by: { ($0.start, -$0.rides.count) < ($1.start, -$1.rides.count) }) else {
+            guard var best = inTime.max(by: { ($0.start, -$0.rides.count) < ($1.start, -$1.rides.count) }) else {
                 continue                                                    // no answer just now: keep what it had
+            }
+            // A change you'll make: also the earlier buses onto the same train, and the latest one that leaves room to
+            // change (a late 306 shouldn't cost you the train, and the next one is 20 to 30 minutes later).
+            if best.rides.count > 1 {
+                let earlier = await Transit.earlierWays(onto: best, now: now, at: [0])
+                guard on else { return }
+                let pool = inTime + earlier.filter { $0.end <= beThere.addingTimeInterval(60) && $0.first.departure > now && seen.insert($0.id).inserted }
+                let safe = pool.filter { Risk.penalty($0) < Risk.safe }
+                best = (safe.isEmpty ? pool : safe).max(by: { ($0.start, -$0.rides.count) < ($1.start, -$1.rides.count) }) ?? best
             }
             trips[k] = best
             let alarmAt = best.start.addingTimeInterval(-Double(wakeMinutes) * 60)

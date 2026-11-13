@@ -285,6 +285,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
 
     /// You're at the end of a leg (by GPS, by the alarm, or "I'm off").
     func legDone() {
+        if let v = vehicle, let l = leg, !demo { noteDelay(v, at: l.to) }
         sound.stop()
         setBackup(0)
         arrivedAt = leg?.to.short
@@ -784,6 +785,21 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             tellBus("Stay on to \(name)", "This \(v.title) goes on to \(name) in time for the same \(then) at \(Fmt.hhmm(nextRide.departure)): no change at \(skipped.joined(separator: ", ")).")
             Task { await loadUpcoming(force: true) }
             return
+        }
+    }
+
+    /// It got you there: how late it was against its timetable (by its own live times when it has them), so next time
+    /// a change after it gets the room it needs.
+    private func noteDelay(_ v: Vehicle, at stop: Place) {
+        let now = Date()
+        Task {
+            guard let t = await Transit.liveTrip(v.tripId) else { return }
+            let target = CLLocation(latitude: stop.coordinate.latitude, longitude: stop.coordinate.longitude)
+            func d(_ i: Int) -> Double { target.distance(from: CLLocation(latitude: t.stops[i].coordinate.latitude, longitude: t.stops[i].coordinate.longitude)) }
+            guard let i = t.stops.indices.min(by: { d($0) < d($1) }), d(i) < 1200, let sch = t.stops[i].scheduled else { return }
+            // no live times: when you got there (it notices a little before the stop)
+            let real = t.live ? (t.stops[i].arrival ?? now) : now.addingTimeInterval(45)
+            DelayBook.shared.record(line: v.line, stop: t.stops[i].name, scheduled: sch, delay: real.timeIntervalSince(sch) / 60)
         }
     }
 

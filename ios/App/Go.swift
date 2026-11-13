@@ -138,6 +138,7 @@ final class GoStore: ObservableObject {
             return
         }
         here = loc
+        Self.waitFrom = loc
         // Going at train or bus speed (faster than a bike): a walk to a stop from here makes no sense. Find which one
         // you're on and plan from it; until then, say so. (In a car it plans once you stop.)
         if LiveStore.movingFix(loc), loc.speed >= 8, loc.timestamp.timeIntervalSinceNow > -30, onBoard == nil, trip?.phase == .idle, !demo {
@@ -200,17 +201,20 @@ final class GoStore: ObservableObject {
         overdue = false
         var pick = ok.min(by: Self.sooner)
         if let dl = deadline {
-            // be there by a time: the one that leaves the latest and still makes it (or else the soonest there)
+            // be there by a time: the one that leaves the latest and still makes it, with changes you're not likely to
+            // miss (or else the soonest there)
             let onTime = ok.filter { $0.end <= dl.addingTimeInterval(60) }
-            pick = onTime.max(by: { ($0.start, -$0.rides.count) < ($1.start, -$1.rides.count) }) ?? pick
+            let safe = onTime.filter { Risk.penalty($0) < Risk.safe }
+            pick = (safe.isEmpty ? onTime : safe).max(by: { ($0.start, -$0.rides.count, -Self.outside($0)) < ($1.start, -$1.rides.count, -Self.outside($1)) }) ?? pick
         }
         // Stay with the one you're catching unless another is clearly better: a minute sooner there (or, for a planned
         // trip, still in time and leaving two minutes later).
         if let cur = best, let p = pick, p.first.tripId != cur.first.tripId,
            let same = ok.filter({ $0.first.tripId == cur.first.tripId }).min(by: Self.sooner) {
             if let dl = deadline {
-                if same.end <= dl.addingTimeInterval(60) && p.start < same.start.addingTimeInterval(120) { pick = same }
-            } else if p.end > same.end.addingTimeInterval(-60) {
+                if same.end <= dl.addingTimeInterval(60) && p.start < same.start.addingTimeInterval(120)
+                    && (Risk.penalty(same) < Risk.safe || Risk.penalty(p) >= Risk.penalty(same)) { pick = same }
+            } else if Risk.score(p) > Risk.score(same) - 1 {
                 pick = same
             }
         }
@@ -259,10 +263,33 @@ final class GoStore: ObservableObject {
     /// Which gets you there first: the earliest arrival; the same arrival, then fewer changes, then the one that leaves later
     /// (less waiting around).
     static func sooner(_ a: DoorTrip, _ b: DoorTrip) -> Bool {
-        let ea = Int(a.end.timeIntervalSince1970 / 60), eb = Int(b.end.timeIntervalSince1970 / 60)
-        if ea != eb { return ea < eb }
+        // when you'd likely be there: the arrival, plus what a change you could well miss would cost (one train missed is
+        // often 20 to 30 minutes)
+        let sa = Risk.score(a), sb = Risk.score(b)
+        if abs(sa - sb) >= 1 { return sa < sb }
+        // the same: the one where you stand outside least (on the train sooner, out of the cold)
+        let wa = outside(a), wb = outside(b)
+        if abs(wa - wb) >= 1.5 { return wa < wb }
         if a.rides.count != b.rides.count { return a.rides.count < b.rides.count }
         return a.first.departure > b.first.departure
+    }
+
+    /// Where you are, for how long you'd wait outside (set on each look).
+    static var waitFrom: CLLocation?
+
+    /// Minutes you'd stand waiting: at each change, from getting there until it leaves; and at the first stop too when
+    /// you're there already (from home you'd simply leave later).
+    static func outside(_ t: DoorTrip, now: Date = Date()) -> Double {
+        var w = 0.0
+        if let h = waitFrom, let a = t.first.fromLat, let o = t.first.fromLon,
+           h.distance(from: CLLocation(latitude: a, longitude: o)) < 250 {
+            w += max(0, t.first.departure.timeIntervalSince(now) / 60)
+        }
+        for i in t.rides.indices.dropFirst() {
+            let r = t.rides[i], p = t.rides[i - 1]
+            w += max(0, r.departure.timeIntervalSince(p.arrival) / 60 - Double(r.walkBefore))
+        }
+        return w
     }
 
     /// The fastest way changed: say why, and that it's watching the new one now.
@@ -795,6 +822,7 @@ struct GoView: View {
                 .padding(10)
                 .background(Paper.late.opacity(0.1), in: RoundedRectangle(cornerRadius: 5))
             }
+            changeNote(t)
             Rectangle().fill(Paper.rule).frame(height: 1)
             kicker("Your trip")
             TripLine(trip: t, others: go.others, dest: destWord) { r in
@@ -804,6 +832,40 @@ struct GoView: View {
         }
         .padding(14)
         .glass()
+    }
+
+    /// A change you could well miss (with what it's been like, and a safer way if there is one), or why it picked one
+    /// that leaves a bit earlier: a change you'll make.
+    @ViewBuilder private func changeNote(_ t: DoorTrip) -> some View {
+        if let w = Risk.weakest(t) {
+            let a = t.rides[w.index - 1], n = t.rides[w.index]
+            let story = DelayBook.shared.story(line: a.line, stop: a.toStop, at: a.scheduledArrival, slack: w.slack)
+            let safer = go.others.filter { Risk.penalty($0) < Risk.penalty(t) - 2 }.min { $0.end < $1.end }
+            let why = story.map { "the \(a.line) here was \($0)" } ?? (a.isTrain ? "trains are sometimes a few minutes late" : "buses are often a few minutes late")
+            let then = safer.map { o in
+                let same = Int(o.end.timeIntervalSince1970 / 60) == Int(t.end.timeIntervalSince1970 / 60)
+                return " Safer: \(GoStore.what(o.first)) at \(Fmt.hhmm(o.first.departure))" + (same ? ", there at the same time." : ", there \(Fmt.hhmm(o.end)).")
+            } ?? ""
+            note(icon: "exclamationmark.triangle.fill", color: Paper.late,
+                 "Tight change at \(Fmt.place(n.fromStop)): \(max(0, Int(w.slack.rounded()))) min from the \(GoStore.what(a)) to the \(GoStore.what(n)), and \(why).\(then)")
+        } else if let quick = go.others.filter({ $0.end < t.end && Risk.penalty($0) > Risk.penalty(t) + 2 }).min(by: { $0.end < $1.end }),
+                  let w = Risk.weakest(quick) {
+            let at = Fmt.place(quick.rides[w.index].fromStop)
+            let mine = t.rides.indices.dropFirst().first { Fmt.place(t.rides[$0].fromStop) == at }
+            let room = mine.map { i in max(0, Int((t.rides[i].departure.timeIntervalSince(t.rides[i - 1].arrival) / 60 - Double(t.rides[i].walkBefore)).rounded())) }
+            note(icon: "checkmark.shield.fill", color: Paper.ok,
+                 "A safe change: \(room.map { "\($0) min" } ?? "time") at \(at), not \(max(0, Int(w.slack.rounded()))) min with the \(GoStore.what(quick.first)) at \(Fmt.hhmm(quick.first.departure)) (there \(Fmt.hhmm(quick.end)) if it all goes right).")
+        }
+    }
+
+    private func note(icon: String, color: Color, _ text: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: icon).font(.system(size: 14, weight: .semibold)).foregroundStyle(color)
+            Text(text).font(BoardInk.sans(12, .medium)).foregroundStyle(Paper.ink).fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(color.opacity(0.1), in: RoundedRectangle(cornerRadius: 5))
     }
 
     // MARK: how to get there
@@ -974,6 +1036,9 @@ struct GoView: View {
             HStack(spacing: 6) {
                 Text("\(GoStore.what(o.first)) \(Fmt.hhmm(o.first.departure)) from \(Fmt.place(o.first.fromStop))\(changes > 0 ? " · \(changes) change\(changes > 1 ? "s" : "")" : "")")
                     .font(BoardInk.sans(10.5, .regular)).foregroundStyle(Paper.ink.opacity(0.7)).lineLimit(1).minimumScaleFactor(0.7)
+                if let w = Risk.weakest(o) {
+                    Text("tight: \(max(0, Int(w.slack.rounded()))) min").font(BoardInk.sans(10.5)).foregroundStyle(Paper.late).lineLimit(1).fixedSize()
+                }
                 Spacer(minLength: 4)
                 Text(fastest ? "fastest" : later == 0 ? "same time" : "+\(later) min")
                     .font(BoardInk.sans(11)).foregroundStyle(!fastest && later == 0 ? Paper.ink : .white)
@@ -1226,19 +1291,36 @@ struct TripLine: View {
     }
 
     /// Other ways that join this trip on one of its later rides: they branch off at the top and join at that station.
-    private func branches(_ boardAt: [String: Int]) -> [Branch] {
+    private func branches(_ boardAt: [String: Int], last: Int) -> [Branch] {
         var out: [Branch] = []
-        for o in others where o.first.tripId != trip.first.tripId {
-            guard let k = o.rides.indices.dropFirst().first(where: { boardAt[o.rides[$0].tripId] != nil && boardAt[o.rides[$0].tripId]! > 0 }),
-                  let join = boardAt[o.rides[k].tripId] else { continue }
-            let firstPart = o.rides[..<k]
-            let lines = firstPart.map { $0.isTrain ? ($0.name.isEmpty ? $0.line : $0.name) : $0.line }.joined(separator: " + ")
-            let shift = Int((o.start.timeIntervalSince(trip.start) / 60).rounded())
-            let same = o.rides[k]
-            let onto = same.isTrain ? (same.name.isEmpty ? "train" : same.name) : "bus \(same.line)"
-            let when = shift == 0 ? "leave at the same time" : shift > 0 ? "leave \(shift) min later" : "leave \(-shift) min earlier"
-            out.append(Branch(from: 0, to: join, color: Paper.line(o.first.line, train: o.first.isTrain),
-                              label: "or \(lines) at \(Fmt.hhmm(o.first.departure)) · same \(onto) · \(when)"))
+        func name(_ r: Ride) -> String { r.isTrain ? (r.name.isEmpty ? "train" : r.name) : "bus \(r.line)" }
+        for o in others {
+            // where it parts from your trip (the first stop, or a change), and where it joins it again: a later ride you
+            // both take, or the end at the same time
+            guard let d = o.rides.indices.first(where: { $0 >= trip.rides.count || o.rides[$0].tripId != trip.rides[$0].tripId }),
+                  d < trip.rides.count else { continue }
+            let from = d == 0 ? 0 : (boardAt[trip.rides[d].tripId] ?? -1)
+            guard from >= 0 else { continue }
+            var k = o.rides.count
+            var join: Int?
+            if let j = o.rides.indices.dropFirst(d + 1).first(where: { (boardAt[o.rides[$0].tripId] ?? 0) > from }) {
+                k = j; join = boardAt[o.rides[j].tripId]
+            } else if d > 0, Int(o.end.timeIntervalSince1970 / 60) == Int(trip.end.timeIntervalSince1970 / 60) {
+                join = last
+            }
+            guard let join, join > from else { continue }
+            let lines = o.rides[d..<k].map { $0.isTrain ? ($0.name.isEmpty ? $0.line : $0.name) : $0.line }.joined(separator: " + ")
+            let label: String
+            if d == 0 {
+                let shift = Int((o.start.timeIntervalSince(trip.start) / 60).rounded())
+                let when = shift == 0 ? "leave at the same time" : shift > 0 ? "leave \(shift) min later" : "leave \(-shift) min earlier"
+                label = "or \(lines) at \(Fmt.hhmm(o.first.departure)) · same \(k < o.rides.count ? name(o.rides[k]) : "arrival") · \(when)"
+            } else {
+                let sooner = Int((trip.rides[d].departure.timeIntervalSince(o.rides[d].departure) / 60).rounded())
+                let onto = k < o.rides.count ? "same \(name(o.rides[k]))" : "there at the same time"
+                label = "or \(lines) at \(Fmt.hhmm(o.rides[d].departure)) · \(onto)" + (sooner > 0 ? " · on board \(sooner) min sooner" : "")
+            }
+            out.append(Branch(from: from, to: join, color: Paper.line(o.rides[d].line, train: o.rides[d].isTrain), label: label))
             if out.count == 2 { break }
         }
         return out
@@ -1246,7 +1328,7 @@ struct TripLine: View {
 
     var body: some View {
         let l = layout
-        let bs = branches(l.boardAt)
+        let bs = branches(l.boardAt, last: l.stops.count - 1)
         // the centre of each station, top to bottom
         var ys: [CGFloat] = [stopH / 2]
         for (i, s) in l.segs.enumerated() where i < l.stops.count - 1 { ys.append(ys[i] + stopH / 2 + s.height + stopH / 2) }

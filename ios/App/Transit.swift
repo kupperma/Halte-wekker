@@ -296,30 +296,55 @@ enum Transit {
         return Array(kept.prefix(keep))
     }
 
-    /// Earlier ways onto the same connection: from the stop your first ride leaves from (the whole station, every
-    /// platform), what else leaves before it, that you can still get to, and that reaches the stop where you change in
-    /// time for the same next ride. Like the 08:31 Sprinter in Den Bosch that's in Breda before the 08:41 Intercity and
-    /// makes the same bus to BUas. The planner leaves those out (the same arrival, and you'd leave earlier), but they're
-    /// good to know: something to get on now, and a way out when the first one runs late.
-    static func earlierWays(onto best: DoorTrip, now: Date = Date()) async -> [DoorTrip] {
-        guard best.rides.count >= 2 else { return [] }
-        let f = best.first, next = best.rides[1]
-        guard let ta = f.toLat, let to = f.toLon, !f.fromId.isEmpty, f.fromId != "onboard" else { return [] }
+    /// Earlier ways onto the same connection. At each place you get on (your first stop, and every change), what else
+    /// leaves from there (the whole station, every platform) before the ride you'd take, once you can be there, and gets
+    /// to where that ride takes you in time for the ride after it (or no later, at the end). Like the 08:31 Sprinter in
+    /// Den Bosch that's in Breda before the 08:41 Intercity and makes the same bus to BUas, or the 306 seven minutes
+    /// earlier that leaves time to spare for the same train. The planner leaves those out (the same arrival), but
+    /// they're good to know: out of the cold sooner, and a change you won't miss.
+    /// `at`: only these rides (nil: every one).
+    static func earlierWays(onto best: DoorTrip, now: Date = Date(), at only: Set<Int>? = nil) async -> [DoorTrip] {
+        await withTaskGroup(of: [DoorTrip].self) { g in
+            for k in best.rides.indices where only?.contains(k) ?? true {
+                g.addTask { await earlier(at: k, onto: best, now: now) }
+            }
+            var out: [DoorTrip] = []
+            for await r in g { out += r }
+            return out
+        }
+    }
+
+    private static func earlier(at k: Int, onto best: DoorTrip, now: Date) async -> [DoorTrip] {
+        let r = best.rides[k]
+        guard let ta = r.toLat, let to = r.toLon, !r.fromId.isEmpty, r.fromId != "onboard" else { return [] }
         let change = CLLocation(latitude: ta, longitude: to)
-        let canLeave = now.addingTimeInterval(Double(f.walkBefore) * 60 + 30)       // the walk to the stop first
-        guard canLeave < f.departure.addingTimeInterval(-60) else { return [] }
-        // in time for the next ride: no later than the first one gets there, or with the same time to change
-        let inTime = max(f.arrival, next.departure.addingTimeInterval(-Double(max(2, next.walkBefore + 1)) * 60))
-        let q: [URLQueryItem] = [.init(name: "stopId", value: f.fromId), .init(name: "time", value: iso.string(from: canLeave.addingTimeInterval(-60))),
+        // when you can be there to get on: the walk from where you are (but looking no more than 25 minutes before it),
+        // or when the ride before gets you there and the walk across
+        let canBoard: Date
+        if k == 0 {
+            canBoard = max(now.addingTimeInterval(Double(r.walkBefore) * 60 + 30), r.departure.addingTimeInterval(-25 * 60))
+        } else {
+            canBoard = best.rides[k - 1].arrival.addingTimeInterval(Double(max(2, r.walkBefore + 1)) * 60)
+        }
+        guard canBoard < r.departure.addingTimeInterval(-60) else { return [] }
+        // in time for the ride after it, with the same time to change; at the end, there no later
+        let inTime: Date
+        if k + 1 < best.rides.count {
+            let n = best.rides[k + 1]
+            inTime = max(r.arrival, n.departure.addingTimeInterval(-Double(max(2, n.walkBefore + 1)) * 60))
+        } else {
+            inTime = r.arrival
+        }
+        let q: [URLQueryItem] = [.init(name: "stopId", value: r.fromId), .init(name: "time", value: iso.string(from: canBoard.addingTimeInterval(-60))),
                                  .init(name: "n", value: "40"), .init(name: "fetchStops", value: "true")]
         guard let json = try? await get("/v6/stoptimes", q) as? [String: Any], let list = json["stopTimes"] as? [[String: Any]] else { return [] }
         var out: [DoorTrip] = [], seen = Set<String>()
         for st in list {
             let p = st["place"] as? [String: Any] ?? [:]
-            guard let id = st["tripId"] as? String, id != f.tripId, seen.insert(id).inserted,
-                  let dep = date(p["departure"]), dep >= canLeave, dep < f.departure.addingTimeInterval(-30),
+            guard let id = st["tripId"] as? String, id != r.tripId, seen.insert(id).inserted,
+                  let dep = date(p["departure"]), dep >= canBoard, dep < r.departure.addingTimeInterval(-30),
                   !(((st["cancelled"] as? Bool) ?? false) || ((st["tripCancelled"] as? Bool) ?? false) || ((p["cancelled"] as? Bool) ?? false)) else { continue }
-            // it calls where you change, in time
+            // it calls where that ride takes you, in time
             let stops = (st["nextStops"] as? [[String: Any]]) ?? []
             guard let at = stops.first(where: { s in
                 guard let a = s["lat"] as? Double, let o = s["lon"] as? Double else { return false }
@@ -331,16 +356,19 @@ enum Transit {
             let ride = Ride(tripId: id, line: train ? trainLabel(short) : short, name: short, isTrain: train,
                             departure: dep, scheduledDeparture: date(p["scheduledDeparture"]) ?? dep,
                             arrival: arr, scheduledArrival: date(at["scheduledArrival"]) ?? arr,
-                            fromStop: (p["name"] as? String) ?? f.fromStop, fromId: (p["stopId"] as? String) ?? f.fromId,
-                            toStop: (at["name"] as? String) ?? f.toStop,
+                            fromStop: (p["name"] as? String) ?? r.fromStop, fromId: (p["stopId"] as? String) ?? r.fromId,
+                            toStop: (at["name"] as? String) ?? r.toStop,
                             platform: (p["track"] as? String) ?? (p["scheduledTrack"] as? String),
-                            live: (st["realTime"] as? Bool) ?? false, cancelled: false, walkBefore: f.walkBefore,
+                            live: (st["realTime"] as? Bool) ?? false, cancelled: false, walkBefore: r.walkBefore,
                             num: text(st["tripShortName"]), headsign: (st["headsign"] as? String) ?? "",
                             plannedPlatform: (p["scheduledTrack"] as? String) ?? (p["track"] as? String),
-                            fromLat: (p["lat"] as? Double) ?? f.fromLat, fromLon: (p["lon"] as? Double) ?? f.fromLon,
+                            fromLat: (p["lat"] as? Double) ?? r.fromLat, fromLon: (p["lon"] as? Double) ?? r.fromLon,
                             toLat: (at["lat"] as? Double) ?? ta, toLon: (at["lon"] as? Double) ?? to)
-            out.append(DoorTrip(rides: [ride] + best.rides.dropFirst(), start: dep.addingTimeInterval(-Double(f.walkBefore) * 60), end: best.end))
-            if out.count >= 3 { break }
+            var rides = best.rides
+            rides[k] = ride
+            let start = k == 0 ? dep.addingTimeInterval(-Double(r.walkBefore) * 60) : best.start
+            out.append(DoorTrip(rides: rides, start: start, end: best.end))
+            if out.count >= (k == 0 ? 3 : 2) { break }
         }
         return out
     }
