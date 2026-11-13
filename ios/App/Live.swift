@@ -149,11 +149,25 @@ final class LiveStore: ObservableObject {
         async let past = Transit.board(stopIds: ids, from: Date().addingTimeInterval(-20 * 60), n: 6, stops: true)
         async let next = Transit.board(stopIds: ids, from: Date().addingTimeInterval(-60), n: 20, stops: true)
         let (p, n) = await (past, next)
+        // A stop whose next ones didn't come (a bad moment on the connection, or a busy server): keep the ones it had that
+        // haven't left, instead of a board with only what's gone, and ask again in a few seconds.
+        let now = Date()
+        let answered = Set(n.map(\.stopId))
+        let kept = nearBoard.filter { !answered.contains($0.stopId) && ids.contains($0.stopId) && ($0.cancelled ? $0.scheduled : $0.time) > now.addingTimeInterval(-60) }
         // the sides of a stop can each list the same bus: keep it once
         var seen = Set<String>()
-        let b = (n + p).filter { seen.insert("\($0.tripId)|\($0.stopName)").inserted }
+        let b = (n + kept + p).filter { seen.insert("\($0.tripId)|\($0.stopName)").inserted }
         if !b.isEmpty { nearBoard = b.sorted { ($0.cancelled ? $0.scheduled : $0.time) < ($1.cancelled ? $1.scheduled : $1.time) } }
+        if ids.contains(where: { !answered.contains($0) }), !nearRetrying {
+            nearRetrying = true
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: 8_000_000_000)
+                await self?.loadNear(h)
+                self?.nearRetrying = false
+            }
+        }
     }
+    private var nearRetrying = false
 
     var stops: StopsStore { StopsStore.shared }
 

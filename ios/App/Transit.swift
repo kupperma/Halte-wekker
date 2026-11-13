@@ -142,13 +142,32 @@ enum Transit {
         return iso.date(from: s) ?? isoFrac.date(from: s)
     }
 
+    /// One question to Transitous. A slow connection or a busy server (a timeout, a dropped connection, "too many
+    /// requests", a server error) gets two more tries, a moment apart, before it gives up: otherwise one bad moment on the
+    /// train leaves a board empty until the next refresh.
     static func get(_ path: String, _ items: [URLQueryItem]) async throws -> Any {
         var c = URLComponents(string: base + path)!
         c.queryItems = items
-        var req = URLRequest(url: c.url!, timeoutInterval: 25)
-        req.setValue(userAgent, forHTTPHeaderField: "User-Agent")
-        let (data, _) = try await URLSession.shared.data(for: req)
-        return try JSONSerialization.jsonObject(with: data)
+        var last: Error = URLError(.unknown)
+        for attempt in 0..<3 {
+            if attempt > 0 {
+                try await Task.sleep(nanoseconds: attempt == 1 ? 800_000_000 : 2_500_000_000)
+            }
+            var req = URLRequest(url: c.url!, timeoutInterval: attempt == 0 ? 20 : 12)
+            req.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+            do {
+                let (data, resp) = try await URLSession.shared.data(for: req)
+                let code = (resp as? HTTPURLResponse)?.statusCode ?? 200
+                if code == 429 || code >= 500 { last = URLError(.badServerResponse); continue }
+                return try JSONSerialization.jsonObject(with: data)
+            } catch let e as URLError where [.timedOut, .networkConnectionLost, .cannotConnectToHost, .cannotFindHost,
+                                             .dnsLookupFailed, .notConnectedToInternet, .secureConnectionFailed].contains(e.code) {
+                last = e
+            } catch is CancellationError {
+                throw CancellationError()
+            }
+        }
+        throw last
     }
 
     static func text(_ a: Any?) -> String {
