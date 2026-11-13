@@ -130,6 +130,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     /// While it's still choosing: the buses it could be (the first is the one it shows).
     @Published private(set) var choosing: [Vehicle] = []
     private var boardAlternatives: [DoorTrip] = []        // started from Fastest trip: the ways it was choosing between
+    private var legClosest: Double?                       // the nearest you've been to this leg's stop
+    private var awayLooked = false                        // it looked once already: going another way than this leg
 
     var leg: Leg? { index < legs.count ? legs[index] : nil }
     var wakeKm: Double { leg.map(km(for:)) ?? busKm }
@@ -270,6 +272,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         vehicleStops = []; matchMeters = nil; pickedByHand = false; byTimetable = false; startDistance = nil
         roadOf = nil; offRoad = 0; farLooks = 0; sameCheckAt = Date().addingTimeInterval(45)
         cands = []; choosing = []; candSince = nil; candLead = nil
+        legClosest = nil; awayLooked = false
         location.desiredAccuracy = kCLLocationAccuracyBest; location.distanceFilter = 25
         location.allowsBackgroundLocationUpdates = true
         location.showsBackgroundLocationIndicator = true
@@ -427,6 +430,16 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         else if vehicle != nil, cands.isEmpty, Date() >= sameCheckAt { sameCheckAt = Date().addingTimeInterval(30); Task { await checkSameBus() } }
         let d = loc.distance(from: CLLocation(latitude: leg.to.coordinate.latitude, longitude: leg.to.coordinate.longitude))
         distance = d
+        // Still looking for what you're on, at train or bus speed, and more than 2 km further from this leg's stop than
+        // you've been: you're going another way (past Boxtel to Den Bosch, where it planned Eindhoven). Find what you're
+        // on and plan the rest from it.
+        if loc.horizontalAccuracy >= 0 && loc.horizontalAccuracy < 150 {
+            legClosest = min(legClosest ?? d, d)
+            if vehicle == nil, !awayLooked, !demo, route?.single == nil, let c = legClosest, d > c + 2000, LiveStore.movingFix(loc) {
+                awayLooked = true
+                Task { await self.goingElsewhere(loc) }
+            }
+        }
         if loc.horizontalAccuracy >= 0 && loc.horizontalAccuracy < 250 { maxDistance = max(maxDistance ?? 0, d) }
         accuracy = loc.horizontalAccuracy
         let good = loc.horizontalAccuracy >= 0 && loc.horizontalAccuracy < 250
@@ -994,6 +1007,22 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         }
     }
 
+    /// Going away from this leg's stop on something it hasn't recognised: the one you're on (the nearest going your way),
+    /// and the rest planned from it. Nothing found: it tries again after another 2 km.
+    private func goingElsewhere(_ loc: CLLocation) async {
+        guard vehicle == nil, let final = legs.last?.to, phase == .sleeping || phase == .awake else { return }
+        guard let ob = await LiveStore.onBoardTrips(loc, to: final, wasMoving: true), let t = ob.1.first, let nr = RoutePlan.from(t),
+              vehicle == nil else {
+            legClosest = distance; awayLooked = false
+            return
+        }
+        boardAlternatives = ob.1
+        setRoute(nr)
+        await vehicleFound(ob.0.vehicle)
+        tellBus("You’re going another way than planned", "On the \(ob.0.vehicle.title), so the rest is planned from it: off at \(legs.first?.to.short ?? "the next stop"), \(final.short) at \(Fmt.hhmm(t.end)).")
+        pushActivity(force: true)
+    }
+
     /// You're on another bus or train than the one planned, and it doesn't go where this leg does: the rest of the trip
     /// is planned again from it (where to get off, and what then), and the ride follows it.
     private func replanOnto(_ v: Vehicle, stops: [TripStop]) async -> Bool {
@@ -1019,6 +1048,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         index = 0
         distance = nil; arrival = nil; next = nil; legArrival = nil; legFrom = nil; legTo = nil
         maxDistance = legSpan
+        legClosest = nil; awayLooked = false
         if phase == .awake { phase = .sleeping }
         Task { await loadUpcoming(force: true) }
     }
