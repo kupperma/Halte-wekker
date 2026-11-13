@@ -306,11 +306,13 @@ final class GoStore: ObservableObject {
         if let b = best, m.vehicle.tripId != b.first.tripId,
            let bm = ranked.first(where: { $0.vehicle.tripId == b.first.tripId }), bm.meters < m.meters + 200 { m = bm }
         let twice = last == m.vehicle.tripId
+        // the others that fit about as well: the ride keeps them in the running until there's real distance between them
+        let close = ranked.filter { $0.vehicle.tripId != m.vehicle.tripId && $0.meters < m.meters + 300 }.map(\.vehicle)
         if let t = all.first(where: { $0.first.tripId == m.vehicle.tripId }) {
             // one look for the line it's watching; another line has to be the same twice
             let sameLine = best.map { $0.first.line == m.vehicle.line } ?? true
             if (m.meters < 250 && sameLine) || twice {
-                board(t, m.vehicle, alternatives: all)
+                board(t, m.vehicle, alternatives: all, couldBe: close)
                 return nil
             }
             seen = m.vehicle
@@ -320,7 +322,7 @@ final class GoStore: ObservableObject {
             // a long way round is probably not a bus you're on (a car or bike next to one)
             if let b = best, t.end > b.end.addingTimeInterval(30 * 60) { seen = nil; return m.vehicle.tripId }
             guard watching, trip.phase == .idle else { return nil }
-            board(t, ob.0.vehicle, alternatives: all)
+            board(t, ob.0.vehicle, alternatives: all, couldBe: ranked.map(\.vehicle).filter { $0.tripId != ob.0.vehicle.tripId && close.contains($0) })
             return nil
         }
         seen = m.vehicle
@@ -329,9 +331,10 @@ final class GoStore: ObservableObject {
 
     /// On board: the trip starts by itself (the ride screen takes over) and the watching stops.
     /// `alternatives`: the ways it was choosing between, so the ride can still switch if it turns out you're on another one.
-    private func board(_ t: DoorTrip, _ v: Vehicle, alternatives: [DoorTrip] = []) {
+    /// `couldBe`: other buses that fit about as well; the ride decides between them once they're clearly apart.
+    private func board(_ t: DoorTrip, _ v: Vehicle, alternatives: [DoorTrip] = [], couldBe: [Vehicle] = []) {
         guard let r = RoutePlan.from(t), let trip else { return }
-        trip.start(r, vehicle: v, auto: true, alternatives: alternatives)
+        trip.start(r, vehicle: v, auto: true, alternatives: alternatives, couldBe: couldBe)
         close()
         let c = UNMutableNotificationContent()
         c.title = "You’re on the \(v.title)"

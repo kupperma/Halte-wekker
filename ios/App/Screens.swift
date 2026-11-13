@@ -1459,7 +1459,7 @@ struct RideView: View {
 
     /// "LEG 1 OF 3 · YOU'RE ON"
     private var rideKicker: String {
-        let k = trip.vehicle == nil ? "NOW RIDING" : trip.pickedByHand ? "YOU PICKED" : "YOU’RE ON"
+        let k = trip.vehicle == nil ? "NOW RIDING" : trip.pickedByHand ? "YOU PICKED" : trip.choosing.count > 1 ? "CHECKING WHICH BUS" : "YOU’RE ON"
         return trip.legs.count > 1 ? "LEG \(trip.index + 1) OF \(trip.legs.count) · \(k)" : k
     }
 
@@ -1490,6 +1490,17 @@ struct RideView: View {
         }
         sheetInfo
         if v == nil { Text("Looking for the bus or train you’re on…").font(HWFont.body(12)).foregroundStyle(Paper.muted).padding(.horizontal, 16).padding(.top, 2) }
+        else if trip.choosing.count > 1 {
+            let c = trip.choosing
+            let same = Set(c.map(\.line)).count == 1
+            HStack(alignment: .top, spacing: 6) {
+                ProgressView().controlSize(.mini).tint(Paper.navy)
+                Text(same ? "\(c.count == 2 ? "Two" : "\(c.count)") \(c[0].title)s were close together: it’s sure which one once there’s some distance between them."
+                          : "On the \(c.map(\.title).joined(separator: " or the ")): it’s sure once their roads part.")
+                    .font(HWFont.body(12)).foregroundStyle(Paper.muted).fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, 16).padding(.top, 2)
+        }
         Spacer(minLength: 6)
         // the countdown: a ring that fills up as you go, with your bus or train riding round it
         TimelineView(.periodic(from: .now, by: 2)) { ctx in

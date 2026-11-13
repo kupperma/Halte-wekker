@@ -112,7 +112,23 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     private var sameCheckAt = Date.distantPast
     private var offRoad = 0
     private var checkingSame = false
-    private var roadOf: (tripId: String, path: [CLLocationCoordinate2D], line: String)?
+    private var roadOf: (tripId: String, trip: LiveTrip, at: Date)?
+    private var farLooks = 0                               // looks in a row far from where its own times put it
+    // still choosing between buses that fit about as well (two that left a stop together)
+    private struct Candidate {
+        let vehicle: Vehicle
+        var trip: LiveTrip?
+        var fetched = Date.distantPast
+        var road: [Double] = []           // how far you were from its road, look by look
+        var time: [Double] = []           // how far from where its times put it
+    }
+    private var cands: [Candidate] = []
+    private var candSince: Date?
+    private var candLead: (id: String, n: Int)?
+    private var candCheckAt = Date.distantPast
+    private var resolving = false
+    /// While it's still choosing: the buses it could be (the first is the one it shows).
+    @Published private(set) var choosing: [Vehicle] = []
     private var boardAlternatives: [DoorTrip] = []        // started from Fastest trip: the ways it was choosing between
 
     var leg: Leg? { index < legs.count ? legs[index] : nil }
@@ -209,7 +225,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     // MARK: trip flow
 
     func start(_ r: RoutePlan, at legIndex: Int = 0, vehicle v: Vehicle? = nil, auto: Bool = false, kms: [Double]? = nil, backup: Int? = nil, stops: [TripStop]? = nil,
-               alternatives: [DoorTrip] = []) {
+               alternatives: [DoorTrip] = [], couldBe: [Vehicle] = []) {
         route = r
         boardAlternatives = alternatives
         legs = r.legs(direction)
@@ -226,6 +242,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
         if location.authorizationStatus == .notDetermined { location.requestWhenInUseAuthorization() }
         beginLeg(vehicle: v, stops: stops)
+        if let v { beginChoosing([v] + couldBe) }
         startActivity()
     }
 
@@ -236,7 +253,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         arrival = nil; next = nil; legArrival = nil; legFrom = nil; legTo = nil
         vehicle = v
         vehicleStops = []; matchMeters = nil; pickedByHand = false; byTimetable = false; startDistance = nil
-        roadOf = nil; offRoad = 0; sameCheckAt = Date().addingTimeInterval(45)
+        roadOf = nil; offRoad = 0; farLooks = 0; sameCheckAt = Date().addingTimeInterval(45)
+        cands = []; choosing = []; candSince = nil; candLead = nil
         location.desiredAccuracy = kCLLocationAccuracyBest; location.distanceFilter = 25
         location.allowsBackgroundLocationUpdates = true
         location.showsBackgroundLocationIndicator = true
@@ -297,7 +315,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         phase = .idle
         route = nil; legs = []; distance = nil; arrival = nil; next = nil; vehicle = nil; legArrival = nil; arrivedAt = nil
         upcoming = []; upcomingAt = nil; upcomingError = nil; upcomingKey = ""; upcomingBoard = []; vehicleStops = []; matchMeters = nil; speed = nil; startDistance = nil
-        roadOf = nil; offRoad = 0; boardAlternatives = []
+        roadOf = nil; offRoad = 0; farLooks = 0; boardAlternatives = []
+        cands = []; choosing = []; candSince = nil; candLead = nil
         legFrom = nil; legTo = nil; maxDistance = nil
         let a = activity; activity = nil
         Task { await a?.end(nil, dismissalPolicy: .immediate) }
@@ -388,7 +407,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         startDistance = loc.distance(from: CLLocation(latitude: leg.from.coordinate.latitude, longitude: leg.from.coordinate.longitude))
         if vehicle == nil { Task { await loadUpcoming() } }
         else if Date().timeIntervalSince(lastVehicleRefresh) > 60 { lastVehicleRefresh = Date(); Task { await refreshVehicle() } }
-        if vehicle != nil, Date() >= sameCheckAt { sameCheckAt = Date().addingTimeInterval(30); Task { await checkSameBus() } }
+        if vehicle != nil, !cands.isEmpty, Date() >= candCheckAt { candCheckAt = Date().addingTimeInterval(12); Task { await resolveCandidates() } }
+        else if vehicle != nil, cands.isEmpty, Date() >= sameCheckAt { sameCheckAt = Date().addingTimeInterval(30); Task { await checkSameBus() } }
         let d = loc.distance(from: CLLocation(latitude: leg.to.coordinate.latitude, longitude: leg.to.coordinate.longitude))
         distance = d
         if loc.horizontalAccuracy >= 0 && loc.horizontalAccuracy < 250 { maxDistance = max(maxDistance ?? 0, d) }
@@ -592,11 +612,14 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
                     guard dests.contains(where: { self.goesAhead(stops, to: $0) }) else {
                         rejected.insert(m.vehicle.tripId); lastBest = nil; continue
                     }
+                    // the ones that fit about as well stay in the running, until there's real distance between them
+                    let close = ranked.filter { $0.vehicle.tripId != m.vehicle.tripId && $0.meters < m.meters + 300 }.map(\.vehicle)
                     if forNextLeg {
                         if self.phase == .transfer { self.nextLeg(vehicle: m.vehicle, stops: stops); self.matchMeters = Int(m.meters) }
                     } else {
                         await self.vehicleFound(m.vehicle, meters: m.meters, stops: stops)
                     }
+                    self.beginChoosing([m.vehicle] + close)
                     return
                 }
                 lastBest = m.vehicle.tripId
@@ -723,29 +746,41 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
 
     // MARK: still the same bus?
 
-    /// Every half minute on board: are you still on its road? Two buses that leave a stop together (the 305 to Eindhoven
-    /// and the 306 to Den Bosch at Veghel) look the same at first. Once the roads part and you're clearly not on this
-    /// one's any more, it finds the one you are on and switches to it: its stops, its times, and the rest of your trip.
+    /// Every half minute on board: are you still on its road, and about where its times say? Two buses that leave a stop
+    /// together (the 305 to Eindhoven and the 306 to Den Bosch at Veghel, or two 306s close behind each other) look the
+    /// same at first. Off its road: it finds the one you are on and switches to it (its stops, its times, and the rest of
+    /// your trip). Far from where its times put it while another of the line is right with you: it looks at both again.
     private func checkSameBus() async {
-        guard let v = vehicle, let leg, !demo, !pickedByHand, !checkingSame, phase == .sleeping || phase == .awake else { return }
+        guard let v = vehicle, let leg, !demo, !pickedByHand, !checkingSame, cands.isEmpty, phase == .sleeping || phase == .awake else { return }
         let now = Date()
         let recent = samples.filter { $0.timestamp > now.addingTimeInterval(-45) && $0.horizontalAccuracy >= 0 && $0.horizontalAccuracy < 80 }
         guard let last = recent.last, max(last.speed, speed ?? 0) >= 4 else { return }      // a clear fix, moving with it
         checkingSame = true
         defer { checkingSame = false }
-        if roadOf?.tripId != v.tripId {
+        if roadOf?.tripId != v.tripId || now.timeIntervalSince(roadOf!.at) > 60 {
             guard let t = await Transit.liveTrip(v.tripId), t.path.count >= 2 else { return }
-            roadOf = (v.tripId, t.path, t.line)
+            roadOf = (v.tripId, t, now)
         }
-        guard let road = roadOf, vehicle == v else { return }
+        guard let road = roadOf, vehicle == v, cands.isEmpty else { return }
+        let t = road.trip
         let limit: Double = v.isTrain ? 700 : 300
-        if Self.metres(from: last.coordinate, to: road.path) < limit {
+        if Self.metres(from: last.coordinate, to: t.path) < limit {
             offRoad = 0
-            if !v.isTrain, !road.line.isEmpty, road.line != v.line {
+            if !v.isTrain, !t.line.isEmpty, t.line != v.line {
                 // the same trip, under another number in its own live data
-                vehicle = Vehicle(tripId: v.tripId, line: road.line, isTrain: false)
-                tellBus("Your bus is listed as \(road.line) now", "The same bus as before, still to \(leg.to.short).")
+                vehicle = Vehicle(tripId: v.tripId, line: t.line, isTrain: false)
+                tellBus("Your bus is listed as \(t.line) now", "The same bus as before, still to \(leg.to.short).")
                 pushActivity(force: true)
+            }
+            // on its road, but far from where its times put it, three looks in a row (a minute and a half): if another of
+            // the same line is right where you are, look at both again
+            let w = t.position(now), at = t.coordinate(atMetres: w.metres)
+            let far = w.done || last.distance(from: CLLocation(latitude: at.latitude, longitude: at.longitude)) > (v.isTrain ? 2500 : 1000)
+            farLooks = far ? farLooks + 1 : 0
+            if farLooks >= 3 {
+                farLooks = 0
+                let near = await matchVehicles(mode: leg.mode, excluding: [v.tripId]).filter { $0.meters < 400 && $0.vehicle.line == v.line }.prefix(2).map(\.vehicle)
+                if !near.isEmpty, vehicle == v { beginChoosing([v] + near) }
             }
             return
         }
@@ -757,6 +792,78 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         } else {
             sameCheckAt = Date().addingTimeInterval(120)      // a detour, or no better one: look again in a while
         }
+    }
+
+    /// Start choosing between buses that fit about as well. Nothing changes on screen but "checking"; the one it shows
+    /// stays until one is clearly the one.
+    private func beginChoosing(_ vs: [Vehicle]) {
+        var seen = Set<String>()
+        let list = Array(vs.filter { seen.insert($0.tripId).inserted }.prefix(3))
+        guard list.count > 1, !demo, !pickedByHand else { cands = []; choosing = []; return }
+        cands = list.map { Candidate(vehicle: $0) }
+        choosing = list
+        candSince = Date(); candLead = nil
+        candCheckAt = Date().addingTimeInterval(8)
+    }
+
+    /// Every dozen seconds while choosing: how far you are from each one's road and from where its times put it. One
+    /// off its road twice is out. Buses of different lines are told apart by their roads (they part somewhere); two
+    /// of the same line by their times: once one has been clearly closer (half a kilometre, and less than half as far)
+    /// two looks in a row. Still together after twelve minutes: they run as one, it keeps the one it shows.
+    private func resolveCandidates() async {
+        guard !cands.isEmpty, !resolving, !demo, phase == .sleeping || phase == .awake else { return }
+        let now = Date()
+        guard let last = samples.last, last.timestamp > now.addingTimeInterval(-30), last.horizontalAccuracy >= 0, last.horizontalAccuracy < 100 else { return }
+        resolving = true
+        defer { resolving = false }
+        var list = cands
+        for i in list.indices where list[i].trip == nil || now.timeIntervalSince(list[i].fetched) > 60 {
+            if let t = await Transit.liveTrip(list[i].vehicle.tripId) { list[i].trip = t; list[i].fetched = now }
+        }
+        guard list.map(\.vehicle.tripId) == cands.map(\.vehicle.tripId), phase == .sleeping || phase == .awake else { return }
+        let limit: Double = list[0].vehicle.isTrain ? 700 : 300
+        for i in list.indices {
+            guard let t = list[i].trip, t.path.count >= 2 else { continue }
+            list[i].road.append(Self.metres(from: last.coordinate, to: t.path))
+            let w = t.position(now), at = t.coordinate(atMetres: w.metres)
+            list[i].time.append(w.done ? 99_999 : last.distance(from: CLLocation(latitude: at.latitude, longitude: at.longitude)))
+        }
+        func offItsRoad(_ c: Candidate) -> Bool { c.road.count >= 2 && c.road.suffix(2).allSatisfy { $0 > limit } }
+        let alive = list.filter { !offItsRoad($0) }
+        func mean(_ c: Candidate) -> Double { let x = c.time.suffix(4); return x.isEmpty ? .infinity : x.reduce(0, +) / Double(x.count) }
+        var winner: Candidate?
+        if alive.count == 1 {
+            winner = alive[0]
+        } else if alive.isEmpty {
+            winner = list.min { mean($0) < mean($1) }        // off every road (a detour): the closest by its times
+        } else if Set(alive.map(\.vehicle.line)).count == 1, alive.allSatisfy({ $0.time.count >= 3 }) {
+            let scored = alive.sorted { mean($0) < mean($1) }
+            let a = mean(scored[0]), b = mean(scored[1])
+            if b - a > 500 && b > 2 * a {
+                let id = scored[0].vehicle.tripId
+                let n = candLead?.id == id ? candLead!.n + 1 : 1
+                candLead = (id: id, n: n)
+                if candLead!.n >= 2 { winner = scored[0] }
+            } else {
+                candLead = nil
+            }
+        }
+        if winner == nil, let s = candSince, now.timeIntervalSince(s) > 12 * 60 {
+            winner = alive.first { $0.vehicle.tripId == vehicle?.tripId } ?? alive.min { mean($0) < mean($1) }
+        }
+        cands = alive.isEmpty ? list : alive
+        choosing = cands.map(\.vehicle)
+        if let w = winner { await settle(w.vehicle) }
+    }
+
+    /// Sure now: the one it showed (just stop saying "checking"), or the other one (switch to it, and tell you).
+    private func settle(_ w: Vehicle) async {
+        cands = []; choosing = []; candLead = nil; candSince = nil
+        offRoad = 0; farLooks = 0; sameCheckAt = Date().addingTimeInterval(30)
+        guard let old = vehicle, w.tripId != old.tripId else { pushActivity(force: true); return }
+        let stops = await Transit.tripStops(w.tripId)
+        guard vehicle == old else { return }
+        await switchVehicle(from: old, to: w, stops: stops)
     }
 
     /// The one you're on, when it's not the one it thought: first the one planned for this leg and the others it was
@@ -799,8 +906,14 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             }
         }
         await vehicleFound(v, stops: stops)
+        cands = []; choosing = []
         let to = leg?.to.short ?? "your stop"
-        tellBus("You’re on the \(v.title), not the \(old.title)", "They looked the same when you got on. Fixed: it now wakes you for \(to)\(legArrival.map { " · \(Fmt.hhmm($0))" } ?? "").")
+        let when = legArrival.map { " · there \(Fmt.hhmm($0))" } ?? ""
+        if v.line == old.line {
+            tellBus("It’s the other \(v.title)", "Two were close together\(legFrom.map { ": you’re on the one from \(Fmt.hhmm($0))" } ?? ""). Fixed its times: it wakes you for \(to)\(when).")
+        } else {
+            tellBus("You’re on the \(v.title), not the \(old.title)", "They looked the same when you got on. Fixed: it now wakes you for \(to)\(when).")
+        }
     }
 
     /// The rest of the trip, changed under way (still on its first leg).
