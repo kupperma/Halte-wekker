@@ -167,6 +167,15 @@ enum Fmt {
     }
     static func mins(_ s: TimeInterval) -> Int { max(0, Int((s / 60).rounded())) }
     /// "’s-Hertogenbosch, Centraal Station" → "Den Bosch"; "Breda, Nassausingel" → "Nassausingel"
+    /// A stop's own name: "Pettelaarseschans" for "'s-Hertogenbosch, Pettelaarseschans" (a station keeps its town:
+    /// "Den Bosch"), so the next stop inside a town isn't just the town.
+    static func stop(_ n: String) -> String {
+        guard let r = n.range(of: ", ") else { return place(n) }
+        let own = String(n[r.upperBound...])
+        if own.lowercased().contains("station") { return place(n) }
+        return own
+    }
+
     static func place(_ n: String) -> String {
         let l = n.lowercased()
         if l.contains("hertogenbosch") { return "Den Bosch" }

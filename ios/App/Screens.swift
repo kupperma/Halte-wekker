@@ -1527,6 +1527,19 @@ struct RideView: View {
 
     // MARK: on board
 
+    /// "one of two Bus 306s or the Bus 60" (the same line twice is two of them close together, not two lines).
+    static func choosingText(_ c: [Vehicle]) -> String {
+        var order: [String] = [], count: [String: Int] = [:], title: [String: String] = [:]
+        for v in c {
+            if count[v.line] == nil { order.append(v.line); title[v.line] = v.title }
+            count[v.line, default: 0] += 1
+        }
+        return order.map { l in
+            let n = count[l] ?? 1
+            return n > 1 ? "one of \(n == 2 ? "two" : "\(n)") \(title[l] ?? l)s" : "the \(title[l] ?? l)"
+        }.joined(separator: " or ")
+    }
+
     /// "LEG 1 OF 3 · YOU'RE ON"
     private var rideKicker: String {
         let k = trip.vehicle == nil ? "NOW RIDING" : trip.pickedByHand ? "YOU PICKED" : trip.choosing.count > 1 ? "CHECKING WHICH BUS" : "YOU’RE ON"
@@ -1566,7 +1579,7 @@ struct RideView: View {
             HStack(alignment: .top, spacing: 6) {
                 ProgressView().controlSize(.mini).tint(Paper.navy)
                 Text(same ? "\(c.count == 2 ? "Two" : "\(c.count)") \(c[0].title)s were close together: it’s sure which one once there’s some distance between them."
-                          : "On the \(c.map(\.title).joined(separator: " or the ")): it’s sure once their roads part.")
+                          : "On \(Self.choosingText(c)): it’s sure once their roads part.")
                     .font(HWFont.body(12)).foregroundStyle(Paper.muted).fixedSize(horizontal: false, vertical: true)
             }
             .padding(.horizontal, 16).padding(.top, 2)
@@ -1626,7 +1639,7 @@ struct RideView: View {
             }
             statTile(speed ?? "–", speed == nil ? "standing still" : "speed")
             if let n = next, let t = n.arrival {
-                statTile(Fmt.hhmm(t), "next: \(Fmt.place(n.name))")
+                statTile(Fmt.hhmm(t), "next: \(Fmt.stop(n.name))")
             } else if let m = trip.matchMeters {
                 statTile("\(m) m", "recognised")
             }
