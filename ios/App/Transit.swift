@@ -279,6 +279,11 @@ enum Transit {
             let walk = min(8, max(2, Int((m / 1.2 / 60).rounded(.up))))
             return DoorTrip(rides: [f.walking(walk)] + t.rides.dropFirst(), start: f.departure.addingTimeInterval(-Double(walk) * 60), end: t.end)
         }
+        // Out in the country (between Tilburg Reeshof and Gilze-Rijen, say) the planner finds no stop it'll walk to:
+        // then from the nearest station and the nearest stop within about 3 km, with the walk there.
+        if all.isEmpty {
+            all = await fromNearest(here, to: to.ids, at: now.addingTimeInterval(-120), count: count)
+        }
         // A ride that only takes you to where you are (the station you're at): you're there already. Only when there's
         // another way, though.
         let at = station.map { CLLocation(latitude: $0.lat, longitude: $0.lon) }
@@ -369,6 +374,35 @@ enum Transit {
             let start = k == 0 ? dep.addingTimeInterval(-Double(r.walkBefore) * 60) : best.start
             out.append(DoorTrip(rides: rides, start: start, end: best.end))
             if out.count >= (k == 0 ? 3 : 2) { break }
+        }
+        return out
+    }
+
+    /// From the nearest train station and the nearest other stop within about 3 km, with the walk to it (a walk across
+    /// fields is longer than a straight line: a third more, at 1.2 m/s).
+    private static func fromNearest(_ here: CLLocation, to ids: [String], at: Date, count: Int) async -> [DoorTrip] {
+        let c = here.coordinate, dLat = 0.03, dLon = 0.045
+        let q: [URLQueryItem] = [.init(name: "min", value: "\(c.latitude - dLat),\(c.longitude - dLon)"),
+                                 .init(name: "max", value: "\(c.latitude + dLat),\(c.longitude + dLon)")]
+        guard let list = try? await get("/v1/map/stops", q) as? [[String: Any]] else { return [] }
+        struct S { let id: String; let lat: Double; let lon: Double; let rail: Bool; let m: Double }
+        let stops: [S] = list.compactMap { s in
+            guard let id = s["stopId"] as? String, let a = s["lat"] as? Double, let o = s["lon"] as? Double else { return nil }
+            let modes = (s["modes"] as? [String]) ?? []
+            let rail = modes.contains { $0.contains("RAIL") || $0 == "LONG_DISTANCE" || $0 == "HIGHSPEED" }
+            return S(id: rail ? ((s["parentId"] as? String) ?? id) : id, lat: a, lon: o, rail: rail,
+                     m: here.distance(from: CLLocation(latitude: a, longitude: o)))
+        }
+        let picks = [stops.filter(\.rail).min { $0.m < $1.m }, stops.filter { !$0.rail }.min { $0.m < $1.m }].compactMap { $0 }.filter { $0.m < 3500 }
+        var out: [DoorTrip] = []
+        for s in picks {
+            let walk = max(2, Int((s.m * 1.33 / 1.2 / 60).rounded(.up)))
+            // you can be there in `walk` minutes: plan from then
+            let trips = await planAll(from: s.id, to: ids, at: max(at, Date().addingTimeInterval(Double(walk) * 60 - 60)), count: count)
+            out += trips.map { t in
+                let f = t.first
+                return DoorTrip(rides: [f.walking(walk)] + t.rides.dropFirst(), start: f.departure.addingTimeInterval(-Double(walk) * 60), end: t.end)
+            }
         }
         return out
     }

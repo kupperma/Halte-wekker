@@ -182,6 +182,14 @@ final class GoStore: ObservableObject {
             found += await earlierWays(onto: top).filter { ids.insert($0.id).inserted }
         }
         guard watching, dest == d else { return }
+        // Nothing from here, and you were just going at train or bus speed (slowing down, or stopped at a signal between
+        // stations): you're on board. Find which one, and don't say there's no way.
+        if found.isEmpty, best == nil, trip?.movedRecently == true, onBoard == nil, trip?.phase == .idle, !demo {
+            await firstLook()
+            guard watching else { return }
+            if onBoard == nil { movingUnknown = true; error = nil }
+            return
+        }
         // One empty answer keeps what you had (that hasn't left).
         let list = found.isEmpty ? ([best].compactMap { $0 } + others).filter { $0.first.departure > now } : found
         // The ones you can still make: not cancelled, and you'd have had to set off at most a minute and a half ago.
@@ -377,7 +385,7 @@ final class GoStore: ObservableObject {
         }
         guard let f = fix, LiveStore.movingFix(f) || trip.movedRecently else { return }      // not moving like a bus: plan from here
         let d = dest
-        guard var ob = await LiveStore.onBoardTrips(f, to: d), watching, dest == d, trip.phase == .idle, !ob.1.isEmpty else { return }
+        guard var ob = await LiveStore.onBoardTrips(f, to: d, wasMoving: trip.movedRecently), watching, dest == d, trip.phase == .idle, !ob.1.isEmpty else { return }
         onBoard = ob.0.vehicle
         best = ob.1.first; others = Array(ob.1.dropFirst())
         here = f; updated = Date(); error = nil

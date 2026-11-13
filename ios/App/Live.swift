@@ -113,10 +113,12 @@ final class LiveStore: ObservableObject {
     }
 
     /// `tripId`: plan from that one (the bus it now knows you're on), not just the nearest.
-    static func onBoardTrips(_ f: CLLocation, to dest: Place, tripId: String? = nil) async -> (OnBoard, [DoorTrip])? {
+    /// `wasMoving`: you were going at train or bus speed just now (stopped at a signal, or slowing down): not "standing".
+    static func onBoardTrips(_ f: CLLocation, to dest: Place, tripId: String? = nil, wasMoving: Bool = false) async -> (OnBoard, [DoorTrip])? {
         let now = Date()
-        let still = f.speed < 3                     // standing or walking now (or no speed): then it has to be right with you
-        let segs = await Transit.vehicles(near: f.coordinate, radiusDeg: tripId == nil && f.speed < 15 ? 0.02 : 0.04)
+        let still = f.speed < 3 && !wasMoving       // standing or walking now (or no speed): then it has to be right with you
+        let speedNow = wasMoving ? max(f.speed, 15) : f.speed
+        let segs = await Transit.vehicles(near: f.coordinate, radiusDeg: tripId == nil && speedNow < 15 ? 0.02 : 0.04)
         var best: (VehicleSegment, Double)?
         for s in segs {
             if let tripId, s.tripId != tripId { continue }
@@ -130,7 +132,7 @@ final class LiveStore: ObservableObject {
                 if turn > 75 { continue }
             }
             let d = f.distance(from: CLLocation(latitude: p.latitude, longitude: p.longitude))
-            let tol = tripId != nil ? 4000 : still ? 250 : matchTolerance(train: s.isTrain, speed: f.speed)
+            let tol = tripId != nil ? 4000 : still ? 250 : matchTolerance(train: s.isTrain, speed: speedNow)
             if d < tol, best == nil || d < best!.1 { best = (s, d) }
         }
         guard let seg = best?.0 else { return nil }
