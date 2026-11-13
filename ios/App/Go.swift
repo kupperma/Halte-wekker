@@ -159,6 +159,14 @@ final class GoStore: ObservableObject {
                 found += late.filter { $0.first.departure >= now.addingTimeInterval(-60) && seen.insert($0.id).inserted }
             }
         }
+        // Earlier ways onto the same connection, which the planner leaves out (the same arrival, but you'd leave earlier):
+        // the Sprinter that's in Breda before the Intercity and makes the same bus. Something to get on now, and a way
+        // out if the first one runs late. They show in Compare and as a branch on your trip; the one it watches stays the
+        // one that lets you leave latest.
+        if let top = found.filter({ !$0.first.cancelled && $0.start >= now.addingTimeInterval(-90) }).min(by: Self.sooner) {
+            var ids = Set(found.map(\.id))
+            found += await earlierWays(onto: top).filter { ids.insert($0.id).inserted }
+        }
         guard watching, dest == d else { return }
         // One empty answer keeps what you had (that hasn't left).
         let list = found.isEmpty ? ([best].compactMap { $0 } + others).filter { $0.first.departure > now } : found
@@ -220,6 +228,19 @@ final class GoStore: ObservableObject {
             missed = nil
             tell("\(Self.title(m.trip.first)) has left", "Next: \(Self.what(p.first)) at \(Fmt.hhmm(p.first.departure)) from \(Fmt.place(p.first.fromStop)) · \(d.short) \(Fmt.hhmm(p.end))", kind: "late")
         }
+    }
+
+    private var earlierCache: (id: String, at: Date, list: [DoorTrip])?
+
+    /// Earlier ways onto `t` (looked up again every minute and a half, or when the one it watches changes).
+    private func earlierWays(onto t: DoorTrip) async -> [DoorTrip] {
+        let now = Date()
+        if let c = earlierCache, c.id == t.id, now.timeIntervalSince(c.at) < 90 {
+            return c.list.filter { $0.first.departure > now.addingTimeInterval(Double($0.first.walkBefore) * 60) }
+        }
+        let list = await Transit.earlierWays(onto: t, now: now)
+        earlierCache = (t.id, now, list)
+        return list
     }
 
     /// Which gets you there first: the earliest arrival; the same arrival, then fewer changes, then the one that leaves later
