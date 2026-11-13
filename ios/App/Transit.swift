@@ -153,19 +153,29 @@ enum Transit {
         return iso.date(from: s) ?? isoFrac.date(from: s)
     }
 
+    /// Whatever `work` gives within `seconds`, or nil (and it's stopped): so a slow answer never holds a screen.
+    static func within<T: Sendable>(_ seconds: Double, _ work: @escaping @Sendable () async -> T) async -> T? {
+        await withTaskGroup(of: T?.self) { g in
+            g.addTask { await work() }
+            g.addTask { try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000)); return nil }
+            let first = await g.next() ?? nil
+            g.cancelAll()
+            return first
+        }
+    }
+
     /// One question to Transitous. A slow connection or a busy server (a timeout, a dropped connection, "too many
-    /// requests", a server error) gets two more tries, a moment apart, before it gives up: otherwise one bad moment on the
-    /// train leaves a board empty until the next refresh.
+    /// requests", a server error) gets one more try a moment later: otherwise one bad moment on the train leaves a board
+    /// empty until the next refresh. It answers in a second or two, so one that takes six is stuck.
     static func get(_ path: String, _ items: [URLQueryItem]) async throws -> Any {
         var c = URLComponents(string: base + path)!
         c.queryItems = items
         var last: Error = URLError(.unknown)
-        for attempt in 0..<3 {
+        for attempt in 0..<2 {
             if attempt > 0 {
-                try await Task.sleep(nanoseconds: attempt == 1 ? 800_000_000 : 2_500_000_000)
+                try await Task.sleep(nanoseconds: 600_000_000)
             }
-            // it answers in a second or two: one that takes ten is stuck, and a new try is quicker than waiting
-            var req = URLRequest(url: c.url!, timeoutInterval: 10)
+            var req = URLRequest(url: c.url!, timeoutInterval: attempt == 0 ? 6 : 5)
             req.setValue(userAgent, forHTTPHeaderField: "User-Agent")
             do {
                 let (data, resp) = try await URLSession.shared.data(for: req)

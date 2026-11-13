@@ -267,7 +267,8 @@ final class LiveStore: ObservableObject {
         if let f = from {
             plannedFrom = f
             // on a bus or train (moving, or moved in the last 3 minutes, e.g. standing at a station): carry on with it
-            if let m = lastMoving, Date().timeIntervalSince(m) < 180, let ob = await Self.onBoardTrips(f, to: destination(dir)) {
+            let to = destination(dir)
+            if let m = lastMoving, Date().timeIntervalSince(m) < 180, let ob = await Transit.within(7, { await Self.onBoardTrips(f, to: to) }) ?? nil {
                 onBoard = ob.0; trips = ob.1
             } else {
                 onBoard = nil; trips = await Transit.tripsFrom(f.coordinate, to: destination(dir))

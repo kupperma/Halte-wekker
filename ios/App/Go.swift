@@ -30,6 +30,7 @@ final class GoStore: ObservableObject {
     @Published private(set) var here: CLLocation?
     @Published private(set) var demo = false                 // pretend buses, to try it at home
     private var demoTask: Task<Void, Never>?
+    private var look: Task<Void, Never>?                      // the "are you on board?" look, beside the planning
     struct Note: Identifiable, Equatable {
         let id = UUID()
         let at: Date
@@ -98,15 +99,17 @@ final class GoStore: ObservableObject {
         watching = true
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
         trip?.setGo(true)
+        look?.cancel()
+        look = Task { [weak self] in await self?.firstLook() }    // on a bus or train already? at the same time as planning
         loop = Task { [weak self] in
-            await self?.firstLook()                // on a bus or train already? then it plans from there
             while !Task.isCancelled {
                 guard let self, self.watching else { return }
                 await self.refresh()
                 // quicker when the one you're catching is close
                 let soon = (self.best?.first.departure.timeIntervalSinceNow ?? .infinity) < 12 * 60
-                let wait: UInt64 = self.best == nil ? 6 : soon ? 20 : 40          // nothing yet: look again soon
-                try? await Task.sleep(nanoseconds: wait * 1_000_000_000)
+                // nothing on screen yet: look again soon (no position yet: sooner still)
+                let wait: Double = self.best == nil ? (self.here == nil ? 1.5 : 4) : soon ? 20 : 40
+                try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
             }
         }
         detect = Task { [weak self] in
@@ -123,6 +126,7 @@ final class GoStore: ObservableObject {
         watching = false
         loop?.cancel(); loop = nil
         detect?.cancel(); detect = nil
+        look?.cancel(); look = nil
         seen = nil
         trip?.setGo(false)
     }
@@ -133,22 +137,21 @@ final class GoStore: ObservableObject {
         guard watching else { return }
         // the newest fix; an old one only when no new one comes (indoors)
         let fix = [trip?.lastFix, fallback].compactMap { $0 }.max { $0.timestamp < $1.timestamp }
-        guard let loc = fix, loc.timestamp.timeIntervalSinceNow > -300 || Date().timeIntervalSince(since) > 20 else {
+        guard let loc = fix, loc.timestamp.timeIntervalSinceNow > -300 || Date().timeIntervalSince(since) > 8 else {
             if trip?.locationDenied == true { error = "Location is off for Haltewekker. Turn it on in Settings to plan from where you are." }
             return
         }
         here = loc
         Self.waitFrom = loc
+        // The on-board look found the one you're on: its plan is on screen while it makes sure. Leave it.
+        if onBoard != nil { return }
         // Going at train or bus speed (faster than a bike): a walk to a stop from here makes no sense. Find which one
-        // you're on and plan from it; until then, say so. (In a car it plans once you stop.)
-        if LiveStore.movingFix(loc), loc.speed >= 8, loc.timestamp.timeIntervalSinceNow > -30, onBoard == nil, trip?.phase == .idle, !demo {
-            await firstLook()
-            guard watching else { return }
-            if onBoard == nil {
-                movingUnknown = true
-                best = nil; others = []; error = nil
-                return
-            }
+        // you're on (beside this, not in the way) and plan from it; until then, say so. (In a car it plans once you stop.)
+        if LiveStore.movingFix(loc), loc.speed >= 8, loc.timestamp.timeIntervalSinceNow > -30, trip?.phase == .idle, !demo {
+            lookAgain()
+            movingUnknown = true
+            best = nil; others = []; error = nil
+            return
         }
         movingUnknown = false
         let now = Date()
@@ -164,30 +167,49 @@ final class GoStore: ObservableObject {
             return
         }
         let d = dest
-        var found = await Transit.tripsFrom(loc.coordinate, to: d, count: 8, keep: 8)
-        if let dl = deadline {
-            // a planned trip: also the latest ones that still get you there in time
-            var seen = Set(found.map(\.id))
+        // The ways from here, within 8 seconds (a slow answer doesn't hold the screen: it tries again on the next look).
+        let c = loc.coordinate
+        let found = await Transit.within(8) { await Transit.tripsFrom(c, to: d, count: 8, keep: 8) } ?? []
+        guard watching, dest == d, onBoard == nil else { return }
+        await apply(found, loc: loc, d: d, now: now)
+        // Then, with that on screen, the extras: earlier ways onto the same connection, which the planner leaves out (the
+        // same arrival, but you'd leave earlier: the Sprinter that's in Breda before the Intercity and makes the same bus,
+        // the earlier 306 that leaves room to change), and for a planned trip the latest that still get you there in time.
+        var more: [DoorTrip] = []
+        async let late: [DoorTrip] = latestInTime(from: c, to: d, now: now)
+        if let top = best { more += await Transit.within(6) { await self.earlierWays(onto: top) } ?? [] }
+        more += await late
+        var ids = Set(found.map(\.id))
+        more = more.filter { ids.insert($0.id).inserted }
+        guard !more.isEmpty, watching, dest == d, onBoard == nil else { return }
+        await apply(found + more, loc: loc, d: d, now: Date())
+    }
+
+    /// A planned trip: the latest ways that still get you there in time (within 6 seconds).
+    private func latestInTime(from c: CLLocationCoordinate2D, to d: Place, now: Date) async -> [DoorTrip] {
+        guard let dl = deadline else { return [] }
+        return await Transit.within(6) {
+            var out: [DoorTrip] = []
             for b in d.ids {
-                let late = await Transit.plan(from: "\(loc.coordinate.latitude),\(loc.coordinate.longitude)", to: b, modes: nil, at: dl, count: 5, maxTransfers: 4, arriveBy: true)
-                found += late.filter { $0.first.departure >= now.addingTimeInterval(-60) && seen.insert($0.id).inserted }
+                out += await Transit.plan(from: "\(c.latitude),\(c.longitude)", to: b, modes: nil, at: dl, count: 5, maxTransfers: 4, arriveBy: true)
             }
-        }
-        // Earlier ways onto the same connection, which the planner leaves out (the same arrival, but you'd leave earlier):
-        // the Sprinter that's in Breda before the Intercity and makes the same bus. Something to get on now, and a way
-        // out if the first one runs late. They show in Compare and as a branch on your trip; the one it watches stays the
-        // one that lets you leave latest.
-        if let top = found.filter({ !$0.first.cancelled && $0.start >= now.addingTimeInterval(-90) }).min(by: Self.sooner) {
-            var ids = Set(found.map(\.id))
-            found += await earlierWays(onto: top).filter { ids.insert($0.id).inserted }
-        }
-        guard watching, dest == d else { return }
+            return out.filter { $0.first.departure >= now.addingTimeInterval(-60) }
+        } ?? []
+    }
+
+    /// The look at what you're on, again (unless it's looking already).
+    private func lookAgain() {
+        guard look == nil || look!.isCancelled || !lookingOnBoard else { return }
+        look = Task { [weak self] in await self?.firstLook() }
+    }
+
+    /// Choose from what it found, put it on screen, and tell you what changed.
+    private func apply(_ found: [DoorTrip], loc: CLLocation, d: Place, now: Date) async {
         // Nothing from here, and you were just going at train or bus speed (slowing down, or stopped at a signal between
         // stations): you're on board. Find which one, and don't say there's no way.
         if found.isEmpty, best == nil, trip?.movedRecently == true, onBoard == nil, trip?.phase == .idle, !demo {
-            await firstLook()
-            guard watching else { return }
-            if onBoard == nil { movingUnknown = true; error = nil }
+            lookAgain()
+            movingUnknown = true; error = nil
             return
         }
         // One empty answer keeps what you had (that hasn't left).
@@ -375,22 +397,26 @@ final class GoStore: ObservableObject {
         defer { lookingOnBoard = false }
         let opened = Date()
         var fix: CLLocation?
-        for _ in 0..<20 {
+        // a fix from the last 20 seconds is good enough; else wait for one, two and a half seconds at most
+        for _ in 0..<10 {
             if let f = trip.lastFix, f.horizontalAccuracy >= 0, f.horizontalAccuracy < 100, f.timestamp > opened.addingTimeInterval(-20) {
                 fix = f
-                if f.timestamp >= opened || LiveStore.movingFix(f) { break }
+                break
             }
             try? await Task.sleep(nanoseconds: 250_000_000)
             guard watching else { return }
         }
-        guard let f = fix, LiveStore.movingFix(f) || trip.movedRecently else { return }      // not moving like a bus: plan from here
+        guard let f = fix ?? trip.lastFix, LiveStore.movingFix(f) || trip.movedRecently else { return }      // not moving like a bus
         let d = dest
-        guard var ob = await LiveStore.onBoardTrips(f, to: d, wasMoving: trip.movedRecently), watching, dest == d, trip.phase == .idle, !ob.1.isEmpty else { return }
+        let moving = trip.movedRecently
+        guard var ob = await Transit.within(7, { await LiveStore.onBoardTrips(f, to: d, wasMoving: moving) }) ?? nil,
+              watching, dest == d, trip.phase == .idle, !ob.1.isEmpty else { return }
+        movingUnknown = false
         onBoard = ob.0.vehicle
         best = ob.1.first; others = Array(ob.1.dropFirst())
         here = f; updated = Date(); error = nil
-        for _ in 0..<5 {
-            try? await Task.sleep(nanoseconds: 6_000_000_000)
+        for _ in 0..<4 {
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
             guard watching, dest == d, trip.phase == .idle, let v = onBoard else { return }
             let ranked = await trip.matchVehicles(mode: nil)
             guard watching, dest == d, trip.phase == .idle else { return }
@@ -407,8 +433,9 @@ final class GoStore: ObservableObject {
                 best = o2.1.first; others = Array(o2.1.dropFirst()); updated = Date()
             }
         }
-        // not seen with it again: it plans from where you are (and still notices when you're on one)
+        // not seen with it again: it plans from where you are right away (and still notices when you're on one)
         onBoard = nil; best = nil; others = []
+        await refresh()
     }
 
     // MARK: on board?
