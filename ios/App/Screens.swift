@@ -121,6 +121,7 @@ struct HomeView: View {
     @State private var liveTrack: LiveTrackTarget?         // a bus or train you tapped, live on a map
     @State private var showMoving = false                  // everything moving near you, on a map
     @State private var showSteady = false                  // how steady the lines are right now
+    @State private var showOutfit = false                  // what to wear today
     @State private var showDemo = false                    // try it at home
     @State private var showNotices = false                 // the notifications you had, and what's watched
     @State private var planByArrival = true                // the plan sheet opens on "be there by"
@@ -163,6 +164,7 @@ struct HomeView: View {
         .sheet(item: $liveTrack) { LiveBusSheet(target: $0).presentationDetents([.large]) }
         .sheet(isPresented: $showMoving) { LiveAllSheet(center: near.position?.coordinate ?? Place.breda.coordinate).presentationDetents([.large]) }
         .sheet(isPresented: $showSteady) { SteadySheet().presentationDetents([.large]) }
+        .sheet(isPresented: $showOutfit) { OutfitSheet().presentationDetents([.large]) }
         .sheet(isPresented: $choosingDestination) {
             DestinationSheet { d in
                 live.go(to: d)
@@ -177,9 +179,15 @@ struct HomeView: View {
         }
         .sheet(isPresented: $showDemo) { DemoSheet().presentationDetents([.large]) }
         .sheet(isPresented: $showNotices) { NotificationsSheet().presentationDetents([.medium, .large]) }
-        // on the map: the bell, top left, clear of the map's own buttons
+        // on the map: the bell and what to wear, top left, clear of the map's own buttons
         .overlay(alignment: .topLeading) {
-            if stage == .map { NoticeBell { showNotices = true }.padding(.leading, 18).padding(.top, 4).transition(.opacity) }
+            if stage == .map {
+                HStack(spacing: 8) {
+                    NoticeBell { showNotices = true }
+                    OutfitTag { showOutfit = true }
+                }
+                .padding(.leading, 18).padding(.top, 4).transition(.opacity)
+            }
         }
         .sheet(isPresented: $planning) { PlanSheet(byArrival: planByArrival) }
         .sheet(isPresented: $liveSettings, onDismiss: { Task { await live.refresh(trip.direction, force: true) } }) { LiveSettingsSheet() }
@@ -198,6 +206,9 @@ struct HomeView: View {
                     await SchoolAlarm.shared.refresh()
                     Watchdog.shared.mark("checking watched trains")
                     await watch.check()
+                    Watchdog.shared.mark("getting the weather")
+                    updateOutfit()
+                    await OutfitStore.shared.refresh()
                     autoGo()
                     Watchdog.shared.mark("showing the home screen")
                 }
@@ -230,6 +241,21 @@ struct HomeView: View {
             guard stage == .leaving else { return }
             withAnimation(.spring(response: 0.45, dampingFraction: 0.9)) { stage = .station }
         }
+    }
+
+    /// What the outfit screen plans for: from where you are to where you're going, leaving and arriving as your trip
+    /// does (Fastest trip, today's first class, or the next way there).
+    private func updateOutfit() {
+        var leave: Date?, arrive: Date?
+        if let b = goStore.best {
+            leave = b.start; arrive = b.end
+        } else if let n = SchoolAlarm.shared.next, let l = n.leave, l > Date().addingTimeInterval(-3600),
+                  Calendar.current.isDate(l, inSameDayAs: Date()) || Calendar.current.component(.hour, from: Date()) >= 19 {
+            leave = l; arrive = n.trip?.end ?? n.beThere
+        } else if let t = live.next.first {
+            leave = t.start; arrive = t.end
+        }
+        OutfitStore.shared.set(here: near.position ?? trip.lastFix, dest: live.destination(trip.direction), leave: leave, arrive: arrive)
     }
 
     /// Around the time to leave for a trip you planned (your first class, or a Be there by time): the hands-free screen
@@ -922,6 +948,21 @@ struct HomeView: View {
     }
 
     @ViewBuilder private var moreContent: some View {
+        Button { showOutfit = true } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "tshirt.fill").font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
+                    .frame(width: 32, height: 32).background(OutfitStore.shared.plan?.start?.layer.color ?? BoardInk.band, in: RoundedRectangle(cornerRadius: 6))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Outfit").font(HWFont.display(17)).foregroundStyle(Paper.ink)
+                    Text("What to wear today: layers, rain, and when to drop one.").font(HWFont.body(12)).foregroundStyle(Paper.muted)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right").font(.system(size: 12, weight: .bold)).foregroundStyle(Paper.ink.opacity(0.8))
+            }
+            .contentShape(Rectangle())
+            .brass(pal, pad: 14)
+        }
+        .buttonStyle(.plain)
         Button { showSteady = true } label: {
             HStack(spacing: 10) {
                 Coin(grade: Steady.rank(line: "306", train: false), size: 32)

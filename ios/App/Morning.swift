@@ -215,6 +215,7 @@ struct MorningView: View {
     @ObservedObject private var school = SchoolAlarm.shared
     let go: (SchoolAlarm.Planned) -> Void
     @State private var picking: [PhotosPickerItem] = []
+    @State private var showOutfit = false
 
     /// Today's (or the next) school day.
     private var day: SchoolAlarm.Planned? {
@@ -256,6 +257,8 @@ struct MorningView: View {
             guard !items.isEmpty else { return }
             Task { await morning.add(items); picking = [] }
         }
+        .sheet(isPresented: $showOutfit) { OutfitSheet().presentationDetents([.large]) }
+        .task { await OutfitStore.shared.refresh() }
     }
 
     /// The picture fills the screen and is cut to it (a wide photo mustn't push the time and the card off the sides).
@@ -305,6 +308,7 @@ struct MorningView: View {
                     }
                 }
                 .padding(.horizontal, 14)
+                Button { showOutfit = true } label: { OutfitLine() }.buttonStyle(.plain).padding(.horizontal, 14)
                 Button { go(p) } label: {
                     Label("GO HANDS-FREE", systemImage: "bolt.fill").font(HWFont.display(14)).tracking(0.8).foregroundStyle(.white)
                         .frame(maxWidth: .infinity).padding(.vertical, 12).background(Paper.green, in: RoundedRectangle(cornerRadius: 6))
