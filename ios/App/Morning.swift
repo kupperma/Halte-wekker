@@ -354,13 +354,22 @@ struct MorningSection: View {
                 LazyVGrid(columns: cols, spacing: 10) {
                     ForEach(morning.all, id: \.self) { l in tile(l) }
                     PhotosPicker(selection: $picking, maxSelectionCount: 10, matching: .images) {
-                        VStack(spacing: 4) {
-                            Image(systemName: "plus").font(.system(size: 18, weight: .bold))
-                            Text("Your photos").font(HWFont.body(10.5)).multilineTextAlignment(.center)
+                        VStack(spacing: 3) {
+                            Color.clear
+                                .aspectRatio(0.462, contentMode: .fit)
+                                .frame(maxWidth: .infinity)
+                                .background(Paper.navy.opacity(0.08), in: RoundedRectangle(cornerRadius: 7))
+                                .overlay(RoundedRectangle(cornerRadius: 7).stroke(Paper.navy.opacity(0.3), style: StrokeStyle(lineWidth: 1.2, dash: [4, 3])))
+                                .overlay {
+                                    VStack(spacing: 6) {
+                                        Image(systemName: "photo.badge.plus").font(.system(size: 22, weight: .semibold))
+                                        Text("Add").font(HWFont.body(11, bold: true))
+                                    }
+                                    .foregroundStyle(Paper.navy)
+                                }
+                            Text("Your photos").font(HWFont.body(10.5)).foregroundStyle(Paper.navy).lineLimit(1).minimumScaleFactor(0.8)
                         }
-                        .foregroundStyle(Paper.navy).frame(maxWidth: .infinity).aspectRatio(0.462, contentMode: .fit)
-                        .background(Paper.navy.opacity(0.08), in: RoundedRectangle(cornerRadius: 7))
-                        .overlay(RoundedRectangle(cornerRadius: 7).stroke(Paper.navy.opacity(0.25), style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                 }
