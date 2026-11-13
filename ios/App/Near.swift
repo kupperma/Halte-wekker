@@ -50,6 +50,13 @@ final class NearMe: NSObject, ObservableObject, CLLocationManagerDelegate {
             return
         }
         lastAsk = Date()
+        // The position the phone already has (from a minute ago), right away: asking for a new one can take a while,
+        // inside a station especially. The new one follows.
+        if position.map({ Date().timeIntervalSince($0.timestamp) > 120 }) ?? true, let l = manager.location,
+           Date().timeIntervalSince(l.timestamp) < 180, l.horizontalAccuracy >= 0, l.horizontalAccuracy < 500 {
+            position = l
+            onPosition(l)
+        }
         manager.requestLocation()
     }
 

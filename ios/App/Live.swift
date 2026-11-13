@@ -143,6 +143,8 @@ final class LiveStore: ObservableObject {
     /// Where you're going: your pick, or school or home.
     func destination(_ dir: Direction) -> Place { custom?.place ?? (dir == .toSchool ? .buas : .veghel) }
 
+    private func loadNearIfAny(_ h: CLLocation?) async { if let h { await loadNear(h) } }
+
     /// The stops near you (the two nearest bus stops, both sides, and the nearest station) and what leaves from them.
     private func loadNear(_ h: CLLocation) async {
         if nearAt.map({ h.distance(from: $0.0) > 150 || Date().timeIntervalSince($0.1) > 600 }) ?? true {
@@ -223,6 +225,8 @@ final class LiveStore: ObservableObject {
         if !force, !moved, loadedFor == key, let u = updated, Date().timeIntervalSince(u) < 60 { return }
         busy = true; loadedFor = key; here = from
         defer { busy = false }
+        // the boards around you load at the same time as your trip (they used to wait for it)
+        async let boards: Void = loadNearIfAny(from)
         let trips: [DoorTrip]
         if let f = from {
             plannedFrom = f
@@ -235,15 +239,15 @@ final class LiveStore: ObservableObject {
         }
         else if custom != nil { onBoard = nil; trips = await Transit.tripsFrom(usual.coordinate, to: destination(dir)) }
         else { onBoard = nil; trips = await Transit.nextTrips(dir) }
-        guard loadedFor == key else { return }
+        guard loadedFor == key else { await boards; return }
         // One empty answer from Transitous doesn't wipe what you had: keep the trips that haven't left yet, and ask again sooner.
         next = trips.isEmpty ? next.filter { $0.first.departure > Date().addingTimeInterval(-60) } : trips
         nextError = next.isEmpty ? "No trips found right now. It tries again in a minute." : nil
         if pick >= next.count { pick = 0 }
         updated = trips.isEmpty ? Date().addingTimeInterval(-40) : Date()
         // From anywhere: the stops around you instead of the lists for your two routes.
+        await boards
         if anywhere {
-            if let f = from { await loadNear(f) }
             guard loadedFor == key else { return }
             panelsUpdated = Date()
             return

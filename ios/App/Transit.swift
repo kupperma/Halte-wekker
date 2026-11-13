@@ -163,7 +163,8 @@ enum Transit {
             if attempt > 0 {
                 try await Task.sleep(nanoseconds: attempt == 1 ? 800_000_000 : 2_500_000_000)
             }
-            var req = URLRequest(url: c.url!, timeoutInterval: attempt == 0 ? 20 : 12)
+            // it answers in a second or two: one that takes ten is stuck, and a new try is quicker than waiting
+            var req = URLRequest(url: c.url!, timeoutInterval: 10)
             req.setValue(userAgent, forHTTPHeaderField: "User-Agent")
             do {
                 let (data, resp) = try await URLSession.shared.data(for: req)
@@ -264,22 +265,19 @@ enum Transit {
     static func tripsFrom(_ c: CLLocationCoordinate2D, to: Place, count: Int = 5, keep: Int = 5) async -> [DoorTrip] {
         let now = Date()
         let here = CLLocation(latitude: c.latitude, longitude: c.longitude)
+        // all at once: from your spot, which station you're at (if any), then from the station too
+        async let fromHere = planAll(from: "\(c.latitude),\(c.longitude)", to: to.ids, at: now.addingTimeInterval(-120), count: count)
         let station = await stationAt(c)
-        var all: [DoorTrip] = []
-        for b in to.ids {
-            all += await plan(from: "\(c.latitude),\(c.longitude)", to: b, modes: nil, at: now.addingTimeInterval(-120), count: count, maxTransfers: 4)
-            // At a station: from the station itself too. From your GPS spot inside a big one, the walk to the platforms can
-            // come out long or odd, and a bus to the station you're standing in looks quicker. Your walk to the platform:
-            // about how far it is.
-            if let st = station {
-                let fromStation = await plan(from: st.id, to: b, modes: nil, at: now.addingTimeInterval(-120), count: count, maxTransfers: 4)
-                all += fromStation.map { t in
-                    let f = t.first
-                    let m = f.fromLat.flatMap { a in f.fromLon.map { o in here.distance(from: CLLocation(latitude: a, longitude: o)) } } ?? 150
-                    let walk = min(8, max(2, Int((m / 1.2 / 60).rounded(.up))))
-                    return DoorTrip(rides: [f.walking(walk)] + t.rides.dropFirst(), start: f.departure.addingTimeInterval(-Double(walk) * 60), end: t.end)
-                }
-            }
+        async let fromStation = planAll(from: station?.id, to: to.ids, at: now.addingTimeInterval(-120), count: count)
+        var all = await fromHere
+        // At a station: from the station itself too. From your GPS spot inside a big one, the walk to the platforms can
+        // come out long or odd, and a bus to the station you're standing in looks quicker. Your walk to the platform:
+        // about how far it is.
+        all += (await fromStation).map { t in
+            let f = t.first
+            let m = f.fromLat.flatMap { a in f.fromLon.map { o in here.distance(from: CLLocation(latitude: a, longitude: o)) } } ?? 150
+            let walk = min(8, max(2, Int((m / 1.2 / 60).rounded(.up))))
+            return DoorTrip(rides: [f.walking(walk)] + t.rides.dropFirst(), start: f.departure.addingTimeInterval(-Double(walk) * 60), end: t.end)
         }
         // A ride that only takes you to where you are (the station you're at): you're there already. Only when there's
         // another way, though.
@@ -345,6 +343,17 @@ enum Transit {
             if out.count >= 3 { break }
         }
         return out
+    }
+
+    /// The planner from one place to each of `ids`, all at once (nil: nothing).
+    private static func planAll(from: String?, to ids: [String], at: Date, count: Int) async -> [DoorTrip] {
+        guard let from else { return [] }
+        return await withTaskGroup(of: [DoorTrip].self) { g in
+            for b in ids { g.addTask { await plan(from: from, to: b, modes: nil, at: at, count: count, maxTransfers: 4) } }
+            var all: [DoorTrip] = []
+            for await r in g { all += r }
+            return all
+        }
     }
 
     /// The train station you're at, if any: within 350 m (big stations are a few hundred metres across, and the GPS
