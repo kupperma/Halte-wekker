@@ -477,7 +477,7 @@ struct PlannerTripCard: View {
                 ForEach(Array(trip.rides.enumerated()), id: \.offset) { i, r in
                     if i > 0 { Rectangle().fill(Color(hex: 0x9FB1D6)).frame(width: 8, height: 2) }
                     HStack(spacing: 4) {
-                        _ = r.isTrain ? nil : r.grade              // (grading remembers a new fastest time for the speed rank)
+                        let _ = r.isTrain ? nil : r.grade          // (grading remembers a new fastest time for the speed rank)
                         LineBullet(line: r.line, train: r.isTrain, at: r.departure, height: 18, minWidth: 30, font: 11)
                         VStack(alignment: .leading, spacing: 0) {
                             Text(Fmt.hhmm(r.departure)).font(BoardInk.sans(13)).foregroundStyle(r.cancelled ? HWPalette.stamp : BoardInk.navy).strikethrough(r.cancelled)
@@ -512,7 +512,7 @@ struct PlannerRideRow: View {
         let st = RideText.status(ride, info)
         let gone = ride.cancelled || info?.cancelled == true
         let late = ride.live && !gone && abs(ride.delay) >= 1
-        _ = ride.isTrain ? nil : ride.grade
+        let _ = ride.isTrain ? nil : ride.grade
         Button(action: tap) {
             HStack(alignment: .top, spacing: 8) {
                 LineBullet(line: ride.line, train: ride.isTrain, at: ride.departure, height: 22, minWidth: 38, font: 13)
@@ -681,7 +681,7 @@ struct BusPage: View {
     let track: () -> Void
 
     var body: some View {
-        _ = rank?.grade
+        let _ = rank?.grade
         VStack(alignment: .leading, spacing: 10) {
             PageTop(tracked: tracked, back: back, track: track)
             HStack(spacing: 8) {

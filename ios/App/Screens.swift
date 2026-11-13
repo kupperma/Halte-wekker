@@ -1915,7 +1915,7 @@ struct ArrivalView: View {
         VStack(alignment: .leading, spacing: 10) {
             PlannerBar(title: "Next", sub: trip.arrival.map { "\(trip.finalName) around \(Fmt.hhmm($0))" })
             if let r = trip.next {
-                _ = r.isTrain ? nil : r.grade
+                let _ = r.isTrain ? nil : r.grade
                 HStack(spacing: 10) {
                     LineBullet(line: r.line, train: r.isTrain, at: r.departure, height: 28, minWidth: 46, font: 15)
                     VStack(alignment: .leading, spacing: 2) {
