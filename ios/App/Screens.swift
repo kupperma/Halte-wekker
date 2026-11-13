@@ -276,12 +276,14 @@ struct HomeView: View {
             }
             return
         }
+        // (leaving at a time: from a quarter of an hour before, the fastest way from then, no deadline to race)
         if let a = planner.arrive, let T = a.when, let t = planner.arriveChosen,
-           now > t.start.addingTimeInterval(-45 * 60), now < t.first.departure.addingTimeInterval(5 * 60) {
+           now > t.start.addingTimeInterval(a.leaving ? -15 * 60 : -45 * 60), now < t.first.departure.addingTimeInterval(5 * 60) {
             if trip.direction != (a.out ? .toSchool : .home) { trip.pick(a.out ? .toSchool : .home) }
             withAnimation(.easeInOut(duration: 0.35)) {
-                goStore.openForPlan(to: a.out ? .buas : .veghel, from: near.position, deadline: T, label: "\(a.out ? "BUas" : "home") by \(a.time)",
-                                    key: "arrive-\(a.date)-\(a.time)")
+                goStore.openForPlan(to: a.out ? .buas : .veghel, from: near.position, deadline: a.leaving ? nil : T,
+                                    label: a.leaving ? nil : "\(a.out ? "BUas" : "home") by \(a.time)",
+                                    key: "arrive-\(a.date)-\(a.time)\(a.leaving ? "-leave" : "")")
             }
         }
     }
@@ -293,7 +295,9 @@ struct HomeView: View {
             withAnimation(.easeInOut(duration: 0.35)) { goStore.open(to: .buas, from: near.position, deadline: n.beThere, label: "your \(Fmt.hhmm(n.classStart)) class") }
         } else if let a = planner.arrive, let T = a.when {
             if trip.direction != (a.out ? .toSchool : .home) { trip.pick(a.out ? .toSchool : .home) }
-            withAnimation(.easeInOut(duration: 0.35)) { goStore.open(to: a.out ? .buas : .veghel, from: near.position, deadline: T, label: "\(a.out ? "BUas" : "home") by \(a.time)") }
+            withAnimation(.easeInOut(duration: 0.35)) {
+                goStore.open(to: a.out ? .buas : .veghel, from: near.position, deadline: a.leaving ? nil : T, label: a.leaving ? nil : "\(a.out ? "BUas" : "home") by \(a.time)")
+            }
         }
     }
 
@@ -351,6 +355,7 @@ struct HomeView: View {
             return "Alarm \(SchoolAlarm.dayWord(a)) \(Fmt.hhmm(a)) · first class \(Fmt.hhmm(n.classStart))"
         }
         if let a = planner.arrive {
+            if a.leaving { return "\(a.dayLabel) · \(a.out ? "to BUas" : "home") · leave \(a.time)" + (planner.arriveChosen.map { " · there \(Fmt.hhmm($0.end))" } ?? "") }
             return "\(a.dayLabel) · \(a.out ? "BUas" : "home") by \(a.time)" + (planner.arriveChosen.map { " · leave \(Fmt.hhmm($0.start))" } ?? "")
         }
         guard let t = planner.trip else { return "Be there by a time, or travel with your friend’s train" }
@@ -1074,8 +1079,8 @@ struct HomeView: View {
             HStack(spacing: 12) {
                 Image(systemName: "flag.checkered").font(.system(size: 14, weight: .semibold)).foregroundStyle(.white).frame(width: 32, height: 32).background(Paper.green, in: RoundedRectangle(cornerRadius: 6))
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Be there by…").font(HWFont.display(17)).foregroundStyle(Paper.ink)
-                    Text("Say when you want to be at school (or home). You get the trip that leaves the latest and still gets you there.").font(HWFont.body(12)).foregroundStyle(Paper.muted)
+                    Text("Be there by, or leave at…").font(HWFont.display(17)).foregroundStyle(Paper.ink)
+                    Text("Say when you want to be at school (or home), or when you want to head off. You get the best trip for it.").font(HWFont.body(12)).foregroundStyle(Paper.muted)
                 }
                 Spacer(minLength: 0)
                 Image(systemName: "chevron.right").font(.system(size: 12, weight: .bold)).foregroundStyle(Paper.ink.opacity(0.8))

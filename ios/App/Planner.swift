@@ -6,6 +6,9 @@ struct PlannedTrip: Codable, Equatable {
     var out: Bool               // true: to Breda, false: home
     var date: String            // yyyy-MM-dd
     var time: String            // HH:mm
+    var leave: Bool? = nil      // a "leave at" plan: `time` is when you head off (else when you want to be there)
+
+    var leaving: Bool { leave == true }
 
     var when: Date? {
         let f = DateFormatter()
@@ -15,6 +18,11 @@ struct PlannedTrip: Codable, Equatable {
     var expired: Bool {
         guard let w = when else { return true }
         return Date() > w.addingTimeInterval(Double(out ? 90 : 150) * 60)
+    }
+    /// A "be there by" plan is done at its time; a "leave at" one an hour and a half after it (you're on your way).
+    var done: Bool {
+        guard let w = when else { return true }
+        return Date() > w.addingTimeInterval(leaving ? 90 * 60 : 0)
     }
     var dayLabel: String {
         guard let w = when else { return date }
@@ -65,16 +73,20 @@ final class Planner: ObservableObject {
         trip = UserDefaults.standard.data(forKey: "plannedTrip").flatMap { try? JSONDecoder().decode(PlannedTrip.self, from: $0) }
         if trip?.expired == true { clear() }
         arrive = UserDefaults.standard.data(forKey: "arrivePlan").flatMap { try? JSONDecoder().decode(PlannedTrip.self, from: $0) }
-        if let a = arrive, let w = a.when, Date() > w { clearArrive() }
+        if let a = arrive, a.done { clearArrive() }
     }
 
     var arriveChosen: DoorTrip? { arriveOptions[safe: arrivePick] ?? arriveOptions.first }
 
-    /// Plan backwards from when you want to be there. Returns a message if the time doesn't work.
-    func setArrive(out: Bool, time: Date, tomorrow: Bool) -> String? {
+    /// Plan backwards from when you want to be there, or (`leave`) forwards from when you want to head off. Returns a
+    /// message if the time doesn't work.
+    func setArrive(out: Bool, time: Date, tomorrow: Bool, leave: Bool = false) -> String? {
         let day = Calendar.current.date(byAdding: .day, value: tomorrow ? 1 : 0, to: Date())!
-        let a = PlannedTrip(out: out, date: Fmt.ymd.string(from: day), time: Fmt.hhmm(time))
-        if let w = a.when, w < Date().addingTimeInterval(10 * 60) { return "That’s too soon (or already passed) today. Pick a later time, or Tomorrow." }
+        let a = PlannedTrip(out: out, date: Fmt.ymd.string(from: day), time: Fmt.hhmm(time), leave: leave ? true : nil)
+        if let w = a.when {
+            if leave, w < Date().addingTimeInterval(-5 * 60) { return "That time has passed today. Pick a later time, or Tomorrow." }
+            if !leave, w < Date().addingTimeInterval(10 * 60) { return "That’s too soon (or already passed) today. Pick a later time, or Tomorrow." }
+        }
         arrive = a; arriveOptions = []; arriveError = nil; arriveUpdated = nil; arrivePick = 0
         UserDefaults.standard.set(try? JSONEncoder().encode(a), forKey: "arrivePlan")
         Task { await refreshArrive(force: true) }
@@ -91,12 +103,34 @@ final class Planner: ObservableObject {
     /// (or from BUas going home), with live times.
     func refreshArrive(force: Bool = false) async {
         guard let a = arrive, let T = a.when else { return }
-        if Date() > T { clearArrive(); return }
+        if a.done { clearArrive(); return }
         guard !arriveBusy, force || arriveUpdated.map({ Date().timeIntervalSince($0) >= 120 }) ?? true else { return }
         arriveBusy = true
         defer { arriveBusy = false }
         let from: Place = a.out ? StopsStore.shared.veghel : .buas
         let to: Place = a.out ? .buas : .veghel
+        if a.leaving {
+            // head off at a time: the ones that leave then or after, the one that gets you there first (and safely, and
+            // with the least standing outside) on top
+            let all = await Transit.plan(from: from, to: to, modes: nil, at: T.addingTimeInterval(-60), count: 6, maxTransfers: 4)
+            guard arrive == a else { return }
+            var seen = Set<String>()
+            let after = all.filter { $0.start >= T.addingTimeInterval(-60) && $0.first.departure > Date().addingTimeInterval(-60) && seen.insert($0.id).inserted }
+                .sorted(by: GoStore.sooner)
+            arriveUpdated = Date()
+            if after.isEmpty {
+                arriveError = all.isEmpty ? "No trips found for that time yet. It tries again in a couple of minutes."
+                                          : "Nothing leaves \(a.out ? "your Veghel stops" : "BUas") after \(a.time)."
+                if !all.isEmpty { arriveOptions = [] }
+                return
+            }
+            let old = arriveChosen?.first.tripId
+            arriveOptions = Array(after.prefix(4))
+            arrivePick = arriveOptions.firstIndex { $0.first.tripId == old } ?? 0
+            arriveError = nil
+            remind()
+            return
+        }
         let all = await Transit.plan(from: from, to: to, modes: nil, at: T, count: 6, maxTransfers: 4, arriveBy: true)
         guard arrive == a else { return }
         var seen = Set<String>()
@@ -127,7 +161,8 @@ final class Planner: ObservableObject {
         let f = t.first
         let n = UNMutableNotificationContent()
         n.title = "Leave in 10 min"
-        n.body = "\(f.isTrain ? f.name : "Bus \(f.line)") at \(Fmt.hhmm(f.departure)) from \(Fmt.place(f.fromStop)) · \(a.out ? "BUas" : "home") by \(a.time)"
+        n.body = "\(f.isTrain ? f.name : "Bus \(f.line)") at \(Fmt.hhmm(f.departure)) from \(Fmt.place(f.fromStop)) · \(a.out ? "BUas" : "home") "
+            + (a.leaving ? "at \(Fmt.hhmm(t.end))" : "by \(a.time)")
         n.sound = .default
         n.interruptionLevel = .timeSensitive
         n.userInfo = ["kind": "go"]

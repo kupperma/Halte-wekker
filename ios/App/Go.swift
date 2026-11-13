@@ -70,7 +70,7 @@ final class GoStore: ObservableObject {
 
     /// The app opened around the time to leave for a trip you planned: open this screen for it (once; not again after you
     /// close it).
-    func openForPlan(to d: Place, from loc: CLLocation?, deadline dl: Date, label: String, key: String) {
+    func openForPlan(to d: Place, from loc: CLLocation?, deadline dl: Date?, label: String?, key: String) {
         guard !isOpen, UserDefaults.standard.string(forKey: "go.closedPlan") != key else { return }
         open(to: d, from: loc, deadline: dl, label: label, autoKey: key)
     }

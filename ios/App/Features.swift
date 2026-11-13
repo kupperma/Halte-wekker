@@ -190,7 +190,9 @@ struct PlanSheet: View {
     @EnvironmentObject var trip: TripManager
     @Environment(\.dismiss) private var dismiss
     var byArrival = true                    // be there by a time (or else: your friend's train)
-    @State private var arriveMode = true
+    @State private var mode = 0             // 0 be there by, 1 leave at, 2 your friend's train
+    private var arriveMode: Bool { mode != 2 }
+    private var leaveMode: Bool { mode == 1 }
     @State private var out = true
     @State private var time = Date()
     @State private var tomorrow = false
@@ -200,14 +202,17 @@ struct PlanSheet: View {
         NavigationStack {
             Form {
                 Section {
-                    Picker("Plan by", selection: $arriveMode) { Text("Be there by").tag(true); Text("Friend’s train").tag(false) }.pickerStyle(.segmented)
+                    Picker("Plan by", selection: $mode) { Text("Be there by").tag(0); Text("Leave at").tag(1); Text("Friend’s train").tag(2) }.pickerStyle(.segmented)
                 }
                 Section {
                     Picker("Direction", selection: $out) { Text(arriveMode ? "To school" : "To Breda").tag(true); Text("Home").tag(false) }.pickerStyle(.segmented)
-                    DatePicker(arriveMode ? (out ? "Be at BUas by" : "Be home by") : (out ? "Arrive in Breda at" : "Leave Breda at"), selection: $time, displayedComponents: .hourAndMinute)
+                    DatePicker(leaveMode ? (out ? "Leave Veghel at" : "Head home at") : arriveMode ? (out ? "Be at BUas by" : "Be home by") : (out ? "Arrive in Breda at" : "Leave Breda at"),
+                               selection: $time, displayedComponents: .hourAndMinute)
                     Picker("Day", selection: $tomorrow) { Text("Today").tag(false); Text("Tomorrow").tag(true) }.pickerStyle(.segmented)
                 } footer: {
-                    if arriveMode {
+                    if leaveMode {
+                        Text("The app finds the trip that gets you \(out ? "to BUas" : "home to Veghel") the soonest when you head off at that time from \(out ? "your Veghel stops" : "BUas"), with changes you’ll make and live times. You get a reminder ten minutes before you have to leave, and Fastest trip opens by itself around then.")
+                    } else if arriveMode {
                         Text("The app finds the trip that leaves the latest and still gets you \(out ? "to BUas" : "home to Veghel") in time, from \(out ? "your Veghel stops" : "BUas"), with live times. You get a reminder ten minutes before you have to leave.")
                     } else {
                         Text("Use the time of your friend’s train. The app finds that train, \(out ? "the bus from Veghel that gets you there in time and the bus to BUas after it" : "the bus from BUas to catch it and the bus to Veghel after it").")
@@ -216,7 +221,7 @@ struct PlanSheet: View {
                 if let error { Section { Text(error).foregroundStyle(Paper.late) } }
                 Section {
                     Button(arriveMode ? "Find the best trip" : "Find this trip") {
-                        let e = arriveMode ? planner.setArrive(out: out, time: time, tomorrow: tomorrow) : planner.set(out: out, time: time, tomorrow: tomorrow)
+                        let e = arriveMode ? planner.setArrive(out: out, time: time, tomorrow: tomorrow, leave: leaveMode) : planner.set(out: out, time: time, tomorrow: tomorrow)
                         if let e { error = e } else { dismiss() }
                     }
                     .foregroundStyle(pal.deep)
@@ -227,11 +232,24 @@ struct PlanSheet: View {
             .scrollContentBackground(.hidden)
             .background(PaperFill().ignoresSafeArea()).preferredColorScheme(.light)
             .font(HWFont.body(15)).tint(pal.band)
-            .navigationTitle(arriveMode ? "Be there by" : "Plan by train time")
+            .navigationTitle(leaveMode ? "Leave at" : arriveMode ? "Be there by" : "Plan by train time")
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
         }
+        .onChange(of: mode) { _, m in
+            // a leave-at time to start from: heading home at three (or now, if that's passed), or to school at eight
+            guard m == 1, planner.arrive?.leaving != true else { return }
+            let now = Date(), cal = Calendar.current
+            if out {
+                tomorrow = cal.component(.hour, from: now) >= 8
+                time = cal.date(bySettingHour: 8, minute: 0, second: 0, of: now) ?? now
+            } else {
+                let three = cal.date(bySettingHour: 15, minute: 0, second: 0, of: now) ?? now
+                tomorrow = false
+                time = three > now ? three : Date(timeIntervalSince1970: (now.timeIntervalSince1970 / 900).rounded(.up) * 900)
+            }
+        }
         .onAppear {
-            arriveMode = byArrival
+            mode = byArrival ? (planner.arrive?.leaving == true ? 1 : 0) : 2
             if byArrival {
                 if let a = planner.arrive, let w = a.when {
                     out = a.out; time = w; tomorrow = !Calendar.current.isDateInToday(w)
@@ -960,8 +978,8 @@ struct ArrivePass: View {
                 PaperBand(home: !a.out) {
                     HStack(alignment: .bottom) {
                         VStack(alignment: .leading, spacing: 1) {
-                            Text("BE THERE BY · \(a.dayLabel.uppercased())").font(BoardInk.sans(10)).tracking(1.6).opacity(0.85)
-                            Text("\(dest) by \(a.time)").font(HWFont.display(24)).lineLimit(1).minimumScaleFactor(0.7)
+                            Text("\(a.leaving ? "LEAVE AT" : "BE THERE BY") · \(a.dayLabel.uppercased())").font(BoardInk.sans(10)).tracking(1.6).opacity(0.85)
+                            Text(a.leaving ? "\(a.out ? "To BUas" : "Home") · leave \(a.time)" : "\(dest) by \(a.time)").font(HWFont.display(24)).lineLimit(1).minimumScaleFactor(0.7)
                         }
                         Spacer(minLength: 6)
                         Button(action: edit) {
@@ -975,14 +993,18 @@ struct ArrivePass: View {
                     let spare = Fmt.mins(T.timeIntervalSince(t.end))
                     HStack(alignment: .lastTextBaseline) {
                         VStack(alignment: .leading, spacing: 0) {
-                            Text("LEAVE BY").font(BoardInk.sans(10)).tracking(1.4).foregroundStyle(Paper.muted)
+                            Text(a.leaving ? "LEAVE AT" : "LEAVE BY").font(BoardInk.sans(10)).tracking(1.4).foregroundStyle(Paper.muted)
                             Text(Fmt.hhmm(t.start)).font(HWFont.display(32)).foregroundStyle(Paper.ink).monospacedDigit()
                         }
                         Spacer()
                         VStack(alignment: .trailing, spacing: 0) {
                             Text("THERE AT").font(BoardInk.sans(10)).tracking(1.4).foregroundStyle(Paper.muted)
                             Text(Fmt.hhmm(t.end)).font(HWFont.display(24)).foregroundStyle(Paper.ink).monospacedDigit()
-                            Text(spare == 0 ? "just in time" : "\(spare) min to spare").font(BoardInk.sans(11.5)).foregroundStyle(spare < 3 ? Paper.late : Paper.ok)
+                            if a.leaving {
+                                Text(Fmt.rideText(t.end.timeIntervalSince(t.start) / 60)).font(BoardInk.sans(11.5)).foregroundStyle(Paper.muted)
+                            } else {
+                                Text(spare == 0 ? "just in time" : "\(spare) min to spare").font(BoardInk.sans(11.5)).foregroundStyle(spare < 3 ? Paper.late : Paper.ok)
+                            }
                         }
                     }
                     if planner.arriveOptions.count > 1 {
@@ -993,7 +1015,7 @@ struct ArrivePass: View {
                                     Button { withAnimation(.easeInOut(duration: 0.2)) { planner.arrivePick = i } } label: {
                                         VStack(spacing: 0) {
                                             Text(Fmt.hhmm(o.first.departure)).font(BoardInk.sans(13))
-                                            Text(i == 0 ? "best" : "\(Fmt.mins(T.timeIntervalSince(o.end))) spare").font(BoardInk.sans(9.5, .medium)).opacity(0.85)
+                                            Text(i == 0 ? "best" : a.leaving ? "there \(Fmt.hhmm(o.end))" : "\(Fmt.mins(T.timeIntervalSince(o.end))) spare").font(BoardInk.sans(9.5, .medium)).opacity(0.85)
                                         }
                                         .foregroundStyle(i == planner.arrivePick ? Color.white : Paper.ink)
                                         .padding(.horizontal, 10).padding(.vertical, 5)
@@ -1007,7 +1029,8 @@ struct ArrivePass: View {
                     Rectangle().fill(Paper.rule).frame(height: 1)
                     TripLine(trip: t, others: planner.arriveOptions.filter { $0.id != t.id }, dest: dest)
                     PlanButtons(go: go, wake: { wake(t) })
-                    Text("Leaves the latest and still gets you there in time. A reminder comes ten minutes before you have to leave.")
+                    Text(a.leaving ? "Gets you there the soonest when you head off at \(a.time), with changes you’ll make. A reminder comes ten minutes before you have to leave."
+                                   : "Leaves the latest and still gets you there in time. A reminder comes ten minutes before you have to leave.")
                         .font(BoardInk.sans(10.5, .regular)).foregroundStyle(Paper.muted).fixedSize(horizontal: false, vertical: true)
                 } else if let e = planner.arriveError {
                     Text(e).font(BoardInk.sans(12.5)).foregroundStyle(Paper.late).fixedSize(horizontal: false, vertical: true)
