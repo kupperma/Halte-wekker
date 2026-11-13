@@ -120,6 +120,7 @@ struct HomeView: View {
     @State private var walkTo: WalkTarget?                 // the walk to a stop, on a map
     @State private var liveTrack: LiveTrackTarget?         // a bus or train you tapped, live on a map
     @State private var showMoving = false                  // everything moving near you, on a map
+    @State private var showSteady = false                  // how steady the lines are right now
     @State private var showDemo = false                    // try it at home
     @State private var showNotices = false                 // the notifications you had, and what's watched
     @State private var planByArrival = true                // the plan sheet opens on "be there by"
@@ -161,6 +162,7 @@ struct HomeView: View {
         .sheet(item: $walkTo) { WalkMapSheet(target: $0).presentationDetents([.large]) }
         .sheet(item: $liveTrack) { LiveBusSheet(target: $0).presentationDetents([.large]) }
         .sheet(isPresented: $showMoving) { LiveAllSheet(center: near.position?.coordinate ?? Place.breda.coordinate).presentationDetents([.large]) }
+        .sheet(isPresented: $showSteady) { SteadySheet().presentationDetents([.large]) }
         .sheet(isPresented: $choosingDestination) {
             DestinationSheet { d in
                 live.go(to: d)
@@ -920,6 +922,20 @@ struct HomeView: View {
     }
 
     @ViewBuilder private var moreContent: some View {
+        Button { showSteady = true } label: {
+            HStack(spacing: 10) {
+                Coin(grade: Steady.rank(line: "306", train: false), size: 32)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("How steady are they now?").font(HWFont.display(17)).foregroundStyle(Paper.ink)
+                    Text("Compare the buses and trains: late right now, S to C through the day.").font(HWFont.body(12)).foregroundStyle(Paper.muted)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right").font(.system(size: 12, weight: .bold)).foregroundStyle(Paper.ink.opacity(0.8))
+            }
+            .contentShape(Rectangle())
+            .brass(pal, pad: 14)
+        }
+        .buttonStyle(.plain)
         Button { showDemo = true } label: {
             HStack(spacing: 10) {
                 Image(systemName: "play.fill").font(.system(size: 14, weight: .semibold)).foregroundStyle(BoardInk.navy)
@@ -1899,9 +1915,9 @@ struct ArrivalView: View {
         VStack(alignment: .leading, spacing: 10) {
             PlannerBar(title: "Next", sub: trip.arrival.map { "\(trip.finalName) around \(Fmt.hhmm($0))" })
             if let r = trip.next {
-                let g = r.isTrain ? nil : r.grade
+                _ = r.isTrain ? nil : r.grade
                 HStack(spacing: 10) {
-                    LineBullet(line: r.line, train: r.isTrain, grade: g, height: 28, minWidth: 46, font: 15)
+                    LineBullet(line: r.line, train: r.isTrain, at: r.departure, height: 28, minWidth: 46, font: 15)
                     VStack(alignment: .leading, spacing: 2) {
                         Text("\(r.isTrain ? r.name : "Bus \(r.line)") to \(n.to.short)").font(BoardInk.sans(17)).foregroundStyle(Paper.ink).lineLimit(1).minimumScaleFactor(0.7)
                         Text([r.platform.map { "platform \($0)" }, "\(r.rideMinutes) min ride"].compactMap { $0 }.joined(separator: " · "))

@@ -596,6 +596,7 @@ struct GoView: View {
     @EnvironmentObject var ns: NSStore
     @State private var walkTo: WalkTarget?
     @State private var liveTrack: LiveTrackTarget?
+    @State private var showSteady = false
     @State private var choosing = false
     var home: Bool { trip.direction == .home }
     var pal: HWPalette { .of(home: home) }
@@ -639,6 +640,7 @@ struct GoView: View {
         .environment(\.colorScheme, .light)
         .sheet(item: $walkTo) { WalkMapSheet(target: $0).presentationDetents([.large]) }
         .sheet(item: $liveTrack) { LiveBusSheet(target: $0).presentationDetents([.large]) }
+        .sheet(isPresented: $showSteady) { SteadySheet().presentationDetents([.large]) }
         .sheet(isPresented: $choosing) {
             DestinationSheet { d in live.go(to: d); go.retarget(d.place) }
         }
@@ -757,7 +759,7 @@ struct GoView: View {
         let f = t.first
         let info = f.isTrain ? ns.rail(f) : nil
         let st = RideText.status(f, info)
-        let g = f.isTrain ? nil : f.grade
+        _ = f.isTrain ? nil : f.grade
         let track = info?.track ?? f.platform ?? ""
         let aboard = go.onBoard?.tripId == f.tripId && f.fromId == "onboard"
         let fromLine = aboard ? "stay on until \(Fmt.place(f.toStop))" : "from \(Fmt.place(f.fromStop))" + (track.isEmpty ? "" : " · platform \(track)")
@@ -783,7 +785,7 @@ struct GoView: View {
             .padding(.horizontal, -14).padding(.top, -14)
             kicker(aboard ? "You’re on" : "Take next")
             HStack(alignment: .center, spacing: 12) {
-                LineBullet(line: f.line, train: f.isTrain, grade: g, height: 44, minWidth: 62, font: 22)
+                LineBullet(line: f.line, train: f.isTrain, at: f.departure, height: 44, minWidth: 62, font: 22)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(GoStore.title(f)).font(BoardInk.sans(17)).foregroundStyle(Paper.ink).lineLimit(1)
                     Text("to \(toName)").font(BoardInk.sans(13, .regular)).foregroundStyle(Paper.ink.opacity(0.9)).lineLimit(1).minimumScaleFactor(0.7)
@@ -1010,7 +1012,16 @@ struct GoView: View {
     /// and how much later than the fastest.
     private func compareCard(_ best: DoorTrip) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            kicker("Compare", "if you take another one").padding(.bottom, 6)
+            HStack(alignment: .firstTextBaseline) {
+                kicker("Compare", "if you take another one")
+                Spacer(minLength: 4)
+                Button { showSteady = true } label: {
+                    Label("How steady now", systemImage: "gauge.with.dots.needle.33percent").font(BoardInk.sans(11)).foregroundStyle(Paper.navy)
+                        .padding(.horizontal, 10).padding(.vertical, 5).background(Paper.navy.opacity(0.1), in: Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.bottom, 6)
             HStack {
                 Text("LEAVE").frame(width: 50, alignment: .leading)
                 Text("TAKE")

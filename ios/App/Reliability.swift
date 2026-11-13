@@ -49,7 +49,160 @@ final class DelayBook {
         return "more than \(Int(slack.rounded())) min late \(late) of the last \(min(10, d.count)) times"
     }
 
+    /// A line seen leaving a stop `delay` minutes late (on a board, or in a plan): what that line is like at that hour,
+    /// anywhere. Once per trip.
+    func recordLine(line: String, scheduled: Date, delay: Double) {
+        record(line: line, stop: "*", scheduled: scheduled, delay: delay)
+    }
+
+    /// What a line has been like around that time: at that stop when it knows (your own rides), and anywhere it was seen.
+    func lineDelays(line: String, stop: String?, at: Date) -> [Double] {
+        let own = stop.map { delays(line: line, stop: $0, at: at) } ?? []
+        let b = Self.base(line, "*")
+        var seen = book[b + "|" + Self.slot(at)] ?? []
+        if seen.count < 6 { seen += [-1, 1].flatMap { book[b + "|" + Self.slot(at.addingTimeInterval(Double($0) * 3600))] ?? [] } }
+        return own + seen
+    }
+
+    /// Every line it has seen anywhere.
+    var lines: [String] {
+        Array(Set(book.keys.compactMap { k -> String? in
+            let p = k.split(separator: "|")
+            return p.count == 3 && p[1] == "*" ? String(p[0]) : nil
+        })).sorted()
+    }
+
+    /// How many times it has seen this line around this hour.
+    func count(line: String, at: Date) -> Int { lineDelays(line: line, stop: nil, at: at).count }
+
     func clear() { book = [:]; UserDefaults.standard.removeObject(forKey: storeKey) }
+}
+
+/// How late each line is running right now: every live time the app sees (the boards, the plans), the latest per trip,
+/// for the last half hour. And, once per trip, into the book for that hour (when it's about to leave, its delay is about
+/// what it really is).
+@MainActor
+final class LiveDelays: ObservableObject {
+    static let shared = LiveDelays()
+    struct Seen { let line: String; let train: Bool; let delay: Double; let at: Date }
+    @Published private(set) var seen: [String: Seen] = [:]           // trip id → the latest
+    private var booked: Set<String> = []
+    private var bookedDay = ""
+
+    nonisolated static func name(_ line: String, train: Bool) -> String { train ? Transit.trainLabel(line) : line }
+
+    func note(trip: String, line: String, train: Bool, time: Date, scheduled: Date) {
+        guard !trip.isEmpty, !line.isEmpty, line != "?" else { return }
+        let now = Date()
+        let name = Self.name(line, train: train)
+        let delay = time.timeIntervalSince(scheduled) / 60
+        guard delay > -10, delay < 90 else { return }
+        seen[trip] = Seen(line: name, train: train, delay: delay, at: now)
+        if seen.count > 600 { seen = seen.filter { now.timeIntervalSince($0.value.at) < 1800 } }
+        // into the book once per trip a day, when it's leaving about now
+        let day = Fmt.ymd.string(from: now)
+        if day != bookedDay { bookedDay = day; booked = [] }
+        if abs(time.timeIntervalSince(now)) < 150, booked.insert(trip).inserted {
+            DelayBook.shared.recordLine(line: name, scheduled: scheduled, delay: delay)
+        }
+    }
+
+    func note(_ list: [BoardDeparture]) {
+        for d in list where d.live && !d.cancelled { note(trip: d.tripId, line: d.line, train: d.train, time: d.time, scheduled: d.scheduled) }
+    }
+
+    func note(_ trips: [DoorTrip]) {
+        for t in trips {
+            for r in t.rides where r.live && !r.cancelled && r.fromId != "onboard" {
+                note(trip: r.tripId, line: r.line, train: r.isTrain, time: r.departure, scheduled: r.scheduledDeparture)
+            }
+        }
+    }
+
+    /// How late `line` is running now: each live trip seen in the last half hour.
+    func now(line: String) -> [Double] {
+        let t = Date()
+        return seen.values.filter { $0.line == line && t.timeIntervalSince($0.at) < 1800 }.map(\.delay)
+    }
+
+    /// Every line seen live in the last half hour.
+    var lines: [(line: String, train: Bool)] {
+        let t = Date()
+        var out: [String: Bool] = [:]
+        for s in seen.values where t.timeIntervalSince(s.at) < 1800 { out[s.line] = s.train }
+        return out.map { ($0.key, $0.value) }
+    }
+}
+
+/// How steady a line is at a time of day: S always on time, A mostly, B often a few minutes late, C late a lot. From
+/// the time of day (rush hour is when buses run late), what the app has seen of that line at that hour, and how it's
+/// running right now.
+@MainActor
+enum Steady {
+    /// What part of the day it is, and how late buses and trains typically get then (minutes, before anything's known).
+    static func period(_ at: Date) -> (name: String, bus: Double, train: Double) {
+        let c = Calendar.current
+        if c.isDateInWeekend(at) { return ("weekend", 1.8, 0.8) }
+        let h = Double(c.component(.hour, from: at)) + Double(c.component(.minute, from: at)) / 60
+        switch h {
+        case 7..<9, 16..<18.5: return ("rush hour", 3.5, 1.2)
+        case 6.5..<7, 9..<9.5, 15..<16, 18.5..<19: return ("busy", 2.6, 1.0)
+        case 9.5..<15: return ("daytime", 2.0, 0.8)
+        default: return ("quiet", 1.5, 0.7)
+        }
+    }
+
+    /// How late it typically gets, in minutes: the chance it's more than x minutes late is about e^(−x / this).
+    static func scale(line: String, train: Bool, stop: String? = nil, at: Date) -> Double {
+        let key = "\(line)|\(train)|\(stop ?? "")|\(Int(at.timeIntervalSince1970 / 1800))"
+        if let c = cache[key], Date().timeIntervalSince(c.at) < 60 { return c.value }
+        let p = period(at)
+        var s = train ? p.train : p.bus
+        // what it's been like at this hour: your rides, and what the app saw on the boards
+        let hist = DelayBook.shared.lineDelays(line: line, stop: stop, at: at)
+        if hist.count >= 3 {
+            let w = Double(hist.count) / Double(hist.count + 6)
+            s = w * fit(hist) + (1 - w) * s
+        }
+        // and right now, for a ride within the hour: how late they're running
+        if abs(at.timeIntervalSinceNow) < 3600 {
+            let live = LiveDelays.shared.now(line: line)
+            if live.count >= 2 { s = 0.5 * s + 0.5 * fit(live) }
+        }
+        let v = max(0.5, s)
+        cache[key] = (v, Date())
+        if cache.count > 500 { cache = [:] }
+        return v
+    }
+    private static var cache: [String: (value: Double, at: Date)] = [:]
+
+    /// The typical lateness of a set of delays (early counts as on time).
+    static func fit(_ d: [Double]) -> Double { d.isEmpty ? 0 : max(0.5, d.map { max(0, $0) }.reduce(0, +) / Double(d.count)) }
+
+    /// The chance it's more than `m` minutes late.
+    static func late(line: String, train: Bool, stop: String? = nil, at: Date, by m: Double = 3) -> Double {
+        exp(-m / scale(line: line, train: train, stop: stop, at: at))
+    }
+
+    /// S to C, by the chance it's more than 3 minutes late: under 10%, 25%, 45%, or more.
+    static func rank(line: String, train: Bool, stop: String? = nil, at: Date = Date()) -> String {
+        rank(late(line: line, train: train, stop: stop, at: at))
+    }
+    static func rank(_ p: Double) -> String { p < 0.10 ? "S" : p < 0.25 ? "A" : p < 0.45 ? "B" : "C" }
+
+    /// The time to leave for a change after it, to make it 9 times out of 10 (the planner's walk has a minute of room).
+    static func room(line: String, train: Bool, stop: String? = nil, at: Date) -> Int {
+        max(1, Int((scale(line: line, train: train, stop: stop, at: at) * log(10.0) - 1).rounded(.up)))
+    }
+
+    static func meaning(_ g: String) -> String {
+        switch g {
+        case "S": return "Nearly always on time"
+        case "A": return "Mostly on time"
+        case "B": return "Often a few minutes late"
+        default: return "Late a lot"
+        }
+    }
 }
 
 /// What a change costs you when it goes wrong: how likely you'd miss it (the ride before it a bit late, and too little
@@ -65,15 +218,19 @@ enum Risk {
         // its live times already have the delay it has now; what's left is how much later it could still get
         let already = r.live ? r.arrival.timeIntervalSince(r.scheduledArrival) / 60 : 0
         let soon = r.live && r.arrival.timeIntervalSince(now) < 10 * 60
+        // How late that line gets at that time of day (rush hour is worse), from what's been seen and how it runs now;
+        // one about to arrive hardly changes any more. (The planner's walk across already has a minute or so of room.)
+        let typical = soon ? 0.8 : Steady.scale(line: r.line, train: r.isTrain, stop: r.toStop, at: r.scheduledArrival)
+        var p = min(0.95, exp(-(slack + 1) / typical))
+        // your own rides to that stop, once there are a few
         let learned = DelayBook.shared.delays(line: r.line, stop: r.toStop, at: r.scheduledArrival)
         if learned.count >= 4 && !soon {
             let late = learned.filter { $0 > already + slack + 0.5 }.count
-            return min(0.95, (Double(late) + 0.5) / (Double(learned.count) + 1))
+            let seen = min(0.95, (Double(late) + 0.5) / (Double(learned.count) + 1))
+            let w = Double(learned.count) / Double(learned.count + 4)
+            p = w * seen + (1 - w) * p
         }
-        // Not known yet: a bus is a few minutes late quite often, a train much less, and one about to arrive hardly
-        // changes any more. (The planner's walk across already has a minute or so of room in it.)
-        let typical = soon ? 0.8 : r.isTrain ? 1.0 : 2.5
-        return min(0.95, exp(-(slack + 1) / typical))
+        return p
     }
 
     /// Minutes it's likely to cost: each change's chance of missing it times the wait for the next one after it.

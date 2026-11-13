@@ -128,16 +128,19 @@ struct PaperBand<Content: View>: View {
     }
 }
 
-/// A line's bullet in its map colour, with its speed rank as a small coin on the corner.
+/// A line's bullet in its map colour, with how steady it is (S to C, at that time of day) as a small coin on the corner.
 struct LineBullet: View {
     let line: String
     var train = false
-    var grade: String? = nil
+    var grade: String? = nil            // another rank to show instead
+    var at: Date? = nil                 // when it runs (rush hour or not); now if not given
     var height: CGFloat = 22
     var minWidth: CGFloat = 34
     var font: CGFloat = 13
+    var steady = true
     var body: some View {
-        Text(line).font(.system(size: font, weight: .heavy)).foregroundStyle(.white).lineLimit(1).minimumScaleFactor(0.6)
+        let grade = self.grade ?? (steady && !line.isEmpty && line != "?" ? Steady.rank(line: line, train: train, at: at ?? Date()) : nil)
+        return Text(line).font(.system(size: font, weight: .heavy)).foregroundStyle(.white).lineLimit(1).minimumScaleFactor(0.6)
             .padding(.horizontal, 6).frame(minWidth: minWidth).frame(height: height)
             .background(Paper.line(line, train: train), in: RoundedRectangle(cornerRadius: 4))
             .overlay(alignment: .topTrailing) {

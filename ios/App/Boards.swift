@@ -124,9 +124,47 @@ struct RankLegend: View {
                 Text(g).font(BoardInk.sans(10)).foregroundStyle(RatingStyle.ink(g))
                     .frame(width: 20, height: 15).background(RatingStyle.fill(g), in: RoundedRectangle(cornerRadius: 2))
             }
-            Text("Route colours are speed ranks: how fast a bus gets you there compared with the fastest on that route. Tap any line for its rank.")
+            Text("Coins on the lines: how steady they are at that time (S nearly always on time, C late a lot). Route colours: speed, how fast a bus gets you there compared with the fastest on that route. Tap any line for both.")
                 .font(BoardInk.sans(9.5, .regular)).foregroundStyle(Paper.ink.opacity(0.75)).fixedSize(horizontal: false, vertical: true)
         }
+    }
+}
+
+/// How steady a line is at that time of day, on its page: the coin, what it means, and why.
+struct SteadyBlock: View {
+    let line: String
+    let train: Bool
+    let stop: String?
+    let at: Date
+    @ObservedObject private var live = LiveDelays.shared
+    var body: some View {
+        let g = Steady.rank(line: line, train: train, stop: stop, at: at)
+        let p = Steady.late(line: line, train: train, stop: stop, at: at)
+        let period = Steady.period(at).name
+        let seen = DelayBook.shared.count(line: line, at: at)
+        let now = abs(at.timeIntervalSinceNow) < 3600 ? live.now(line: LiveDelays.name(line, train: train)) : []
+        VStack(alignment: .leading, spacing: 8) {
+            PlannerBar(title: "How steady", sub: "around \(Fmt.hhmm(at)) · \(period)")
+            HStack(alignment: .top, spacing: 10) {
+                Coin(grade: g, size: 42)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("\(g)-rank · \(Steady.meaning(g))").font(BoardInk.sans(15)).foregroundStyle(Paper.ink)
+                    Text("More than 3 min late about \(Int((p * 100).rounded()))% of the time around now. For a change after it, leave \(Steady.room(line: line, train: train, stop: stop, at: at)) min to be safe.")
+                        .font(BoardInk.sans(11, .regular)).foregroundStyle(Paper.ink.opacity(0.88)).fixedSize(horizontal: false, vertical: true)
+                    Text(why(seen: seen, now: now, period: period)).font(BoardInk.sans(11)).foregroundStyle(Paper.ink).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+    private func why(seen: Int, now: [Double], period: String) -> String {
+        var parts: [String] = []
+        if now.count >= 2 {
+            let avg = now.reduce(0, +) / Double(now.count)
+            parts.append(avg >= 1 ? "Right now they're running \(Int(avg.rounded())) min late on average (\(now.count) seen)." : "Right now they're on time (\(now.count) seen).")
+        }
+        if seen >= 3 { parts.append("Seen \(seen) times around this hour.") }
+        else { parts.append(train ? "Trains are rarely more than a couple of minutes late." : period == "rush hour" ? "Rush hour: buses run late much more often." : "From the time of day, until it has seen this line more.") }
+        return parts.joined(separator: " ")
     }
 }
 
@@ -439,8 +477,8 @@ struct PlannerTripCard: View {
                 ForEach(Array(trip.rides.enumerated()), id: \.offset) { i, r in
                     if i > 0 { Rectangle().fill(Color(hex: 0x9FB1D6)).frame(width: 8, height: 2) }
                     HStack(spacing: 4) {
-                        let g = r.isTrain ? nil : r.grade          // buses in the colour of their speed rank, trains in yellow
-                        LineBullet(line: r.line, train: r.isTrain, grade: g, height: 18, minWidth: 30, font: 11)
+                        _ = r.isTrain ? nil : r.grade              // (grading remembers a new fastest time for the speed rank)
+                        LineBullet(line: r.line, train: r.isTrain, at: r.departure, height: 18, minWidth: 30, font: 11)
                         VStack(alignment: .leading, spacing: 0) {
                             Text(Fmt.hhmm(r.departure)).font(BoardInk.sans(13)).foregroundStyle(r.cancelled ? HWPalette.stamp : BoardInk.navy).strikethrough(r.cancelled)
                             Text("to \(Fmt.place(r.toStop))").font(BoardInk.sans(9.5, .regular)).foregroundStyle(Color(hex: 0x45608F)).lineLimit(1).minimumScaleFactor(0.7)
@@ -474,10 +512,10 @@ struct PlannerRideRow: View {
         let st = RideText.status(ride, info)
         let gone = ride.cancelled || info?.cancelled == true
         let late = ride.live && !gone && abs(ride.delay) >= 1
-        let g = ride.isTrain ? nil : ride.grade
+        _ = ride.isTrain ? nil : ride.grade
         Button(action: tap) {
             HStack(alignment: .top, spacing: 8) {
-                LineBullet(line: ride.line, train: ride.isTrain, grade: g, height: 22, minWidth: 38, font: 13)
+                LineBullet(line: ride.line, train: ride.isTrain, at: ride.departure, height: 22, minWidth: 38, font: 13)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("to \(Fmt.place(ride.toStop))").font(BoardInk.sans(14)).foregroundStyle(Paper.ink).lineLimit(1).minimumScaleFactor(0.7)
                     Text("from \(Fmt.place(ride.fromStop)) · \(ride.rideMinutes) min ride").font(BoardInk.sans(10, .regular)).foregroundStyle(Paper.ink.opacity(0.75)).lineLimit(1)
@@ -594,6 +632,7 @@ struct TrainPage: View {
                 if let liveMap { WalkButton(title: "See it live", icon: "location.viewfinder", go: liveMap) }
                 if let walk { WalkButton(title: "Show the way to the station", go: walk) }
             }
+            SteadyBlock(line: p.trip.first.line, train: p.trip.first.isTrain, stop: p.trip.first.toStop, at: p.trip.first.departure)
             RankBlock(rank: RankInfo.of(p.trip), cancelled: gone)
             PlannerBar(title: "The train", sub: info?.size.map { "\($0.cars) coaches" })
             if let s = info?.size {
@@ -642,11 +681,11 @@ struct BusPage: View {
     let track: () -> Void
 
     var body: some View {
-        let g = rank?.grade
+        _ = rank?.grade
         VStack(alignment: .leading, spacing: 10) {
             PageTop(tracked: tracked, back: back, track: track)
             HStack(spacing: 8) {
-                LineBullet(line: line, train: train, grade: g, height: 28, minWidth: 46, font: 15)
+                LineBullet(line: line, train: train, at: time, height: 28, minWidth: 46, font: 15)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(to).font(BoardInk.sans(22)).foregroundStyle(Paper.ink).lineLimit(1).minimumScaleFactor(0.6)
                     Text("\(train ? "Train" : "Bus") \(line) · from \(stop)").font(BoardInk.sans(11, .regular)).foregroundStyle(Paper.ink.opacity(0.8)).lineLimit(1)
@@ -664,6 +703,7 @@ struct BusPage: View {
                 if let liveMap { WalkButton(title: "See it live", icon: "location.viewfinder", go: liveMap) }
                 if let walk { WalkButton(title: "Show the way to the stop", go: walk) }
             }
+            SteadyBlock(line: line, train: train, stop: nil, at: time)
             if let rank { RankBlock(rank: rank, cancelled: cancelled) }
             if let ride {
                 PlannerBar(title: "Your ride")

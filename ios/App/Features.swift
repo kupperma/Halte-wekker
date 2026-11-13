@@ -794,7 +794,7 @@ struct BoardRow: View {
     var body: some View {
         let gone = !d.cancelled && d.time < Date().addingTimeInterval(-60)
         HStack(alignment: .top, spacing: 10) {
-            LineBullet(line: d.line, grade: d.cancelled ? nil : ride?.grade, height: 24, minWidth: 44, font: 13)
+            LineBullet(line: d.line, train: d.train, at: d.time, height: 24, minWidth: 44, font: 13)
             VStack(alignment: .leading, spacing: 2) {
                 Text(d.headsign).font(HWFont.display(16)).foregroundStyle(Paper.ink)
                 if watched { SmallTag(text: "WATCHING", icon: "bell.fill", pal: pal) }

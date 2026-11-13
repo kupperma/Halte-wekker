@@ -75,6 +75,7 @@ struct BoardDeparture: Identifiable, Hashable {
     let cancelled: Bool
     let platform: String?
     var heading: Heading? = nil         // which way it goes from here
+    var train = false
     var delay: Int { live ? Int((time.timeIntervalSince(scheduled) / 60).rounded()) : 0 }
 }
 
@@ -246,7 +247,9 @@ enum Transit {
         if arriveBy { q.append(.init(name: "arriveBy", value: "true")) }       // `at` is when you want to be there
         if let m = modes { q.append(.init(name: "transitModes", value: m)) }
         guard let json = try? await get("/v5/plan", q) as? [String: Any], let its = json["itineraries"] as? [[String: Any]] else { return [] }
-        return its.compactMap(parseItinerary)
+        let trips = its.compactMap(parseItinerary)
+        Task { @MainActor in LiveDelays.shared.note(trips) }          // how late each line is running now
+        return trips
     }
 
     static func plan(from: Place, to: Place, modes: String?, at: Date, count: Int, maxTransfers: Int, arriveBy: Bool = false) async -> [DoorTrip] {
@@ -490,12 +493,15 @@ enum Transit {
                                               time: t, scheduled: date(p["scheduledDeparture"]) ?? t, live: (st["realTime"] as? Bool) ?? false,
                                               cancelled: ((st["cancelled"] as? Bool) ?? false) || ((st["tripCancelled"] as? Bool) ?? false) || ((p["cancelled"] as? Bool) ?? false),
                                               platform: (p["track"] as? String) ?? (p["scheduledTrack"] as? String),
-                                              heading: heading(st, p))
+                                              heading: heading(st, p),
+                                              train: { let m = (st["mode"] as? String) ?? "BUS"; return !(m.contains("BUS") || m.contains("COACH")) }())
                     }
                 }
             }
             var all: [BoardDeparture] = []
             for await r in g { all += r }
+            let seen = all
+            Task { @MainActor in LiveDelays.shared.note(seen) }       // how late each line is running now
             return all.sorted { $0.time < $1.time }
         }
     }
