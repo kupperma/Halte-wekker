@@ -748,9 +748,43 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
                 route = nr; legs = nr.legs(direction); distance = nil; maxDistance = legSpan
             }
         }
+        stayOnIfItGoes(stops)
         applyStops(stops)
         refreshEta(force: true)
         pushActivity(force: true)
+    }
+
+    /// Your bus or train also goes to where a later leg starts, in time for it: stay on instead of changing. A Sprinter
+    /// to Tilburg, then an Intercity to Breda, when the Sprinter goes on to Breda anyway and makes the same bus.
+    private func stayOnIfItGoes(_ stops: [TripStop]) {
+        guard let r = route, var custom = r.custom, var planned = r.planned, planned.count == custom.count,
+              index + 2 < custom.count, let v = vehicle else { return }
+        let now = Date()
+        for k in stride(from: custom.count - 1, through: index + 2, by: -1) {
+            let from = custom[k].from
+            let at = CLLocation(latitude: from.coordinate.latitude, longitude: from.coordinate.longitude)
+            guard let s = stops.first(where: { ($0.arrival ?? .distantPast) > now
+                                                && at.distance(from: CLLocation(latitude: $0.coordinate.latitude, longitude: $0.coordinate.longitude)) < 400 }),
+                  let arr = s.arrival, arr <= planned[k].departure.addingTimeInterval(-120) else { continue }
+            let skipped = custom[(index + 1)..<k].map(\.from.short)
+            let name = Fmt.place(s.name)
+            let to = Place(key: "s:\(s.name)|\(s.coordinate.latitude),\(s.coordinate.longitude)", name: s.name, short: name,
+                           ids: ["\(s.coordinate.latitude),\(s.coordinate.longitude)"], coordinate: s.coordinate, spoken: name)
+            let cur = custom[index]
+            let nextRide = planned[k]
+            custom = Array(custom[..<index]) + [Leg(mode: cur.mode, from: cur.from, to: to)] + Array(custom[k...])
+            planned = Array(planned[...index]) + Array(planned[k...])
+            let nr = RoutePlan(id: r.id, name: r.name, station: r.station, custom: custom, planned: planned)
+            route = nr
+            legs = nr.legs(direction)
+            distance = nil; arrival = nil; next = nil; legArrival = nil; legTo = nil
+            maxDistance = legSpan
+            if phase == .awake { phase = .sleeping }
+            let then = nextRide.isTrain ? (nextRide.line == "IC" ? "Intercity" : nextRide.line) : "bus \(nextRide.line)"
+            tellBus("Stay on to \(name)", "This \(v.title) goes on to \(name) in time for the same \(then) at \(Fmt.hhmm(nextRide.departure)): no change at \(skipped.joined(separator: ", ")).")
+            Task { await loadUpcoming(force: true) }
+            return
+        }
     }
 
     // MARK: still the same bus?

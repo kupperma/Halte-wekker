@@ -78,6 +78,23 @@ final class LiveStore: ObservableObject {
 
     /// You're on a bus or train: find it (its live position closest to you), then plan from its next stop, from when it
     /// gets there, so your trip carries on with it (or changes there) instead of starting with one you'd still have to catch.
+    /// The latest ride of `rides` you can get to by staying on (its stops from `next` on): which one, the stop, and when
+    /// you're there. In time means a couple of minutes to change (more if it's a walk).
+    nonisolated static func staysOn(_ stops: [TripStop], from next: TripStop, until rides: [Ride]) -> (Int, TripStop, Date)? {
+        guard rides.count >= 2 else { return nil }
+        let ahead = stops.drop(while: { !($0.name == next.name && $0.arrival == next.arrival) })
+        for k in stride(from: rides.count - 1, through: 1, by: -1) {
+            let r = rides[k]
+            guard let a = r.fromLat, let o = r.fromLon else { continue }
+            let at = CLLocation(latitude: a, longitude: o)
+            if let s = ahead.first(where: { at.distance(from: CLLocation(latitude: $0.coordinate.latitude, longitude: $0.coordinate.longitude)) < 400 }),
+               let arr = s.arrival, arr <= r.departure.addingTimeInterval(-Double(max(2, r.walkBefore + 1)) * 60) {
+                return (k, s, arr)
+            }
+        }
+        return nil
+    }
+
     /// A GPS fix good enough to tell speed from (inside a station they're often off by 50 m and more).
     nonisolated static func goodFix(_ l: CLLocation) -> Bool { l.horizontalAccuracy >= 0 && l.horizontalAccuracy <= 40 }
     /// The GPS itself says bus or train speed, and is sure of it.
@@ -129,6 +146,12 @@ final class LiveStore: ObservableObject {
             if rides.first?.tripId == seg.tripId {
                 let r = rides.removeFirst()          // it stays on: the ride you're on goes on to where you get off
                 rides.insert(onIt(to: r.toStop, lat: r.toLat, lon: r.toLon, arrival: r.arrival, scheduled: r.scheduledArrival), at: 0)
+            } else if let hit = Self.staysOn(stops, from: next, until: rides) {
+                let (k, s, arr) = hit
+                // The one you're on also gets to where a later ride leaves, in time for it: stay on until there. (The
+                // planner, from its next stop, likes a later one from there best: a Sprinter to Tilburg, then an Intercity
+                // to Breda, when the Sprinter goes to Breda anyway and makes the same bus.)
+                rides = [onIt(to: s.name, lat: s.coordinate.latitude, lon: s.coordinate.longitude, arrival: arr, scheduled: arr)] + rides[k...]
             } else {
                 rides.insert(onIt(to: next.name, lat: next.coordinate.latitude, lon: next.coordinate.longitude, arrival: at, scheduled: at), at: 0)
             }
