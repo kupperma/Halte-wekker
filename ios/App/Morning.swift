@@ -2,20 +2,82 @@ import AppIntents
 import PhotosUI
 import SwiftUI
 
-/// The morning screen after the school alarm: one of your own photos full screen, the time, and the day on a sheet of
-/// paper: when to leave, the bus, when you're at BUas, your first class. It shows when you tap Open on the alarm, or the
-/// first time you open the app after it rang that morning.
+/// One of the drawn backgrounds for the morning screen (in the app's Media folder as morning-<id>.jpg, with a small
+/// morning-<id>-t.jpg for the picker). `light`: a pale picture, so the time is written in ink instead of white.
+struct MorningPreset: Hashable, Identifiable {
+    let id: String
+    let title: String
+    let light: Bool
+
+    static let all: [MorningPreset] = [
+        .init(id: "sunrise", title: "Sunrise", light: false),
+        .init(id: "brabant", title: "Brabant", light: false),
+        .init(id: "splitflap", title: "Departures", light: false),
+        .init(id: "riso", title: "Riso", light: true),
+        .init(id: "delft", title: "Delft blue", light: true),
+        .init(id: "constellation", title: "Stars", light: false),
+        .init(id: "breda", title: "Breda", light: false),
+        .init(id: "papermap", title: "Map & coffee", light: false),
+        .init(id: "rails", title: "Rails", light: false),
+        .init(id: "bauhaus", title: "Bauhaus", light: true),
+    ]
+    static func named(_ id: String) -> MorningPreset? { all.first { $0.id == id } }
+
+    var thumbnail: UIImage? { Bundle.main.path(forResource: "morning-\(id)-t", ofType: "jpg").flatMap(UIImage.init(contentsOfFile:)) }
+}
+
+/// What the morning screen shows behind the time: the moving metro station, one of the drawn designs, or a photo of yours.
+enum MorningLook: Hashable {
+    case station
+    case preset(MorningPreset)
+    case photo(String)
+
+    /// How it's remembered: "station", "p:<id>" or "u:<file name>".
+    var key: String {
+        switch self {
+        case .station: return "station"
+        case .preset(let p): return "p:" + p.id
+        case .photo(let n): return "u:" + n
+        }
+    }
+    init?(key: String) {
+        if key == "station" { self = .station }
+        else if key.hasPrefix("p:"), let p = MorningPreset.named(String(key.dropFirst(2))) { self = .preset(p) }
+        else if key.hasPrefix("u:") { self = .photo(String(key.dropFirst(2))) }
+        else { return nil }
+    }
+    var light: Bool { if case .preset(let p) = self { return p.light }; return false }
+}
+
+/// The morning screen after the school alarm: the time, and the day on a sheet of paper (when to leave, the bus, when
+/// you're at BUas, your first class), over the metro station, a drawn design or one of your photos. Pick several and
+/// they take turns, one each morning. It shows when you tap Open on the alarm, or the first time you open the app after
+/// it rang that morning.
 @MainActor
 final class Morning: ObservableObject {
     static let shared = Morning()
-    @Published var showing = false
+    @Published var showing = false { didSet { if !showing { preview = nil } } }
     @Published var on: Bool { didSet { UserDefaults.standard.set(on, forKey: "morning.on") } }
     @Published private(set) var photos: [String]            // file names, in the app's own folder
+    @Published private(set) var chosen: [String]            // MorningLook keys, taking turns
+    /// Shown instead of today's look, until the morning screen closes (to try one from Settings).
+    @Published var preview: String?
+
+    private var cached: (key: String, image: UIImage)?
 
     private init() {
         on = UserDefaults.standard.object(forKey: "morning.on") as? Bool ?? true
-        photos = UserDefaults.standard.stringArray(forKey: "morning.photos") ?? []
-        photos = photos.filter { FileManager.default.fileExists(atPath: Self.dir.appendingPathComponent($0).path) }
+        let stored = (UserDefaults.standard.stringArray(forKey: "morning.photos") ?? [])
+            .filter { FileManager.default.fileExists(atPath: Self.dir.appendingPathComponent($0).path) }
+        photos = stored
+        if let c = UserDefaults.standard.stringArray(forKey: "morning.chosen") {
+            chosen = c
+        } else {
+            // before there were designs your photos took turns: keep that, else the station
+            chosen = stored.isEmpty ? ["station"] : stored.map { "u:" + $0 }
+        }
+        chosen = chosen.filter(valid)
+        if chosen.isEmpty { chosen = ["station"] }
     }
 
     nonisolated static var dir: URL {
@@ -24,18 +86,66 @@ final class Morning: ObservableObject {
         return u
     }
 
-    private func persist() { UserDefaults.standard.set(photos, forKey: "morning.photos") }
-
-    /// Today's photo: a different one of yours each day.
-    func photo(for day: Date = Date()) -> UIImage? {
-        guard !photos.isEmpty else { return nil }
-        let n = Calendar.current.ordinality(of: .day, in: .era, for: day) ?? 0
-        return UIImage(contentsOfFile: Self.dir.appendingPathComponent(photos[n % photos.count]).path)
+    private func valid(_ key: String) -> Bool {
+        guard let l = MorningLook(key: key) else { return false }
+        if case .photo(let n) = l { return photos.contains(n) }
+        return true
     }
 
-    func thumbnail(_ name: String) -> UIImage? { UIImage(contentsOfFile: Self.dir.appendingPathComponent(name).path) }
+    private func persist() {
+        UserDefaults.standard.set(photos, forKey: "morning.photos")
+        UserDefaults.standard.set(chosen, forKey: "morning.chosen")
+    }
 
-    /// Photos you picked: made smaller (no need for 48 megapixels on a phone screen) and kept in the app.
+    /// Everything you can pick, in the order of the picker.
+    var all: [MorningLook] { [.station] + MorningPreset.all.map { .preset($0) } + photos.map { .photo($0) } }
+
+    func isChosen(_ l: MorningLook) -> Bool { chosen.contains(l.key) }
+
+    /// Tap in the picker: in or out of the turns. One always stays.
+    func toggle(_ l: MorningLook) {
+        if let i = chosen.firstIndex(of: l.key) {
+            guard chosen.count > 1 else { return }
+            chosen.remove(at: i)
+        } else {
+            chosen.append(l.key)
+        }
+        persist()
+    }
+
+    /// Today's look: the next one of your picks each day (or the one you're trying from Settings).
+    func look(for day: Date = Date()) -> MorningLook {
+        if let p = preview, let l = MorningLook(key: p), valid(p) { return l }
+        let picks = chosen.compactMap(MorningLook.init(key:))
+        guard !picks.isEmpty else { return .station }
+        let n = Calendar.current.ordinality(of: .day, in: .era, for: day) ?? 0
+        return picks[n % picks.count]
+    }
+
+    /// The full picture for a drawn design or a photo (the station is a video, so nil). The last one is kept, so the
+    /// screen doesn't read the file again each time it redraws.
+    func image(_ l: MorningLook) -> UIImage? {
+        if let c = cached, c.key == l.key { return c.image }
+        let img: UIImage?
+        switch l {
+        case .station: return nil
+        case .preset(let p): img = Bundle.main.path(forResource: "morning-\(p.id)", ofType: "jpg").flatMap(UIImage.init(contentsOfFile:))
+        case .photo(let n): img = UIImage(contentsOfFile: Self.dir.appendingPathComponent(n).path)
+        }
+        if let img { cached = (l.key, img) }
+        return img
+    }
+
+    func thumbnail(_ l: MorningLook) -> UIImage? {
+        switch l {
+        case .station: return Bundle.main.path(forResource: "morning-station-t", ofType: "jpg").flatMap(UIImage.init(contentsOfFile:))
+        case .preset(let p): return p.thumbnail
+        case .photo(let n): return UIImage(contentsOfFile: Self.dir.appendingPathComponent(n).path)
+        }
+    }
+
+    /// Photos you picked: made smaller (no need for 48 megapixels on a phone screen), kept in the app, and added to
+    /// the turns.
     func add(_ items: [PhotosPickerItem]) async {
         for item in items.prefix(12) {
             guard let data = try? await item.loadTransferable(type: Data.self) else { continue }
@@ -50,7 +160,10 @@ final class Morning: ObservableObject {
                 try? jpg.write(to: Morning.dir.appendingPathComponent(name))
                 return name
             }.value
-            if let name { photos.append(name) }
+            if let name {
+                photos.append(name)
+                chosen.append("u:" + name)
+            }
         }
         persist()
     }
@@ -58,7 +171,16 @@ final class Morning: ObservableObject {
     func remove(_ name: String) {
         try? FileManager.default.removeItem(at: Self.dir.appendingPathComponent(name))
         photos.removeAll { $0 == name }
+        chosen.removeAll { $0 == "u:" + name }
+        if chosen.isEmpty { chosen = ["station"] }
+        if cached?.key == "u:" + name { cached = nil }
         persist()
+    }
+
+    /// Settings: see one look on the morning screen now.
+    func tryOut(_ l: MorningLook) {
+        preview = l.key
+        withAnimation(.easeInOut(duration: 0.4)) { showing = true }
     }
 
     /// The app came to the screen: if the school alarm rang this morning (in the last 90 minutes), show the morning
@@ -88,6 +210,7 @@ struct OpenMorningIntent: LiveActivityIntent {
 
 /// The morning screen itself.
 struct MorningView: View {
+    @EnvironmentObject private var trip: TripManager
     @ObservedObject private var morning = Morning.shared
     @ObservedObject private var school = SchoolAlarm.shared
     let go: (SchoolAlarm.Planned) -> Void
@@ -99,24 +222,31 @@ struct MorningView: View {
     }
 
     var body: some View {
+        let look = morning.look()
+        let light = look.light
+        let text: Color = light ? Paper.ink : .white
+        let shade: Color = light ? .clear : .black.opacity(0.45)
         ZStack {
-            // your photo (or the station)
+            backdrop(look)
+            // a little darker behind the time and under the card, so they read on any picture
             Group {
-                if let img = morning.photo() {
-                    Image(uiImage: img).resizable().scaledToFill()
+                if light {
+                    LinearGradient(colors: [Paper.paper.opacity(0.45), .clear], startPoint: .top, endPoint: .init(x: 0.5, y: 0.3))
+                } else if case .photo = look {
+                    LinearGradient(colors: [.black.opacity(0.5), .clear, .clear, .black.opacity(0.55)], startPoint: .top, endPoint: .bottom)
                 } else {
-                    StationBackdrop(home: false, moving: false, dim: 0.1)
+                    LinearGradient(colors: [.black.opacity(0.3), .clear, .clear, .black.opacity(0.35)], startPoint: .top, endPoint: .bottom)
                 }
             }
             .ignoresSafeArea()
-            LinearGradient(colors: [.black.opacity(0.5), .clear, .clear, .black.opacity(0.55)], startPoint: .top, endPoint: .bottom).ignoresSafeArea()
+            .allowsHitTesting(false)
             VStack(spacing: 0) {
                 TimelineView(.everyMinute) { tl in
-                    Text(Fmt.hhmm(tl.date)).font(.system(size: 88, weight: .heavy)).monospacedDigit().foregroundStyle(.white)
-                        .shadow(color: .black.opacity(0.45), radius: 10, y: 4)
+                    Text(Fmt.hhmm(tl.date)).font(.system(size: 88, weight: .heavy)).monospacedDigit().foregroundStyle(text)
+                        .shadow(color: shade, radius: 10, y: 4)
                 }
                 .padding(.top, 30)
-                Text("Good morning").font(HWFont.display(24)).foregroundStyle(.white).shadow(color: .black.opacity(0.45), radius: 6, y: 2)
+                Text("Good morning").font(HWFont.display(24)).foregroundStyle(text).shadow(color: shade, radius: 6, y: 2)
                 Spacer()
                 card
             }
@@ -125,6 +255,21 @@ struct MorningView: View {
         .onChange(of: picking) { _, items in
             guard !items.isEmpty else { return }
             Task { await morning.add(items); picking = [] }
+        }
+    }
+
+    /// The picture fills the screen and is cut to it (a wide photo mustn't push the time and the card off the sides).
+    @ViewBuilder private func backdrop(_ look: MorningLook) -> some View {
+        if case .station = look {
+            StationBackdrop(home: false, moving: trip.movingStation, dim: 0.1)
+        } else if let img = morning.image(look) {
+            GeometryReader { g in
+                Image(uiImage: img).resizable().scaledToFill()
+                    .frame(width: g.size.width, height: g.size.height).clipped()
+            }
+            .ignoresSafeArea()
+        } else {
+            StationBackdrop(home: false, moving: false, dim: 0.1)
         }
     }
 
@@ -187,54 +332,93 @@ struct MorningView: View {
     }
 }
 
-/// Settings: the morning screen and your photos for it.
+/// Settings: the morning screen, and what it shows. Tap to pick (as many as you like: they take turns, one each
+/// morning), hold one to try it now.
 struct MorningSection: View {
     @ObservedObject private var morning = Morning.shared
     @State private var picking: [PhotosPickerItem] = []
-    let preview: () -> Void
+    let preview: (MorningLook?) -> Void
+
+    private let cols = [GridItem(.adaptive(minimum: 66, maximum: 90), spacing: 8)]
+
     var body: some View {
         Section {
             Toggle(isOn: $morning.on) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Morning screen")
-                    Text("After the school alarm: your photo, the time, when to leave and your first class. Tap Open on the alarm, or just open the app.")
+                    Text("After the school alarm: the time, when to leave and your first class. Tap Open on the alarm, or just open the app.")
                         .font(HWFont.body(12)).foregroundStyle(Paper.muted)
                 }
             }
             if morning.on {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(morning.photos, id: \.self) { name in
-                            ZStack(alignment: .topTrailing) {
-                                Group {
-                                    if let t = morning.thumbnail(name) { Image(uiImage: t).resizable().scaledToFill() } else { Paper.card }
-                                }
-                                .frame(width: 64, height: 86).clipShape(RoundedRectangle(cornerRadius: 6))
-                                Button { morning.remove(name) } label: {
-                                    Image(systemName: "xmark.circle.fill").font(.system(size: 18)).foregroundStyle(.white, Color.black.opacity(0.55))
-                                }
-                                .buttonStyle(.plain).padding(3)
-                            }
+                LazyVGrid(columns: cols, spacing: 10) {
+                    ForEach(morning.all, id: \.self) { l in tile(l) }
+                    PhotosPicker(selection: $picking, maxSelectionCount: 10, matching: .images) {
+                        VStack(spacing: 4) {
+                            Image(systemName: "plus").font(.system(size: 18, weight: .bold))
+                            Text("Your photos").font(HWFont.body(10.5)).multilineTextAlignment(.center)
                         }
-                        PhotosPicker(selection: $picking, maxSelectionCount: 10, matching: .images) {
-                            VStack(spacing: 4) {
-                                Image(systemName: "plus").font(.system(size: 18, weight: .bold))
-                                Text("Photos").font(HWFont.body(11))
-                            }
-                            .foregroundStyle(Paper.navy).frame(width: 64, height: 86)
-                            .background(Paper.navy.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
-                        }
+                        .foregroundStyle(Paper.navy).frame(maxWidth: .infinity).aspectRatio(0.462, contentMode: .fit)
+                        .background(Paper.navy.opacity(0.08), in: RoundedRectangle(cornerRadius: 7))
+                        .overlay(RoundedRectangle(cornerRadius: 7).stroke(Paper.navy.opacity(0.25), style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
                     }
-                    .padding(.vertical, 4)
+                    .buttonStyle(.plain)
                 }
-                Text(morning.photos.isEmpty ? "Pick a few photos: each morning shows another one." : "\(morning.photos.count) photo\(morning.photos.count == 1 ? "" : "s"): each morning shows another one.")
-                    .font(HWFont.body(11.5)).foregroundStyle(Paper.muted)
-                Button("Show the morning screen now", action: preview).foregroundStyle(Paper.navy)
+                .padding(.vertical, 6)
+                Text(caption).font(HWFont.body(11.5)).foregroundStyle(Paper.muted)
+                Button("Show the morning screen now") { preview(nil) }.foregroundStyle(Paper.navy)
             }
         } header: { Text("Morning") }
         .onChange(of: picking) { _, items in
             guard !items.isEmpty else { return }
             Task { await morning.add(items); picking = [] }
+        }
+    }
+
+    private var caption: String {
+        let n = morning.chosen.count
+        return n == 1 ? "Tap more to take turns, one each morning. Hold one to try it." : "\(n) picked: a different one each morning. Hold one to try it."
+    }
+
+    private func name(_ l: MorningLook) -> String {
+        switch l {
+        case .station: return "Metro"
+        case .preset(let p): return p.title
+        case .photo: return "Your photo"
+        }
+    }
+
+    private func tile(_ l: MorningLook) -> some View {
+        let on = morning.isChosen(l)
+        return VStack(spacing: 3) {
+            ZStack(alignment: .topTrailing) {
+                Group {
+                    if let t = morning.thumbnail(l) { Image(uiImage: t).resizable().scaledToFill() } else { Paper.card }
+                }
+                .frame(maxWidth: .infinity).aspectRatio(0.462, contentMode: .fit)
+                .clipShape(RoundedRectangle(cornerRadius: 7))
+                .overlay(RoundedRectangle(cornerRadius: 7).stroke(on ? Paper.navy : Paper.ink.opacity(0.15), lineWidth: on ? 3 : 1))
+                .overlay(alignment: .bottomLeading) {
+                    if case .station = l {
+                        Text("LIVE").font(BoardInk.sans(8.5)).tracking(1).foregroundStyle(.white)
+                            .padding(.horizontal, 4).padding(.vertical, 1.5).background(Paper.oxblood, in: RoundedRectangle(cornerRadius: 3)).padding(5)
+                    }
+                }
+                Image(systemName: on ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(on ? Color.white : Color.white.opacity(0.9), on ? Paper.navy : Color.black.opacity(0.35))
+                    .padding(4)
+            }
+            Text(name(l)).font(HWFont.body(10.5)).foregroundStyle(on ? Paper.navy : Paper.muted).lineLimit(1).minimumScaleFactor(0.8)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { withAnimation(.easeInOut(duration: 0.15)) { morning.toggle(l) } }
+        .contextMenu {
+            Button { preview(l) } label: { Label("Try it now", systemImage: "eye") }
+            Button { morning.toggle(l) } label: { Label(on ? "Don’t use" : "Use it", systemImage: on ? "minus.circle" : "checkmark.circle") }
+            if case .photo(let n) = l {
+                Button(role: .destructive) { morning.remove(n) } label: { Label("Remove photo", systemImage: "trash") }
+            }
         }
     }
 }

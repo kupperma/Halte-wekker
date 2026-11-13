@@ -1944,9 +1944,12 @@ struct SettingsView: View {
                     } footer: { Text("Fastest trip with the map and notifications, being recognised on the bus, the ride ring, the alarm and arriving, all pretend.") }
                 }
                 SchoolAlarmSection()
-                MorningSection(preview: {
+                MorningSection(preview: { look in
                     dismissSettings()
-                    Task { @MainActor in try? await Task.sleep(nanoseconds: 500_000_000); Morning.shared.showing = true }
+                    Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: 500_000_000)
+                        if let look { Morning.shared.tryOut(look) } else { Morning.shared.showing = true }
+                    }
                 })
                 FreezeSection()
                 Section {
