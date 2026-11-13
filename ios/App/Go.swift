@@ -28,6 +28,7 @@ final class GoStore: ObservableObject {
     @Published private(set) var lookingOnBoard = false       // just opened: checking whether you're on a bus or train
     @Published private(set) var movingUnknown = false        // going at train or bus speed, but which one isn't clear yet
     @Published private(set) var slow = false                 // the answer is taking long (a slow connection)
+    private var why: String?                                 // why the last look found nothing
     private var seed: [DoorTrip] = []                        // the home screen's trips from here, to start with
     @Published private(set) var here: CLLocation?
     @Published private(set) var demo = false                 // pretend buses, to try it at home
@@ -188,9 +189,12 @@ final class GoStore: ObservableObject {
             try? await Task.sleep(nanoseconds: 8_000_000_000)
             if !Task.isCancelled, let self, self.best == nil { self.slow = true }
         }
-        let found = await Transit.$urgent.withValue(true) {
+        let answer = await Transit.$urgent.withValue(true) {
             await Transit.within(25) { await Transit.tripsFrom(c, to: d, count: 8, keep: 8) }
-        } ?? []
+        }
+        let found = answer ?? []
+        why = answer == nil ? "No answer within 25 seconds: a slow connection."
+            : found.isEmpty ? (Transit.trouble.recent().map { "\($0)." } ?? "Transitous found no way from here.") : nil
         slowNote.cancel()
         slow = false
         guard watching, dest == d, onBoard == nil else { return }
@@ -276,7 +280,7 @@ final class GoStore: ObservableObject {
         guard let p = pick else {
             if !found.isEmpty || best == nil {
                 best = nil; others = []
-                error = "No way to \(d.short) found from here right now. It tries again in a minute."
+                error = "No way to \(d.short) found from here right now. It tries again in a few seconds." + (why.map { "\n\($0)" } ?? "")
             }
             return
         }

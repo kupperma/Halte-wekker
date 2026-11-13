@@ -168,6 +168,19 @@ enum Transit {
     /// phone keeps only a few open to one server, and the boards, the school alarm planning the week and the rest would
     /// otherwise have them queue.
     @TaskLocal static var urgent = false
+    /// The last thing that went wrong with one of those, and when (so the screen can say why it found nothing).
+    static let trouble = Trouble()
+    final class Trouble: @unchecked Sendable {
+        private let lock = NSLock()
+        private var last: (text: String, at: Date)?
+        func note(_ t: String) { lock.lock(); last = (t, Date()); lock.unlock() }
+        /// What went wrong in the last `seconds`, if anything.
+        func recent(_ seconds: Double = 40) -> String? {
+            lock.lock(); defer { lock.unlock() }
+            guard let l = last, Date().timeIntervalSince(l.at) < seconds else { return nil }
+            return l.text
+        }
+    }
     private static let urgentSession: URLSession = {
         let c = URLSessionConfiguration.default
         c.httpMaximumConnectionsPerHost = 6
@@ -192,11 +205,17 @@ enum Transit {
             do {
                 let (data, resp) = try await session.data(for: req)
                 let code = (resp as? HTTPURLResponse)?.statusCode ?? 200
-                if code == 429 || code >= 500 { last = URLError(.badServerResponse); continue }
+                if code == 429 || code >= 500 {
+                    last = URLError(.badServerResponse)
+                    if urgent { trouble.note(code == 429 ? "Transitous asked to slow down (HTTP 429)" : "Transitous had a problem (HTTP \(code))") }
+                    continue
+                }
+                if code >= 400, urgent { trouble.note("Transitous said no (HTTP \(code))") }
                 return try JSONSerialization.jsonObject(with: data)
             } catch let e as URLError where [.timedOut, .networkConnectionLost, .cannotConnectToHost, .cannotFindHost,
                                              .dnsLookupFailed, .notConnectedToInternet, .secureConnectionFailed].contains(e.code) {
                 last = e
+                if urgent { trouble.note(e.code == .timedOut ? "Transitous didn’t answer in time" : e.localizedDescription) }
             } catch is CancellationError {
                 throw CancellationError()
             }
