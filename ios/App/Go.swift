@@ -23,6 +23,7 @@ final class GoStore: ObservableObject {
     @Published private(set) var notes: [Note] = []           // what it told you, newest first
     @Published private(set) var arrived = false
     @Published private(set) var seen: Vehicle?               // looks like you're on this one (checking)
+    @Published private(set) var overdue = false              // the one you're waiting for at its stop is past its time
     @Published private(set) var here: CLLocation?
     @Published private(set) var demo = false                 // pretend buses, to try it at home
     private var demoTask: Task<Void, Never>?
@@ -88,7 +89,7 @@ final class GoStore: ObservableObject {
     private func begin(_ d: Place) {
         loop?.cancel(); detect?.cancel()
         dest = d
-        best = nil; others = []; error = nil; updated = nil; notes = []; arrived = false; seen = nil
+        best = nil; others = []; error = nil; updated = nil; notes = []; arrived = false; seen = nil; overdue = false
         told = [:]; toldEnd = nil; toldGo = []; missed = nil
         since = Date()
         watching = true
@@ -160,6 +161,19 @@ final class GoStore: ObservableObject {
         let list = found.isEmpty ? ([best].compactMap { $0 } + others).filter { $0.first.departure > now } : found
         // The ones you can still make: not cancelled, and you'd have had to set off at most a minute and a half ago.
         let ok = list.filter { !$0.first.cancelled && $0.start >= now.addingTimeInterval(-90) }
+        // The one you're waiting for at its stop, just past its time, is still the one: buses run late without the live
+        // data knowing. Keep it for a few minutes instead of quietly swapping in another bus (or another line).
+        if let cur = best, !cur.first.cancelled, !ok.contains(where: { $0.first.tripId == cur.first.tripId }),
+           cur.first.departure < now.addingTimeInterval(60), now < cur.first.departure.addingTimeInterval(6 * 60),
+           let la = cur.first.fromLat, let lo = cur.first.fromLon,
+           loc.distance(from: CLLocation(latitude: la, longitude: lo)) < 200, (trip?.speed ?? 0) < 2.5 {
+            overdue = true
+            others = Array(ok.filter { $0.first.tripId != cur.first.tripId }.sorted(by: Self.sooner).prefix(5))
+            error = nil
+            updated = now
+            return
+        }
+        overdue = false
         var pick = ok.min(by: Self.sooner)
         if let dl = deadline {
             // be there by a time: the one that leaves the latest and still makes it (or else the soonest there)
@@ -281,21 +295,32 @@ final class GoStore: ObservableObject {
     /// others it found); any other one has to be the same twice and take you there.
     private func checkBoarding(_ last: String?) async -> String? {
         guard let trip, trip.phase == .idle, watching else { return nil }
-        guard let m = await trip.matchVehicle(mode: nil) else { seen = nil; return nil }
+        let ranked = await trip.matchVehicles(mode: nil)
+        guard var m = ranked.first else { seen = nil; return nil }
         guard watching, trip.phase == .idle else { return nil }
         // at bus speed, not running for it while it passes you
         guard (trip.speed ?? 0) >= 3.5 else { return last }
-        let twice = last == m.vehicle.tripId
         let all = [best].compactMap { $0 } + others
-        if let t = all.first(where: { $0.first.tripId == m.vehicle.tripId }), m.meters < 250 || twice {
-            board(t, m.vehicle)
-            return nil
+        // Buses that leave the same stop together (the 305 and the 306 at Veghel) fit about the same at first: the one
+        // it's watching wins when it fits nearly as well.
+        if let b = best, m.vehicle.tripId != b.first.tripId,
+           let bm = ranked.first(where: { $0.vehicle.tripId == b.first.tripId }), bm.meters < m.meters + 200 { m = bm }
+        let twice = last == m.vehicle.tripId
+        if let t = all.first(where: { $0.first.tripId == m.vehicle.tripId }) {
+            // one look for the line it's watching; another line has to be the same twice
+            let sameLine = best.map { $0.first.line == m.vehicle.line } ?? true
+            if (m.meters < 250 && sameLine) || twice {
+                board(t, m.vehicle, alternatives: all)
+                return nil
+            }
+            seen = m.vehicle
+            return m.vehicle.tripId
         }
         if twice, let loc = trip.lastFix, let ob = await LiveStore.onBoardTrips(loc, to: dest), ob.0.vehicle.tripId == m.vehicle.tripId, let t = ob.1.first {
             // a long way round is probably not a bus you're on (a car or bike next to one)
             if let b = best, t.end > b.end.addingTimeInterval(30 * 60) { seen = nil; return m.vehicle.tripId }
             guard watching, trip.phase == .idle else { return nil }
-            board(t, ob.0.vehicle)
+            board(t, ob.0.vehicle, alternatives: all)
             return nil
         }
         seen = m.vehicle
@@ -303,9 +328,10 @@ final class GoStore: ObservableObject {
     }
 
     /// On board: the trip starts by itself (the ride screen takes over) and the watching stops.
-    private func board(_ t: DoorTrip, _ v: Vehicle) {
+    /// `alternatives`: the ways it was choosing between, so the ride can still switch if it turns out you're on another one.
+    private func board(_ t: DoorTrip, _ v: Vehicle, alternatives: [DoorTrip] = []) {
         guard let r = RoutePlan.from(t), let trip else { return }
-        trip.start(r, vehicle: v, auto: true)
+        trip.start(r, vehicle: v, auto: true, alternatives: alternatives)
         close()
         let c = UNMutableNotificationContent()
         c.title = "You’re on the \(v.title)"
@@ -334,7 +360,7 @@ final class GoStore: ObservableObject {
         demo = true
         isOpen = true
         dest = .breda
-        best = nil; others = []; error = nil; updated = nil; notes = []; arrived = false; seen = nil
+        best = nil; others = []; error = nil; updated = nil; notes = []; arrived = false; seen = nil; overdue = false
         here = loc ?? trip?.lastFix
         watching = true
         demoTask = Task { [weak self] in await self?.runDemo() }
@@ -650,6 +676,17 @@ struct GoView: View {
                         .padding(.horizontal, 10).padding(.vertical, 5).background(Paper.navy.opacity(0.1), in: Capsule())
                 }
                 .buttonStyle(.plain)
+            }
+            if go.overdue {
+                let alt = go.others.first
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "clock.badge.exclamationmark").font(.system(size: 15, weight: .semibold)).foregroundStyle(Paper.late)
+                    Text("Due at \(Fmt.hhmm(f.departure)) and not seen leaving: it may be running late. Wait for this \(GoStore.what(f))"
+                         + (alt.map { ", or take \(GoStore.what($0.first)) at \(Fmt.hhmm($0.first.departure)) (\(destWord) \(Fmt.hhmm($0.end)))." } ?? "."))
+                        .font(BoardInk.sans(12, .medium)).foregroundStyle(Paper.ink).fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(10)
+                .background(Paper.late.opacity(0.1), in: RoundedRectangle(cornerRadius: 5))
             }
             Rectangle().fill(Paper.rule).frame(height: 1)
             kicker("Your trip")

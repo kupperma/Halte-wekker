@@ -78,14 +78,16 @@ final class LiveStore: ObservableObject {
 
     /// You're on a bus or train: find it (its live position closest to you), then plan from its next stop, from when it
     /// gets there, so your trip carries on with it (or changes there) instead of starting with one you'd still have to catch.
-    static func onBoardTrips(_ f: CLLocation, to dest: Place) async -> (OnBoard, [DoorTrip])? {
+    /// `tripId`: plan from that one (the bus it now knows you're on), not just the nearest.
+    static func onBoardTrips(_ f: CLLocation, to dest: Place, tripId: String? = nil) async -> (OnBoard, [DoorTrip])? {
         let now = Date()
-        let segs = await Transit.vehicles(near: f.coordinate, radiusDeg: 0.02)
+        let segs = await Transit.vehicles(near: f.coordinate, radiusDeg: tripId == nil ? 0.02 : 0.04)
         var best: (VehicleSegment, Double)?
         for s in segs {
+            if let tripId, s.tripId != tripId { continue }
             guard let p = s.position(at: now) else { continue }
             let d = f.distance(from: CLLocation(latitude: p.latitude, longitude: p.longitude))
-            if d < 600, best == nil || d < best!.1 { best = (s, d) }
+            if d < (tripId == nil ? 600 : 4000), best == nil || d < best!.1 { best = (s, d) }
         }
         guard let seg = best?.0 else { return nil }
         let stops = await Transit.tripStops(seg.tripId)
