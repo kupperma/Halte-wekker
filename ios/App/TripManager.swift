@@ -237,6 +237,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             }
         }
         updateWatching()
+        // a trip doesn't outlive the app: whatever is still on the lock screen from before is stale
+        Self.endLeftoverActivities()
     }
 
     // MARK: trip flow
@@ -1405,11 +1407,21 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
 
     private func startActivity() {
         guard ActivityAuthorizationInfo().areActivitiesEnabled, let route, activity == nil else { return }
+        Self.endLeftoverActivities()
         activity = try? Activity.request(attributes: TripAttributes(routeName: route.name), content: ActivityContent(state: state, staleDate: nil), pushType: nil)
     }
 
+    /// Live Activities from an earlier run of the app (it was closed, or updated, during a trip): iOS keeps them on the lock
+    /// screen, but nothing updates them any more. They go.
+    static func endLeftoverActivities(keeping id: String? = nil) {
+        for a in Activity<TripAttributes>.activities where a.id != id {
+            Task { await a.end(nil, dismissalPolicy: .immediate) }
+        }
+    }
+
     private func pushActivity(force: Bool) {
-        guard let activity else { return }
+        // riding without one (it couldn't start, or it was lost): start it now
+        guard let activity else { if isRiding { startActivity() }; return }
         let s = state
         let key = "\(s.legTitle)|\(s.distanceText)|\(s.arrival?.timeIntervalSince1970 ?? 0)|\(s.awake)|\(Int(s.progress * 50))|\(s.song ?? "")|\(s.songPlaying)|\(s.ringing)"
         guard force || (key != lastActivityKey && Date().timeIntervalSince(lastActivity) > 8) else { return }
