@@ -21,7 +21,7 @@ struct OutfitSheet: View {
                     } else {
                         HStack(spacing: 10) {
                             if store.loading { ProgressView() } else { Image(systemName: "cloud.sun").font(.system(size: 22)).foregroundStyle(Paper.navy) }
-                            Text(store.loading ? "Getting the forecast…" : "No forecast yet: it needs a connection.").font(BoardInk.sans(14)).foregroundStyle(Paper.ink)
+                            Text(store.loading || !store.tried ? "Getting the forecast…" : "Couldn’t get the forecast just now. Tap ↻ to try again.").font(BoardInk.sans(14)).foregroundStyle(Paper.ink)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .paperCard()
@@ -29,7 +29,7 @@ struct OutfitSheet: View {
                 }
                 .padding(.horizontal, 14).padding(.vertical, 12)
             }
-            .background(Paper.paper.ignoresSafeArea())
+            .background(PaperFill().ignoresSafeArea())
             .navigationTitle("Outfit")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -40,6 +40,7 @@ struct OutfitSheet: View {
                 }
             }
         }
+        .preferredColorScheme(.light)                   // ink on paper, the title too
         .task { await store.refresh() }
     }
 

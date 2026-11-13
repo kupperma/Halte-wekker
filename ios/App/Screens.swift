@@ -198,6 +198,8 @@ struct HomeView: View {
                 if scene == .active {
                     Watchdog.shared.mark("finding where you are")
                     near.locate(ask: true)                       // where you are decides where your trips start
+                    updateOutfit()                               // the weather for it, alongside the rest
+                    Task { await OutfitStore.shared.refresh() }
                     Watchdog.shared.mark("loading the live times")
                     await live.refresh(trip.direction, at: near.position)
                     Watchdog.shared.mark("planning your planned trips")

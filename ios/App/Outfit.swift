@@ -216,6 +216,7 @@ final class OutfitStore: ObservableObject {
     static let shared = OutfitStore()
     @Published private(set) var plan: OutfitPlan?
     @Published private(set) var loading = false
+    @Published private(set) var tried = false               // it has asked for a forecast at least once
     private var last: (key: String, at: Date)?
     private var context: (here: CLLocation?, dest: Place, leave: Date?, arrive: Date?)?
 
@@ -225,6 +226,13 @@ final class OutfitStore: ObservableObject {
     }
 
     func refresh(force: Bool = false) async {
+        // Opened before the home screen said where you're going: the phone's last position, and home or school
+        // (whichever you're not at). The home screen fills in your trip's times as soon as it has them.
+        if context == nil {
+            let l = CLLocationManager().location.flatMap { Date().timeIntervalSince($0.timestamp) < 3 * 3600 ? $0 : nil }
+            let atHome = l.map { $0.distance(from: CLLocation(latitude: Place.veghel.coordinate.latitude, longitude: Place.veghel.coordinate.longitude)) < 5000 } ?? true
+            context = (l, atHome ? Place.buas : Place.veghel, nil, nil)
+        }
         guard let c = context else { return }
         let now = Date()
         let hereC = c.here?.coordinate ?? (c.dest == .veghel ? Place.buas.coordinate : Place.veghel.coordinate)
@@ -237,6 +245,7 @@ final class OutfitStore: ObservableObject {
         async let a = Weather.hourly(hereC)
         async let b = Weather.hourly(c.dest.coordinate)
         let (atHere, atThere) = await (a, b)
+        tried = true
         guard !atHere.isEmpty || !atThere.isEmpty else { return }
         // the day: from this hour (or 6 tomorrow morning, in the evening) until 11 at night
         let cal = Calendar.current

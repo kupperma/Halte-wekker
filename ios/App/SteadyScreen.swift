@@ -38,7 +38,7 @@ struct SteadySheet: View {
                     .padding(.horizontal, 14).padding(.vertical, 12)
                 }
             }
-            .background(Paper.paper.ignoresSafeArea())
+            .background(PaperFill().ignoresSafeArea())
             .navigationTitle("How steady, now")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -49,6 +49,7 @@ struct SteadySheet: View {
                 }
             }
         }
+        .preferredColorScheme(.light)                   // ink on paper, the title too
         .task { await load() }
     }
 
