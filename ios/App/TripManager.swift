@@ -601,8 +601,11 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
                 let li = forNextLeg ? self.index + 1 : self.index
                 let mode = self.legs[safe: li]?.mode
                 let planned = self.route?.planned?[safe: li]
-                let ranked = await self.matchVehicles(mode: mode, excluding: rejected)
-                guard var m = ranked.first else {
+                // every kind: you can be on a train where it planned a bus (it'll plan again from it); the kind it
+                // planned comes first
+                let ranked = await self.matchVehicles(mode: nil, excluding: rejected)
+                let kind = ranked.filter { mode == nil || $0.vehicle.isTrain == (mode == .train) }
+                guard var m = kind.first ?? ranked.first else {
                     lastBest = nil
                     // No live match (some have no live position): the one it planned, once you've clearly left on it.
                     if let p = planned, let from = self.legs[safe: li]?.from, self.clearlyLeft(on: p, from: from) {
@@ -619,14 +622,24 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
                    let pm = ranked.first(where: { $0.vehicle.tripId == p.tripId }), pm.meters < m.meters + 200 { m = pm }
                 // One look is enough for one it expects, or one right with you of the line it planned; others it wants
                 // to see twice.
-                let expected = (self.upcoming.contains { $0.trip.first.tripId == m.vehicle.tripId } || planned?.tripId == m.vehicle.tripId) && m.meters < 350
-                let sameLine = planned.map { $0.line == m.vehicle.line } ?? true
+                let otherKind = mode != nil && m.vehicle.isTrain != (mode == .train)
+                let expected = (self.upcoming.contains { $0.trip.first.tripId == m.vehicle.tripId } || planned?.tripId == m.vehicle.tripId) && m.meters < 350 && !otherKind
+                let sameLine = (planned.map { $0.line == m.vehicle.line } ?? true) && !otherKind
                 if expected || (m.meters < 150 && sameLine) || m.vehicle.tripId == lastBest {
                     // Its own timetable must still have your stop ahead: not one going the other way, not an earlier run.
                     let stops = await Transit.tripStops(m.vehicle.tripId)
                     let dests: [Place] = forNextLeg ? [self.legs[safe: self.index + 1]?.to].compactMap { $0 } : self.legDestinations
                     guard dests.contains(where: { self.goesAhead(stops, to: $0) }) else {
-                        rejected.insert(m.vehicle.tripId); lastBest = nil; continue
+                        // Not where this leg goes. Seen twice: you're on another one than it planned (the Sprinter to Den
+                        // Bosch where it planned the Intercity to Eindhoven). On a trip from Fastest trip the rest is
+                        // planned again from that one; on your own route it's not yours.
+                        if m.vehicle.tripId == lastBest {
+                            if self.route?.isFixed == false, await self.replanOnto(m.vehicle, stops: stops) { return }
+                            rejected.insert(m.vehicle.tripId); lastBest = nil
+                        } else {
+                            lastBest = m.vehicle.tripId
+                        }
+                        continue
                     }
                     // the ones that fit about as well stay in the running, until there's real distance between them
                     let close = ranked.filter { $0.vehicle.tripId != m.vehicle.tripId && $0.meters < m.meters + 300 }.map(\.vehicle)
@@ -961,8 +974,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     private func switchVehicle(from old: Vehicle, to v: Vehicle, stops: [TripStop]) async {
         roadOf = nil
         // A trip from Fastest trip: the rest of it goes with this bus (the way it was choosing between, or planned again
-        // from it). Your own two routes follow the station it goes to by themselves.
-        if let r = route, !r.isFixed, r.single == nil, index == 0 {
+        // from it), on any leg. Your own two routes follow the station it goes to by themselves.
+        if let r = route, !r.isFixed, r.single == nil {
             if let alt = boardAlternatives.first(where: { $0.first.tripId == v.tripId }), let nr = RoutePlan.from(alt) {
                 setRoute(nr)
             } else if let here = samples.last, let final = legs.last?.to,
@@ -979,6 +992,24 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         } else {
             tellBus("You’re on the \(v.title), not the \(old.title)", "They looked the same when you got on. Fixed: it now wakes you for \(to)\(when).")
         }
+    }
+
+    /// You're on another bus or train than the one planned, and it doesn't go where this leg does: the rest of the trip
+    /// is planned again from it (where to get off, and what then), and the ride follows it.
+    private func replanOnto(_ v: Vehicle, stops: [TripStop]) async -> Bool {
+        guard let here = samples.last, let final = legs.last?.to,
+              let ob = await LiveStore.onBoardTrips(here, to: final, tripId: v.tripId), let t = ob.1.first, let nr = RoutePlan.from(t) else { return false }
+        boardAlternatives = ob.1
+        if phase == .transfer {
+            route = nr; legs = nr.legs(direction); index = 0
+            beginLeg(vehicle: v, stops: stops)
+        } else {
+            setRoute(nr)
+            await vehicleFound(v, stops: stops)
+        }
+        tellBus("You’re on the \(v.title)", "Not the one it planned, so the rest is planned from this one: off at \(legs.first?.to.short ?? "the next stop"), \(final.short) at \(Fmt.hhmm(t.end)).")
+        pushActivity(force: true)
+        return true
     }
 
     /// The rest of the trip, changed under way (still on its first leg).

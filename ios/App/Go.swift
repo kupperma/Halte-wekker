@@ -24,6 +24,7 @@ final class GoStore: ObservableObject {
     @Published private(set) var arrived = false
     @Published private(set) var seen: Vehicle?               // looks like you're on this one (checking)
     @Published private(set) var overdue = false              // the one you're waiting for at its stop is past its time
+    @Published private(set) var hurry: (meters: Int, minutes: Int)?   // the one you're on your way to: still makes it at a brisk walk
     @Published private(set) var onBoard: Vehicle?            // you're on this one already: the plan starts from it
     @Published private(set) var lookingOnBoard = false       // just opened: checking whether you're on a bus or train
     @Published private(set) var movingUnknown = false        // going at train or bus speed, but which one isn't clear yet
@@ -99,7 +100,7 @@ final class GoStore: ObservableObject {
     private func begin(_ d: Place) {
         loop?.cancel(); detect?.cancel()
         dest = d
-        best = nil; others = []; error = nil; updated = nil; notes = []; arrived = false; seen = nil; overdue = false; onBoard = nil; movingUnknown = false; slow = false
+        best = nil; others = []; error = nil; updated = nil; notes = []; arrived = false; seen = nil; overdue = false; onBoard = nil; movingUnknown = false; slow = false; hurry = nil
         told = [:]; toldEnd = nil; toldGo = []; missed = nil
         since = Date()
         watching = true
@@ -256,6 +257,21 @@ final class GoStore: ObservableObject {
             return
         }
         overdue = false
+        // The one you're on your way to, that the planner now leaves out because at its walking pace you can't make it:
+        // at a brisk walk you still can. Keep it (and say hurry) rather than swap in a worse one.
+        if let cur = best, !cur.first.cancelled, !ok.contains(where: { $0.first.tripId == cur.first.tripId }),
+           let la = cur.first.fromLat, let lo = cur.first.fromLon, (trip?.phase ?? .idle) == .idle {
+            let m = loc.distance(from: CLLocation(latitude: la, longitude: lo))
+            let left = cur.first.departure.timeIntervalSince(now)
+            if left > 60, m > 60, m * 1.3 / 1.7 <= left {
+                hurry = (Int(m), Int(left / 60))
+                others = Array(ok.filter { $0.first.tripId != cur.first.tripId }.sorted(by: Self.sooner).prefix(5))
+                error = nil
+                updated = now
+                return
+            }
+        }
+        hurry = nil
         var pick = ok.min(by: Self.sooner)
         if let dl = deadline {
             // be there by a time: the one that leaves the latest and still makes it, with changes you're not likely to
@@ -542,7 +558,7 @@ final class GoStore: ObservableObject {
         demo = true
         isOpen = true
         dest = .breda
-        best = nil; others = []; error = nil; updated = nil; notes = []; arrived = false; seen = nil; overdue = false; onBoard = nil; movingUnknown = false; slow = false
+        best = nil; others = []; error = nil; updated = nil; notes = []; arrived = false; seen = nil; overdue = false; onBoard = nil; movingUnknown = false; slow = false; hurry = nil
         here = loc ?? trip?.lastFix
         watching = true
         demoTask = Task { [weak self] in await self?.runDemo() }
@@ -882,6 +898,16 @@ struct GoView: View {
                         .padding(.horizontal, 10).padding(.vertical, 5).background(Paper.navy.opacity(0.1), in: Capsule())
                 }
                 .buttonStyle(.plain)
+            }
+            if let h = go.hurry {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "figure.run").font(.system(size: 15, weight: .semibold)).foregroundStyle(Paper.late)
+                    Text("Hurry: \(h.meters) m to the stop and it leaves in \(h.minutes) min. A brisk walk makes it."
+                         + (go.others.first.map { " If not: \(GoStore.what($0.first)) at \(Fmt.hhmm($0.first.departure)), \(destWord) \(Fmt.hhmm($0.end))." } ?? ""))
+                        .font(BoardInk.sans(12, .medium)).foregroundStyle(Paper.ink).fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(10)
+                .background(Paper.late.opacity(0.1), in: RoundedRectangle(cornerRadius: 5))
             }
             if go.overdue {
                 let alt = go.others.first
