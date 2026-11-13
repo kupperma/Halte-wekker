@@ -328,12 +328,12 @@ final class GoStore: ObservableObject {
         for _ in 0..<20 {
             if let f = trip.lastFix, f.horizontalAccuracy >= 0, f.horizontalAccuracy < 100, f.timestamp > opened.addingTimeInterval(-20) {
                 fix = f
-                if f.timestamp >= opened || f.speed >= 5 { break }
+                if f.timestamp >= opened || LiveStore.movingFix(f) { break }
             }
             try? await Task.sleep(nanoseconds: 250_000_000)
             guard watching else { return }
         }
-        guard let f = fix, f.speed >= 5 || trip.movedRecently else { return }      // not moving like a bus: plan from here
+        guard let f = fix, LiveStore.movingFix(f) || trip.movedRecently else { return }      // not moving like a bus: plan from here
         let d = dest
         guard var ob = await LiveStore.onBoardTrips(f, to: d), watching, dest == d, trip.phase == .idle, !ob.1.isEmpty else { return }
         onBoard = ob.0.vehicle

@@ -78,9 +78,17 @@ final class LiveStore: ObservableObject {
 
     /// You're on a bus or train: find it (its live position closest to you), then plan from its next stop, from when it
     /// gets there, so your trip carries on with it (or changes there) instead of starting with one you'd still have to catch.
+    /// A GPS fix good enough to tell speed from (inside a station they're often off by 50 m and more).
+    nonisolated static func goodFix(_ l: CLLocation) -> Bool { l.horizontalAccuracy >= 0 && l.horizontalAccuracy <= 40 }
+    /// The GPS itself says bus or train speed, and is sure of it.
+    nonisolated static func movingFix(_ l: CLLocation) -> Bool {
+        l.speed >= 5 && goodFix(l) && (l.speedAccuracy < 0 || l.speedAccuracy < 2)
+    }
+
     /// `tripId`: plan from that one (the bus it now knows you're on), not just the nearest.
     static func onBoardTrips(_ f: CLLocation, to dest: Place, tripId: String? = nil) async -> (OnBoard, [DoorTrip])? {
         let now = Date()
+        let still = f.speed < 3                     // standing or walking now (or no speed): then it has to be right with you
         let segs = await Transit.vehicles(near: f.coordinate, radiusDeg: tripId == nil ? 0.02 : 0.04)
         var best: (VehicleSegment, Double)?
         for s in segs {
@@ -95,11 +103,13 @@ final class LiveStore: ObservableObject {
                 if turn > 75 { continue }
             }
             let d = f.distance(from: CLLocation(latitude: p.latitude, longitude: p.longitude))
-            if d < (tripId == nil ? 600 : 4000), best == nil || d < best!.1 { best = (s, d) }
+            if d < (tripId == nil ? (still ? 250 : 600) : 4000), best == nil || d < best!.1 { best = (s, d) }
         }
         guard let seg = best?.0 else { return nil }
         let stops = await Transit.tripStops(seg.tripId)
         guard let next = stops.first(where: { ($0.arrival ?? .distantPast) > now.addingTimeInterval(20) }) else { return nil }
+        // Standing still and it's coming to where you are: you're at its stop (a bus station by the train station), not on it.
+        if tripId == nil, still, f.distance(from: CLLocation(latitude: next.coordinate.latitude, longitude: next.coordinate.longitude)) < 350 { return nil }
         let at = next.arrival ?? now
         var its: [DoorTrip] = []
         for b in dest.ids {
@@ -187,11 +197,12 @@ final class LiveStore: ObservableObject {
 
     func refresh(_ dir: Direction, at loc: CLLocation? = nil, force: Bool = false) async {
         if let loc {
-            // moving at bus or train speed (by the GPS, or between two positions): you're probably on board
-            if loc.speed >= 5 { lastMoving = loc.timestamp }
+            // moving at bus or train speed (by the GPS, or between two positions): you're probably on board. Only on good
+            // fixes, far enough apart: inside a big station the GPS jumps about and a few seconds can look like 20 km/h.
+            if Self.movingFix(loc) { lastMoving = loc.timestamp }
             if let p = lastSeen, loc.timestamp > p.timestamp {
                 let dt = loc.timestamp.timeIntervalSince(p.timestamp)
-                if dt < 300, loc.distance(from: p) / dt >= 5 { lastMoving = loc.timestamp }
+                if dt >= 15, dt < 300, Self.goodFix(loc), Self.goodFix(p), loc.distance(from: p) / dt >= 5 { lastMoving = loc.timestamp }
             }
             lastSeen = loc
         }

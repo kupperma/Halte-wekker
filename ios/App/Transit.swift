@@ -33,6 +33,16 @@ struct Ride: Identifiable, Hashable {
                                               scheduled: scheduledArrival.timeIntervalSince(scheduledDeparture) / 60, cancelled: cancelled) }
 }
 
+extension Ride {
+    /// The same ride, with another walk to it.
+    func walking(_ minutes: Int) -> Ride {
+        Ride(tripId: tripId, line: line, name: name, isTrain: isTrain, departure: departure, scheduledDeparture: scheduledDeparture,
+             arrival: arrival, scheduledArrival: scheduledArrival, fromStop: fromStop, fromId: fromId, toStop: toStop, platform: platform,
+             live: live, cancelled: cancelled, walkBefore: minutes, num: num, headsign: headsign, plannedPlatform: plannedPlatform,
+             fromLat: fromLat, fromLon: fromLon, toLat: toLat, toLon: toLon)
+    }
+}
+
 /// A door-to-door trip from the planner: the rides plus where it starts and ends.
 struct DoorTrip: Identifiable, Hashable {
     var id: String { rides.map(\.id).joined(separator: "+") }
@@ -253,10 +263,34 @@ enum Transit {
     /// Door-to-door trips from where you are to a place, without the ones a later trip beats.
     static func tripsFrom(_ c: CLLocationCoordinate2D, to: Place, count: Int = 5, keep: Int = 5) async -> [DoorTrip] {
         let now = Date()
+        let here = CLLocation(latitude: c.latitude, longitude: c.longitude)
+        let station = await stationAt(c)
         var all: [DoorTrip] = []
         for b in to.ids {
             all += await plan(from: "\(c.latitude),\(c.longitude)", to: b, modes: nil, at: now.addingTimeInterval(-120), count: count, maxTransfers: 4)
+            // At a station: from the station itself too. From your GPS spot inside a big one, the walk to the platforms can
+            // come out long or odd, and a bus to the station you're standing in looks quicker. Your walk to the platform:
+            // about how far it is.
+            if let st = station {
+                let fromStation = await plan(from: st.id, to: b, modes: nil, at: now.addingTimeInterval(-120), count: count, maxTransfers: 4)
+                all += fromStation.map { t in
+                    let f = t.first
+                    let m = f.fromLat.flatMap { a in f.fromLon.map { o in here.distance(from: CLLocation(latitude: a, longitude: o)) } } ?? 150
+                    let walk = min(8, max(2, Int((m / 1.2 / 60).rounded(.up))))
+                    return DoorTrip(rides: [f.walking(walk)] + t.rides.dropFirst(), start: f.departure.addingTimeInterval(-Double(walk) * 60), end: t.end)
+                }
+            }
         }
+        // A ride that only takes you to where you are (the station you're at): you're there already. Only when there's
+        // another way, though.
+        let at = station.map { CLLocation(latitude: $0.lat, longitude: $0.lon) }
+        func hop(_ t: DoorTrip) -> Bool {
+            guard t.rides.count > 1, let a = t.first.toLat, let o = t.first.toLon else { return false }
+            let end = CLLocation(latitude: a, longitude: o)
+            return end.distance(from: here) < 350 || (at.map { end.distance(from: $0) < 400 } ?? false)
+        }
+        let direct = all.filter { !hop($0) }
+        if !direct.isEmpty { all = direct }
         var seen = Set<String>()
         all = all.filter { $0.first.departure >= now.addingTimeInterval(-60) && $0.start >= now.addingTimeInterval(-90) && seen.insert($0.id).inserted }
             .sorted { $0.first.departure < $1.first.departure }
@@ -313,6 +347,16 @@ enum Transit {
         return out
     }
 
+    /// The train station you're at, if any: within 350 m (big stations are a few hundred metres across, and the GPS
+    /// wanders inside). Remembered for ten minutes per spot.
+    static func stationAt(_ c: CLLocationCoordinate2D) async -> NearStop? {
+        let key = "\(Int((c.latitude * 500).rounded())),\(Int((c.longitude * 300).rounded()))"         // about 200 m
+        if let hit = StationMemo.shared.get(key) { return hit.stop }
+        let s = await nearStops(c).first { $0.rail && $0.meters < 350 }
+        StationMemo.shared.set(key, s)
+        return s
+    }
+
     /// A stop near you: a bus stop, or a train station (by the station, not one platform).
     struct NearStop: Identifiable, Hashable {
         let id: String
@@ -360,8 +404,13 @@ enum Transit {
                     var q: [URLQueryItem] = [.init(name: "stopId", value: id), .init(name: "n", value: String(n))]
                     if let from { q.append(.init(name: "time", value: iso.string(from: from))) }
                     if stops { q.append(.init(name: "fetchStops", value: "true")) }      // its next stops: which way it goes
-                    guard let json = try? await get("/v6/stoptimes", q) as? [String: Any],
-                          let list = json["stopTimes"] as? [[String: Any]] else { return [] }
+                    var json = try? await get("/v6/stoptimes", q) as? [String: Any]
+                    if json?["stopTimes"] == nil, stops {
+                        // A big station's answer with every train's next stops is large: on a weak connection, ask again
+                        // without them (a quarter of the size; only the "via" goes)
+                        json = try? await get("/v6/stoptimes", q.filter { $0.name != "fetchStops" }) as? [String: Any]
+                    }
+                    guard let list = json?["stopTimes"] as? [[String: Any]] else { return [] }
                     return list.compactMap { st in
                         let p = st["place"] as? [String: Any] ?? [:]
                         guard let t = date(p["departure"]) ?? date(p["arrival"]) else { return nil }
@@ -540,5 +589,22 @@ final class Ratings {
         if e <= 3 || r <= 1.18 { return "A" }
         if r <= 1.3 { return "B" }
         return "C"
+    }
+}
+
+/// The station near a spot, remembered (a lock: it's asked from anywhere).
+final class StationMemo: @unchecked Sendable {
+    static let shared = StationMemo()
+    private let lock = NSLock()
+    private var items: [String: (stop: Transit.NearStop?, at: Date)] = [:]
+    func get(_ k: String) -> (stop: Transit.NearStop?, at: Date)? {
+        lock.lock(); defer { lock.unlock() }
+        guard let v = items[k], Date().timeIntervalSince(v.at) < 600 else { return nil }
+        return v
+    }
+    func set(_ k: String, _ s: Transit.NearStop?) {
+        lock.lock(); defer { lock.unlock() }
+        if items.count > 200 { items = [:] }
+        items[k] = (s, Date())
     }
 }
