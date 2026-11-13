@@ -190,7 +190,7 @@ final class GoStore: ObservableObject {
             if !Task.isCancelled, let self, self.best == nil { self.slow = true }
         }
         let answer = await Transit.$urgent.withValue(true) {
-            await Transit.within(25) { await Transit.tripsFrom(c, to: d, count: 8, keep: 8) }
+            await Transit.within(25) { await Transit.tripsFrom(c, to: d, count: 6, keep: 8) }
         }
         let found = answer ?? []
         why = answer == nil ? "No answer within 25 seconds: a slow connection."

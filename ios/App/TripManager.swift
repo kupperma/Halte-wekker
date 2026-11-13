@@ -372,7 +372,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         Watchdog.shared.mark("coming back to the screen")
         always = location.authorizationStatus == .authorizedAlways
         Task { await NoticeLog.shared.collectDelivered() }       // off the lock screen, into the app's list
-        Task { await SchoolAlarm.shared.refresh(force: true) }    // the timetable may have changed: plan the school alarm again
+        Task { await SchoolAlarm.shared.refresh() }               // the timetable may have changed: plan again (5 minutes apart at most)
         Morning.shared.checkAfterAlarm()                          // just woke up from the school alarm: the morning screen
         if let a = awaySince, Date().timeIntervalSince(a) > 30 * 60 { guessDirection = true }
         awaySince = nil

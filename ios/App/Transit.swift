@@ -168,6 +168,16 @@ enum Transit {
     /// phone keeps only a few open to one server, and the boards, the school alarm planning the week and the rest would
     /// otherwise have them queue.
     @TaskLocal static var urgent = false
+    /// How many of those are on their way.
+    static let flight = Flight()
+    final class Flight: @unchecked Sendable {
+        private let lock = NSLock()
+        private var n = 0
+        func begin() { lock.lock(); n += 1; lock.unlock() }
+        func end() { lock.lock(); n = max(0, n - 1); lock.unlock() }
+        var busy: Bool { lock.lock(); defer { lock.unlock() }; return n > 0 }
+    }
+
     /// The last thing that went wrong with one of those, and when (so the screen can say why it found nothing).
     static let trouble = Trouble()
     final class Trouble: @unchecked Sendable {
@@ -195,7 +205,17 @@ enum Transit {
         var c = URLComponents(string: base + path)!
         c.queryItems = items
         var last: Error = URLError(.unknown)
-        let session = urgent ? urgentSession : URLSession.shared
+        let isUrgent = urgent
+        let session = isUrgent ? urgentSession : URLSession.shared
+        // On a thin connection (2 bars inside a building) what you're waiting for goes first: the rest holds back while
+        // one of those is on its way (12 seconds at most).
+        if isUrgent {
+            flight.begin()
+        } else {
+            var waited = 0.0
+            while flight.busy && waited < 12 { try await Task.sleep(nanoseconds: 250_000_000); waited += 0.25 }
+        }
+        defer { if isUrgent { flight.end() } }
         for attempt in 0..<2 {
             if attempt > 0 {
                 try await Task.sleep(nanoseconds: 600_000_000)
@@ -284,7 +304,8 @@ enum Transit {
     static func plan(from: String, to: String, modes: String?, at: Date, count: Int, maxTransfers: Int, arriveBy: Bool = false) async -> [DoorTrip] {
         var q: [URLQueryItem] = [.init(name: "fromPlace", value: from), .init(name: "toPlace", value: to),
                                  .init(name: "numItineraries", value: String(count)), .init(name: "maxTransfers", value: String(maxTransfers)),
-                                 .init(name: "time", value: iso.string(from: at))]
+                                 .init(name: "time", value: iso.string(from: at)),
+                                 .init(name: "detailedTransfers", value: "false")]          // a third smaller: no turn-by-turn for changes
         if arriveBy { q.append(.init(name: "arriveBy", value: "true")) }       // `at` is when you want to be there
         if let m = modes { q.append(.init(name: "transitModes", value: m)) }
         guard let json = try? await get("/v5/plan", q) as? [String: Any], let its = json["itineraries"] as? [[String: Any]] else { return [] }

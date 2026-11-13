@@ -251,7 +251,7 @@ final class SchoolAlarm: ObservableObject {
             }
             // A change you'll make: also the earlier buses onto the same train, and the latest one that leaves room to
             // change (a late 306 shouldn't cost you the train, and the next one is 20 to 30 minutes later).
-            if best.rides.count > 1 {
+            if best.rides.count > 1, e.startDate.timeIntervalSince(now) < 36 * 3600 {         // the next day and a half
                 let earlier = await Transit.earlierWays(onto: best, now: now, at: [0])
                 guard on else { return }
                 // (no more than 35 minutes before the latest: the planner also lists night buses that get there by morning)
