@@ -164,21 +164,33 @@ enum Transit {
         }
     }
 
+    /// Questions someone is waiting for on screen (Fastest trip, what you're on). They go on their own connections: a
+    /// phone keeps only a few open to one server, and the boards, the school alarm planning the week and the rest would
+    /// otherwise have them queue.
+    @TaskLocal static var urgent = false
+    private static let urgentSession: URLSession = {
+        let c = URLSessionConfiguration.default
+        c.httpMaximumConnectionsPerHost = 6
+        c.waitsForConnectivity = false
+        return URLSession(configuration: c)
+    }()
+
     /// One question to Transitous. A slow connection or a busy server (a timeout, a dropped connection, "too many
     /// requests", a server error) gets one more try a moment later: otherwise one bad moment on the train leaves a board
-    /// empty until the next refresh. It answers in a second or two, so one that takes six is stuck.
+    /// empty until the next refresh.
     static func get(_ path: String, _ items: [URLQueryItem]) async throws -> Any {
         var c = URLComponents(string: base + path)!
         c.queryItems = items
         var last: Error = URLError(.unknown)
+        let session = urgent ? urgentSession : URLSession.shared
         for attempt in 0..<2 {
             if attempt > 0 {
                 try await Task.sleep(nanoseconds: 600_000_000)
             }
-            var req = URLRequest(url: c.url!, timeoutInterval: attempt == 0 ? 6 : 5)
+            var req = URLRequest(url: c.url!, timeoutInterval: attempt == 0 ? 9 : 7)
             req.setValue(userAgent, forHTTPHeaderField: "User-Agent")
             do {
-                let (data, resp) = try await URLSession.shared.data(for: req)
+                let (data, resp) = try await session.data(for: req)
                 let code = (resp as? HTTPURLResponse)?.statusCode ?? 200
                 if code == 429 || code >= 500 { last = URLError(.badServerResponse); continue }
                 return try JSONSerialization.jsonObject(with: data)

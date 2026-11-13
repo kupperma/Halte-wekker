@@ -27,10 +27,13 @@ final class GoStore: ObservableObject {
     @Published private(set) var onBoard: Vehicle?            // you're on this one already: the plan starts from it
     @Published private(set) var lookingOnBoard = false       // just opened: checking whether you're on a bus or train
     @Published private(set) var movingUnknown = false        // going at train or bus speed, but which one isn't clear yet
+    @Published private(set) var slow = false                 // the answer is taking long (a slow connection)
+    private var seed: [DoorTrip] = []                        // the home screen's trips from here, to start with
     @Published private(set) var here: CLLocation?
     @Published private(set) var demo = false                 // pretend buses, to try it at home
     private var demoTask: Task<Void, Never>?
     private var look: Task<Void, Never>?                      // the "are you on board?" look, beside the planning
+    private var lookRunning = false
     struct Note: Identifiable, Equatable {
         let id = UUID()
         let at: Date
@@ -50,8 +53,10 @@ final class GoStore: ObservableObject {
     // MARK: open and close
 
     /// Open the screen and start watching the way to `d`.
-    func open(to d: Place, from loc: CLLocation?, deadline dl: Date? = nil, label: String? = nil, autoKey: String? = nil) {
+    /// `seed`: trips from where you are that the home screen just found: on screen at once, then looked up again.
+    func open(to d: Place, from loc: CLLocation?, deadline dl: Date? = nil, label: String? = nil, autoKey: String? = nil, seed: [DoorTrip] = []) {
         fallback = loc
+        self.seed = dl == nil ? seed : []
         deadline = dl; deadlineLabel = label; self.autoKey = autoKey
         isOpen = true
         begin(d)
@@ -93,7 +98,7 @@ final class GoStore: ObservableObject {
     private func begin(_ d: Place) {
         loop?.cancel(); detect?.cancel()
         dest = d
-        best = nil; others = []; error = nil; updated = nil; notes = []; arrived = false; seen = nil; overdue = false; onBoard = nil; movingUnknown = false
+        best = nil; others = []; error = nil; updated = nil; notes = []; arrived = false; seen = nil; overdue = false; onBoard = nil; movingUnknown = false; slow = false
         told = [:]; toldEnd = nil; toldGo = []; missed = nil
         since = Date()
         watching = true
@@ -101,7 +106,15 @@ final class GoStore: ObservableObject {
         trip?.setGo(true)
         look?.cancel()
         look = Task { [weak self] in await self?.firstLook() }    // on a bus or train already? at the same time as planning
+        let start = seed
+        seed = []
         loop = Task { [weak self] in
+            // what the home screen just found from here, on screen at once
+            if let self, !start.isEmpty, let l = self.fallback ?? self.trip?.lastFix {
+                self.here = l
+                Self.waitFrom = l
+                await self.apply(start, loc: l, d: d, now: Date())
+            }
             while !Task.isCancelled {
                 guard let self, self.watching else { return }
                 await self.refresh()
@@ -169,7 +182,17 @@ final class GoStore: ObservableObject {
         let d = dest
         // The ways from here, within 8 seconds (a slow answer doesn't hold the screen: it tries again on the next look).
         let c = loc.coordinate
-        let found = await Transit.within(8) { await Transit.tripsFrom(c, to: d, count: 8, keep: 8) } ?? []
+        // On its own connections (never behind the boards and the school alarm), and kept when it's slow: after 8 seconds
+        // it says so, and only after 25 it gives up for this look.
+        let slowNote = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 8_000_000_000)
+            if !Task.isCancelled, let self, self.best == nil { self.slow = true }
+        }
+        let found = await Transit.$urgent.withValue(true) {
+            await Transit.within(25) { await Transit.tripsFrom(c, to: d, count: 8, keep: 8) }
+        } ?? []
+        slowNote.cancel()
+        slow = false
         guard watching, dest == d, onBoard == nil else { return }
         await apply(found, loc: loc, d: d, now: now)
         // Then, with that on screen, the extras: earlier ways onto the same connection, which the planner leaves out (the
@@ -177,7 +200,7 @@ final class GoStore: ObservableObject {
         // the earlier 306 that leaves room to change), and for a planned trip the latest that still get you there in time.
         var more: [DoorTrip] = []
         async let late: [DoorTrip] = latestInTime(from: c, to: d, now: now)
-        if let top = best { more += await Transit.within(6) { await self.earlierWays(onto: top) } ?? [] }
+        if let top = best { more += await Transit.$urgent.withValue(true) { await Transit.within(8) { await self.earlierWays(onto: top) } } ?? [] }
         more += await late
         var ids = Set(found.map(\.id))
         more = more.filter { ids.insert($0.id).inserted }
@@ -188,18 +211,18 @@ final class GoStore: ObservableObject {
     /// A planned trip: the latest ways that still get you there in time (within 6 seconds).
     private func latestInTime(from c: CLLocationCoordinate2D, to d: Place, now: Date) async -> [DoorTrip] {
         guard let dl = deadline else { return [] }
-        return await Transit.within(6) {
+        return await Transit.$urgent.withValue(true) { await Transit.within(8) {
             var out: [DoorTrip] = []
             for b in d.ids {
                 out += await Transit.plan(from: "\(c.latitude),\(c.longitude)", to: b, modes: nil, at: dl, count: 5, maxTransfers: 4, arriveBy: true)
             }
             return out.filter { $0.first.departure >= now.addingTimeInterval(-60) }
-        } ?? []
+        } } ?? []
     }
 
     /// The look at what you're on, again (unless it's looking already).
     private func lookAgain() {
-        guard look == nil || look!.isCancelled || !lookingOnBoard else { return }
+        guard !lookRunning else { return }
         look = Task { [weak self] in await self?.firstLook() }
     }
 
@@ -392,9 +415,9 @@ final class GoStore: ObservableObject {
     /// plans from that one: stay on, or where to change. One more look a few seconds later to be sure you're with it
     /// (not in a car next to it), and the trip starts by itself. Otherwise it plans from where you are, as before.
     private func firstLook() async {
-        guard let trip, trip.phase == .idle, !demo, watching else { return }
-        lookingOnBoard = true
-        defer { lookingOnBoard = false }
+        guard let trip, trip.phase == .idle, !demo, watching, !lookRunning else { return }
+        lookRunning = true
+        defer { lookRunning = false }
         let opened = Date()
         var fix: CLLocation?
         // a fix from the last 20 seconds is good enough; else wait for one, two and a half seconds at most
@@ -407,9 +430,12 @@ final class GoStore: ObservableObject {
             guard watching else { return }
         }
         guard let f = fix ?? trip.lastFix, LiveStore.movingFix(f) || trip.movedRecently else { return }      // not moving like a bus
+        // moving like one: now it's really checking (and says so)
+        lookingOnBoard = true
+        defer { lookingOnBoard = false }
         let d = dest
         let moving = trip.movedRecently
-        guard var ob = await Transit.within(7, { await LiveStore.onBoardTrips(f, to: d, wasMoving: moving) }) ?? nil,
+        guard var ob = await Transit.$urgent.withValue(true, operation: { await Transit.within(10, { await LiveStore.onBoardTrips(f, to: d, wasMoving: moving) }) }) ?? nil,
               watching, dest == d, trip.phase == .idle, !ob.1.isEmpty else { return }
         movingUnknown = false
         onBoard = ob.0.vehicle
@@ -512,7 +538,7 @@ final class GoStore: ObservableObject {
         demo = true
         isOpen = true
         dest = .breda
-        best = nil; others = []; error = nil; updated = nil; notes = []; arrived = false; seen = nil; overdue = false; onBoard = nil; movingUnknown = false
+        best = nil; others = []; error = nil; updated = nil; notes = []; arrived = false; seen = nil; overdue = false; onBoard = nil; movingUnknown = false; slow = false
         here = loc ?? trip?.lastFix
         watching = true
         demoTask = Task { [weak self] in await self?.runDemo() }
@@ -741,6 +767,9 @@ struct GoView: View {
         } else if go.movingUnknown {
             message(icon: "tram.fill", title: "You’re going fast",
                     text: "On a train or bus? It’s finding which one, to plan from there. In a car, it plans once you stop.", spinner: true)
+        } else if go.slow {
+            message(icon: "wifi.exclamationmark", title: "Slow connection",
+                    text: "Still getting the trips to \(destWord). It shows them as soon as they’re in.", spinner: true)
         } else if go.lookingOnBoard {
             message(icon: "bus.fill", title: "Are you on a bus or train?",
                     text: "Checking how you’re moving. If you’re on one, it plans from there: stay on, or where to change.", spinner: true)

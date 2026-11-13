@@ -240,7 +240,8 @@ final class LiveStore: ObservableObject {
             if Self.movingFix(loc) { lastMoving = loc.timestamp }
             if let p = lastSeen, loc.timestamp > p.timestamp {
                 let dt = loc.timestamp.timeIntervalSince(p.timestamp)
-                if dt >= 15, dt < 300, Self.goodFix(loc), Self.goodFix(p), loc.distance(from: p) / dt >= 5 { lastMoving = loc.timestamp }
+                if dt >= 20, dt < 300, loc.horizontalAccuracy >= 0, loc.horizontalAccuracy <= 25, p.horizontalAccuracy >= 0, p.horizontalAccuracy <= 25,
+                   loc.distance(from: p) / dt >= 5 { lastMoving = loc.timestamp }
             }
             lastSeen = loc
         }

@@ -144,11 +144,17 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
 
     /// Moving like a bus or train in the last three minutes (by the GPS's speed, or between two fixes): standing at a
     /// stop on board still counts.
+    /// (Indoors the GPS can jump a hundred metres between two fixes and still say it's within 40: one jump isn't a bus.
+    /// So: its own speed, sure of it, twice; or three fixes of 25 m or better, half a minute or more apart, every stretch
+    /// at bus speed.)
     var movedRecently: Bool {
         let r = samples.filter { $0.timestamp > Date().addingTimeInterval(-180) && LiveStore.goodFix($0) }
-        if r.contains(where: LiveStore.movingFix) { return true }
-        guard let a = r.first, let b = r.last, b.timestamp.timeIntervalSince(a.timestamp) > 20 else { return false }
-        return b.distance(from: a) / b.timestamp.timeIntervalSince(a.timestamp) >= 5
+        if r.filter(LiveStore.movingFix).count >= 2 { return true }
+        let g = r.filter { $0.horizontalAccuracy <= 25 }
+        guard g.count >= 3, let a = g.first, let b = g.last, b.timestamp.timeIntervalSince(a.timestamp) >= 30 else { return false }
+        let mid = g[g.count / 2]
+        func v(_ p: CLLocation, _ q: CLLocation) -> Double { q.distance(from: p) / max(1, q.timestamp.timeIntervalSince(p.timestamp)) }
+        return v(a, mid) >= 4 && v(mid, b) >= 4 && v(a, b) >= 5
     }
     /// The Fastest trip screen is open: it needs GPS (also locked) to plan from where you are and notice when you get on.
     private(set) var going = false

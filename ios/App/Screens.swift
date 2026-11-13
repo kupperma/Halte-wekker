@@ -299,7 +299,13 @@ struct HomeView: View {
 
     /// The hands-free Fastest trip screen, to where you're going now.
     private func openGo() {
-        withAnimation(.easeInOut(duration: 0.35)) { goStore.open(to: live.destination(trip.direction), from: near.position) }
+        // what the home screen just found from here, to start with: fresh, from about where you are, not from a bus
+        var seed: [DoorTrip] = []
+        if live.onBoard == nil, let h = live.here, let u = live.updated, Date().timeIntervalSince(u) < 180,
+           let p = near.position, p.distance(from: h) < 300 {
+            seed = live.next
+        }
+        withAnimation(.easeInOut(duration: 0.35)) { goStore.open(to: live.destination(trip.direction), from: near.position, seed: seed) }
     }
 
     /// Back to the map: walk back over to the wall.
