@@ -659,7 +659,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         let speed = max(last.speed, recent.first.map { last.distance(from: $0) / max(1, last.timestamp.timeIntervalSince($0.timestamp)) } ?? 0)
         guard speed > 2.5 else { return [] }                    // not moving: not on board yet
         // Each bus or train in pieces from stop to stop: put them together, so it isn't lost when it passes a stop.
-        let segs = await Transit.vehicles(near: last.coordinate)
+        let segs = await Transit.vehicles(near: last.coordinate, radiusDeg: speed > 15 ? 0.04 : 0.02)
         let byTrip = Dictionary(grouping: segs, by: { $0.tripId })
         func at(_ list: [VehicleSegment], _ t: Date) -> CLLocationCoordinate2D? {
             list.first(where: { t >= $0.departure && t <= $0.arrival })?.position(at: t) ?? list.lazy.compactMap { $0.position(at: t) }.first
@@ -687,7 +687,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             }
             guard n >= 2 else { continue }
             let avg = total / n
-            if avg < (s.isTrain ? 600 : 400) { found.append((Vehicle(tripId: s.tripId, line: s.isTrain ? Transit.trainLabel(s.line) : s.line, isTrain: s.isTrain), avg)) }
+            if avg < LiveStore.matchTolerance(train: s.isTrain, speed: speed) { found.append((Vehicle(tripId: s.tripId, line: s.isTrain ? Transit.trainLabel(s.line) : s.line, isTrain: s.isTrain), avg)) }
         }
         return found.sorted { $0.meters < $1.meters }
     }

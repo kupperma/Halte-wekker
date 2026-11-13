@@ -98,15 +98,25 @@ final class LiveStore: ObservableObject {
     /// A GPS fix good enough to tell speed from (inside a station they're often off by 50 m and more).
     nonisolated static func goodFix(_ l: CLLocation) -> Bool { l.horizontalAccuracy >= 0 && l.horizontalAccuracy <= 40 }
     /// The GPS itself says bus or train speed, and is sure of it.
+    /// (The GPS's speed comes from the Doppler shift, not from positions, so it's good even when the position isn't, as in
+    /// a train: then a sure speed is enough. Without a speed accuracy it wants a good position.)
     nonisolated static func movingFix(_ l: CLLocation) -> Bool {
-        l.speed >= 5 && goodFix(l) && (l.speedAccuracy < 0 || l.speedAccuracy < 2)
+        guard l.speed >= 5, l.horizontalAccuracy >= 0, l.horizontalAccuracy <= 100 else { return false }
+        return l.speedAccuracy >= 0 ? l.speedAccuracy < 2.5 : goodFix(l)
+    }
+
+    /// How far a bus or train can be from where its times put it and still be the one you're on: further the faster
+    /// you go (at 130 km/h, half a minute off its times is a kilometre).
+    nonisolated static func matchTolerance(train: Bool, speed: Double) -> Double {
+        let v = max(0, speed)
+        return train ? min(2500, max(600, v * 60)) : min(1000, max(400, v * 45))
     }
 
     /// `tripId`: plan from that one (the bus it now knows you're on), not just the nearest.
     static func onBoardTrips(_ f: CLLocation, to dest: Place, tripId: String? = nil) async -> (OnBoard, [DoorTrip])? {
         let now = Date()
         let still = f.speed < 3                     // standing or walking now (or no speed): then it has to be right with you
-        let segs = await Transit.vehicles(near: f.coordinate, radiusDeg: tripId == nil ? 0.02 : 0.04)
+        let segs = await Transit.vehicles(near: f.coordinate, radiusDeg: tripId == nil && f.speed < 15 ? 0.02 : 0.04)
         var best: (VehicleSegment, Double)?
         for s in segs {
             if let tripId, s.tripId != tripId { continue }
@@ -120,7 +130,8 @@ final class LiveStore: ObservableObject {
                 if turn > 75 { continue }
             }
             let d = f.distance(from: CLLocation(latitude: p.latitude, longitude: p.longitude))
-            if d < (tripId == nil ? (still ? 250 : 600) : 4000), best == nil || d < best!.1 { best = (s, d) }
+            let tol = tripId != nil ? 4000 : still ? 250 : matchTolerance(train: s.isTrain, speed: f.speed)
+            if d < tol, best == nil || d < best!.1 { best = (s, d) }
         }
         guard let seg = best?.0 else { return nil }
         let stops = await Transit.tripStops(seg.tripId)

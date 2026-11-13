@@ -26,6 +26,7 @@ final class GoStore: ObservableObject {
     @Published private(set) var overdue = false              // the one you're waiting for at its stop is past its time
     @Published private(set) var onBoard: Vehicle?            // you're on this one already: the plan starts from it
     @Published private(set) var lookingOnBoard = false       // just opened: checking whether you're on a bus or train
+    @Published private(set) var movingUnknown = false        // going at train or bus speed, but which one isn't clear yet
     @Published private(set) var here: CLLocation?
     @Published private(set) var demo = false                 // pretend buses, to try it at home
     private var demoTask: Task<Void, Never>?
@@ -91,7 +92,7 @@ final class GoStore: ObservableObject {
     private func begin(_ d: Place) {
         loop?.cancel(); detect?.cancel()
         dest = d
-        best = nil; others = []; error = nil; updated = nil; notes = []; arrived = false; seen = nil; overdue = false; onBoard = nil
+        best = nil; others = []; error = nil; updated = nil; notes = []; arrived = false; seen = nil; overdue = false; onBoard = nil; movingUnknown = false
         told = [:]; toldEnd = nil; toldGo = []; missed = nil
         since = Date()
         watching = true
@@ -137,6 +138,18 @@ final class GoStore: ObservableObject {
             return
         }
         here = loc
+        // Going at train or bus speed (faster than a bike): a walk to a stop from here makes no sense. Find which one
+        // you're on and plan from it; until then, say so. (In a car it plans once you stop.)
+        if LiveStore.movingFix(loc), loc.speed >= 8, loc.timestamp.timeIntervalSinceNow > -30, onBoard == nil, trip?.phase == .idle, !demo {
+            await firstLook()
+            guard watching else { return }
+            if onBoard == nil {
+                movingUnknown = true
+                best = nil; others = []; error = nil
+                return
+            }
+        }
+        movingUnknown = false
         let now = Date()
         if now.timeIntervalSince(since) > Self.maxHours * 3600 {
             stopWatching()
@@ -435,7 +448,7 @@ final class GoStore: ObservableObject {
         demo = true
         isOpen = true
         dest = .breda
-        best = nil; others = []; error = nil; updated = nil; notes = []; arrived = false; seen = nil; overdue = false; onBoard = nil
+        best = nil; others = []; error = nil; updated = nil; notes = []; arrived = false; seen = nil; overdue = false; onBoard = nil; movingUnknown = false
         here = loc ?? trip?.lastFix
         watching = true
         demoTask = Task { [weak self] in await self?.runDemo() }
@@ -659,6 +672,9 @@ struct GoView: View {
             howToGetThere(t)
             watchingCard(t)
             if !go.others.isEmpty { compareCard(t) }
+        } else if go.movingUnknown {
+            message(icon: "tram.fill", title: "You’re going fast",
+                    text: "On a train or bus? It’s finding which one, to plan from there. In a car, it plans once you stop.", spinner: true)
         } else if go.lookingOnBoard {
             message(icon: "bus.fill", title: "Are you on a bus or train?",
                     text: "Checking how you’re moving. If you’re on one, it plans from there: stay on, or where to change.", spinner: true)
