@@ -57,7 +57,8 @@ final class Planner: ObservableObject {
     @Published private(set) var updated: Date?
     @Published private(set) var busy = false
     @Published var pick = 0 { didSet { if !holdWatch { watchChosen() } } }
-    /// While a refresh waits for NS: the watch is set up after it, so it starts from NS's platform.
+    /// Held only across the synchronous `pick = 0` reset in `refresh`, so the didSet doesn't set up the watch before NS
+    /// has answered; `refresh` sets it up itself after `enrich`.
     private var holdWatch = false
 
     // MARK: be there by a time
