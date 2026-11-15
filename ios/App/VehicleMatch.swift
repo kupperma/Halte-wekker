@@ -608,7 +608,7 @@ extension VehicleMatch {
     /// fixes, no times now, or no track at all: `r` nil), you're off its road by today's check); or it's not sure yet.
     /// (A trip whose times have ended says nothing by its times: a late one you're on is still on its road, a wrong one
     /// that ended at a stop you passed isn't.)
-    static func verdict(_ r: Result<Double, Reject>?, offRoad: Bool) -> Verdict {
+    static func verdict(_ r: Result<Double, Reject>?, offRoad: Bool) -> ShownVerdict {
         switch r {
         case .success?: return .passes
         case .failure(let why)? where !why.notSure: return .fails
@@ -665,7 +665,7 @@ extension VehicleMatch {
 }
 
 /// The one shown, this look: passes, fails, or not sure yet.
-enum Verdict: Equatable, Sendable { case passes, notSure, fails }
+enum ShownVerdict: Equatable, Sendable { case passes, notSure, fails }
 
 /// One look while choosing (see `VehicleMatch.choose`).
 struct ChoiceLook: Equatable, Sendable {
@@ -674,7 +674,7 @@ struct ChoiceLook: Equatable, Sendable {
     let alive: [String]             // still in the running, in the order given
     let settle: String?             // sure now: the one to show (nil: still choosing)
     let why: Why?
-    let shown: Verdict?             // the one shown, this look
+    let shown: ShownVerdict?        // the one shown, this look
     let shownFailing: Bool          // the one shown failed `dropAfter` looks in a row
 }
 
