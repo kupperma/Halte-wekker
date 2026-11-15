@@ -77,6 +77,8 @@ final class LiveStore: ObservableObject {
     private var lastMoving: Date?               // when you last went at bus or train speed
     /// The bus or train you're on now (you're moving, and its live position is right where you are).
     @Published private(set) var onBoard: OnBoard?
+    /// On a moving train or bus that isn't found yet: no walking plan from the railway, just "finding what you're on".
+    @Published private(set) var onTheMove = false
     struct OnBoard: Equatable {
         let vehicle: Vehicle
         let to: String              // where it's going
@@ -445,13 +447,16 @@ final class LiveStore: ObservableObject {
             // on a bus or train (moving, or moved in the last 3 minutes, e.g. standing at a station): carry on with it
             let to = destination(dir)
             if let m = lastMoving, Date().timeIntervalSince(m) < 180, let ob = await Net.within(7, { await Self.onBoardTrips(f, to: to) }) ?? nil {
-                onBoard = ob.0; trips = ob.1
+                onBoard = ob.0; trips = ob.1; onTheMove = false
+            } else if let m = lastMoving, Date().timeIntervalSince(m) < 180,
+                      !VehicleMatch.planFromSpot(speed: f.speed, movedAgo: Date().timeIntervalSince(m)) {
+                onBoard = nil; onTheMove = true; trips = []
             } else {
-                onBoard = nil; trips = await Transit.tripsFrom(f.coordinate, to: destination(dir))
+                onBoard = nil; onTheMove = false; trips = await Transit.tripsFrom(f.coordinate, to: destination(dir))
             }
         }
-        else if custom != nil { onBoard = nil; trips = await Transit.tripsFrom(usual.coordinate, to: destination(dir)) }
-        else { onBoard = nil; trips = await Transit.nextTrips(dir) }
+        else if custom != nil { onBoard = nil; onTheMove = false; trips = await Transit.tripsFrom(usual.coordinate, to: destination(dir)) }
+        else { onBoard = nil; onTheMove = false; trips = await Transit.nextTrips(dir) }
         guard loadedFor == key else { await boards; return }
         // One empty answer from Transitous doesn't wipe what you had: keep the trips that haven't left yet, and ask again sooner.
         if trips.isEmpty {
@@ -460,7 +465,7 @@ final class LiveStore: ObservableObject {
             next = trips; nextAsOf = nil; nextAt = Date()
             SnapshotStore.shared.save(SavedTrips(trips: trips, lat: from?.coordinate.latitude, lon: from?.coordinate.longitude), key: "next|\(key)")
         }
-        nextError = next.isEmpty ? "No trips found right now. It tries again in a minute." : nil
+        nextError = next.isEmpty && !onTheMove ? "No trips found right now. It tries again in a minute." : nil
         if pick >= next.count { pick = 0 }
         updated = trips.isEmpty ? Date().addingTimeInterval(-40) : Date()
         // From anywhere: the stops around you instead of the lists for your two routes.
@@ -494,7 +499,7 @@ final class LiveStore: ObservableObject {
             next = []; nextAsOf = nil; nextAt = nil; pick = 0
         }
         nextError = nil; updated = nil; panelsUpdated = nil; lastPanels = .distantPast
-        onBoard = nil                           // (the bus or train you're on is found again for the new key)
+        onBoard = nil; onTheMove = false        // (the bus or train you're on is found again for the new key)
 
         livePanels.reset()                      // what the lists per leg show isn't live for the new key
         if panelsFor != dir {

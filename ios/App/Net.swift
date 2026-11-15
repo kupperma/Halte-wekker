@@ -159,6 +159,35 @@ enum Net {
         }
     }
 
+    /// How long Fastest trip waits after its `failures`-th empty look in a row: 4, 8, 16, then 30 seconds.
+    static func nextBackoff(failures: Int) -> TimeInterval {
+        let n = max(0, failures)
+        return n >= 3 ? 30 : 4 * Double(1 << n)
+    }
+
+    private static let connection = Connection()
+    final class Connection: @unchecked Sendable {
+        private let lock = NSLock()
+        private var up = true
+        private var started = false
+        private let queue = DispatchQueue(label: "haltewekker.connection")
+        func set(_ v: Bool) { lock.lock(); up = v; lock.unlock() }
+        var online: Bool { lock.lock(); defer { lock.unlock() }; return up }
+        func start() {
+            lock.lock()
+            if started { lock.unlock(); return }
+            started = true
+            lock.unlock()
+            let m = NWPathMonitor()
+            m.pathUpdateHandler = { [weak self] path in self?.set(path.status == .satisfied) }
+            m.start(queue: queue)
+        }
+    }
+    /// True until the network monitor says there is no connection.
+    static var online: Bool { connection.online }
+    /// Start watching the connection (once, from the app's init).
+    static func startWatchingConnection() { connection.start() }
+
     /// Whatever `work` gives within `seconds`, or nil (and it's stopped): so a slow answer never holds a screen.
     static func within<T: Sendable>(_ seconds: Double, _ work: @escaping @Sendable () async -> T) async -> T? {
         await withTaskGroup(of: T?.self) { g in

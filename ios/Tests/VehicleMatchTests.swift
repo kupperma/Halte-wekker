@@ -647,6 +647,16 @@ final class VehicleMatchTests: XCTestCase {
         XCTAssertEqual(late, 10, accuracy: 0.01)
     }
 
+    func test_planFromSpot() {
+        XCTAssertFalse(VehicleMatch.planFromSpot(speed: 12, movedAgo: 5))
+        XCTAssertFalse(VehicleMatch.planFromSpot(speed: 8, movedAgo: 1))
+        XCTAssertTrue(VehicleMatch.planFromSpot(speed: 7.9, movedAgo: 1))
+        XCTAssertTrue(VehicleMatch.planFromSpot(speed: 2, movedAgo: 60))
+        XCTAssertFalse(VehicleMatch.planFromSpot(speed: -1, movedAgo: 10))
+        XCTAssertTrue(VehicleMatch.planFromSpot(speed: -1, movedAgo: 120))
+        XCTAssertTrue(VehicleMatch.planFromSpot(speed: -1, movedAgo: nil))
+    }
+
     func test_otherKindPossible() {
         XCTAssertTrue(VehicleMatch.otherKindPossible(.implausibleSpeed))
         XCTAssertTrue(VehicleMatch.otherKindPossible(.drifting))

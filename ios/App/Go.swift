@@ -105,11 +105,13 @@ final class GoStore: ObservableObject {
     /// Watch again (after it stopped by itself).
     func again() { begin(dest) }
 
+    private var emptyLooks = 0                 // looks in a row that found nothing (the wait grows: 4, 8, 16, 30 s)
+
     private func begin(_ d: Place) {
         loop?.cancel(); detect?.cancel()
         dest = d
         best = nil; others = []; error = nil; updated = nil; notes = []; arrived = false; seen = nil; overdue = false; onBoard = nil; movingUnknown = false; slow = false; hurry = nil
-        firstOnly = false; asOf = nil
+        firstOnly = false; asOf = nil; emptyLooks = 0
         told = [:]; toldEnd = nil; toldGo = []; missed = nil
         since = Date()
         watching = true
@@ -132,11 +134,18 @@ final class GoStore: ObservableObject {
             }
             while !Task.isCancelled {
                 guard let self, self.watching else { return }
+                if !Net.online {
+                    // no connection: no requests, look again as soon as it's back
+                    if self.best == nil { self.error = "No internet connection right now. It looks again as soon as you’re back online." }
+                    try? await Task.sleep(nanoseconds: 4_000_000_000)
+                    continue
+                }
                 await self.refresh()
+                if self.best != nil { self.emptyLooks = 0 } else if !self.movingUnknown { self.emptyLooks += 1 }
                 // quicker when the one you're catching is close
                 let soon = (self.best?.first.departure.timeIntervalSinceNow ?? .infinity) < 12 * 60
                 // nothing on screen yet (or only the saved answer): look again soon (no position yet: sooner still)
-                let wait: Double = self.best == nil || self.asOf != nil ? (self.here == nil ? 1.5 : 4) : soon ? 20 : 40
+                let wait: Double = self.best == nil || self.asOf != nil ? (self.here == nil ? 1.5 : Net.nextBackoff(failures: self.emptyLooks - 1)) : soon ? 20 : 40
                 try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
             }
         }

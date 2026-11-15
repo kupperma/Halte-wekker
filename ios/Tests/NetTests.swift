@@ -187,4 +187,8 @@ final class NetTests: XCTestCase {
         let n = await sends.count
         XCTAssertEqual(n, 1)
     }
+
+    func test_backoff() {
+        XCTAssertEqual([0, 1, 2, 3, 9, -1].map { Net.nextBackoff(failures: $0) }, [4, 8, 16, 30, 30, 4])
+    }
 }

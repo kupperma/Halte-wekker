@@ -9,6 +9,7 @@ struct HaltewekkerApp: App {
     @StateObject private var near = NearMe()
     init() {
         Watchdog.shared.start()
+        Net.startWatchingConnection()
         Watchdog.shared.mark("setting up sound")
         // The station video is silent and must never stop your music.
         try? AVAudioSession.sharedInstance().setCategory(.ambient, options: [.mixWithOthers])

@@ -116,6 +116,16 @@ struct RoadHit: Equatable, Sendable {
     let late: TimeInterval
 }
 
+extension VehicleMatch {
+    /// Whether a walking plan from where you stand makes sense: not at train or bus speed (8 m/s or more), and not when
+    /// the speed is unknown (negative) and you moved less than 30 s ago.
+    static func planFromSpot(speed: Double, movedAgo: TimeInterval?) -> Bool {
+        if speed >= 8 { return false }
+        if speed < 0, let m = movedAgo, m < 30 { return false }
+        return true
+    }
+}
+
 /// Which bus or train you're on: the one that moves with you (on its path, going its way, at a possible speed, keeping
 /// pace with its own times), compared in seconds off its times. Every number here is a starting value, to be tuned from
 /// the field log.

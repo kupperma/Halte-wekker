@@ -366,9 +366,10 @@ struct HomeView: View {
 
     /// "Leaves 08:15 (in 7 min) · BUas 09:20"; from a saved answer, without the countdown: "Leaves 08:15 · BUas 09:20 · as of 08:12".
     private var fastestSub: String {
-        guard let t = live.next.first else { return live.nextError == nil ? "Finding your next connection…" : "No trips found right now" }
+        guard let t = live.next.first else { return live.onTheMove ? onTheMoveText : live.nextError == nil ? "Finding your next connection…" : "No trips found right now" }
         let m = Fmt.mins(t.first.departure.timeIntervalSinceNow)
         let leaves = live.nextAsOf == nil && m <= 90 ? " (in \(m) min)" : ""
+        if live.onTheMove { return onTheMoveText }
         return "Leaves \(Fmt.hhmm(t.first.departure))\(leaves) · \(live.custom?.short ?? (home ? "home" : "BUas")) \(Fmt.hhmm(t.end))"
             + (live.nextAsOf.map { " · " + Snapshots.asOf($0) } ?? "")
     }
@@ -491,8 +492,8 @@ struct HomeView: View {
     }
 
     /// "as of 08:12", under a list on the planner that shows a saved answer.
-    private func asOfNote(_ a: Date) -> some View {
-        Text(Snapshots.asOf(a)).font(BoardInk.sans(10, .regular)).foregroundStyle(Paper.ink.opacity(0.6))
+    private func asOfNote(_ a: Date, moving: Bool = false) -> some View {
+        Text(moving ? onTheMoveText : Snapshots.asOf(a)).font(BoardInk.sans(10, .regular)).foregroundStyle(Paper.ink.opacity(0.6))
     }
 
     private var ledTitle: String {
@@ -661,7 +662,7 @@ struct HomeView: View {
             .buttonStyle(.plain)
         }
         if live.next.isEmpty {
-            Text(live.nextError ?? "Finding your next connections…").font(BoardInk.sans(12, .regular)).foregroundStyle(Paper.ink.opacity(0.85))
+            Text(live.onTheMove ? onTheMoveText : (live.nextError ?? "Finding your next connections…")).font(BoardInk.sans(12, .regular)).foregroundStyle(Paper.ink.opacity(0.85))
         } else {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 5) {
@@ -740,7 +741,7 @@ struct HomeView: View {
                             title: live.nextAsOf != nil ? "Your trip" : live.onBoard.map { "On the \($0.vehicle.title) now" } ?? (live.here == nil ? "Your trip · fastest" : "Your trip · from here")) {
                 wake(t)
             }
-            if let a = live.nextAsOf { asOfNote(a) }
+            if let a = live.nextAsOf { asOfNote(a, moving: live.onTheMove) }
             if let ob = live.onBoard, t.first.tripId == ob.vehicle.tripId {
                 Label("You’re on the \(ob.vehicle.title) to \(ob.to): stay on until \(Fmt.place(t.first.toStop))", systemImage: ob.vehicle.isTrain ? "tram.fill" : "bus.fill")
                     .font(BoardInk.sans(11.5, .semibold)).foregroundStyle(Paper.ink.opacity(0.9))
@@ -878,9 +879,9 @@ struct HomeView: View {
             PlannerTripCard(trip: t, home: home, wakeTitle: r.map { "Wake me up · via \($0.station.short)" }) {
                 if let r { trip.start(r) }
             }
-            if let a = live.nextAsOf { asOfNote(a) }
+            if let a = live.nextAsOf { asOfNote(a, moving: live.onTheMove) }
         } else {
-            Text(live.nextError ?? "Finding your next connection…").font(BoardInk.sans(12, .regular)).foregroundStyle(Paper.ink.opacity(0.85))
+            Text(live.onTheMove ? onTheMoveText : (live.nextError ?? "Finding your next connection…")).font(BoardInk.sans(12, .regular)).foregroundStyle(Paper.ink.opacity(0.85))
         }
         ForEach(panelOrder.filter(shown).filter { $0 != "train" }, id: \.self) { p in busPanel(p) }
         if let a = live.panelsAsOf { asOfNote(a) }
@@ -949,7 +950,7 @@ struct HomeView: View {
                               saved: live.nextAsOf != nil) { tapRide(r) }
             }
             Text("From your next trips; the full list comes in on the next refresh.").font(BoardInk.sans(9.5, .regular)).foregroundStyle(Paper.ink.opacity(0.65))
-            if let a = live.nextAsOf { asOfNote(a) }
+            if let a = live.nextAsOf { asOfNote(a, moving: live.onTheMove) }
         } else if list.isEmpty {
             Text(live.panelsUpdated == nil ? "Loading…" : "Nothing coming up right now.").font(BoardInk.sans(12, .regular)).foregroundStyle(Paper.ink.opacity(0.85))
         } else {
@@ -1147,13 +1148,13 @@ struct HomeView: View {
         if let t = live.next[safe: live.pick] {
             BoardingPass(trip: t, home: home, options: live.next, pick: $live.pick)
             if let a = live.nextAsOf {
-                Text(Snapshots.asOf(a)).font(HWFont.body(10)).foregroundStyle(Paper.muted).frame(maxWidth: .infinity, alignment: .leading)
+                Text(live.onTheMove ? onTheMoveText : Snapshots.asOf(a)).font(HWFont.body(10)).foregroundStyle(Paper.muted).frame(maxWidth: .infinity, alignment: .leading)
             }
             if let via = t.via, let r = RoutePlan.all.first(where: { $0.station.short == via }) {
                 BandButton(title: "Wake me up · via \(via)", pal: pal) { trip.start(r) }
             }
         } else {
-            Text(live.nextError ?? "Finding your next connections…").font(HWFont.body(13)).foregroundStyle(Paper.muted)
+            Text(live.onTheMove ? onTheMoveText : (live.nextError ?? "Finding your next connections…")).font(HWFont.body(13)).foregroundStyle(Paper.muted)
                 .frame(maxWidth: .infinity, alignment: .leading).brass(pal, pad: 18)
         }
     }
@@ -2260,3 +2261,6 @@ struct SettingsView: View {
         }
     }
 }
+
+/// Shown instead of a walking plan from the railway while you're on a moving train or bus that isn't found yet.
+let onTheMoveText = "On the move: finding what you’re on…"
