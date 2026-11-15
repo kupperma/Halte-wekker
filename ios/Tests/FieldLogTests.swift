@@ -67,7 +67,11 @@ final class FieldLogTests: XCTestCase {
                           evidence: evidence(crossTrack: 180), result: .failure(.offItsPath))
         XCTAssertEqual(FieldFormat.match("detect", [b, a], outcome: "keep IC·a1b2"),
                        "detect · IC·a1b2 live 30 s | 306·c3d4 timetable off its path 180 m → keep IC·a1b2")
-        let many = (0..<9).map { Judgement(id: "id-\(1000 + $0)", line: "1", isTrain: false, realTime: true, evidence: nil, result: .success(Double($0))) }
+        var many: [Judgement] = []
+        for k in 0..<9 {
+            let id: String = "id-" + String(1000 + k)
+            many.append(Judgement(id: id, line: "1", isTrain: false, realTime: true, evidence: nil, result: .success(Double(k))))
+        }
         XCTAssertEqual(FieldFormat.match("find", many, outcome: "none").components(separatedBy: " | ").count, 6)
     }
 
