@@ -1,5 +1,4 @@
 import XCTest
-@testable import Haltewekker
 
 private final class Clock {
     var date: Date
