@@ -365,6 +365,18 @@ final class WorkoutRulesTests: XCTestCase {
         XCTAssertFalse(flagged([100, 95, 97]))
     }
 
+    func test_flaggedNeedsMoreThanOnePercent() {
+        func flagged(_ values: [Double]) -> Bool {
+            Deload.flagged(values.enumerated().map { SessionBest(day: String(format: "2026-11-%02d", $0.offset + 1), value: $0.element) })
+        }
+        // Body-weight drift on a weighted lift: 0.2 % down each time.
+        XCTAssertFalse(flagged([124.13, 123.88, 123.63]))
+        XCTAssertTrue(flagged([100, 97, 94]))
+        // Exactly 1 % down is not a fall.
+        XCTAssertFalse(flagged([100, 99, 98.01]))
+        XCTAssertTrue(flagged([10, 9, 8]))
+    }
+
     func test_flaggedAfterDeload() {
         let falling = [SessionBest(day: "2026-11-01", value: 100), SessionBest(day: "2026-11-04", value: 98),
                        SessionBest(day: "2026-11-07", value: 95)]

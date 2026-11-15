@@ -270,12 +270,16 @@ enum Deload {
         max(1, n - max(1, Int((Double(n) / 3).rounded())))
     }
 
-    /// Fell two sessions running: the last three, oldest first, strictly falling. With `after` (the last deload's day),
-    /// only sessions after that day count, so the falls that led to a deload don't flag again right after it.
+    /// A fall is more than 1 % down, so a body weight a few hundred grams lighter on a weighted lift is not one.
+    static let fallMargin = 0.99
+
+    /// Fell two sessions running: the last three, oldest first, each more than 1 % below the one before. With `after`
+    /// (the last deload's day), only sessions after that day count, so the falls that led to a deload don't flag again
+    /// right after it.
     static func flagged(_ recent: [SessionBest], after: DayKey? = nil) -> Bool {
         let counted = after.map { a in recent.filter { $0.day > a } } ?? recent
         let v = counted.suffix(3).map(\.value)
-        return v.count == 3 && v[0] > v[1] && v[1] > v[2]
+        return v.count == 3 && v[1] < v[0] * fallMargin && v[2] < v[1] * fallMargin
     }
 
     /// Nothing while a deload runs or "Not yet" holds. Two or more flags, else week 6 or later since the last deload,

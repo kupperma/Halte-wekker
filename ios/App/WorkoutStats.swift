@@ -95,15 +95,21 @@ struct Records: Codable, Equatable {
         if let seconds = s.seconds, seconds > 0 { longest = max(longest ?? seconds, seconds) }
     }
 
+    /// Weighted and assisted loads include the body weight: they must be more than 1 % better, so a few hundred grams
+    /// more body weight is not a best. Plain weights are compared as they are.
+    static let bodyWeightMargin = 1.01
+
     /// A higher e1RM or a heavier load (weight, weighted, assisted), else more reps, else longer.
     /// False when there is nothing to beat yet, and for a warm-up.
     func beaten(by s: LoggedSet, _ kind: ExerciseKind, bodyWeight: Double?) -> Bool {
         guard s.kind != .warmup else { return false }
-        let margin = 1e-9
         if let lift = Lifts.lift(s, kind, bodyWeight: bodyWeight), e1rm != nil || heaviest != nil {
-            if let best = e1rm, Lifts.e1rm(load: lift.load, reps: lift.reps) > best + margin { return true }
-            if let top = heaviest, lift.load > top + margin { return true }
-            return false
+            let factor = kind == .weighted || kind == .assisted ? Records.bodyWeightMargin : 1
+            func above(_ v: Double, _ record: Double?) -> Bool {
+                guard let record else { return false }
+                return v > record * factor + 1e-9
+            }
+            return above(Lifts.e1rm(load: lift.load, reps: lift.reps), e1rm) || above(lift.load, heaviest)
         }
         if let reps = s.reps, reps > 0, let most = mostReps { return reps > most }
         if let seconds = s.seconds, seconds > 0, let long = longest { return seconds > long }
@@ -124,6 +130,9 @@ struct ExerciseIndex: Codable, Equatable {
     var last: Performance? = nil
     /// Routine id → the last time in that routine.
     var lastByRoutine: [String: Performance] = [:]
+    /// The same two without deload workouts: after a deload, the next time starts from the last full session.
+    var lastNormal: Performance? = nil
+    var lastNormalByRoutine: [String: Performance] = [:]
     /// Newest last, at most 3. Deload workouts are left out.
     var recent: [SessionBest] = []
     var records = Records()
@@ -148,7 +157,8 @@ struct WorkoutIndex: Codable, Equatable {
         return index
     }
 
-    /// The same result as `build`, for a workout newer than all the others.
+    /// The same result as `build`, for a workout newer than all the others. Two workouts with exactly the same start
+    /// keep the order they are added in (`build` puts them in id order).
     mutating func add(_ w: Workout, library: [Exercise]) {
         let at = workouts.lastIndex { $0.start <= w.start }.map { $0 + 1 } ?? 0
         workouts.insert(WorkoutSummary(w), at: at)
@@ -167,15 +177,18 @@ struct WorkoutIndex: Codable, Equatable {
             let kind = WorkoutProgram.exercise(id, in: library)?.kind ?? .weight
             var x = exercises[id] ?? ExerciseIndex()
 
-            if x.last.map({ $0.start <= w.start }) ?? true {
-                x.last = Performance(workoutId: w.id, start: w.start, sets: all.filter(\.done))
-            }
+            func newer(_ p: Performance?) -> Bool { p.map { $0.start <= w.start } ?? true }
+            let performance = Performance(workoutId: w.id, start: w.start, sets: all.filter(\.done))
+            if newer(x.last) { x.last = performance }
+            if !w.deload, newer(x.lastNormal) { x.lastNormal = performance }
             var routineIds: [String] = []
             for r in items.compactMap(\.routineId) where !routineIds.contains(r) { routineIds.append(r) }
             for r in routineIds {
                 let sets = items.filter { $0.routineId == r }.flatMap(\.sets)
-                guard sets.contains(where: \.counts), x.lastByRoutine[r].map({ $0.start <= w.start }) ?? true else { continue }
-                x.lastByRoutine[r] = Performance(workoutId: w.id, start: w.start, sets: sets.filter(\.done))
+                guard sets.contains(where: \.counts) else { continue }
+                let p = Performance(workoutId: w.id, start: w.start, sets: sets.filter(\.done))
+                if newer(x.lastByRoutine[r]) { x.lastByRoutine[r] = p }
+                if !w.deload, newer(x.lastNormalByRoutine[r]) { x.lastNormalByRoutine[r] = p }
             }
             if !w.deload, let best = Lifts.sessionBest(all, kind, bodyWeight: w.bodyWeight) {
                 x.recent.append(SessionBest(day: w.day, value: best))
@@ -191,11 +204,13 @@ struct WorkoutIndex: Codable, Equatable {
 // MARK: - Previous values
 
 enum Previous {
-    /// The last time in the same routine, else the last time anywhere.
+    /// The last full (not deload) time in the same routine, else anywhere; only then a deload: in the same routine,
+    /// else anywhere.
     static func sets(_ e: ExerciseIndex?, routineId: String?) -> [LoggedSet] {
         guard let e else { return [] }
-        if let r = routineId, let p = e.lastByRoutine[r] { return p.sets }
-        return e.last?.sets ?? []
+        let byRoutine = { (d: [String: Performance]) in routineId.flatMap { d[$0] } }
+        let p = byRoutine(e.lastNormalByRoutine) ?? e.lastNormal ?? byRoutine(e.lastByRoutine) ?? e.last
+        return p?.sets ?? []
     }
 
     /// The number-th (0-based) warm-up, or the number-th work set (anything but a warm-up).
@@ -348,11 +363,11 @@ struct ExerciseSession: Equatable {
 }
 
 enum ChartMetric: String, CaseIterable {
-    case bestSet, e1rm, volume, reps
+    case heaviest, e1rm, volume, reps
 
     var title: String {
         switch self {
-        case .bestSet: return "Best set"
+        case .heaviest: return "Heaviest"
         case .e1rm: return "e1RM"
         case .volume: return "Volume"
         case .reps: return "Reps"
@@ -407,26 +422,22 @@ enum Series {
         }
     }
 
-    /// Best set: the heaviest load (the most reps for bodyweight, the longest for time). e1RM: the best one, for loads.
-    /// Volume: as `Lifts.volume`, for weight and weighted. Reps: the most in one set.
+    /// Heaviest: the heaviest load. e1RM: the best one. Both for weight, weighted and assisted. Volume: as `Lifts.volume`,
+    /// for weight and weighted. Reps: the most in one set, or the longest hold in seconds for time and cardio.
     private static func value(_ x: ExerciseSession, _ kind: ExerciseKind, _ metric: ChartMetric) -> Double? {
         let sets = x.sets.filter(\.counts)
         let lifts = sets.compactMap { Lifts.lift($0, kind, bodyWeight: x.bodyWeight) }
         let reps = sets.compactMap(\.reps).filter { $0 > 0 }.max().map { Double($0) }
         let seconds = sets.compactMap(\.seconds).filter { $0 > 0 }.max().map { Double($0) }
         switch metric {
-        case .bestSet:
-            switch kind {
-            case .weight, .weighted, .assisted: return lifts.map { $0.load }.max()
-            case .bodyweight: return reps
-            case .time, .cardio: return seconds
-            }
+        case .heaviest:
+            return lifts.map { $0.load }.max()
         case .e1rm:
             return lifts.map { Lifts.e1rm(load: $0.load, reps: $0.reps) }.max()
         case .volume:
             return kind == .weight || kind == .weighted ? Lifts.volume(sets, kind) : nil
         case .reps:
-            return reps
+            return kind == .time || kind == .cardio ? seconds : reps
         }
     }
 }
@@ -478,6 +489,8 @@ extension ExerciseIndex {
         let c = try decoder.container(keyedBy: StatsKey.self)
         last = try c.opt("last")
         lastByRoutine = try c.get("lastByRoutine", [String: Performance]())
+        lastNormal = try c.opt("lastNormal")
+        lastNormalByRoutine = try c.get("lastNormalByRoutine", [String: Performance]())
         recent = try c.get("recent", [SessionBest]())
         records = try c.get("records", Records())
         sessions = try c.get("sessions", 0)

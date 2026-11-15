@@ -115,9 +115,49 @@ final class WorkoutStatsTests: XCTestCase {
         XCTAssertTrue(bodyweight.beaten(by: LoggedSet(reps: 13, done: true), .bodyweight, bodyWeight: nil))
         XCTAssertFalse(bodyweight.beaten(by: LoggedSet(reps: 12, done: true), .bodyweight, bodyWeight: nil))
 
+        // .weight stays exact: a quarter kilo more is a best.
+        XCTAssertTrue(r.beaten(by: LoggedSet(kg: 26.25, reps: 10, done: true), .weight, bodyWeight: nil))
+
         let hold = Records(longest: 30)
         XCTAssertTrue(hold.beaten(by: LoggedSet(seconds: 35, done: true), .time, bodyWeight: nil))
         XCTAssertFalse(hold.beaten(by: LoggedSet(seconds: 30, done: true), .time, bodyWeight: nil))
+    }
+
+    func test_bodyWeightDriftIsNoBest() throws {
+        let weighted = try kind("weighted-pull-up")
+        var r = Records()
+        r.add(LoggedSet(kg: 10, reps: 8, done: true), weighted, bodyWeight: 88)
+        // The same +10 × 8 at a 0.2 kg heavier body weight is not a best; one more rep is.
+        XCTAssertFalse(r.beaten(by: LoggedSet(kg: 10, reps: 8, done: true), weighted, bodyWeight: 88.2))
+        XCTAssertTrue(r.beaten(by: LoggedSet(kg: 10, reps: 9, done: true), weighted, bodyWeight: 88.2))
+        // 2.5 kg more extra weight is.
+        XCTAssertTrue(r.beaten(by: LoggedSet(kg: 12.5, reps: 8, done: true), weighted, bodyWeight: 88))
+        // The record itself still keeps the higher number.
+        r.add(LoggedSet(kg: 10, reps: 8, done: true), weighted, bodyWeight: 88.2)
+        XCTAssertEqual(r.heaviest, 98.2)
+
+        let assisted = try kind("assisted-pull-up")
+        var help = Records()
+        help.add(LoggedSet(kg: 20, reps: 8, done: true), assisted, bodyWeight: 88)
+        XCTAssertFalse(help.beaten(by: LoggedSet(kg: 20, reps: 8, done: true), assisted, bodyWeight: 88.2))
+        XCTAssertTrue(help.beaten(by: LoggedSet(kg: 17.5, reps: 8, done: true), assisted, bodyWeight: 88))
+    }
+
+    func test_bodyWeightDriftIsNoFall() throws {
+        // +10 × 8 three times while the week average drops 88.0 → 87.8 → 87.6: no deload flag.
+        func pulls(_ reps: [Int], _ weights: [Double]) -> [Workout] {
+            zip(reps, weights).enumerated().map { i, p in
+                workout(String(format: "2026-11-%02d 18:00", 3 + 3 * i), ids: ["pull"], bodyWeight: p.1,
+                        [LoggedExercise(exerciseId: "weighted-pull-up", routineId: "pull", sets: done(10, [p.0, p.0]))])
+            }
+        }
+        let drift = WorkoutIndex.build(pulls([8, 8, 8], [88.0, 87.8, 87.6]), library: lib)
+        let recent = try XCTUnwrap(drift.exercises["weighted-pull-up"]?.recent)
+        XCTAssertEqual(recent.count, 3)
+        XCTAssertFalse(Deload.flagged(recent))
+        // A rep less each time is a real fall.
+        let falling = WorkoutIndex.build(pulls([8, 7, 6], [88.0, 87.8, 87.6]), library: lib)
+        XCTAssertTrue(Deload.flagged(try XCTUnwrap(falling.exercises["weighted-pull-up"]?.recent)))
     }
 
     // MARK: - Sets per week
@@ -239,6 +279,8 @@ final class WorkoutStatsTests: XCTestCase {
         XCTAssertEqual(incline.lastByRoutine["push"]?.workoutId, deload.id)
         XCTAssertEqual(incline.sessions, 2)
         XCTAssertEqual(incline.records.heaviest, 26)
+        XCTAssertEqual(incline.lastNormal?.workoutId, push.id)
+        XCTAssertEqual(incline.lastNormalByRoutine["push"]?.workoutId, push.id)
         XCTAssertEqual(built.exercises["pull-up"]?.recent.map(\.value), [9])
 
         // It survives the file, and an empty file is an empty index.
@@ -269,6 +311,28 @@ final class WorkoutStatsTests: XCTestCase {
         XCTAssertNil(Previous.row(previous, warmup: true, number: 1))
     }
 
+    func test_previousSkipsDeload() {
+        let full = done(26, [10, 10, 9])
+        let push = workout("2026-11-10 18:00", ids: ["push"], [
+            LoggedExercise(exerciseId: "incline-db-press", routineId: "push", sets: full),
+        ])
+        let light = done(26, [10, 10])
+        let deload = workout("2026-11-14 18:00", ids: ["push"], deload: true, [
+            LoggedExercise(exerciseId: "incline-db-press", routineId: "push", sets: light),
+        ])
+        var added = WorkoutIndex()
+        for w in [push, deload] { added.add(w, library: lib) }
+        XCTAssertEqual(WorkoutIndex.build([deload, push], library: lib), added)
+
+        let e = added.exercises["incline-db-press"]
+        XCTAssertEqual(Previous.sets(e, routineId: "push"), full)
+        XCTAssertEqual(Previous.sets(e, routineId: nil), full)
+        // With only a deload, that is the last time.
+        let only = WorkoutIndex.build([deload], library: lib).exercises["incline-db-press"]
+        XCTAssertEqual(Previous.sets(only, routineId: "push"), light)
+        XCTAssertEqual(Previous.sets(only, routineId: nil), light)
+    }
+
     // MARK: - Chart series
 
     func test_series() throws {
@@ -293,11 +357,23 @@ final class WorkoutStatsTests: XCTestCase {
         XCTAssertEqual(points(.volume, .year).count, 2)
         XCTAssertEqual(points(.volume, .all).count, 2)
         XCTAssertEqual(points(.volume, .all).map(\.value), [780, 780])
-        XCTAssertEqual(points(.bestSet, .all).map(\.value), [26, 26])
+        XCTAssertEqual(points(.heaviest, .all).map(\.value), [26, 26])
         XCTAssertEqual(points(.reps, .all).map(\.value), [10, 10])
         XCTAssertEqual(try XCTUnwrap(points(.e1rm, .all).first?.value), 34.67, accuracy: 0.01)
 
-        XCTAssertEqual(ChartMetric.allCases.map(\.title), ["Best set", "e1RM", "Volume", "Reps"])
+        // A hold: Reps is the longest hold in seconds; it has no load.
+        let holds = [30, 40, 35].map { LoggedSet(seconds: $0, done: true) }
+        let hollow = [Workout(title: "Push", start: t0.addingTimeInterval(-10 * day),
+                              exercises: [LoggedExercise(exerciseId: "hollow-body-hold", sets: holds)]),
+                      Workout(title: "Push", start: t0.addingTimeInterval(-5 * day),
+                              exercises: [LoggedExercise(exerciseId: "hollow-body-hold",
+                                                         sets: [LoggedSet(seconds: 45, done: true)])])]
+        let holdSessions = Series.sessions(hollow, exerciseId: "hollow-body-hold")
+        let time = try kind("hollow-body-hold")
+        XCTAssertEqual(Series.points(holdSessions, kind: time, metric: .reps, period: .threeMonths, now: t0).map(\.value), [40, 45])
+        XCTAssertEqual(Series.points(holdSessions, kind: time, metric: .heaviest, period: .all, now: t0), [])
+
+        XCTAssertEqual(ChartMetric.allCases.map(\.title), ["Heaviest", "e1RM", "Volume", "Reps"])
         XCTAssertEqual(ChartPeriod.allCases.map(\.title), ["3 months", "1 year", "All"])
     }
 }
