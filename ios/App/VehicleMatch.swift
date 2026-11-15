@@ -77,6 +77,9 @@ struct Evidence: Equatable, Sendable {
 /// Why a vehicle isn't the one you're on.
 enum Reject: Error, Equatable, Sendable {
     case tooFewFixes, offItsPath, wrongWay, implausibleSpeed, standing, drifting, tooFarFromTimes, noTimes
+
+    /// Not a failure but "not sure yet": too few fixes to judge by, or no times for it now.
+    var notSure: Bool { self == .tooFewFixes || self == .noTimes }
 }
 
 /// One vehicle, judged: the cost in seconds off its times, or why not.
@@ -321,8 +324,10 @@ enum VehicleMatch {
     /// - One shown: kept while it is the best, while it or the best is timetable-only and it still passes, or while the
     ///   best beats it by less than `margin`. It switches only after the same other one has been `margin` better (or the
     ///   shown one failed) in `looks` looks in a row spanning at least `span` seconds.
-    static func decide(shown: String?, ranked: [Ranked], liveIds: Set<String>, state: inout SwitchState, now: Date,
-                       margin: Double = 60, looks: Int = 3, span: TimeInterval = 45) -> Decision {
+    /// - `unsure`: the ones it isn't sure about yet (too few fixes, no times now). A shown one among them hasn't failed:
+    ///   it's kept, and the look breaks the run (it can't tell whether the other one is better).
+    static func decide(shown: String?, ranked: [Ranked], liveIds: Set<String>, unsure: Set<String> = [], state: inout SwitchState,
+                       now: Date, margin: Double = 60, looks: Int = 3, span: TimeInterval = 45) -> Decision {
         guard let best = ranked.first else {
             state = SwitchState()
             if let shown { return .keep(shown) }
@@ -340,6 +345,8 @@ enum VehicleMatch {
         if let mine = ranked.first(where: { $0.id == shown }) {
             let bothLive = liveIds.contains(shown) && liveIds.contains(best.id)
             if !bothLive || mine.cost - best.cost < margin { state = SwitchState(); return .keep(shown) }
+        } else if unsure.contains(shown) {
+            state = SwitchState(); return .keep(shown)
         }
         // a look for `best`: the same one as last time carries the run on; any other starts it again
         if state.leader == best.id, state.since != nil {
@@ -569,6 +576,22 @@ extension VehicleMatch {
             out.append(k)
         }
         return out
+    }
+
+    /// Looks in a row a candidate may fail the hard tests before it's out of the running.
+    static let dropAfter = 2
+
+    /// A failure (other than tooFewFixes or noTimes) adds a miss; a success resets it. Returns those with < 2 misses, plus `keep` always.
+    /// ("Not sure yet" neither adds nor resets: it's no look at all. `keep`, the one shown, is never dropped this way: the
+    /// switching rule covers it.)
+    static func prune(_ judged: [Judgement], misses: inout [String: Int], keep: String?) -> [Judgement] {
+        for j in judged {
+            switch j.result {
+            case .success: misses[j.id] = nil
+            case .failure(let why): if !why.notSure { misses[j.id, default: 0] += 1 }
+            }
+        }
+        return judged.filter { $0.id == keep || misses[$0.id, default: 0] < dropAfter }
     }
 }
 

@@ -142,6 +142,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     private var cands: [Candidate] = []
     private var candSince: Date?
     private var candLead: (id: String, n: Int)?
+    private var candSwitch = SwitchState()                // the matcher: who has been beating the one it shows, since when
+    private var candMisses: [String: Int] = [:]           // …and the looks in a row each one failed
     private var candCheckAt = Date.distantPast
     private var resolving = false
     /// While it's still choosing: the buses it could be (the first is the one it shows).
@@ -295,7 +297,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         vehicle = v
         vehicleStops = []; matchMeters = nil; pickedByHand = false; byTimetable = false; startDistance = nil
         roadOf = nil; offRoad = 0; farLooks = 0; sameCheckAt = Date().addingTimeInterval(45)
-        cands = []; choosing = []; candSince = nil; candLead = nil
+        cands = []; choosing = []; candSince = nil; candLead = nil; candSwitch = SwitchState(); candMisses = [:]
         legClosest = nil; awayLooked = false
         location.desiredAccuracy = kCLLocationAccuracyBest; location.distanceFilter = 25
         location.allowsBackgroundLocationUpdates = true
@@ -359,7 +361,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         route = nil; legs = []; distance = nil; arrival = nil; next = nil; vehicle = nil; legArrival = nil; arrivedAt = nil
         upcoming = []; upcomingAt = nil; upcomingError = nil; upcomingKey = ""; upcomingBoard = []; upcomingAsOf = nil; vehicleStops = []; matchMeters = nil; speed = nil; startDistance = nil
         roadOf = nil; offRoad = 0; farLooks = 0; boardAlternatives = []
-        cands = []; choosing = []; candSince = nil; candLead = nil
+        cands = []; choosing = []; candSince = nil; candLead = nil; candSwitch = SwitchState(); candMisses = [:]
         legFrom = nil; legTo = nil; maxDistance = nil
         let a = activity; activity = nil
         Task { await a?.end(nil, dismissalPolicy: .immediate) }
@@ -935,6 +937,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         guard let road = roadOf, vehicle == v, cands.isEmpty else { return }
         let t = road.trip
         let limit: Double = v.isTrain ? 700 : 300
+        if !MatchSettings.classic() { await sameBusByJudging(v, trip: t, leg: leg, last: last, limit: limit, now: now); return }
         if Self.metres(from: last.coordinate, to: t.path) < limit {
             offRoad = 0
             if !v.isTrain, !t.line.isEmpty, t.line != v.line {
@@ -970,6 +973,57 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         }
     }
 
+    /// `checkSameBus` with the matcher, from its road check on: the one it shows is judged on your fixes along its own
+    /// road and times (a timetable-only one by its road and your speed, not by its times). Failing twice in a row ("not
+    /// sure yet" isn't failing): it finds the one you're on, and switches to it (and tells you) only when that one is
+    /// clearly the one; when several fit about as well, it keeps the one it shows and chooses between them. Otherwise
+    /// as today: a new line number, and the looks far from its times.
+    private func sameBusByJudging(_ v: Vehicle, trip t: LiveTrip, leg: Leg, last: CLLocation, limit: Double, now: Date) async {
+        let judged = VehicleTrack(tripId: v.tripId, line: v.line, isTrain: v.isTrain, trip: t)
+            .map { VehicleMatch.judgeAll(recentFixes, [$0], strictTimes: false) } ?? []
+        var failed = false
+        if case .failure(let why)? = judged.first?.result { failed = !why.notSure }
+        let shown = FieldFormat.label(v.tripId, [v.tripId: v.line])
+        if !failed {
+            offRoad = 0
+            FieldLog.shared.add(.match, FieldFormat.match("same bus", judged, outcome: "keep \(shown)"))
+            if !v.isTrain, !t.line.isEmpty, t.line != v.line {
+                // the same trip, under another number in its own live data
+                vehicle = Vehicle(tripId: v.tripId, line: t.line, isTrain: false)
+                tellBus("Your bus is listed as \(t.line) now", "The same bus as before, still to \(leg.to.short).")
+                pushActivity(force: true)
+            }
+            // on its road, but far from where its times put it, three looks in a row (a minute and a half): if another of
+            // the same line is right where you are, look at both again
+            let w = t.position(now), at = t.coordinate(atMetres: w.metres)
+            let far = w.done || last.distance(from: CLLocation(latitude: at.latitude, longitude: at.longitude)) > (v.isTrain ? 2500 : 1000)
+            farLooks = far ? farLooks + 1 : 0
+            if farLooks >= 3 {
+                farLooks = 0
+                let R = MatchRules.current()
+                let near = await matchVehicles(mode: leg.mode, excluding: [v.tripId], place: "same bus")
+                    .filter { $0.cost < R.sameLineNear && $0.vehicle.line == v.line }.prefix(2).map(\.vehicle)
+                if !near.isEmpty, vehicle == v { beginChoosing([v] + near) }
+            }
+            return
+        }
+        offRoad += 1
+        FieldLog.shared.add(.match, FieldFormat.match("same bus", judged, outcome: offRoad >= 2 ? "find another" : "keep \(shown), 1 miss"))
+        guard offRoad >= 2 else { return }                    // failed twice, half a minute apart
+        offRoad = 0
+        if let found = await findBusYoureOn(not: v, at: last, limit: limit), vehicle == v {
+            if found.others.isEmpty {
+                await switchVehicle(from: v, to: found.vehicle, stops: found.stops)
+            } else {
+                // several fit about as well (lines that share the road out of a bus station): it keeps the one it shows
+                // and chooses between them, and tells you only once one is clearly the one
+                beginChoosing([v, found.vehicle] + found.others)
+            }
+        } else {
+            sameCheckAt = Date().addingTimeInterval(120)      // a detour, or no better one: look again in a while
+        }
+    }
+
     /// Start choosing between buses that fit about as well. Nothing changes on screen but "checking"; the one it shows
     /// stays until one is clearly the one.
     private func beginChoosing(_ vs: [Vehicle]) {
@@ -978,7 +1032,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         guard list.count > 1, !demo, !pickedByHand else { cands = []; choosing = []; return }
         cands = list.map { Candidate(vehicle: $0) }
         choosing = list
-        candSince = Date(); candLead = nil
+        candSince = Date(); candLead = nil; candSwitch = SwitchState(); candMisses = [:]
         candCheckAt = Date().addingTimeInterval(8)
     }
 
@@ -997,6 +1051,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             if let t = await Transit.liveTrip(list[i].vehicle.tripId) { list[i].trip = t; list[i].fetched = now }
         }
         guard list.map(\.vehicle.tripId) == cands.map(\.vehicle.tripId), phase == .sleeping || phase == .awake else { return }
+        if !MatchSettings.classic() { await chooseByJudging(list, now: now); return }
         let limit: Double = list[0].vehicle.isTrain ? 700 : 300
         for i in list.indices {
             guard let t = list[i].trip, t.path.count >= 2 else { continue }
@@ -1032,9 +1087,51 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         if let w = winner { await settle(w.vehicle) }
     }
 
+    /// `resolveCandidates` with the matcher: each one judged on your fixes (a timetable-only one by its road and your
+    /// speed, not by its times). One that fails twice in a row is out ("not sure yet" isn't failing; the one it shows is
+    /// never out this way). It switches only when the same other one has been a minute better (or the one it shows
+    /// failed) in 3 looks in a row spanning 45 s, and never by the times of a timetable-only one: then it keeps the one
+    /// it shows until their roads part. Only the one it shows left: it's sure. Still choosing after twelve minutes: it
+    /// keeps the one it shows.
+    private func chooseByJudging(_ list: [Candidate], now: Date) async {
+        let shown = vehicle?.tripId
+        let tracks: [VehicleTrack] = list.compactMap { c in
+            c.trip.flatMap { VehicleTrack(tripId: c.vehicle.tripId, line: c.vehicle.line, isTrain: c.vehicle.isTrain, trip: $0) }
+        }
+        let judged = VehicleMatch.judgeAll(recentFixes, tracks, strictTimes: false)
+        let pruned = VehicleMatch.prune(judged, misses: &candMisses, keep: shown)
+        let kept = Set(pruned.map(\.id)), tracked = Set(tracks.map(\.tripId))
+        // still in the running: the ones not out, and the ones it can't judge yet (no trip, or no times, yet)
+        let alive = list.filter { kept.contains($0.vehicle.tripId) || !tracked.contains($0.vehicle.tripId) }
+        let unsure = Set(list.map(\.vehicle.tripId).filter { !tracked.contains($0) })
+            .union(judged.filter { if case .failure(let why) = $0.result { return why.notSure } else { return false } }.map(\.id))
+        // the seconds off its times as they are: a minute better is a minute better, without the planned one's bonus
+        let ranked = VehicleMatch.rank(pruned, planned: nil)
+        let live = Set(tracks.filter(\.realTime).map(\.tripId))
+        let d = VehicleMatch.decide(shown: shown, ranked: ranked, liveIds: live, unsure: unsure, state: &candSwitch, now: now)
+        var winner: Vehicle?, note = ""
+        switch d {
+        case .switchTo(let id):
+            winner = alive.first { $0.vehicle.tripId == id }?.vehicle
+        case .keep(let id) where alive.count == 1 && alive[0].vehicle.tripId == id:
+            winner = alive[0].vehicle; note = " · the only one left"
+        default:
+            break
+        }
+        if winner == nil, let s = candSince, now.timeIntervalSince(s) > 12 * 60,
+           let w = alive.first(where: { $0.vehicle.tripId == shown }) ?? alive.first(where: { $0.vehicle.tripId == ranked.first?.id }) {
+            winner = w.vehicle; note = " · 12 minutes"
+        }
+        let lines = Dictionary(list.map { ($0.vehicle.tripId, $0.vehicle.line) }, uniquingKeysWith: { a, _ in a })
+        FieldLog.shared.add(.match, FieldFormat.match("choose", judged, outcome: FieldFormat.outcome(d, lines: lines) + note))
+        cands = alive
+        choosing = cands.map(\.vehicle)
+        if let w = winner { await settle(w) }
+    }
+
     /// Sure now: the one it showed (just stop saying "checking"), or the other one (switch to it, and tell you).
     private func settle(_ w: Vehicle) async {
-        cands = []; choosing = []; candLead = nil; candSince = nil
+        cands = []; choosing = []; candLead = nil; candSince = nil; candSwitch = SwitchState(); candMisses = [:]
         offRoad = 0; farLooks = 0; sameCheckAt = Date().addingTimeInterval(30)
         guard let old = vehicle, w.tripId != old.tripId else { pushActivity(force: true); return }
         let stops = await Transit.tripStops(w.tripId)

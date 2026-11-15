@@ -60,4 +60,56 @@ final class DecideTests: XCTestCase {
         XCTAssertEqual(looks(shown: nil, live: [], [(0, [Ranked(id: "b1", cost: 300)])]), [.switchTo("b1")])
         XCTAssertEqual(looks(shown: nil, live: ["b1", "b2"], [(0, [])]), [Decision.none])
     }
+
+    // MARK: - Dropping candidates
+
+    private func judged(_ id: String, _ r: Result<Double, Reject>) -> Judgement {
+        Judgement(id: id, line: "306", isTrain: false, realTime: true, evidence: nil, result: r)
+    }
+
+    /// The ids `prune` returns for each look, carrying the misses from look to look.
+    private func pruned(keep: String?, _ seq: [[Judgement]]) -> [[String]] {
+        var misses: [String: Int] = [:]
+        return seq.map { VehicleMatch.prune($0, misses: &misses, keep: keep).map(\.id) }
+    }
+
+    func test_pruneDropsAfterTwoMisses() {
+        let look = [judged("a", .success(10)), judged("b", .failure(.offItsPath))]
+        XCTAssertEqual(pruned(keep: nil, [look, look]), [["a", "b"], ["a"]])
+    }
+
+    func test_pruneNeverDropsShown() {
+        let look = [judged("a", .failure(.offItsPath)), judged("b", .success(10))]
+        XCTAssertEqual(pruned(keep: "a", [look, look, look]), [["a", "b"], ["a", "b"], ["a", "b"]])
+    }
+
+    func test_pruneResetsOnSuccess() {
+        let fail = [judged("a", .success(10)), judged("b", .failure(.wrongWay))]
+        let pass = [judged("a", .success(10)), judged("b", .success(20))]
+        XCTAssertEqual(pruned(keep: nil, [fail, pass, fail]), [["a", "b"], ["a", "b"], ["a", "b"]])
+    }
+
+    func test_pruneIgnoresTooFewFixes() {
+        let few = [judged("a", .success(10)), judged("b", .failure(.tooFewFixes))]
+        XCTAssertEqual(pruned(keep: nil, [few, few, few]), [["a", "b"], ["a", "b"], ["a", "b"]])
+        // no times now isn't a failure either, and doesn't break a run of misses: fail, not sure, fail is out
+        let none = [judged("a", .success(10)), judged("b", .failure(.noTimes))]
+        let fail = [judged("a", .success(10)), judged("b", .failure(.offItsPath))]
+        XCTAssertEqual(pruned(keep: nil, [none, none, none]), [["a", "b"], ["a", "b"], ["a", "b"]])
+        XCTAssertEqual(pruned(keep: nil, [fail, none, fail]), [["a", "b"], ["a", "b"], ["a"]])
+    }
+
+    /// The one shown that is only "not sure yet" (too few fixes, no times now) hasn't failed: it's kept, and the run for
+    /// the other one starts again.
+    func test_unsureShownIsNotFailed() {
+        let other = [Ranked(id: "B", cost: 10)]
+        var state = SwitchState()
+        func look(_ dt: TimeInterval, unsure: Set<String>) -> Decision {
+            VehicleMatch.decide(shown: "A", ranked: other, liveIds: ["A", "B"], unsure: unsure, state: &state, now: t0 + dt)
+        }
+        XCTAssertEqual((0..<6).map { look(Double($0) * 24, unsure: ["A"]) }, Array(repeating: .keep("A"), count: 6))
+        // failed, not sure, then failed 3 looks spanning 48 s: only the last 3 count
+        let out = [look(200, unsure: []), look(224, unsure: ["A"]), look(248, unsure: []), look(272, unsure: []), look(296, unsure: [])]
+        XCTAssertEqual(out, [.keep("A"), .keep("A"), .keep("A"), .keep("A"), .switchTo("B")])
+    }
 }
