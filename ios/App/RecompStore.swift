@@ -17,9 +17,13 @@ final class RecompStore: ObservableObject {
         self.defaults = defaults
         self.now = now
         var loaded = RecompData()
-        if let raw = defaults.data(forKey: RecompStore.key),
-           let decoded = try? JSONDecoder().decode(RecompData.self, from: raw) {
-            loaded = decoded
+        if let raw = defaults.data(forKey: RecompStore.key) {
+            if let decoded = try? JSONDecoder().decode(RecompData.self, from: raw) {
+                loaded = decoded
+            } else {
+                // Keep the unreadable bytes so nothing is lost for good.
+                defaults.set(raw, forKey: RecompStore.key + ".corrupt")
+            }
         }
         self.data = loaded
         prune()
@@ -54,13 +58,14 @@ final class RecompStore: ObservableObject {
     // MARK: - Protein
 
     func add(_ source: ProteinSource, amount: Double) {
+        guard amount > 0 else { return }
         data.entries.append(ProteinEntry(at: now(), name: source.name, unit: source.unit, units: source.units,
                                          amount: amount, gramsPerUnit: source.gramsPerUnit))
         save()
     }
 
     func addProduct(barcode: String, fraction: Double) {
-        guard let p = data.products[barcode] else { return }
+        guard fraction > 0, let p = data.products[barcode] else { return }
         data.entries.append(ProteinEntry(at: now(), name: p.name, unit: "pack", units: "packs",
                                          amount: fraction, gramsPerUnit: p.proteinPerPack))
         save()
@@ -73,6 +78,11 @@ final class RecompStore: ObservableObject {
 
     func setAmount(_ entryID: UUID, _ amount: Double) {
         guard let i = data.entries.firstIndex(where: { $0.id == entryID }) else { return }
+        if amount <= 0 {
+            data.entries.remove(at: i)
+            save()
+            return
+        }
         data.entries[i].amount = amount
         save()
     }
@@ -160,8 +170,10 @@ final class RecompStore: ObservableObject {
         save()
     }
 
+    @discardableResult
     func addToSources(barcode: String) -> Bool {
-        guard data.sources.count < RecompData.maxSources, let p = data.products[barcode] else { return false }
+        guard data.sources.count < RecompData.maxSources, let p = data.products[barcode],
+              !data.sources.contains(where: { $0.barcode == barcode }) else { return false }
         data.sources.append(ProteinSource(name: p.name, unit: "pack", units: "packs",
                                           gramsPerUnit: p.proteinPerPack, step: 0.25, barcode: barcode))
         save()

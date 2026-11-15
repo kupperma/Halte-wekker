@@ -12,13 +12,34 @@ enum RecompCalendar {
         return c
     }
 
-    private static func keyFormatter(_ calendar: Calendar) -> DateFormatter {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.calendar = calendar
-        f.timeZone = calendar.timeZone
-        f.dateFormat = "yyyy-MM-dd"
-        return f
+    /// One "yyyy-MM-dd" formatter per time zone, created lazily. DateFormatter is not thread-safe, so use goes through a lock.
+    private final class FormatterCache: @unchecked Sendable {
+        private let lock = NSLock()
+        private var formatters: [String: DateFormatter] = [:]
+
+        func string(from date: Date, calendar: Calendar) -> String {
+            lock.lock()
+            defer { lock.unlock() }
+            let id = calendar.timeZone.identifier
+            let f: DateFormatter
+            if let cached = formatters[id] {
+                f = cached
+            } else {
+                f = DateFormatter()
+                f.locale = Locale(identifier: "en_US_POSIX")
+                f.calendar = calendar
+                f.timeZone = calendar.timeZone
+                f.dateFormat = "yyyy-MM-dd"
+                formatters[id] = f
+            }
+            return f.string(from: date)
+        }
+    }
+
+    private static let keyCache = FormatterCache()
+
+    private static func keyString(_ date: Date, _ calendar: Calendar) -> String {
+        keyCache.string(from: date, calendar: calendar)
     }
 
     /// The recomp day a moment belongs to: before 04:00 local it is still the previous calendar day.
@@ -31,7 +52,7 @@ enum RecompCalendar {
             let prev = calendar.date(byAdding: .day, value: -1, to: startOfDay) ?? startOfDay
             d = calendar.date(bySettingHour: 12, minute: 0, second: 0, of: prev) ?? prev
         }
-        return keyFormatter(calendar).string(from: d)
+        return keyString(d, calendar)
     }
 
     /// 12:00 local on that day.
@@ -46,7 +67,7 @@ enum RecompCalendar {
     static func adding(_ days: Int, to day: DayKey, calendar: Calendar = RecompCalendar.calendar) -> DayKey {
         let noon = date(of: day, calendar: calendar)
         let moved = calendar.date(byAdding: .day, value: days, to: noon) ?? noon
-        return keyFormatter(calendar).string(from: moved)
+        return keyString(moved, calendar)
     }
 
     /// The Monday of the week that day is in.

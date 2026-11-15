@@ -162,4 +162,47 @@ final class RecompStoreTests: XCTestCase {
         XCTAssertEqual(e.grams, 20.5, accuracy: 0.001)
         XCTAssertEqual(ProteinMath.amountLabel(e.amount, unit: e.unit, units: e.units), "½ pack")
     }
+
+    func test_missingKeysUseDefaults() {
+        let json = #"{"goal":150,"weights":[{"day":"2026-11-16","value":88.4}]}"#
+        defaults.set(Data(json.utf8), forKey: "recomp.v1")
+        let s = makeStore()
+        XCTAssertEqual(s.data.goal, 150)
+        XCTAssertEqual(s.data.weights, [Measure(day: "2026-11-16", value: 88.4)])
+        XCTAssertEqual(s.data.sources.map { $0.name }, RecompDefaults.sources.map { $0.name })
+        XCTAssertEqual(s.data.habits.map { $0.title }, RecompDefaults.habits.map { $0.title })
+        XCTAssertNil(defaults.data(forKey: "recomp.v1.corrupt"))
+    }
+
+    func test_corruptKeepsBackup() {
+        let garbage = Data("not json".utf8)
+        defaults.set(garbage, forKey: "recomp.v1")
+        let s = makeStore()
+        XCTAssertEqual(s.data, RecompData())
+        XCTAssertEqual(defaults.data(forKey: "recomp.v1.corrupt"), garbage)
+    }
+
+    func test_nonPositiveAmounts() {
+        let s = makeStore()
+        s.add(source(s, "Eggs"), amount: 0)
+        s.add(source(s, "Eggs"), amount: -2)
+        XCTAssertTrue(s.todayEntries.isEmpty)
+        s.rememberProduct(barcode: "1", name: "X", proteinPerPack: 10)
+        s.addProduct(barcode: "1", fraction: 0)
+        s.addProduct(barcode: "1", fraction: -1)
+        XCTAssertTrue(s.todayEntries.isEmpty)
+        s.add(source(s, "Eggs"), amount: 3)
+        let id = s.todayEntries[0].id
+        s.setAmount(id, 0)
+        XCTAssertTrue(s.todayEntries.isEmpty)
+    }
+
+    func test_addToSourcesNoDuplicate() {
+        let s = makeStore()
+        s.saveSources(Array(s.data.sources.prefix(3)))
+        s.rememberProduct(barcode: "1", name: "X", proteinPerPack: 10)
+        XCTAssertTrue(s.addToSources(barcode: "1"))
+        XCTAssertFalse(s.addToSources(barcode: "1"))
+        XCTAssertEqual(s.data.sources.count, 4)
+    }
 }

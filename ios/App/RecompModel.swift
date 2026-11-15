@@ -22,6 +22,24 @@ struct CheckState: Codable, Equatable {
     var baseline: DayKey? = nil
 }
 
+/// Coding key by name, so a custom decoder can read every property with `decodeIfPresent`.
+private struct RecompKey: CodingKey {
+    var stringValue: String
+    var intValue: Int? { nil }
+    init(_ s: String) { stringValue = s }
+    init?(stringValue: String) { self.stringValue = stringValue }
+    init?(intValue: Int) { return nil }
+}
+
+extension CheckState {
+    /// Missing keys decode to their defaults.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: RecompKey.self)
+        pending = try c.decodeIfPresent(PendingAdvice.self, forKey: RecompKey("pending"))
+        baseline = try c.decodeIfPresent(DayKey.self, forKey: RecompKey("baseline"))
+    }
+}
+
 // MARK: - Stored data
 
 struct ProteinSource: Codable, Identifiable, Equatable {
@@ -87,4 +105,64 @@ struct RecompData: Codable, Equatable {
     var check = CheckState()
     var products: [String: KnownProduct] = [:]   // barcode → product
     static let maxSources = 7, maxHabits = 5
+}
+
+// MARK: - Tolerant decoding (a missing key decodes to its default, never throws)
+
+extension ProteinSource {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: RecompKey.self)
+        id = try c.decodeIfPresent(UUID.self, forKey: RecompKey("id")) ?? UUID()
+        name = try c.decodeIfPresent(String.self, forKey: RecompKey("name")) ?? ""
+        unit = try c.decodeIfPresent(String.self, forKey: RecompKey("unit")) ?? ""
+        units = try c.decodeIfPresent(String.self, forKey: RecompKey("units")) ?? ""
+        gramsPerUnit = try c.decodeIfPresent(Double.self, forKey: RecompKey("gramsPerUnit")) ?? 0
+        step = try c.decodeIfPresent(Double.self, forKey: RecompKey("step")) ?? 1
+        barcode = try c.decodeIfPresent(String.self, forKey: RecompKey("barcode"))
+    }
+}
+
+extension ProteinEntry {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: RecompKey.self)
+        id = try c.decodeIfPresent(UUID.self, forKey: RecompKey("id")) ?? UUID()
+        at = try c.decodeIfPresent(Date.self, forKey: RecompKey("at")) ?? Date(timeIntervalSince1970: 0)
+        name = try c.decodeIfPresent(String.self, forKey: RecompKey("name")) ?? ""
+        unit = try c.decodeIfPresent(String.self, forKey: RecompKey("unit")) ?? ""
+        units = try c.decodeIfPresent(String.self, forKey: RecompKey("units")) ?? ""
+        amount = try c.decodeIfPresent(Double.self, forKey: RecompKey("amount")) ?? 0
+        gramsPerUnit = try c.decodeIfPresent(Double.self, forKey: RecompKey("gramsPerUnit")) ?? 0
+    }
+}
+
+extension Habit {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: RecompKey.self)
+        id = try c.decodeIfPresent(UUID.self, forKey: RecompKey("id")) ?? UUID()
+        title = try c.decodeIfPresent(String.self, forKey: RecompKey("title")) ?? ""
+    }
+}
+
+extension KnownProduct {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: RecompKey.self)
+        name = try c.decodeIfPresent(String.self, forKey: RecompKey("name")) ?? ""
+        proteinPerPack = try c.decodeIfPresent(Double.self, forKey: RecompKey("proteinPerPack")) ?? 0
+    }
+}
+
+extension RecompData {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: RecompKey.self)
+        goal = try c.decodeIfPresent(Double.self, forKey: RecompKey("goal")) ?? 160
+        sources = try c.decodeIfPresent([ProteinSource].self, forKey: RecompKey("sources")) ?? RecompDefaults.sources
+        habits = try c.decodeIfPresent([Habit].self, forKey: RecompKey("habits")) ?? RecompDefaults.habits
+        entries = try c.decodeIfPresent([ProteinEntry].self, forKey: RecompKey("entries")) ?? []
+        habitsDone = try c.decodeIfPresent([DayKey: [UUID]].self, forKey: RecompKey("habitsDone")) ?? [:]
+        weights = try c.decodeIfPresent([Measure].self, forKey: RecompKey("weights")) ?? []
+        waists = try c.decodeIfPresent([Measure].self, forKey: RecompKey("waists")) ?? []
+        waistSkippedOn = try c.decodeIfPresent(DayKey.self, forKey: RecompKey("waistSkippedOn"))
+        check = try c.decodeIfPresent(CheckState.self, forKey: RecompKey("check")) ?? CheckState()
+        products = try c.decodeIfPresent([String: KnownProduct].self, forKey: RecompKey("products")) ?? [:]
+    }
 }
