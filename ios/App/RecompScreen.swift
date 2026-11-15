@@ -60,8 +60,7 @@ struct RecompSheet: View {
 
     private var settingsLink: some View {
         NavigationLink {
-            // Task 8: RecompSettingsView
-            Text("Settings come next")
+            RecompSettingsView()
         } label: {
             HStack(spacing: 8) {
                 Text("Goal, sources and habits").font(BoardInk.sans(15, .medium))
