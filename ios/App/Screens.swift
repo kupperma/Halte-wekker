@@ -203,6 +203,7 @@ struct HomeView: View {
                 near.locate(ask: true)                           // where you are decides where your trips start
                 Watchdog.shared.mark("loading the live times")
                 await live.refresh(trip.direction, at: near.position)
+                updateOutfit()                                   // your trip's times for what to wear (no request)
                 Watchdog.shared.mark("showing the home screen")
             }
         }

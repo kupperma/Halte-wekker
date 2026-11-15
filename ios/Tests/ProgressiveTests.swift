@@ -17,7 +17,8 @@ final class ProgressiveTests: XCTestCase {
     func test_gatherPublishesAsTheyCome() async {
         let publishes = Publishes()
         let t0 = Date()
-        let jobs: [@Sendable () async -> [Int]] = [job(after: 0.05, [1]), job(after: 0.1, [2]), job(after: 0.6, [3])]
+        // the slow one first: one at a time, nothing would come in before 0.6 s
+        let jobs: [@Sendable () async -> [Int]] = [job(after: 0.6, [3]), job(after: 0.05, [1]), job(after: 0.1, [2])]
         let all = await Progressive.gather(jobs) { soFar in
             await publishes.note(soFar, Date().timeIntervalSince(t0))
         }
@@ -38,9 +39,10 @@ final class ProgressiveTests: XCTestCase {
 
     func test_allKeepsOrderAndRunsAtOnce() async {
         let t0 = Date()
-        let jobs: [@Sendable () async -> Int] = [job(after: 0.3, 0), job(after: 0.1, 1), job(after: 0.2, 2)]
+        // at once: 0.3 s; one at a time it would be 0.75 s
+        let jobs: [@Sendable () async -> Int] = [job(after: 0.3, 0), job(after: 0.2, 1), job(after: 0.25, 2)]
         let all = await Progressive.all(jobs)
         XCTAssertEqual(all, [0, 1, 2])
-        XCTAssertLessThan(Date().timeIntervalSince(t0), 0.55)
+        XCTAssertLessThan(Date().timeIntervalSince(t0), 0.6)
     }
 }

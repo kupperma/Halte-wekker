@@ -411,12 +411,29 @@ final class LiveStore: ObservableObject {
         if loadedFor == key, !g.isEmpty { boardRides = g }
     }
 
-    /// One list per leg: its planner questions all at once, and after each answer the list with everything so far.
-    /// Returns all of it.
+    /// One list per leg: its planner questions all at once. A partial answer only fills an empty list (so a list you
+    /// have never drops to one station's rows); once every answer is in, the whole answer replaces it. Returns all of it.
     private func loadList(_ list: PanelList, _ jobs: [PanelJob], at: Date, key: String) async -> [PanelTrip] {
         var work: [@Sendable () async -> [PanelTrip]] = []
         for j in jobs { work.append { await self.panel(j, at: at) } }
-        return await Progressive.gather(work) { soFar in await self.show(soFar, as: list, key: key) }
+        let all = await Progressive.gather(work) { soFar in await self.fillIfEmpty(soFar, as: list, key: key) }
+        show(all, as: list, key: key)
+        return all
+    }
+
+    /// What a list per leg shows now.
+    private func shown(_ list: PanelList) -> [PanelTrip] {
+        switch list {
+        case .trains: return trains
+        case .buas: return buas
+        case .toVeghel: return toVeghel
+        }
+    }
+
+    /// A partial answer, shown only when the list is empty.
+    private func fillIfEmpty(_ l: [PanelTrip], as list: PanelList, key: String) {
+        guard shown(list).isEmpty else { return }
+        show(l, as: list, key: key)
     }
 
     private func panel(_ j: PanelJob, at: Date) async -> [PanelTrip] {
