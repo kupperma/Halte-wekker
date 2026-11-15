@@ -15,8 +15,8 @@ enum NextUp: Equatable { case push, pull(legs: Bool), restThenPush }
 /// Push → Pull → rest, counted from what he actually did, not from the calendar. Legs on every second Pull.
 enum Rotation {
     /// The workouts that count for the rotation, oldest first. An app workout counts by its routine ids, a Hevy
-    /// workout by its title "Push" or "Pull"; a Hevy "Legs" on the same day as a Pull makes that Pull one with legs.
-    /// Everything else is only history.
+    /// workout by its title "Push" or "Pull". Legs on the same day as a Pull (an app workout with "legs", or a Hevy
+    /// "Legs") make that Pull one with legs. Everything else is only history.
     static func days(_ workouts: [WorkoutSummary]) -> [RotationDay] {
         var out: [RotationDay] = []
         var legsDays = Set<DayKey>()
@@ -24,6 +24,7 @@ enum Rotation {
             let kind: RotationKind?
             switch w.source {
             case .app:
+                if w.routineIds.contains("legs") { legsDays.insert(w.day) }
                 if w.routineIds.contains("push") {
                     kind = .push
                 } else if w.routineIds.contains("pull") {
@@ -85,8 +86,9 @@ enum Rotation {
         return !workouts.contains { $0.day == today }
     }
 
-    /// "Next: Pull + legs · Push 2 days ago", "Rest day. Next: Push · Pull yesterday".
+    /// "Next: Pull + legs · Push 2 days ago", "Rest day. Next: Push · Pull yesterday", "Done today. Next: Push".
     static func cardLine(_ n: NextUp, last: WorkoutSummary?, today: DayKey) -> String {
+        if last?.day == today { return "Done today. Next: \(title(n))" }
         var line = n == .restThenPush ? "Rest day. Next: Push" : "Next: \(title(n))"
         if let last {
             line += " · \(last.title) \(WorkoutFormat.ago(days: RecompCalendar.daysBetween(last.day, today)))"
@@ -131,21 +133,23 @@ enum Progression {
         return settings.steps[key] ?? 2.5
     }
 
-    /// Did every work set reach the top of the range at the RIR target? A set without RIR counts as on target.
+    /// Did all the planned sets reach the top of the range at the RIR target? A set without RIR counts as on target,
+    /// except a failure set, which counts as RIR 0.
     static func topReached(_ work: [LoggedSet], _ t: Target, kind: ExerciseKind, rule: MoveUpRule = .standard) -> Bool {
         let sets = workSets(work)
         let values = sets.map { value($0, kind) }
         guard let first = values.first else { return false }
-        let allAtTop = values.allSatisfy { $0 >= t.hi }
+        // Fewer sets than planned (a deload, a short day) is never the top.
+        let allAtTop = values.count >= t.sets && values.allSatisfy { $0 >= t.hi }
         switch rule {
         case .standard:
             return allAtTop && sets.allSatisfy { s in
-                guard let rir = s.rir, let lo = t.rirLo else { return true }
+                guard let rir = effectiveRIR(s), let lo = t.rirLo else { return true }
                 return rir >= lo
             }
         case .pullUpToWeighted:
             // 12 clean reps in the first set, or every set at the top with 2 or more in reserve.
-            return first >= 12 || (allAtTop && sets.allSatisfy { ($0.rir ?? 2) >= 2 })
+            return first >= 12 || (allAtTop && sets.allSatisfy { (effectiveRIR($0) ?? 2) >= 2 })
         }
     }
 
@@ -202,6 +206,11 @@ enum Progression {
 
     private static func value(_ s: LoggedSet, _ kind: ExerciseKind) -> Int {
         (kind == .time ? s.seconds : s.reps) ?? 0
+    }
+
+    /// The logged RIR; a failure set without one had nothing left.
+    private static func effectiveRIR(_ s: LoggedSet) -> Int? {
+        s.rir ?? (s.kind == .failure ? 0 : nil)
     }
 }
 
@@ -261,9 +270,11 @@ enum Deload {
         max(1, n - max(1, Int((Double(n) / 3).rounded())))
     }
 
-    /// Fell two sessions running: the last three, oldest first, strictly falling.
-    static func flagged(_ recent: [SessionBest]) -> Bool {
-        let v = recent.suffix(3).map(\.value)
+    /// Fell two sessions running: the last three, oldest first, strictly falling. With `after` (the last deload's day),
+    /// only sessions after that day count, so the falls that led to a deload don't flag again right after it.
+    static func flagged(_ recent: [SessionBest], after: DayKey? = nil) -> Bool {
+        let counted = after.map { a in recent.filter { $0.day > a } } ?? recent
+        let v = counted.suffix(3).map(\.value)
         return v.count == 3 && v[0] > v[1] && v[1] > v[2]
     }
 

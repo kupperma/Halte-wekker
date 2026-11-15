@@ -76,6 +76,19 @@ final class WorkoutRulesTests: XCTestCase {
         XCTAssertEqual(Rotation.days([summary("Push", ids: [])]), [])
     }
 
+    func test_appLegsMarksPull() {
+        let pull = summary("Pull", ids: ["pull"], at: "2026-11-12 22:00")
+        // A separate Legs after midnight is still the same 04:00 day.
+        let legs = summary("Legs", ids: ["legs"], at: "2026-11-13 00:30")
+        XCTAssertEqual(Rotation.days([pull, legs]).map(\.kind), [.pull(legs: true)])
+        let push = summary("Push", ids: ["push"], at: "2026-11-14 18:00")
+        XCTAssertEqual(next([pull, legs, push], today: "2026-11-15"), .pull(legs: false))
+        // On another day it marks nothing, and on its own it isn't a rotation day.
+        let laterLegs = summary("Legs", ids: ["legs"], at: "2026-11-13 18:00")
+        XCTAssertEqual(Rotation.days([pull, laterLegs]).map(\.kind), [.pull(legs: false)])
+        XCTAssertEqual(Rotation.days([laterLegs]), [])
+    }
+
     func test_afterMidnight() {
         let late = summary("Pull", ids: ["pull"], at: "2026-11-15 00:30")
         XCTAssertEqual(late.day, "2026-11-14")
@@ -99,6 +112,10 @@ final class WorkoutRulesTests: XCTestCase {
         let pull = summary("Pull", ids: ["pull"], at: "2026-11-14 18:00")
         XCTAssertEqual(Rotation.cardLine(.restThenPush, last: pull, today: today), "Rest day. Next: Push · Pull yesterday")
         XCTAssertEqual(Rotation.cardLine(.push, last: nil, today: today), "Next: Push")
+        let pullToday = summary("Pull", ids: ["pull"], at: "2026-11-15 18:00")
+        XCTAssertEqual(Rotation.cardLine(.restThenPush, last: pullToday, today: today), "Done today. Next: Push")
+        let pushToday = summary("Push", ids: ["push"], at: "2026-11-15 18:00")
+        XCTAssertEqual(Rotation.cardLine(.pull(legs: true), last: pushToday, today: today), "Done today. Next: Pull + legs")
 
         let last = summary("Push", ids: ["push"], at: "2026-11-12 19:16", end: "2026-11-12 20:31", sets: 22)
         XCTAssertEqual(Rotation.lastLine(last, timeZone: zone), "Last: Push · Thu 12 Nov · 75 min · 22 sets")
@@ -149,6 +166,37 @@ final class WorkoutRulesTests: XCTestCase {
         let s = suggest(done(26, [10, 10, 10]), incline, .weight, step: 2)
         XCTAssertTrue(s.increased)
         XCTAssertEqual(s.kg, 28)
+    }
+
+    func test_fewerSetsThanPlannedHolds() {
+        // After a deload of 2 sets, 3 planned: not the top, so no step up.
+        let s = suggest(done(26, [10, 10], rir: [1, 1]), incline, .weight, step: 2)
+        XCTAssertFalse(s.topReached)
+        XCTAssertFalse(s.increased)
+        XCTAssertEqual(s.kg, 26)
+        XCTAssertEqual(s.values, [10, 10, 10])
+        XCTAssertNil(Progression.nextTime(s, target: incline, kind: .weight, nextStep: nil))
+        // The 12-rep rule for pull-ups still looks at the first set alone.
+        let pullUp = Target(sets: 3, lo: 5, hi: 10, rirLo: 1, rirHi: 2, rest: 150)
+        XCTAssertTrue(Progression.topReached(done(nil, [12]), pullUp, kind: .bodyweight, rule: .pullUpToWeighted))
+        XCTAssertFalse(Progression.topReached(done(nil, [10, 10], rir: [2, 2]), pullUp, kind: .bodyweight, rule: .pullUpToWeighted))
+    }
+
+    func test_failureWithoutRirIsRirZero() {
+        let sets = done(26, [10, 10]) + done(26, [10], kind: .failure)
+        XCTAssertFalse(Progression.topReached(sets, incline, kind: .weight))
+        let s = suggest(sets, incline, .weight, step: 2)
+        XCTAssertFalse(s.increased)
+        XCTAssertEqual(s.values, [10, 10, 10])
+        // RIR 0 is on target for a 0–1 target, and there is nothing to check without an RIR target.
+        XCTAssertTrue(Progression.topReached(sets, Target(sets: 3, lo: 6, hi: 10, rirLo: 0, rirHi: 1, rest: 75), kind: .weight))
+        XCTAssertTrue(Progression.topReached(sets, Target(sets: 3, lo: 6, hi: 10, rest: 75), kind: .weight))
+        // A logged RIR on a failure set is used as logged.
+        XCTAssertTrue(Progression.topReached(done(26, [10, 10]) + done(26, [10], rir: [1], kind: .failure), incline, kind: .weight))
+        // The pull-up rule wants 2 in reserve: a failure set without RIR doesn't have them.
+        let pullUp = Target(sets: 3, lo: 5, hi: 10, rirLo: 1, rirHi: 2, rest: 150)
+        XCTAssertFalse(Progression.topReached(done(nil, [10, 10]) + done(nil, [10], kind: .failure), pullUp, kind: .bodyweight,
+                                              rule: .pullUpToWeighted))
     }
 
     func test_stepPerEquipment() {
@@ -243,6 +291,20 @@ final class WorkoutRulesTests: XCTestCase {
         XCTAssertEqual(Progression.nextTime(s, target: t, kind: .assisted, nextStep: nil), "All sets at 10. Next time \u{2212}17.5 kg")
     }
 
+    func test_assistedWithoutHelp() {
+        let t = Target(sets: 3, lo: 5, hi: 10, rest: 150)
+        for help in [0, nil] as [Double?] {
+            let s = suggest(done(help, [10, 10, 10]), t, .assisted, step: 2.5)
+            XCTAssertEqual(s.values, [10, 10, 10], "help \(String(describing: help))")
+            XCTAssertFalse(s.increased, "help \(String(describing: help))")
+            XCTAssertNil(Progression.nextTime(s, target: t, kind: .assisted, nextStep: nil), "help \(String(describing: help))")
+        }
+        let last = suggest(done(2.5, [10, 10, 10]), t, .assisted, step: 2.5)
+        XCTAssertEqual(last.kg, 0)
+        XCTAssertTrue(last.increased)
+        XCTAssertEqual(Progression.nextTime(last, target: t, kind: .assisted, nextStep: nil), "All sets at 10. Next time 0 kg")
+    }
+
     func test_deloadHolds() {
         let s = suggest(done(26, [10, 10, 9]), incline, .weight, step: 2, deload: true)
         XCTAssertEqual(s, Suggestion(kg: 26, values: [10, 10, 9], topReached: false, moveUp: false, increased: false))
@@ -301,6 +363,17 @@ final class WorkoutRulesTests: XCTestCase {
         XCTAssertFalse(flagged([100, 95]))
         XCTAssertTrue(flagged([90, 100, 98, 95]))
         XCTAssertFalse(flagged([100, 95, 97]))
+    }
+
+    func test_flaggedAfterDeload() {
+        let falling = [SessionBest(day: "2026-11-01", value: 100), SessionBest(day: "2026-11-04", value: 98),
+                       SessionBest(day: "2026-11-07", value: 95)]
+        XCTAssertTrue(Deload.flagged(falling))
+        XCTAssertFalse(Deload.flagged(falling, after: "2026-11-07"))
+        XCTAssertFalse(Deload.flagged(falling, after: "2026-11-01"))
+        let later = falling + [SessionBest(day: "2026-11-10", value: 94), SessionBest(day: "2026-11-13", value: 93),
+                               SessionBest(day: "2026-11-16", value: 92)]
+        XCTAssertTrue(Deload.flagged(later, after: "2026-11-07"))
     }
 
     func test_sessionBestDecodesTolerantly() throws {
