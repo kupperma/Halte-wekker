@@ -20,7 +20,7 @@ Hij opent Haltewekker al elke ochtend en op weg naar huis. Daarom komt dit in Ha
 
 Drie momenten op een dag:
 
-1. **'s Ochtends: wegen.** Hij tikt zijn gewicht in, of de app haalt het uit Apple Gezondheid als het daar staat. Groot op het scherm staat het weekgemiddelde en hoe dat verandert.
+1. **'s Ochtends: wegen.** Hij tikt zijn gewicht in. Groot op het scherm staat het weekgemiddelde en hoe dat verandert.
 2. **Bij maaltijden: eiwit en gewoontes.** Met één tik voegt hij een eiwitbron toe, geteld in dingen die hij kent (eieren, glazen, bakjes) en **nooit in grammen**. Daarna vinkt hij af welke gewoontes vandaag gelukt zijn.
 3. **Op weg naar huis:** op het ritscherm van Haltewekker staat één regel met wat er vandaag nog aan eiwit over is.
 
@@ -29,11 +29,9 @@ Daarnaast een wekelijkse check die zegt of hij moet bijsturen.
 ### Ochtend: gewicht
 
 - Hij tikt zijn gewicht in. Zowel "88,4" als "88.4" werkt.
-- Staat er vandaag al een gewicht in Apple Gezondheid (van een weegschaal), dan neemt de app dat over en hoeft hij niets in te tikken. Een gewicht dat hij zelf intikt, gaat voor.
-- ⚙︎ Per dag telt één gewicht: het eerste van die ochtend.
+- ⚙︎ Per dag telt één gewicht. Tikt hij later die dag een nieuw gewicht in, dan vervangt dat het vorige (een tikfout herstellen).
 - Groot staat het **weekgemiddelde**: het gemiddelde van de gewichten uit de afgelopen 7 dagen. Klein ernaast staat het gewicht van vandaag en het verschil met het weekgemiddelde van 7 dagen eerder.
 - ⚙︎ **Taille:** is het 14 dagen of langer geleden dat hij zijn taille invulde, dan vraagt het ochtendscherm erom, in cm. Hij kan dit overslaan; dan vraagt de app het de volgende ochtend opnieuw.
-- **Trainingen:** uit Apple Gezondheid haalt de app hoe vaak hij de afgelopen 7 dagen getraind heeft ("5× getraind deze week"). Hevy zet daar zijn trainingen in, en zijn Apple Watch ook. Er zijn geen krachtcijfers; die staan niet in Gezondheid, en hij heeft geen Hevy Pro.
 
 ### Maaltijden: eiwit
 
@@ -129,6 +127,7 @@ Taal: **Engels**, net als de rest van de app. ⚙︎ Etenswaren mogen Nederlands
 - **Calorieën tellen.** Het weekgewicht laat zien of het tekort klopt.
 - **Foto's van eten met AI.** Daarvoor is een betaalde API-sleutel nodig, en die zit niet in het educatieplan van de gebruiker. Misschien later, als hij gratis tegoed krijgt via Anthropic's Student Builders.
 - **De website.** Die loopt al achter op de app (laatst bijgewerkt bij versie 0.9.1). De website bijwerken is een apart project.
+- **Apple Gezondheid (voor nu).** Daarmee zouden het gewicht van een weegschaal en het aantal trainingen (van Hevy en zijn Apple Watch) vanzelf binnenkomen. Maar de toestemming die de app daarvoor nodig heeft, kan Sideloadly met een gratis Apple ID misschien niet aan. Dan zou hij ook de reiswekker niet meer kunnen vernieuwen. Het komt later, met een aparte testversie. Bouw de gegevens zo dat gewichten later uit Gezondheid kunnen komen, zonder alles om te gooien.
 - **Slaap.** Hij draagt zijn Apple Watch niet in bed.
 - **Krachtcijfers uit Hevy.** Daarvoor is Hevy Pro nodig, en die heeft hij niet.
 - **Eetschema's of recepten.**
@@ -140,14 +139,16 @@ Taal: **Engels**, net als de rest van de app. ⚙︎ Etenswaren mogen Nederlands
 - **Gedoe.** Een maaltijd vastleggen moet in **ongeveer 10 seconden** kunnen. Duurt het langer, dan houdt hij het niet vol.
 - **Schuldgevoel.** Geen rode kruizen, geen reeksen die breken, geen zeurende meldingen.
 - **AI-achtig ontwerp:** generieke kaarten, versiering en onduidelijke kopjes (zie de lijstjes hierboven).
-- **Kwetsbaar.** Werkt Apple Gezondheid niet of geeft hij geen toestemming, dan moet alles nog werken. Alleen de automatische gewichten en het aantal trainingen vallen dan weg.
+- **Kwetsbaar.** Weigert hij camera-toegang of is er geen internet, dan werkt alles behalve het scannen van nieuwe producten. Barcode intikken blijft dan mogelijk.
+- **Een risico voor installeren.** Er komen geen nieuwe entitlements bij die het ondertekenen met Sideloadly en een gratis Apple ID kunnen breken.
 - **Last voor het reizen.** Haltewekker wordt niet trager en de reisschermen worden niet voller. Op het ritscherm komt alleen die ene regel bij.
 
 ## Beperkingen
 
 - SwiftUI, iOS 17+, project via XcodeGen (`ios/project.yml`). GitHub Actions bouwt een **niet-ondertekende** `.ipa` (`.github/workflows/ios.yml`), die de gebruiker met **Sideloadly en een gratis Apple ID** installeert.
-- **Apple Gezondheid (HealthKit)** heeft een eigen toestemming (entitlement) nodig. Het is onzeker of die werkt bij een niet-ondertekende build die Sideloadly met een gratis Apple ID ondertekent. De bouwer moet dit regelen en op het toestel testen. Werkt het niet, dan valt het weg zonder dat de rest stuk gaat (zie "Kwetsbaar" hierboven).
-- **Camera** voor barcodes: er moet een uitleg in de Info.plist komen (`NSCameraUsageDescription`) via `project.yml`. Voor Gezondheid ook (`NSHealthShareUsageDescription`). De app leest alleen uit Gezondheid en schrijft er niets in.
+- **Geen HealthKit** in deze versie (zie "Wat er bewust niet in komt").
+- **Camera** voor barcodes: er moet een uitleg in de Info.plist komen (`NSCameraUsageDescription`) via `project.yml`. Camera-toegang heeft geen entitlement nodig.
+- Elke push naar `main` vervangt de enige release `latest-ios`, die hij installeert. Wat op `main` komt, moet dus bouwen en werken.
 - **Opslag op de telefoon**, zoals de rest van Haltewekker (UserDefaults/JSON, `ObservableObject`-stores met `shared`, zoals `OutfitStore`). De gegevens moeten blijven staan als de app via Sideloadly opnieuw wordt geïnstalleerd. Dat gebeurt nu ook met de instellingen.
 - **Open Food Facts** is gratis en vraagt geen sleutel. Het verwacht wel een herkenbare User-Agent met een algemene appnaam (geen persoonlijke gegevens).
 - Versienummer ophogen in `project.yml` (`MARKETING_VERSION`, `CURRENT_PROJECT_VERSION`), zoals bij elke release.
@@ -156,7 +157,7 @@ Taal: **Engels**, net als de rest van de app. ⚙︎ Etenswaren mogen Nederlands
 
 1. **Een eigen versie voor de iPhone-app én voor de website.** Voelt in beide goed, maar de logica bestaat dan twee keer.
 2. **Eén keer bouwen als webpagina en die in de app tonen.** Eén versie, maar in de app voelt het anders dan de rest, en Gezondheid en het ritscherm worden ingewikkeld.
-3. **Alleen in de iPhone-app, in SwiftUI.** ← **gekozen.** De gebruiker wilde de website er eerst bij, maar liet die daarna vallen. Hij gebruikt de app elke dag; daar moet het het best werken, met Gezondheid en de regel op het ritscherm.
+3. **Alleen in de iPhone-app, in SwiftUI.** ← **gekozen.** De gebruiker wilde de website er eerst bij, maar liet die daarna vallen. Hij gebruikt de app elke dag; daar moet het het best werken, met de regel op het ritscherm en het ochtendscherm (en later Gezondheid).
 
 ## Wat de gebruiker heeft besloten
 
@@ -166,8 +167,10 @@ Taal: **Engels**, net als de rest van de app. ⚙︎ Etenswaren mogen Nederlands
 - Geen fotoherkenning (geen API-sleutel).
 - Eiwit tellen in stuks, glazen, bakjes en porties, en bij gescande producten in ¼, ½, ¾ of alles. Nooit in grammen.
 - Nederlandse en Duitse producten moeten scanbaar zijn.
-- Trainingen uit Apple Gezondheid (Hevy en Apple Watch), geen krachtcijfers.
+- Geen krachtcijfers (geen Hevy Pro).
+- Apple Gezondheid voor nu weglaten, later toevoegen.
 - Geen slaap.
+- Na Recomp volgt een apart project: de hele app nalopen met de twee lijstjes.
 - Alle ontwerpen volgen de twee lijstjes uit de video's.
 
 ## Wat aan de bouwer is
@@ -176,6 +179,5 @@ Taal: **Engels**, net als de rest van de app. ⚙︎ Etenswaren mogen Nederlands
 - Hoe de gegevens precies worden opgeslagen.
 - Hoe barcodes worden gescand: VisionKit `DataScannerViewController` of AVFoundation. Het moet werken op iOS 17 en een terugweg hebben als de camera niet beschikbaar is (barcode intikken).
 - Welke Open Food Facts-velden de app gebruikt (eiwit per verpakking, of per 100 g maal de inhoud) en wat er gebeurt als een veld ontbreekt.
-- Hoe HealthKit technisch in de build komt (entitlements bij een niet-ondertekende build).
 - De precieze kleur, maten en animaties, binnen de regels hierboven.
 - Tests voor de rekenregels: weekgemiddelde, wekelijkse check, dagwissel om 04:00, delen van een verpakking en invoer met komma of punt.
