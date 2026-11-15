@@ -272,7 +272,7 @@ final class NSStore: ObservableObject {
             return { @Sendable in (k, await self.trainSize(num: u.num, code: u.code)) }
         }
         var byKey: [String: TrainSize?] = [:]
-        for (k, s) in await Progressive.all(sizeJobs) { byKey[k] = s }
+        for (k, s) in await Progressive.all(sizeJobs) { byKey[k] = .some(s) }
         for r in sized {
             if let v = byKey["\(r.trip.first.num)@\(Self.code(r.from)!)"] { got[r.trip.first.id] = .some(v) }
         }
