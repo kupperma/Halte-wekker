@@ -648,7 +648,8 @@ private struct RecompTileStyle: ButtonStyle {
     }
 }
 
-private struct RecompPressStyle: ButtonStyle {
+/// A round − or + that gives under the thumb (the amount steppers here and in the scan sheet).
+struct RecompPressStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .scaleEffect(configuration.isPressed ? 0.92 : 1)

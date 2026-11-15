@@ -148,6 +148,14 @@ enum RecompInput {
     static func waist(_ text: String) -> Double? { ranged(text, 40...200) }
     /// Grams of protein per pack, from a label.
     static func protein(_ text: String) -> Double? { ranged(text, 0.1...300) }
+
+    /// How many portions are in a pack: a whole number from 1 to 200.
+    static func portions(_ text: String) -> Int? {
+        let s = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !s.isEmpty, s.count <= 3, s.allSatisfy({ $0.isASCII && $0.isNumber }),
+              let n = Int(s), (1...200).contains(n) else { return nil }
+        return n
+    }
 }
 
 // MARK: - Protein maths

@@ -72,6 +72,74 @@ struct Habit: Codable, Identifiable, Equatable {
 struct KnownProduct: Codable, Equatable {
     var name: String
     var proteinPerPack: Double
+    /// "slice", "piece", "portion" or "bar", once the pack is counted by portion.
+    var portionName: String? = nil
+    /// Grams of protein in one of those.
+    var proteinPerPortion: Double? = nil
+
+    /// One portion, when both its name and a believable protein are known.
+    var portion: Portion? { Portion(name: portionName, protein: proteinPerPortion) }
+}
+
+/// One slice, piece or portion of a scanned product, and the protein in it.
+struct Portion: Equatable {
+    let name: String
+    let protein: Double
+
+    /// "slices"
+    var units: String { PortionName.plural(name) }
+
+    /// What one portion can sensibly hold, in grams of protein. Outside it the numbers are wrong.
+    static let proteinRange: ClosedRange<Double> = 0.1...300
+    /// How many portions a pack can sensibly hold.
+    static let perPackRange: ClosedRange<Double> = 1...200
+
+    /// nil without a name, or with a protein that isn't finite and inside `proteinRange`.
+    init?(name: String?, protein: Double?) {
+        guard let n = name?.trimmingCharacters(in: .whitespacesAndNewlines), !n.isEmpty,
+              let g = protein, g.isFinite, Portion.proteinRange.contains(g) else { return nil }
+        self.name = n
+        self.protein = g
+    }
+
+    /// A pack counted by hand: `count` portions (1…200) share its protein.
+    static func split(pack: Double, into count: Int, name: String) -> Portion? {
+        guard pack.isFinite, pack > 0, perPackRange.contains(Double(count)) else { return nil }
+        return Portion(name: name, protein: pack / Double(count))
+    }
+
+    /// Clearly less than the whole pack. A "portion" of about the whole pack (a single yoghurt) is just the pack.
+    func isPart(of pack: Double) -> Bool {
+        pack.isFinite && protein < pack * 0.9
+    }
+}
+
+/// What a portion of a scanned product is called, always in English.
+enum PortionName {
+    static let portion = "portion"
+    /// To pick from when counting a pack by hand, the most used first.
+    static let choices = ["slice", "piece", "portion"]
+
+    /// "slices": the name with an "s"; "portions" without a name.
+    static func plural(_ name: String) -> String {
+        let n = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return n.isEmpty ? "portions" : n + "s"
+    }
+
+    /// "Scheiben" → "slice", "stuk" → "piece", "Portie" → "portion", "Riegel" → "bar". nil for any other word.
+    static func english(_ word: String) -> String? {
+        words[word.lowercased()]
+    }
+
+    private static let words: [String: String] = {
+        var w: [String: String] = [:]
+        for s in ["slice", "slices", "scheibe", "scheiben", "scheibchen", "plak", "plakje", "plakjes", "plakken",
+                  "snee", "sneetje", "sneetjes", "sneden", "tranche", "tranches"] { w[s] = "slice" }
+        for s in ["piece", "pieces", "stuk", "stuks", "stukje", "stukjes", "stück", "stueck", "stk"] { w[s] = "piece" }
+        for s in ["portion", "portions", "portionen", "portie", "porties"] { w[s] = "portion" }
+        for s in ["bar", "bars", "riegel", "reep", "reepje", "repen"] { w[s] = "bar" }
+        return w
+    }()
 }
 
 enum RecompDefaults {
@@ -148,6 +216,9 @@ extension KnownProduct {
         let c = try decoder.container(keyedBy: RecompKey.self)
         name = try c.decodeIfPresent(String.self, forKey: RecompKey("name")) ?? ""
         proteinPerPack = try c.decodeIfPresent(Double.self, forKey: RecompKey("proteinPerPack")) ?? 0
+        // Added in 0.17.1. Missing, or not what's expected: no portion, and everything else still loads.
+        portionName = try? c.decodeIfPresent(String.self, forKey: RecompKey("portionName"))
+        proteinPerPortion = try? c.decodeIfPresent(Double.self, forKey: RecompKey("proteinPerPortion"))
     }
 }
 

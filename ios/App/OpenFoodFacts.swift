@@ -3,11 +3,16 @@ import Foundation
 struct OFFProduct: Equatable {
     var name: String?
     var proteinPerPack: Double?
+    /// One slice, piece or portion, when Open Food Facts knows the serving.
+    var portion: Portion? = nil
+    /// How many of those portions are in a pack, when the pack and the serving are both weighed (1…200).
+    var portionsPerPack: Double? = nil
 }
 
 enum LookupResult: Equatable {
-    case found(name: String, proteinPerPack: Double)
-    case needsProtein(name: String?)
+    case found(name: String, proteinPerPack: Double, portion: Portion? = nil)
+    /// No believable protein per pack. A portion that is known still comes along, to keep once the label is typed.
+    case needsProtein(name: String?, portion: Portion? = nil)
     case offline
 }
 
@@ -32,7 +37,7 @@ enum OpenFoodFacts {
     /// nil for anything that isn't a barcode.
     static func url(for barcode: String) -> URL? {
         guard isBarcode(barcode) else { return nil }
-        let fields = "product_name,brands,product_quantity,product_quantity_unit,nutriments"
+        let fields = "product_name,brands,product_quantity,product_quantity_unit,serving_size,serving_quantity,nutriments"
         return URL(string: "https://world.openfoodfacts.org/api/v2/product/\(barcode).json?fields=\(fields)")
     }
 
@@ -42,6 +47,12 @@ enum OpenFoodFacts {
             return Double(s.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: "."))
         }
         return nil
+    }
+
+    /// A number above 0 and finite, or nil: "", "0", "inf" and the like are missing.
+    private static func positive(_ v: Any?) -> Double? {
+        guard let n = number(v), n.isFinite, n > 0 else { return nil }
+        return n
     }
 
     private static func text(_ v: Any?) -> String? {
@@ -77,11 +88,81 @@ enum OpenFoodFacts {
         }
 
         let nutriments = product["nutriments"] as? [String: Any]
-        let pack = ProteinMath.perPack(
-            proteinPer100: number(nutriments?["proteins_100g"]),
-            quantity: number(product["product_quantity"]),
-            unit: text(product["product_quantity_unit"]))
-        return OFFProduct(name: name, proteinPerPack: pack)
+        let per100 = positive(nutriments?["proteins_100g"])
+        let quantity = positive(product["product_quantity"])
+        let unit = text(product["product_quantity_unit"])
+        var pack = ProteinMath.perPack(proteinPer100: per100, quantity: quantity, unit: unit)
+
+        // One serving: "2 Scheiben (25 g)" is two slices of 12,5 g, so one slice is half of it.
+        let served = serving(text(product["serving_size"]))
+        let servingGrams = positive(product["serving_quantity"])
+        let servingProtein = positive(nutriments?["proteins_serving"])
+            ?? servingGrams.flatMap { g in per100.map { $0 * g / 100 } }
+        var portion = Portion(name: served.name, protein: servingProtein.map { $0 / served.count })
+
+        var portionsPerPack: Double?
+        if let q = quantity, let g = servingGrams {
+            let packGrams = ["kg", "l"].contains(unit?.lowercased() ?? "") ? q * 1000 : q
+            let n = packGrams / (g / served.count)
+            if n.isFinite, Portion.perPackRange.contains(n) { portionsPerPack = n }
+        }
+        // No protein per 100 g, but per serving: the pack is its portions.
+        if pack == nil, let p = portion, let n = portionsPerPack {
+            let g = p.protein * n
+            if g.isFinite, ProteinMath.packRange.contains(g) { pack = g }
+        }
+        // A portion that is about the whole pack (or more) is no help: count by the pack.
+        if let p = portion, let whole = pack, !p.isPart(of: whole) { portion = nil }
+        return OFFProduct(name: name, proteinPerPack: pack, portion: portion, portionsPerPack: portionsPerPack)
+    }
+
+    /// What one serving is called, in English, and how many of those it is: "2 Scheiben (25 g)" → ("slice", 2),
+    /// "1 stuk" → ("piece", 1), "30 g (1 Scheibe)" → ("slice", 1). "40 g", "1 Becher" or nothing → ("portion", 1).
+    static func serving(_ text: String?) -> (name: String, count: Double) {
+        let fallback = (name: PortionName.portion, count: 1.0)
+        guard let t = text, !t.isEmpty else { return fallback }
+        // The words before the bracket, then the ones in it.
+        var parts = [t[..<(t.firstIndex(of: "(") ?? t.endIndex)]]
+        if let open = t.firstIndex(of: "(") {
+            let inside = t[t.index(after: open)...]
+            parts.append(inside[..<(inside.firstIndex(of: ")") ?? inside.endIndex)])
+        }
+        for part in parts {
+            var words = tokens(String(part))[...]
+            var count = 1.0
+            if let first = words.first, let n = Double(first) {
+                count = n
+                words = words.dropFirst()
+            }
+            // A whole count from 1 to 50, then a word it knows ("g" or "Becher" isn't one).
+            guard let word = words.first, let name = PortionName.english(word),
+                  count.isFinite, count >= 1, count <= 50, count == count.rounded() else { continue }
+            return (name, count)
+        }
+        return fallback
+    }
+
+    /// Runs of ASCII digits (a "," read as ".") and runs of letters: "2Scheiben (12,5g)" → ["2", "Scheiben", "12.5", "g"].
+    private static func tokens(_ s: String) -> [String] {
+        var out: [String] = []
+        var current = ""
+        var inNumber = false
+        for ch in s {
+            let digit = ch.isASCII && (ch.isNumber || ch == "." || ch == ",")
+            guard digit || ch.isLetter else {
+                if !current.isEmpty { out.append(current) }
+                current = ""
+                continue
+            }
+            if !current.isEmpty, digit != inNumber {
+                out.append(current)
+                current = ""
+            }
+            current.append(ch == "," ? "." : ch)
+            inNumber = digit
+        }
+        if !current.isEmpty { out.append(current) }
+        return out
     }
 
     static func lookup(_ barcode: String,
@@ -103,9 +184,9 @@ enum OpenFoodFacts {
         guard let product = parse(data) else { return .needsProtein(name: nil) }
         // perPack already leaves out a pack that can't be (infinite, 0, or over 1 kg of protein); checked again here.
         guard let protein = product.proteinPerPack, protein.isFinite, ProteinMath.packRange.contains(protein) else {
-            return .needsProtein(name: product.name)
+            return .needsProtein(name: product.name, portion: product.portion)
         }
         // Protein known but no name: still usable, with a generic name.
-        return .found(name: product.name ?? fallbackName, proteinPerPack: protein)
+        return .found(name: product.name ?? fallbackName, proteinPerPack: protein, portion: product.portion)
     }
 }

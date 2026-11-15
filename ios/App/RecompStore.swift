@@ -75,8 +75,30 @@ final class RecompStore: ObservableObject {
         save()
     }
 
-    func rememberProduct(barcode: String, name: String, proteinPerPack: Double) {
-        data.products[barcode] = KnownProduct(name: name, proteinPerPack: proteinPerPack)
+    /// "2 slices": `count` portions of a product counted by portion. Nothing for a product without a portion.
+    func addProductPortions(barcode: String, count: Double) {
+        guard count > 0, count.isFinite, let p = data.products[barcode], let portion = p.portion else { return }
+        data.entries.append(ProteinEntry(at: now(), name: p.name, unit: portion.name, units: portion.units,
+                                         amount: count, gramsPerUnit: portion.protein))
+        save()
+    }
+
+    /// The protein in a whole pack. The barcode's portion stays as it was, unless `portion` brings a new one.
+    func rememberProduct(barcode: String, name: String, proteinPerPack: Double, portion: Portion? = nil) {
+        var p = KnownProduct(name: name, proteinPerPack: proteinPerPack)
+        if let keep = portion ?? data.products[barcode]?.portion {
+            p.portionName = keep.name
+            p.proteinPerPortion = keep.protein
+        }
+        data.products[barcode] = p
+        save()
+    }
+
+    /// Count a remembered product by portion from now on. Not for an unknown barcode or a portion that can't be.
+    func rememberPortion(barcode: String, name: String, proteinPerPortion: Double) {
+        guard data.products[barcode] != nil, let portion = Portion(name: name, protein: proteinPerPortion) else { return }
+        data.products[barcode]?.portionName = portion.name
+        data.products[barcode]?.proteinPerPortion = portion.protein
         save()
     }
 
@@ -174,12 +196,18 @@ final class RecompStore: ObservableObject {
         save()
     }
 
+    /// A product counted by portion becomes a source in portions ("per slice", one at a time); any other in packs.
     @discardableResult
     func addToSources(barcode: String) -> Bool {
         guard data.sources.count < RecompData.maxSources, let p = data.products[barcode],
               !data.sources.contains(where: { $0.barcode == barcode }) else { return false }
-        data.sources.append(ProteinSource(name: p.name, unit: "pack", units: "packs",
-                                          gramsPerUnit: p.proteinPerPack, step: 0.25, barcode: barcode))
+        if let portion = p.portion {
+            data.sources.append(ProteinSource(name: p.name, unit: portion.name, units: portion.units,
+                                              gramsPerUnit: portion.protein, step: 1, barcode: barcode))
+        } else {
+            data.sources.append(ProteinSource(name: p.name, unit: "pack", units: "packs",
+                                              gramsPerUnit: p.proteinPerPack, step: 0.25, barcode: barcode))
+        }
         save()
         return true
     }

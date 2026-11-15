@@ -90,4 +90,35 @@ final class RecompMathTests: XCTestCase {
         XCTAssertEqual(RecompFormat.kg(88.14, locale: gb), "88.1 kg")
         XCTAssertEqual(RecompFormat.grams(19.6), "20 g")
     }
+
+    func test_portionsInput() {
+        XCTAssertEqual(RecompInput.portions("12"), 12)
+        XCTAssertEqual(RecompInput.portions(" 7 "), 7)
+        XCTAssertEqual(RecompInput.portions("1"), 1)
+        XCTAssertEqual(RecompInput.portions("200"), 200)
+        XCTAssertNil(RecompInput.portions("0"))
+        XCTAssertNil(RecompInput.portions("201"))
+        XCTAssertNil(RecompInput.portions(""))
+        XCTAssertNil(RecompInput.portions("1.5"))
+        XCTAssertNil(RecompInput.portions("-3"))
+        XCTAssertNil(RecompInput.portions("99999999999999999999"))
+        XCTAssertNil(RecompInput.portions("\u{0664}"))             // Arabic-Indic four
+    }
+
+    func test_portionSplitAndNames() {
+        XCTAssertEqual(Portion.split(pack: 68, into: 17, name: "slice"), Portion(name: "slice", protein: 4))
+        XCTAssertNil(Portion.split(pack: 68, into: 0, name: "slice"))
+        XCTAssertNil(Portion.split(pack: 68, into: 201, name: "slice"))
+        XCTAssertNil(Portion.split(pack: 1, into: 20, name: "slice"))           // 0.05 g
+        XCTAssertNil(Portion.split(pack: .nan, into: 2, name: "slice"))
+        XCTAssertNil(Portion(name: "slice", protein: 301))
+        XCTAssertNil(Portion(name: " ", protein: 4))
+        XCTAssertEqual(PortionName.plural("slice"), "slices")
+        XCTAssertEqual(PortionName.plural("piece"), "pieces")
+        XCTAssertEqual(PortionName.plural(""), "portions")
+        XCTAssertEqual(PortionName.english("Scheiben"), "slice")
+        XCTAssertEqual(PortionName.english("STÜCK"), "piece")
+        XCTAssertEqual(PortionName.english("Portie"), "portion")
+        XCTAssertNil(PortionName.english("g"))
+    }
 }

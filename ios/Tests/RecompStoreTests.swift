@@ -221,4 +221,108 @@ final class RecompStoreTests: XCTestCase {
         XCTAssertFalse(s.addToSources(barcode: "1"))
         XCTAssertEqual(s.data.sources.count, 4)
     }
+
+    // MARK: - Portions
+
+    private let bread = "8712345678906"
+
+    /// A product saved by 0.17.0 has no portion fields: it still loads, counted by the pack.
+    func test_oldProductDecodes() throws {
+        let json = #"{"goal":160,"products":{"8712345678906":{"name":"Brood","proteinPerPack":68}}}"#
+        defaults.set(Data(json.utf8), forKey: "recomp.v1")
+        let s = makeStore()
+        let p = try XCTUnwrap(s.data.products[bread])
+        XCTAssertEqual(p.name, "Brood")
+        XCTAssertEqual(p.proteinPerPack, 68)
+        XCTAssertNil(p.portionName)
+        XCTAssertNil(p.proteinPerPortion)
+        XCTAssertNil(p.portion)
+        XCTAssertNil(defaults.data(forKey: "recomp.v1.corrupt"))
+    }
+
+    /// A portion field of the wrong type is dropped; the rest of the data still loads.
+    func test_badPortionFieldsDecode() throws {
+        let json = #"{"goal":150,"products":{"8712345678906":{"name":"Brood","proteinPerPack":68,"portionName":7,"proteinPerPortion":"x"}}}"#
+        defaults.set(Data(json.utf8), forKey: "recomp.v1")
+        let s = makeStore()
+        XCTAssertEqual(s.data.goal, 150)
+        let p = try XCTUnwrap(s.data.products[bread])
+        XCTAssertEqual(p.proteinPerPack, 68)
+        XCTAssertNil(p.portion)
+        XCTAssertNil(defaults.data(forKey: "recomp.v1.corrupt"))
+    }
+
+    func test_addPortions() throws {
+        let s = makeStore()
+        s.rememberProduct(barcode: bread, name: "Grafschafter Sandwich", proteinPerPack: 67.5,
+                          portion: Portion(name: "slice", protein: 3.6))
+        s.addProductPortions(barcode: bread, count: 2)
+        let e = try XCTUnwrap(s.todayEntries.first)
+        XCTAssertEqual(e.name, "Grafschafter Sandwich")
+        XCTAssertEqual(e.grams, 7.2, accuracy: 0.001)
+        XCTAssertEqual(ProteinMath.amountLabel(e.amount, unit: e.unit, units: e.units), "2 slices")
+        XCTAssertEqual(ProteinMath.amountLabel(1, unit: e.unit, units: e.units), "1 slice")
+        // the pack still works too
+        s.addProductPortions(barcode: bread, count: 0)
+        s.addProductPortions(barcode: bread, count: -1)
+        s.addProduct(barcode: bread, fraction: 0.25)
+        XCTAssertEqual(s.todayEntries.count, 2)
+        XCTAssertEqual(s.todayTotal, 7.2 + 16.875, accuracy: 0.001)
+    }
+
+    func test_portionsNeedAPortion() {
+        let s = makeStore()
+        s.rememberProduct(barcode: bread, name: "Brood", proteinPerPack: 68)
+        s.addProductPortions(barcode: bread, count: 2)
+        s.addProductPortions(barcode: "unknown", count: 2)
+        XCTAssertTrue(s.todayEntries.isEmpty)
+    }
+
+    /// Counted by hand: 17 slices share the pack's 68 g. Remembered for the barcode, also after a restart.
+    func test_rememberPortion() throws {
+        let s = makeStore()
+        s.rememberProduct(barcode: bread, name: "Brood", proteinPerPack: 68)
+        let one = try XCTUnwrap(Portion.split(pack: 68, into: 17, name: "slice"))
+        s.rememberPortion(barcode: bread, name: one.name, proteinPerPortion: one.protein)
+        XCTAssertEqual(s.data.products[bread]?.portion, Portion(name: "slice", protein: 4))
+        // can't be: ignored
+        s.rememberPortion(barcode: bread, name: "slice", proteinPerPortion: 1000)
+        s.rememberPortion(barcode: bread, name: "slice", proteinPerPortion: .infinity)
+        s.rememberPortion(barcode: bread, name: "", proteinPerPortion: 4)
+        s.rememberPortion(barcode: "unknown", name: "slice", proteinPerPortion: 4)
+        XCTAssertEqual(s.data.products[bread]?.portion, Portion(name: "slice", protein: 4))
+        XCTAssertNil(s.data.products["unknown"])
+        XCTAssertEqual(makeStore().data.products[bread]?.portion, Portion(name: "slice", protein: 4))
+    }
+
+    /// Typing the pack's protein again keeps how it's counted.
+    func test_correctingKeepsPortion() {
+        let s = makeStore()
+        s.rememberProduct(barcode: bread, name: "Brood", proteinPerPack: 68, portion: Portion(name: "slice", protein: 4))
+        s.rememberProduct(barcode: bread, name: "Brood", proteinPerPack: 60)
+        XCTAssertEqual(s.data.products[bread]?.proteinPerPack, 60)
+        XCTAssertEqual(s.data.products[bread]?.portion, Portion(name: "slice", protein: 4))
+    }
+
+    func test_addToSourcesInPortions() throws {
+        let s = makeStore()
+        s.saveSources(Array(s.data.sources.prefix(3)))
+        s.rememberProduct(barcode: bread, name: "Grafschafter Sandwich", proteinPerPack: 67.5,
+                          portion: Portion(name: "slice", protein: 3.6))
+        XCTAssertTrue(s.addToSources(barcode: bread))
+        let src = try XCTUnwrap(s.data.sources.last)
+        XCTAssertEqual(src.name, "Grafschafter Sandwich")
+        XCTAssertEqual(src.unit, "slice")
+        XCTAssertEqual(src.units, "slices")
+        XCTAssertEqual(src.gramsPerUnit, 3.6, accuracy: 0.001)
+        XCTAssertEqual(src.step, 1)
+        XCTAssertEqual(src.barcode, bread)
+        s.add(src, amount: 3)
+        XCTAssertEqual(s.todayTotal, 10.8, accuracy: 0.001)
+        // without a portion it's still packs
+        s.rememberProduct(barcode: "1", name: "Kwark", proteinPerPack: 41)
+        XCTAssertTrue(s.addToSources(barcode: "1"))
+        XCTAssertEqual(s.data.sources.last?.unit, "pack")
+        XCTAssertEqual(s.data.sources.last?.step, 0.25)
+    }
 }
