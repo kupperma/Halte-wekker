@@ -138,54 +138,117 @@ final class LiveStore: ObservableObject {
     /// `wasMoving`: you were going at train or bus speed just now (stopped at a signal, or slowing down): not "standing".
     /// `late` (with `tripId`): it was found by the road you're on, this many seconds off its times: its next stop is the
     /// next one ahead by its times moved by that much (its timetable position may be kilometres from you).
+    /// `history`: your fixes of the last minutes. Without a `tripId` it's the one that moves with you (`movesWithYou`);
+    /// classic matching: the one whose position by its times now is nearest to you.
     static func onBoardTrips(_ f: CLLocation, to dest: Place, tripId: String? = nil, wasMoving: Bool = false,
-                             late: TimeInterval? = nil, line: String? = nil, isTrain: Bool? = nil) async -> (OnBoard, [DoorTrip])? {
+                             late: TimeInterval? = nil, line: String? = nil, isTrain: Bool? = nil, history: [Fix] = []) async -> (OnBoard, [DoorTrip])? {
         let now = Date()
         if let tripId, let late {
             let stops = await Transit.tripStops(tripId)
             guard let next = stops.first(where: { ($0.arrival ?? .distantPast).addingTimeInterval(late) > now.addingTimeInterval(20) }) else { return nil }
-            return await plans(from: f, tripId: tripId, line: line ?? "?", isTrain: isTrain ?? false, toName: stops.last?.name ?? "",
-                               stops: stops, next: next, at: (next.arrival ?? now).addingTimeInterval(late), to: dest)
+            let at = (next.arrival ?? now).addingTimeInterval(late)
+            let its = await planOn(next: next, at: at, to: dest)
+            return assemble(from: f, tripId: tripId, line: line ?? "?", isTrain: isTrain ?? false, toName: stops.last?.name ?? "",
+                            stops: stops, next: next, at: at, its: its)
         }
         let still = f.speed < 3 && !wasMoving       // standing or walking now (or no speed): then it has to be right with you
         let speedNow = wasMoving ? max(f.speed, 15) : f.speed
-        let segs = await Transit.vehicles(near: f.coordinate, radiusDeg: tripId == nil && speedNow < 15 ? 0.02 : 0.04)
-        var best: (VehicleSegment, Double)?
-        for s in segs {
-            if let tripId, s.tripId != tripId { continue }
-            guard let p = s.position(at: now) else { continue }
-            // going your way, by the GPS's heading while you're moving (not one passing the other way)
-            if tripId == nil, f.course >= 0, f.speed >= 3,
-               let a = s.position(at: now.addingTimeInterval(-15)), let b = s.position(at: now.addingTimeInterval(15)),
-               CLLocation(latitude: a.latitude, longitude: a.longitude).distance(from: CLLocation(latitude: b.latitude, longitude: b.longitude)) > 20 {
-                var turn = abs(Heading.bearing(a, b) - f.course).truncatingRemainder(dividingBy: 360)
-                if turn > 180 { turn = 360 - turn }
-                if turn > 75 { continue }
+        let classic = MatchSettings.classic()
+        // (the matcher reads every trip on a piece several share; classic matching the first only)
+        let segs = await Transit.vehicles(near: f.coordinate, radiusDeg: tripId == nil && speedNow < 15 ? 0.02 : 0.04, allTrips: !classic)
+        let chosen: VehicleSegment?
+        if classic || tripId != nil {
+            var best: (VehicleSegment, Double)?
+            for s in segs {
+                if let tripId, s.tripId != tripId { continue }
+                guard let p = s.position(at: now) else { continue }
+                // going your way, by the GPS's heading while you're moving (not one passing the other way)
+                if tripId == nil, f.course >= 0, f.speed >= 3,
+                   let a = s.position(at: now.addingTimeInterval(-15)), let b = s.position(at: now.addingTimeInterval(15)),
+                   CLLocation(latitude: a.latitude, longitude: a.longitude).distance(from: CLLocation(latitude: b.latitude, longitude: b.longitude)) > 20 {
+                    var turn = abs(Heading.bearing(a, b) - f.course).truncatingRemainder(dividingBy: 360)
+                    if turn > 180 { turn = 360 - turn }
+                    if turn > 75 { continue }
+                }
+                let d = f.distance(from: CLLocation(latitude: p.latitude, longitude: p.longitude))
+                let tol = tripId != nil ? 4000 : still ? 250 : matchTolerance(train: s.isTrain, speed: speedNow)
+                if d < tol, best == nil || d < best!.1 { best = (s, d) }
             }
-            let d = f.distance(from: CLLocation(latitude: p.latitude, longitude: p.longitude))
-            let tol = tripId != nil ? 4000 : still ? 250 : matchTolerance(train: s.isTrain, speed: speedNow)
-            if d < tol, best == nil || d < best!.1 { best = (s, d) }
+            chosen = best?.0
+        } else {
+            chosen = movesWithYou(f, segs, history: history, still: still, speed: speedNow, now: now)
         }
-        guard let seg = best?.0 else { return nil }
+        guard let seg = chosen else { return nil }
+        // Its next stop is where this piece goes (it left its last one, or leaves it within 20 s, and gets there after
+        // that): its stops and the ways on from there are asked at once. Otherwise its stops first, then the first of
+        // them it gets to after 20 s from now.
+        if let la = seg.toLat, let lo = seg.toLon, seg.departure <= now.addingTimeInterval(20), seg.arrival > now.addingTimeInterval(20) {
+            // Standing still and it's coming to where you are: you're at its stop (a bus station by the train station), not on it.
+            if tripId == nil, still, f.distance(from: CLLocation(latitude: la, longitude: lo)) < 350 { return nil }
+            let ahead = TripStop(name: seg.toName, coordinate: .init(latitude: la, longitude: lo), arrival: seg.arrival)
+            async let asked = Transit.tripStops(seg.tripId)
+            async let ways = planOn(next: ahead, at: seg.arrival, to: dest)
+            let (stops, its) = await (asked, ways)
+            guard !stops.isEmpty else { return nil }
+            // that stop as its trip has it (its name, and for staying on past it)
+            let there = CLLocation(latitude: la, longitude: lo)
+            let next = stops.first { s in
+                abs((s.arrival ?? .distantPast).timeIntervalSince(seg.arrival)) <= 120
+                    && (s.name == ahead.name || there.distance(from: CLLocation(latitude: s.coordinate.latitude, longitude: s.coordinate.longitude)) < 150)
+            } ?? ahead
+            return assemble(from: f, tripId: seg.tripId, line: seg.line, isTrain: seg.isTrain, toName: seg.toName,
+                            stops: stops, next: next, at: seg.arrival, its: its)
+        }
         let stops = await Transit.tripStops(seg.tripId)
         guard let next = stops.first(where: { ($0.arrival ?? .distantPast) > now.addingTimeInterval(20) }) else { return nil }
         // Standing still and it's coming to where you are: you're at its stop (a bus station by the train station), not on it.
         if tripId == nil, still, f.distance(from: CLLocation(latitude: next.coordinate.latitude, longitude: next.coordinate.longitude)) < 350 { return nil }
-        return await plans(from: f, tripId: seg.tripId, line: seg.line, isTrain: seg.isTrain, toName: seg.toName, stops: stops, next: next, at: next.arrival ?? now, to: dest)
+        let its = await planOn(next: next, at: next.arrival ?? now, to: dest)
+        return assemble(from: f, tripId: seg.tripId, line: seg.line, isTrain: seg.isTrain, toName: seg.toName,
+                        stops: stops, next: next, at: next.arrival ?? now, its: its)
     }
 
-    /// The ways on from the bus or train you're on: from its next stop, from when it gets there (staying on when it goes
-    /// where a later ride leaves).
-    private static func plans(from f: CLLocation, tripId: String, line: String, isTrain: Bool, toName: String,
-                              stops: [TripStop], next: TripStop, at: Date, to dest: Place) async -> (OnBoard, [DoorTrip])? {
-        let now = Date()
-        // to each of the destination's stops at once
+    /// The matcher's pick for `onBoardTrips`: the bus or train that moves with you. Judged on your fixes once they span
+    /// 20 s, else on this fix alone at its own time (on its path, going your way by the GPS's course, a possible speed,
+    /// near its times: today's allowed distance, 250 m when you're standing), at most 10 of them; the best by the
+    /// seconds you are off its times. Its piece now: the last of its pieces that has left (else its first).
+    private static func movesWithYou(_ f: CLLocation, _ segs: [VehicleSegment], history: [Fix], still: Bool, speed: Double,
+                                     now: Date) -> VehicleSegment? {
+        let one = Fix(f)
+        let tracks = VehicleMatch.shortlist(VehicleTrack.group(segs.map { MapPiece($0) }), near: one)
+        let judged: [Judgement]
+        if VehicleMatch.enough(history) {
+            judged = VehicleMatch.judgeAll(history, tracks)
+        } else {
+            judged = tracks.map { v in
+                VehicleMatch.judgeOne(one, v, tolerance: still ? 250 : VehicleMatch.tolerance(isTrain: v.isTrain, speed: speed))
+            }
+        }
+        let ranked = VehicleMatch.rank(judged, planned: nil)
+        let lines = Dictionary(tracks.map { ($0.tripId, $0.line) }, uniquingKeysWith: { a, _ in a })
+        let outcome = ranked.first.map { "best " + FieldFormat.label($0.id, lines) } ?? "none"
+        FieldLog.shared.add(.match, FieldFormat.match("on board", judged, outcome: outcome))
+        guard let id = ranked.first?.id else { return nil }
+        let pieces = segs.filter { $0.tripId == id }
+        return pieces.filter { $0.departure <= now }.max { $0.departure < $1.departure } ?? pieces.min { $0.departure < $1.departure }
+    }
+
+    /// The planner's ways on from the bus or train you're on: from its next stop, from when it gets there, to each of
+    /// the destination's stops at once.
+    private static func planOn(next: TripStop, at: Date, to dest: Place) async -> [DoorTrip] {
         let start = "\(next.coordinate.latitude),\(next.coordinate.longitude)", when = at.addingTimeInterval(-60)
         var jobs: [@Sendable () async -> [DoorTrip]] = []
         for b in dest.ids {
             jobs.append { await Transit.plan(from: start, to: b, modes: nil, at: when, count: 5, maxTransfers: 4) }
         }
-        let its = await Progressive.all(jobs).flatMap { $0 }
+        return await Progressive.all(jobs).flatMap { $0 }
+    }
+
+    /// The ways on from the bus or train you're on (`its`: the planner's, from its next stop), staying on when it goes
+    /// where a later ride leaves.
+    private static func assemble(from f: CLLocation, tripId: String, line: String, isTrain: Bool, toName: String,
+                                 stops: [TripStop], next: TripStop, at: Date, its: [DoorTrip]) -> (OnBoard, [DoorTrip])? {
+        let now = Date()
         let v = Vehicle(tripId: tripId, line: isTrain ? Transit.trainLabel(line) : line, isTrain: isTrain)
         func onIt(to name: String, lat: Double?, lon: Double?, arrival: Date, scheduled: Date) -> Ride {
             Ride(tripId: tripId, line: v.line, name: line, isTrain: isTrain, departure: now, scheduledDeparture: now,

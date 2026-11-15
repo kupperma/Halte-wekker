@@ -561,7 +561,8 @@ final class GoStore: ObservableObject {
         defer { lookingOnBoard = false }
         let d = dest
         let moving = trip.movedRecently
-        guard var ob = await Transit.$urgent.withValue(true, operation: { await Net.within(10, { await LiveStore.onBoardTrips(f, to: d, wasMoving: moving) }) }) ?? nil,
+        let history = trip.recentFixes
+        guard var ob = await Transit.$urgent.withValue(true, operation: { await Net.within(10, { await LiveStore.onBoardTrips(f, to: d, wasMoving: moving, history: history) }) }) ?? nil,
               watching, dest == d, trip.phase == .idle, !ob.1.isEmpty else { return }
         movingUnknown = false
         forgetSaved()
@@ -571,10 +572,11 @@ final class GoStore: ObservableObject {
         for _ in 0..<4 {
             try? await Task.sleep(nanoseconds: 5_000_000_000)
             guard watching, dest == d, trip.phase == .idle, let v = onBoard else { return }
-            let ranked = await trip.matchVehicles(mode: nil)
+            let R = MatchRules.current()
+            let ranked = await trip.matchVehicles(mode: nil, planned: v.tripId, place: "confirm")
             guard watching, dest == d, trip.phase == .idle else { return }
             if let me = ranked.first(where: { $0.vehicle.tripId == v.tripId }), let t = best {
-                let close = ranked.filter { $0.vehicle.tripId != v.tripId && $0.meters < me.meters + 300 }.map(\.vehicle)
+                let close = ranked.filter { $0.vehicle.tripId != v.tripId && $0.score < me.score + R.close }.map(\.vehicle)
                 board(t, v, alternatives: ob.1, couldBe: close)
                 return
             }
@@ -597,7 +599,8 @@ final class GoStore: ObservableObject {
     /// others it found); any other one has to be the same twice and take you there.
     private func checkBoarding(_ last: String?) async -> String? {
         guard let trip, trip.phase == .idle, watching, !lookingOnBoard else { return nil }
-        let ranked = await trip.matchVehicles(mode: nil)
+        let R = MatchRules.current()
+        let ranked = await trip.matchVehicles(mode: nil, planned: best?.first.tripId, place: "board")
         guard var m = ranked.first else { seen = nil; return nil }
         guard watching, trip.phase == .idle else { return nil }
         // at bus speed, not running for it while it passes you
@@ -608,21 +611,22 @@ final class GoStore: ObservableObject {
         // Buses that leave the same stop together (the 305 and the 306 at Veghel) fit about the same at first: the one
         // it's watching wins when it fits nearly as well.
         if live, let b = best, m.vehicle.tripId != b.first.tripId,
-           let bm = ranked.first(where: { $0.vehicle.tripId == b.first.tripId }), bm.meters < m.meters + 200 { m = bm }
+           let bm = ranked.first(where: { $0.vehicle.tripId == b.first.tripId }), bm.score < m.score + R.plannedEdge { m = bm }
         let twice = last == m.vehicle.tripId
         // the others that fit about as well: the ride keeps them in the running until there's real distance between them
-        let close = ranked.filter { $0.vehicle.tripId != m.vehicle.tripId && $0.meters < m.meters + 300 }.map(\.vehicle)
+        let close = ranked.filter { $0.vehicle.tripId != m.vehicle.tripId && $0.score < m.score + R.close }.map(\.vehicle)
         if let t = all.first(where: { $0.first.tripId == m.vehicle.tripId }) {
             // one look for the line it's watching; another line has to be the same twice
             let sameLine = (live ? best : nil).map { $0.first.line == m.vehicle.line } ?? true
-            if (m.meters < 250 && sameLine) || twice {
+            if (m.score < R.oneLookWatched && sameLine) || twice {
                 board(t, m.vehicle, alternatives: all, couldBe: close)
                 return nil
             }
             seen = m.vehicle
             return m.vehicle.tripId
         }
-        if twice, let loc = trip.lastFix, let ob = await LiveStore.onBoardTrips(loc, to: dest), ob.0.vehicle.tripId == m.vehicle.tripId, let t = ob.1.first {
+        if twice, let loc = trip.lastFix, let ob = await LiveStore.onBoardTrips(loc, to: dest, history: trip.recentFixes),
+           ob.0.vehicle.tripId == m.vehicle.tripId, let t = ob.1.first {
             // a long way round is probably not a bus you're on (a car or bike next to one)
             if asOf == nil, let b = best, t.end > b.end.addingTimeInterval(30 * 60) { seen = nil; return m.vehicle.tripId }
             guard watching, trip.phase == .idle else { return nil }

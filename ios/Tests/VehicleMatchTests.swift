@@ -271,6 +271,62 @@ final class VehicleMatchTests: XCTestCase {
         XCTAssertTrue(MatchSettings.classic(d))
     }
 
+    // MARK: - Where the app picks
+
+    func test_rulesPinToday() {
+        let r = MatchRules.classic
+        XCTAssertEqual(r.oneLook, 150)
+        XCTAssertEqual(r.oneLookWatched, 250)
+        XCTAssertEqual(r.expected, 350)
+        XCTAssertEqual(r.plannedEdge, 200)
+        XCTAssertEqual(r.close, 300)
+        XCTAssertEqual(r.sameLineNear, 400)
+        XCTAssertEqual(r, MatchRules(oneLook: 150, oneLookWatched: 250, expected: 350, plannedEdge: 200, close: 300, sameLineNear: 400))
+        XCTAssertEqual(MatchRules.seconds, MatchRules(oneLook: 15, oneLookWatched: 20, expected: 30, plannedEdge: 0, close: 60, sameLineNear: 40))
+    }
+
+    func test_rulesFollowTheSwitch() {
+        let d = UserDefaults(suiteName: UUID().uuidString)!
+        XCTAssertEqual(MatchRules.current(d), .seconds)
+        d.set(true, forKey: MatchSettings.key)
+        XCTAssertEqual(MatchRules.current(d), .classic)
+        d.set(false, forKey: MatchSettings.key)
+        XCTAssertEqual(MatchRules.current(d), .seconds)
+    }
+
+    /// Not sure before 3 usable fixes of the last half minute span 20 s.
+    func test_enoughSpansTwentySeconds() {
+        XCTAssertFalse(VehicleMatch.enough([]))
+        XCTAssertFalse(VehicleMatch.enough(Fx.fixes(from: 0, speed: 15, count: 10)))           // 18 s
+        XCTAssertTrue(VehicleMatch.enough(Fx.fixes(from: 0, speed: 15, count: 11)))            // 20 s
+        XCTAssertFalse(VehicleMatch.enough(Fx.fixes(from: 0, speed: 15, count: 2, every: 25))) // 2 fixes
+        XCTAssertFalse(VehicleMatch.enough(Fx.fixes(from: 0, speed: 15, count: 11, accuracy: 200)))
+        // older fixes than the last half minute don't count
+        let old = Fx.fixes(from: 0, speed: 15, count: 3, every: 10, start: t0 - 60)
+        let now = Fx.fixes(from: 900, speed: 15, count: 3, every: 5)
+        XCTAssertFalse(VehicleMatch.enough(old + now))
+        // nor does a bad newest fix shorten the window
+        let bad = Fix(t: t0 + 60, p: Fx.east(5000), accuracy: 500, speed: 15, course: 90)
+        XCTAssertTrue(VehicleMatch.enough(Fx.fixes(from: 0, speed: 15, count: 11) + [bad]))
+    }
+
+    /// At most 10 judged: the likeliest by one look at your newest fix; with 10 or fewer, all as given.
+    func test_shortlist() {
+        let me = Fix(t: t0, p: Fx.east(3500), accuracy: 20, speed: 15, course: 90)
+        let few = (0..<3).map { Fx.track("v\($0)", line: "306", train: false, path: Fx.railway, at: 3500 + Double($0) * 300, speed: 15) }
+        XCTAssertEqual(VehicleMatch.shortlist(few, near: me).map(\.tripId), ["v0", "v1", "v2"])
+        // 12: one with you, 9 ahead of you by their times by 30…270 m, one far off its path, one going the other way
+        var many = (1...9).map { Fx.track("b\($0)", line: "306", train: false, path: Fx.railway, at: 3500 + Double($0) * 30, speed: 15) }
+        many.insert(Fx.track("off", line: "305", train: false, path: Fx.road(north: 900), at: 3500, speed: 15), at: 0)
+        many.insert(Fx.track("back", line: "305", train: false, path: Array(Fx.railway.reversed()), at: 3400, speed: 15), at: 1)
+        many.append(Fx.track("mine", line: "306", train: false, path: Fx.railway, at: 3500, speed: 15))
+        let picked = VehicleMatch.shortlist(many, near: me).map(\.tripId)
+        XCTAssertEqual(picked.count, 10)
+        XCTAssertEqual(picked.first, "mine")
+        XCTAssertEqual(picked, ["mine"] + (1...9).map { "b\($0)" })
+        XCTAssertEqual(VehicleMatch.shortlist(many, near: nil).count, 10)
+    }
+
     /// R-rel-13: across a 2 km gap between pieces that don't meet, its times run along the connector: the bus that
     /// crosses it with you passes; one whose times cross it at half your speed doesn't.
     func test_acrossAGap() {

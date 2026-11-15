@@ -164,9 +164,7 @@ enum VehicleMatch {
     /// The evidence, or why there is none: `noTimes` when none of the fixes has a time position on it, `tooFewFixes`
     /// when no fix is usable or fewer than 2 are.
     private static func gather(_ fixes: [Fix], _ v: VehicleTrack) -> Result<Evidence, Reject> {
-        let good = fixes.filter {
-            $0.accuracy.isFinite && $0.accuracy >= 0 && $0.accuracy <= maxAccuracy && $0.p.lat.isFinite && $0.p.lon.isFinite
-        }
+        let good = fixes.filter(usable)
         guard let newest = good.map(\.t).max() else { return .failure(.tooFewFixes) }
         let j = Joined(v.pieces)
         var rows: [(t: Date, along: Double, cross: Double, at: Double, accuracy: Double, connector: Bool)] = []
@@ -334,6 +332,11 @@ enum VehicleMatch {
 
     // MARK: - Helpers
 
+    /// A fix the evidence uses: a known accuracy of at most `maxAccuracy`, at a real place.
+    private static func usable(_ f: Fix) -> Bool {
+        f.accuracy.isFinite && f.accuracy >= 0 && f.accuracy <= maxAccuracy && f.p.lat.isFinite && f.p.lon.isFinite
+    }
+
     /// Seconds off its times: metres ÷ its speed (at least `costSpeedMin`).
     private static func cost(offset: Double, itsSpeed: Double) -> Double {
         abs(offset) / max(costSpeedMin, itsSpeed)
@@ -478,5 +481,48 @@ extension VehicleMatch {
         case .implausibleSpeed?, .drifting?: return true
         default: return false
         }
+    }
+}
+
+extension VehicleMatch {
+    /// Enough fixes to judge by (the first hard test's own minimum): of the usable ones of the last `window` seconds, at
+    /// least `minFixes`, spanning at least `minSpan`. Until then nothing passes `judgeAll`: not sure yet.
+    static func enough(_ fixes: [Fix]) -> Bool {
+        let good = fixes.filter(usable)
+        guard let newest = good.map(\.t).max() else { return false }
+        let recent = good.filter { newest.timeIntervalSince($0.t) <= window }
+        guard recent.count >= minFixes, let oldest = recent.map(\.t).min() else { return false }
+        return newest.timeIntervalSince(oldest) >= minSpan
+    }
+
+    /// The ones worth judging, at most `limit`: with more, the likeliest by one look at your newest fix (`judgeOne` at
+    /// any distance from its times): those that pass by their cost, then the others as given. With `limit` or fewer,
+    /// all of them as given.
+    static func shortlist(_ tracks: [VehicleTrack], near f: Fix?, limit: Int = 10) -> [VehicleTrack] {
+        guard tracks.count > limit else { return tracks }
+        guard let f else { return Array(tracks.prefix(limit)) }
+        let scored = tracks.enumerated().map { k, v -> (k: Int, cost: Double) in
+            if case .success(let c) = judgeOne(f, v, tolerance: .infinity).result { return (k, c) }
+            return (k, .infinity)
+        }
+        return scored.sorted { $0.cost != $1.cost ? $0.cost < $1.cost : $0.k < $1.k }.prefix(limit).map { tracks[$0.k] }
+    }
+}
+
+/// The one-look thresholds where the app picks the bus or train you're on. Classic matching compares metres from where
+/// a vehicle's times put it (today's numbers); the matcher compares seconds off its times.
+struct MatchRules: Equatable, Sendable {
+    let oneLook: Double             // one look is enough for one of the line it planned, this close
+    let oneLookWatched: Double      // …for the line you watch, or the one on the Fastest trip screen
+    let expected: Double            // …for one it expects (one it listed or planned)
+    let plannedEdge: Double         // the planned one wins when it is at most this much worse than the best
+    let close: Double               // others at most this much worse than the pick stay in the running
+    let sameLineNear: Double        // still the same bus?: another of its line this close is looked at too
+    static let classic = MatchRules(oneLook: 150, oneLookWatched: 250, expected: 350, plannedEdge: 200, close: 300, sameLineNear: 400)  // metres: today
+    static let seconds = MatchRules(oneLook: 15, oneLookWatched: 20, expected: 30, plannedEdge: 0, close: 60, sameLineNear: 40)       // seconds off its times
+
+    /// Metres while "Classic vehicle matching" is on, else seconds.
+    static func current(_ d: UserDefaults = .standard) -> MatchRules {
+        MatchSettings.classic(d) ? .classic : .seconds
     }
 }

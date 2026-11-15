@@ -13,6 +13,10 @@ struct Vehicle: Equatable {
     var title: String { isTrain ? (line == "IC" ? "Intercity" : line == "SPR" ? "Sprinter" : line) : "Bus \(line)" }
 }
 
+/// A bus or train that fits where you've been: `meters` from where its times put it, and `score` to compare by (classic
+/// matching: those metres; the matcher: the seconds you are off its times, the planned one 45 s less).
+struct Match: Equatable { let vehicle: Vehicle; let meters: Double; let score: Double }
+
 /// Runs a trip: follows GPS (also with the phone locked), rings before each stop with an announcement,
 /// recognises the vehicle you're on, keeps the arrival time up to date and drives the Live Activity.
 /// With "Start trips by itself" on, it watches your stations and starts a trip when you leave on a bus or train.
@@ -434,9 +438,10 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         if phase == .idle, !LineWatchStore.shared.watches.isEmpty, Date().timeIntervalSince(lastIdleMatch) > 20 {
             lastIdleMatch = Date()
             Task {
+                let R = MatchRules.current()
                 guard let m = await self.matchVehicle(mode: .bus) else { self.idleBest = nil; return }
                 let watched = LineWatchStore.shared.watches.contains { $0.line == m.vehicle.line }
-                if watched && (m.meters < 250 || self.idleBest == m.vehicle.tripId) { LineWatchStore.shared.boarded(line: m.vehicle.line); self.idleBest = nil }
+                if watched && (m.score < R.oneLookWatched || self.idleBest == m.vehicle.tripId) { LineWatchStore.shared.boarded(line: m.vehicle.line); self.idleBest = nil }
                 else { self.idleBest = m.vehicle.tripId }
             }
         }
@@ -633,9 +638,10 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
                 let li = forNextLeg ? self.index + 1 : self.index
                 let mode = self.legs[safe: li]?.mode
                 let planned = self.route?.planned?[safe: li]
+                let R = MatchRules.current()
                 // every kind: you can be on a train where it planned a bus (it'll plan again from it); the kind it
                 // planned comes first
-                let ranked = await self.matchVehicles(mode: nil, excluding: rejected)
+                let ranked = await self.matchVehicles(mode: nil, excluding: rejected, planned: planned?.tripId, place: "detect")
                 let kind = ranked.filter { mode == nil || $0.vehicle.isTrain == (mode == .train) }
                 guard var m = kind.first ?? ranked.first else {
                     lastBest = nil
@@ -651,15 +657,15 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
                 // Two buses that leave a stop together (the 305 and the 306 at Veghel) fit about the same at first: the
                 // one it planned wins when it fits nearly as well.
                 if let p = planned, m.vehicle.tripId != p.tripId,
-                   let pm = ranked.first(where: { $0.vehicle.tripId == p.tripId }), pm.meters < m.meters + 200 { m = pm }
+                   let pm = ranked.first(where: { $0.vehicle.tripId == p.tripId }), pm.score < m.score + R.plannedEdge { m = pm }
                 // One look is enough for one it expects, or one right with you of the line it planned; others it wants
                 // to see twice.
                 let otherKind = mode != nil && m.vehicle.isTrain != (mode == .train)
                 // (a saved list of next departures isn't one it expects: only a live answer can)
                 let expected = ((self.upcomingAsOf == nil && self.upcoming.contains { $0.trip.first.tripId == m.vehicle.tripId })
-                                || planned?.tripId == m.vehicle.tripId) && m.meters < 350 && !otherKind
+                                || planned?.tripId == m.vehicle.tripId) && m.score < R.expected && !otherKind
                 let sameLine = (planned.map { $0.line == m.vehicle.line } ?? true) && !otherKind
-                if expected || (m.meters < 150 && sameLine) || m.vehicle.tripId == lastBest {
+                if expected || (m.score < R.oneLook && sameLine) || m.vehicle.tripId == lastBest {
                     // Its own timetable must still have your stop ahead: not one going the other way, not an earlier run.
                     let stops = await Transit.tripStops(m.vehicle.tripId)
                     let dests: [Place] = forNextLeg ? [self.legs[safe: self.index + 1]?.to].compactMap { $0 } : self.legDestinations
@@ -676,7 +682,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
                         continue
                     }
                     // the ones that fit about as well stay in the running, until there's real distance between them
-                    let close = ranked.filter { $0.vehicle.tripId != m.vehicle.tripId && $0.meters < m.meters + 300 }.map(\.vehicle)
+                    let close = ranked.filter { $0.vehicle.tripId != m.vehicle.tripId && $0.score < m.score + R.close }.map(\.vehicle)
                     if forNextLeg {
                         if self.phase == .transfer { self.nextLeg(vehicle: m.vehicle, stops: stops); self.matchMeters = Int(m.meters) }
                     } else {
@@ -701,13 +707,16 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     }
 
     /// Compares where you've been in the last minutes with where every nearby bus or train should have been.
-    func matchVehicle(mode: Mode?, excluding: Set<String> = []) async -> (vehicle: Vehicle, meters: Double)? {
+    func matchVehicle(mode: Mode?, excluding: Set<String> = []) async -> Match? {
         await matchVehicles(mode: mode, excluding: excluding).first
     }
 
-    /// Every bus or train whose timetable position follows where you've been, the closest first. (Two that leave a
-    /// stop together both fit at first: the one you meant to take can be a close second.)
-    func matchVehicles(mode: Mode?, excluding: Set<String> = []) async -> [(vehicle: Vehicle, meters: Double)] {
+    /// Every bus or train that moves with you, the best first (see `matchByJudging`); `planned` (the one it planned or
+    /// shows) gets 45 s off, `place` names the look in the field log.
+    /// Classic matching: every bus or train whose timetable position follows where you've been, the closest first (score:
+    /// those metres). (Two that leave a stop together both fit at first: the one you meant to take can be a close second.)
+    func matchVehicles(mode: Mode?, excluding: Set<String> = [], planned: String? = nil, place: String = "match") async -> [Match] {
+        if !MatchSettings.classic() { return await matchByJudging(mode: mode, excluding: excluding, planned: planned, place: place) }
         let recent = samples.filter { $0.timestamp > Date().addingTimeInterval(-120) && $0.horizontalAccuracy < 150 }
         guard let last = recent.last, recent.count >= 2 else { return [] }
         let speed = max(last.speed, recent.first.map { last.distance(from: $0) / max(1, last.timestamp.timeIntervalSince($0.timestamp)) } ?? 0)
@@ -746,7 +755,42 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             let avg = total / n
             if avg < LiveStore.matchTolerance(train: s.isTrain, speed: speed) { found.append((Vehicle(tripId: s.tripId, line: s.isTrain ? Transit.trainLabel(s.line) : s.line, isTrain: s.isTrain), avg)) }
         }
-        return found.sorted { $0.meters < $1.meters }
+        let sorted = found.sorted { $0.meters < $1.meters }
+        let logged: [(label: String, metres: Double)] = sorted.map { (label: FieldFormat.label($0.vehicle.tripId, [$0.vehicle.tripId: $0.vehicle.line]), metres: $0.meters) }
+        FieldLog.shared.add(.match, FieldFormat.classic(place, logged))
+        return sorted.map { Match(vehicle: $0.vehicle, meters: $0.meters, score: $0.meters) }
+    }
+
+    /// The matcher's `matchVehicles`: every bus or train near you judged on your fixes of the last half minute, each
+    /// compared with where its own times put it at that fix's time: on its path, going its way, at a possible speed,
+    /// keeping pace with its times and near them (today's allowed distance). The ones that pass, by the seconds you are
+    /// off their times; `planned` 45 s less. Not sure yet (none) until your fixes span 20 s. At most 10 are judged.
+    private func matchByJudging(mode: Mode?, excluding: Set<String>, planned: String?, place: String) async -> [Match] {
+        let recent = samples.filter { $0.timestamp > Date().addingTimeInterval(-120) && $0.horizontalAccuracy < 150 }
+        guard let last = recent.last, recent.count >= 2 else { return [] }
+        let speed = max(last.speed, recent.first.map { last.distance(from: $0) / max(1, last.timestamp.timeIntervalSince($0.timestamp)) } ?? 0)
+        guard speed > 2.5 else { return [] }                    // not moving: not on board yet
+        guard VehicleMatch.enough(recentFixes) else { return [] }       // not sure yet: nothing would pass, so no need to ask
+        // every trip on a piece several share (coupled and through trains), each put together from its pieces
+        let urgentAsk = going || isRiding      // someone is waiting for it on a ride or on Fastest trip
+        let segs = await Transit.$urgent.withValue(urgentAsk) {
+            await Transit.vehicles(near: last.coordinate, radiusDeg: speed > 15 ? 0.04 : 0.02, allTrips: true)
+        }
+        let around = VehicleTrack.group(segs.map { MapPiece($0) }).filter { v in
+            !excluding.contains(v.tripId) && (mode.map { ($0 == .train) == v.isTrain } ?? true)
+        }
+        let fixes = recentFixes                                 // with the ones that came in while it asked
+        let tracks = VehicleMatch.shortlist(around, near: fixes.max { $0.t < $1.t })
+        let judged = VehicleMatch.judgeAll(fixes, tracks)
+        let ranked = VehicleMatch.rank(judged, planned: planned)
+        let lines = Dictionary(tracks.map { ($0.tripId, $0.line) }, uniquingKeysWith: { a, _ in a })
+        let outcome = ranked.first.map { "best " + FieldFormat.label($0.id, lines) } ?? "none"
+        FieldLog.shared.add(.match, FieldFormat.match(place, judged, outcome: outcome))
+        return ranked.compactMap { r -> Match? in
+            guard let v = tracks.first(where: { $0.tripId == r.id }) else { return nil }
+            let offset = judged.first { $0.id == r.id }?.evidence?.offset ?? 0
+            return Match(vehicle: Vehicle(tripId: v.tripId, line: v.line, isTrain: v.isTrain), meters: abs(offset), score: r.cost)
+        }
     }
 
     /// Where this leg can take you: on the first leg of a route either station (it follows the one you take).
@@ -894,7 +938,9 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             farLooks = far ? farLooks + 1 : 0
             if farLooks >= 3 {
                 farLooks = 0
-                let near = await matchVehicles(mode: leg.mode, excluding: [v.tripId]).filter { $0.meters < 400 && $0.vehicle.line == v.line }.prefix(2).map(\.vehicle)
+                let R = MatchRules.current()
+                let near = await matchVehicles(mode: leg.mode, excluding: [v.tripId], place: "same bus")
+                    .filter { $0.score < R.sameLineNear && $0.vehicle.line == v.line }.prefix(2).map(\.vehicle)
                 if !near.isEmpty, vehicle == v { beginChoosing([v] + near) }
             }
             return
@@ -1116,7 +1162,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         if let r = pool.first {
             ob = await LiveStore.onBoardTrips(loc, to: final, tripId: r.tripId, late: r.late, line: r.line, isTrain: r.isTrain)
         }
-        if ob == nil { ob = await LiveStore.onBoardTrips(loc, to: final, wasMoving: true) }
+        if ob == nil { ob = await LiveStore.onBoardTrips(loc, to: final, wasMoving: true, history: recentFixes) }
         guard let ob, ob.0.vehicle.tripId != vehicle?.tripId, let t = ob.1.first, let nr = RoutePlan.from(t),
               phase == .sleeping || phase == .awake else {
             legClosest = distance; awayLooked = false
