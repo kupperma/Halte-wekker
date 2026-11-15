@@ -4,18 +4,20 @@ import SwiftUI
 // MARK: words for a ride
 
 enum RideText {
-    /// "On time, platform 5" · "3 min late, planned 08:02, now platform 7 (was 5)" · "Cancelled"
-    static func status(_ r: Ride, _ i: RailInfo?) -> (text: String, warn: Bool, ok: Bool) {
+    /// "On time, platform 5" · "3 min late, planned 08:02, now platform 7 (was 5)" · "Cancelled". `saved`: from a saved
+    /// answer, which doesn't say it's on time now ("Platform 5", or nothing).
+    static func status(_ r: Ride, _ i: RailInfo?, saved: Bool = false) -> (text: String, warn: Bool, ok: Bool) {
         if r.cancelled || i?.cancelled == true { return ("Cancelled", true, false) }
-        var st: String, warn = false, ok = false
-        if !r.live { st = "Timetable time" }
-        else if r.delay >= 1 { st = "\(r.delay) min late"; warn = true }
-        else if r.delay <= -1 { st = "\(-r.delay) min early"; warn = true }
-        else { st = "On time"; ok = true }
-        if r.live && abs(r.delay) >= 1 { st += ", planned \(Fmt.hhmm(r.scheduledDeparture))" }
-        if let i, i.trackChanged, let t = i.track, let p = i.plannedTrack { st += ", now platform \(t) (was \(p))"; warn = true; ok = false }
-        else if let t = i?.track ?? r.platform, !t.isEmpty { st += ", platform \(t)" }
-        return (st, warn, ok)
+        var parts: [String] = [], warn = false, ok = false
+        if !r.live { parts.append("Timetable time") }
+        else if r.delay >= 1 { parts.append("\(r.delay) min late"); warn = true }
+        else if r.delay <= -1 { parts.append("\(-r.delay) min early"); warn = true }
+        else if !saved { parts.append("On time"); ok = true }
+        if r.live && abs(r.delay) >= 1 { parts.append("planned \(Fmt.hhmm(r.scheduledDeparture))") }
+        if let i, i.trackChanged, let t = i.track, let p = i.plannedTrack { parts.append("now platform \(t) (was \(p))"); warn = true; ok = false }
+        else if let t = i?.track ?? r.platform, !t.isEmpty { parts.append("platform \(t)") }
+        let st = parts.joined(separator: ", ")
+        return (st.prefix(1).uppercased() + st.dropFirst(), warn, ok)
     }
 
     /// The live line on a boarding pass section.
@@ -757,10 +759,13 @@ struct TransferList: View {
         let what = mode == .train ? "trains" : "buses"
         let mine = planner.chosen?.tripIds ?? []
         let list = Array(all.filter { $0.trip.first.departure > Date().addingTimeInterval(earlier ? -30 * 60 : -60) }.prefix(earlier ? 10 : 6))
+        // (a saved answer whose rows have all left, after a round that brought nothing: it couldn't load them)
+        let emptyNote: String = error ?? (updated == nil ? "Looking up the next \(what)…"
+                                     : asOf != nil ? "Couldn’t load the next \(what) just now. It tries again in a minute." : "No \(what) to \(dest) coming up.")
         VStack(alignment: .leading, spacing: 6) {
             PlannerBar(title: "Next \(what) to \(dest)", sub: asOf.map { Snapshots.asOf($0) } ?? updated.map { "updated \(Fmt.hhmm($0))" })
             if list.isEmpty {
-                Text(error ?? (updated == nil ? "Looking up the next \(what)…" : "No \(what) to \(dest) coming up."))
+                Text(emptyNote)
                     .font(BoardInk.sans(12, .regular)).foregroundStyle(Paper.ink.opacity(0.85)).padding(.vertical, 6)
             } else {
                 PlannerColumns()
@@ -772,7 +777,7 @@ struct TransferList: View {
                               time: f.departure, scheduled: f.scheduledDeparture, live: f.live, cancelled: f.cancelled || info?.cancelled == true,
                               grade: rail ? nil : (t.rides.count == 1 ? f.grade : t.last.grade), train: rail,
                               note: "\(t.rideLabel) · arrives \(Fmt.hhmm(t.last.arrival))\(plat.map { " · platform \($0)" } ?? "")",
-                              heading: Heading.of(f), watched: rail && watch.isWatched(f, from: p.from), picked: mine.contains(f.tripId)) {
+                              heading: Heading.of(f), watched: rail && watch.isWatched(f, from: p.from), picked: mine.contains(f.tripId), saved: asOf != nil) {
                     if rail { _ = watch.toggle(t, from: p.from, to: p.to) }
                 }
             }
@@ -791,16 +796,19 @@ struct BoardRow: View {
     var stopLabel: String? = nil        // when the board has several stops
     var watched = false
     let pal: HWPalette
+    var saved = false                   // from a saved answer: no countdown, and no "On time"
     var onBell: (() -> Void)? = nil
 
-    static func status(_ d: BoardDeparture) -> String {
-        var st: String
-        if d.cancelled { st = "cancelled" }
-        else if !d.live { st = "timetable time" }
-        else if d.delay >= 1 { st = "\(d.delay) min late, planned \(Fmt.hhmm(d.scheduled))" }
-        else if d.delay <= -1 { st = "\(-d.delay) min early, planned \(Fmt.hhmm(d.scheduled))" }
-        else { st = "on time" }
-        if let p = d.platform, !p.isEmpty, !d.cancelled { st += ", platform \(p)" }
+    /// "On time, platform 3"; `saved`: from a saved answer, which doesn't say it's on time now ("Platform 3", or nothing).
+    static func status(_ d: BoardDeparture, saved: Bool = false) -> String {
+        var parts: [String] = []
+        if d.cancelled { parts.append("cancelled") }
+        else if !d.live { parts.append("timetable time") }
+        else if d.delay >= 1 { parts.append("\(d.delay) min late, planned \(Fmt.hhmm(d.scheduled))") }
+        else if d.delay <= -1 { parts.append("\(-d.delay) min early, planned \(Fmt.hhmm(d.scheduled))") }
+        else if !saved { parts.append("on time") }
+        if let p = d.platform, !p.isEmpty, !d.cancelled { parts.append("platform \(p)") }
+        let st = parts.joined(separator: ", ")
         return st.prefix(1).uppercased() + st.dropFirst()
     }
     static func when(_ d: BoardDeparture) -> String {
@@ -817,9 +825,9 @@ struct BoardRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(d.headsign).font(HWFont.display(16)).foregroundStyle(Paper.ink)
                 if watched { SmallTag(text: "WATCHING", icon: "bell.fill", pal: pal) }
-                Text([stopLabel, Self.status(d)].compactMap { $0 }.joined(separator: " · "))
+                Text([stopLabel, Self.status(d, saved: saved)].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
                     .font(HWFont.body(12, bold: d.live || d.cancelled))
-                    .foregroundStyle(d.delay != 0 || d.cancelled ? Paper.late : d.live ? Paper.ok : Paper.muted)
+                    .foregroundStyle(d.delay != 0 || d.cancelled ? Paper.late : d.live && !saved ? Paper.ok : Paper.muted)
                 if let r = ride, !d.cancelled {
                     Text("\(Fmt.rideText(r.minutes)) ride to \(r.station) station, arrives \(Fmt.hhmm(r.arrival))").font(HWFont.body(12)).foregroundStyle(Paper.ink.opacity(0.8))
                 }
@@ -827,7 +835,7 @@ struct BoardRow: View {
             Spacer(minLength: 4)
             VStack(alignment: .trailing, spacing: 2) {
                 Text(Fmt.hhmm(d.cancelled ? d.scheduled : d.time)).font(HWFont.display(23)).foregroundStyle(d.cancelled ? Paper.late : pal.deep).strikethrough(d.cancelled)
-                Text(Self.when(d)).font(HWFont.body(12)).foregroundStyle(Paper.muted)
+                if !saved { Text(Self.when(d)).font(HWFont.body(12)).foregroundStyle(Paper.muted) }
                 if let onBell {
                     Button(action: onBell) {
                         Image(systemName: watched ? "bell.fill" : "bell").font(.system(size: 15, weight: .semibold)).foregroundStyle(watched ? pal.deep : pal.deep)

@@ -74,8 +74,14 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     /// When the next departures shown were the live answer, while they're the leg's saved answer (nil: live). Shown as
     /// "as of 08:12".
     @Published private(set) var upcomingAsOf: Date?
-    /// The last next departures per leg, saved in `<Caches>/answers` and shown at once when that leg comes up again.
-    struct SavedUpcoming: Codable { let upcoming: [PanelTrip]; let board: [BoardDeparture] }     // "upcoming|<leg key>"
+    /// The last next departures per leg, saved in `<Caches>/answers` and shown at once when that leg comes up again. A leg
+    /// from where you were (an alarm for one stop) also keeps where that was: its list is used only within 300 m of it.
+    struct SavedUpcoming: Codable {                                                                  // "upcoming|<leg key>"
+        let upcoming: [PanelTrip]
+        let board: [BoardDeparture]
+        let lat: Double?
+        let lon: Double?
+    }
     // Once it knows which bus or train you're on.
     @Published private(set) var vehicleStops: [TripStop] = []
     @Published private(set) var matchMeters: Int?            // how far its live position was from yours
@@ -1203,7 +1209,9 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             upcomingKey = k; upcomingAt = nil; upcomingError = nil
             // This leg's last answer at once, minus what has left, "as of" until the live one is in; nothing saved: none.
             let now = Date()
-            let s = SnapshotStore.shared.load(SavedUpcoming.self, key: "upcoming|\(k)", now: now)
+            var s = SnapshotStore.shared.load(SavedUpcoming.self, key: "upcoming|\(k)", now: now)
+            if let v = s?.value, let la = v.lat, let lo = v.lon,
+               !Snapshots.closeEnough(saved: (lat: la, lon: lo), here: (lat: t.from.coordinate.latitude, lon: t.from.coordinate.longitude), metres: 300) { s = nil }
             upcoming = Snapshots.upcoming(s?.value.upcoming ?? [], now: now) { $0.trip.rides.first?.departure ?? .distantPast }
             upcomingBoard = Snapshots.upcoming(s?.value.board ?? [], now: now) { $0.cancelled ? $0.scheduled : $0.time }
             upcomingAsOf = upcoming.isEmpty && upcomingBoard.isEmpty ? nil : s?.at
@@ -1228,16 +1236,30 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             Ratings.shared.learn(from, dest, l)
             all += l.map { PanelTrip(trip: $0, from: from, to: dest) }
         }
+        var keptSavedBoard = false
         if !rail {
             let names = t.to.map(\.short) + t.to.map(\.name)
             let ids = Set(all.map { $0.trip.first.tripId })
             let b = await boardAsk
             guard k == upcomingKey else { return }
-            upcomingBoard = b.filter { d in ids.contains(d.tripId) || names.contains { !$0.isEmpty && d.headsign.localizedCaseInsensitiveContains($0) } }
-        } else { upcomingBoard = [] }
-        guard k == upcomingKey else { return }
+            if b.isEmpty && upcomingAsOf != nil {
+                // The board didn't come: the saved one stays, minus what has left, still "as of".
+                upcomingBoard = Snapshots.upcoming(upcomingBoard, now: Date()) { $0.cancelled ? $0.scheduled : $0.time }
+                keptSavedBoard = !upcomingBoard.isEmpty
+            } else {
+                upcomingBoard = b.filter { d in ids.contains(d.tripId) || names.contains { !$0.isEmpty && d.headsign.localizedCaseInsensitiveContains($0) } }
+            }
+        } else {
+            guard k == upcomingKey else { return }       // (a late round for another leg leaves its lists alone)
+            upcomingBoard = []
+        }
         upcomingAt = Date()
         guard !all.isEmpty else {
+            if upcomingAsOf != nil {
+                // Nothing live yet: the saved list stays, minus what has left; once nothing of it is left, it's gone.
+                upcoming = Snapshots.upcoming(upcoming, now: Date()) { $0.trip.rides.first?.departure ?? .distantPast }
+                if upcoming.isEmpty && upcomingBoard.isEmpty { upcomingAsOf = nil }
+            }
             if upcoming.isEmpty { upcomingError = "Couldn’t load the next \(rail ? "trains" : "buses") just now. It tries again in a minute." }
             return
         }
@@ -1248,8 +1270,13 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         let kept = once.filter { o in !once.contains { q in q.id != o.id && q.to == o.to && q.trip.first.departure > o.trip.first.departure && q.trip.last.arrival <= o.trip.last.arrival } }
         upcoming = kept.sorted { $0.trip.first.departure < $1.trip.first.departure }
         upcomingError = nil
+        // A saved board that stayed (its own answer didn't come) goes with the rest of the saved answer: all that shows is live.
+        if keptSavedBoard { upcomingBoard = [] }
         upcomingAsOf = nil
-        SnapshotStore.shared.save(SavedUpcoming(upcoming: upcoming, board: upcomingBoard), key: "upcoming|\(k)", at: asked)
+        let fromHere = t.from.key == "here"        // (a leg from where you were: saved with where that was)
+        SnapshotStore.shared.save(SavedUpcoming(upcoming: upcoming, board: upcomingBoard,
+                                                lat: fromHere ? t.from.coordinate.latitude : nil, lon: fromHere ? t.from.coordinate.longitude : nil),
+                                  key: "upcoming|\(k)", at: asked)
         if rail {
             let rows = upcoming.map { ($0.trip, $0.from, $0.to) }
             Task { await NSStore.shared.enrich(rows) }     // the trains show first; NS fills in after

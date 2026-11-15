@@ -393,6 +393,7 @@ struct PlannerBusRow: View {
     var heading: Heading? = nil     // which way it goes: an arrow, the compass direction and where it goes next
     let watched: Bool
     let picked: Bool
+    var saved = false               // from a saved answer: its time, without the minutes counting down
     let tap: () -> Void
 
     var body: some View {
@@ -426,7 +427,7 @@ struct PlannerBusRow: View {
                     }
                     Spacer(minLength: 4)
                     if watched { Image(systemName: "bell.fill").font(.system(size: 10, weight: .bold)).foregroundStyle(Paper.navy).padding(.trailing, 4) }
-                    Text(due(gone)).font(BoardInk.sans(14)).foregroundStyle(Paper.ink).frame(width: 40, alignment: .trailing)
+                    Text(saved ? "" : due(gone)).font(BoardInk.sans(14)).foregroundStyle(Paper.ink).frame(width: 40, alignment: .trailing)
                     if late {
                         HStack(spacing: 4) {
                             Text(Fmt.hhmm(scheduled)).font(BoardInk.sans(10, .regular)).foregroundStyle(Paper.ink.opacity(0.7))
@@ -507,9 +508,10 @@ struct PlannerRideRow: View {
     let ride: Ride
     let info: RailInfo?
     let picked: Bool
+    var saved = false               // from a saved answer: no "On time"
     let tap: () -> Void
     var body: some View {
-        let st = RideText.status(ride, info)
+        let st = RideText.status(ride, info, saved: saved)
         let gone = ride.cancelled || info?.cancelled == true
         let late = ride.live && !gone && abs(ride.delay) >= 1
         let _ = ride.isTrain ? nil : ride.grade
@@ -519,7 +521,9 @@ struct PlannerRideRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("to \(Fmt.place(ride.toStop))").font(BoardInk.sans(14)).foregroundStyle(Paper.ink).lineLimit(1).minimumScaleFactor(0.7)
                     Text("from \(Fmt.place(ride.fromStop)) · \(ride.rideMinutes) min ride").font(BoardInk.sans(10, .regular)).foregroundStyle(Paper.ink.opacity(0.75)).lineLimit(1)
-                    Text(st.text).font(BoardInk.sans(10.5)).foregroundStyle(st.warn ? Paper.late : st.ok ? Paper.ok : Paper.ink.opacity(0.8)).lineLimit(2)
+                    if !st.text.isEmpty {
+                        Text(st.text).font(BoardInk.sans(10.5)).foregroundStyle(st.warn ? Paper.late : st.ok ? Paper.ok : Paper.ink.opacity(0.8)).lineLimit(2)
+                    }
                 }
                 Spacer(minLength: 4)
                 VStack(alignment: .trailing, spacing: 3) {
@@ -604,7 +608,7 @@ struct TrainPage: View {
 
     var body: some View {
         let f = p.trip.first
-        let st = RideText.status(f, info)
+        let st = RideText.status(f, info, saved: asOf != nil)
         let gone = f.cancelled || info?.cancelled == true
         VStack(alignment: .leading, spacing: 10) {
             PageTop(tracked: tracked, back: back, track: track)
@@ -619,10 +623,13 @@ struct TrainPage: View {
             HStack(alignment: .center, spacing: 10) {
                 Text(Fmt.hhmm(f.departure)).font(BoardInk.sans(32)).foregroundStyle(Paper.ink).strikethrough(gone)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(st.text).font(BoardInk.sans(12)).foregroundStyle(st.warn ? Paper.late : st.ok ? Paper.ok : Paper.ink.opacity(0.85))
-                        .lineLimit(2).minimumScaleFactor(0.8)
-                    Text(leaves(f.departure)).font(BoardInk.sans(11, .regular)).foregroundStyle(Paper.ink.opacity(0.8))
+                    if !st.text.isEmpty {
+                        Text(st.text).font(BoardInk.sans(12)).foregroundStyle(st.warn ? Paper.late : st.ok ? Paper.ok : Paper.ink.opacity(0.85))
+                            .lineLimit(2).minimumScaleFactor(0.8)
+                    }
+                    // (opened from a saved answer: when that was, instead of a countdown)
                     if let asOf { Text(Snapshots.asOf(asOf)).font(BoardInk.sans(10, .regular)).foregroundStyle(Paper.ink.opacity(0.6)) }
+                    else { Text(leaves(f.departure)).font(BoardInk.sans(11, .regular)).foregroundStyle(Paper.ink.opacity(0.8)) }
                 }
                 Spacer(minLength: 4)
                 VStack(spacing: 0) {
@@ -697,10 +704,14 @@ struct BusPage: View {
             HStack(alignment: .center, spacing: 10) {
                 Text(Fmt.hhmm(cancelled ? scheduled : time)).font(BoardInk.sans(32)).foregroundStyle(Paper.ink).strikethrough(cancelled)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(status).font(BoardInk.sans(12)).foregroundStyle(cancelled || (live && abs(time.timeIntervalSince(scheduled)) >= 60) ? Paper.late : live ? Paper.ok : Paper.ink.opacity(0.85))
-                        .lineLimit(2).minimumScaleFactor(0.8)
-                    Text(leaves(time)).font(BoardInk.sans(11, .regular)).foregroundStyle(Paper.ink.opacity(0.8))
+                    if !status.isEmpty {
+                        Text(status).font(BoardInk.sans(12))
+                            .foregroundStyle(cancelled || (live && abs(time.timeIntervalSince(scheduled)) >= 60) ? Paper.late : live && asOf == nil ? Paper.ok : Paper.ink.opacity(0.85))
+                            .lineLimit(2).minimumScaleFactor(0.8)
+                    }
+                    // (opened from a saved answer: when that was, instead of a countdown)
                     if let asOf { Text(Snapshots.asOf(asOf)).font(BoardInk.sans(10, .regular)).foregroundStyle(Paper.ink.opacity(0.6)) }
+                    else { Text(leaves(time)).font(BoardInk.sans(11, .regular)).foregroundStyle(Paper.ink.opacity(0.8)) }
                 }
             }
             HStack(spacing: 8) {

@@ -791,7 +791,7 @@ struct GoView: View {
             let window = max(220, (g.size.height - bar) * 0.47)     // the map you see above the cards
             ZStack(alignment: .top) {
                 GoMap(ride: go.arrived ? nil : go.best?.first, here: go.here,
-                      top: g.safeAreaInsets.top + bar, bottom: g.safeAreaInsets.top + bar + window)
+                      top: g.safeAreaInsets.top + bar, bottom: g.safeAreaInsets.top + bar + window, saved: go.asOf != nil)
                     .ignoresSafeArea()
                 // a little shade under the buttons, so they read on any map
                 LinearGradient(colors: [.black.opacity(0.22), .clear], startPoint: .top, endPoint: .bottom)
@@ -944,7 +944,7 @@ struct GoView: View {
     private func nextCard(_ t: DoorTrip) -> some View {
         let f = t.first
         let info = f.isTrain ? ns.rail(f) : nil
-        let st = RideText.status(f, info)
+        let st = RideText.status(f, info, saved: go.asOf != nil)      // (the saved answer doesn't say "On time")
         _ = f.isTrain ? nil : f.grade
         let track = info?.track ?? f.platform ?? ""
         let aboard = go.onBoard?.tripId == f.tripId && f.fromId == "onboard"
@@ -1188,16 +1188,20 @@ struct GoView: View {
 
     private func watchingCard(_ t: DoorTrip) -> some View {
         VStack(alignment: .leading, spacing: 7) {
+            // (the saved answer isn't watched: nothing is told about it until the live one is in)
+            let checking = go.watching && go.asOf != nil
             HStack(spacing: 8) {
-                Image(systemName: go.watching ? "bell.and.waves.left.and.right.fill" : "bell.slash.fill").foregroundStyle(go.watching ? Paper.late : Paper.ink.opacity(0.6))
+                Image(systemName: checking ? "arrow.triangle.2.circlepath" : go.watching ? "bell.and.waves.left.and.right.fill" : "bell.slash.fill")
+                    .foregroundStyle(checking ? Paper.navy : go.watching ? Paper.late : Paper.ink.opacity(0.6))
                     .symbolEffect(.pulse, isActive: go.watching)
-                Text(go.watching ? "Watching the \(GoStore.what(t.first)) for you" : "Not watching any more").font(BoardInk.sans(14)).foregroundStyle(Paper.ink)
+                Text(checking ? "Checking for live times…" : go.watching ? "Watching the \(GoStore.what(t.first)) for you" : "Not watching any more")
+                    .font(BoardInk.sans(14)).foregroundStyle(Paper.ink)
             }
             if let v = go.seen {
                 Label("Looks like you’re on the \(v.title)… checking.", systemImage: v.isTrain ? "tram.fill" : "bus.fill")
                     .font(BoardInk.sans(12)).foregroundStyle(Paper.ok)
             }
-            if go.watching {
+            if go.watching && !checking {
                 Text("You get a notification if it runs late or leaves early, or if something faster comes up: then it watches that one instead. Once you’re on board, your trip starts by itself.")
                     .font(BoardInk.sans(11.5, .regular)).foregroundStyle(Paper.ink.opacity(0.85)).fixedSize(horizontal: false, vertical: true)
             }
@@ -1325,6 +1329,7 @@ struct GoMap: View {
     let here: CLLocation?
     let top: CGFloat            // the screen's top part that the buttons cover
     let bottom: CGFloat         // where the cards start
+    var saved = false           // the ride is from the saved answer: its pin without the time
     @State private var trip: LiveTrip?
     @State private var mine: Int?
     @State private var walk: MKRoute?
@@ -1397,7 +1402,7 @@ struct GoMap: View {
                 VStack(spacing: 0) {
                     HStack(spacing: 5) {
                         Image(systemName: r.isTrain ? "tram.fill" : "bus.fill").font(.system(size: 11, weight: .bold))
-                        Text("\(r.line) · \(Fmt.hhmm(r.departure))").font(BoardInk.sans(12))
+                        Text(saved ? r.line : "\(r.line) · \(Fmt.hhmm(r.departure))").font(BoardInk.sans(12))
                     }
                     .foregroundStyle(.white).padding(.horizontal, 8).padding(.vertical, 5)
                     .background(Paper.navy, in: RoundedRectangle(cornerRadius: 4))
