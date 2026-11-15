@@ -2,7 +2,7 @@ import CoreLocation
 import Foundation
 
 /// A place the planner knows. `ids` are Transitous stop ids (or "lat,lon").
-struct Place: Hashable {
+struct Place: Hashable, Codable {
     let key: String
     let name: String
     let short: String
@@ -32,6 +32,31 @@ struct Place: Hashable {
     /// Where you are now, as a place to plan from.
     static func here(_ c: CLLocationCoordinate2D) -> Place {
         Place(key: "here", name: "Where you are", short: "Here", ids: ["\(c.latitude),\(c.longitude)"], coordinate: c, spoken: "here")
+    }
+}
+
+/// As saved with an answer (the coordinate as lat and lon). In an extension, so the memberwise init stays.
+extension Place {
+    enum CodingKeys: String, CodingKey { case key, name, short, ids, lat, lon, spoken }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let key = try c.decode(String.self, forKey: .key), name = try c.decode(String.self, forKey: .name)
+        let short = try c.decode(String.self, forKey: .short), ids = try c.decode([String].self, forKey: .ids)
+        let lat = try c.decode(Double.self, forKey: .lat), lon = try c.decode(Double.self, forKey: .lon)
+        let spoken = try c.decode(String.self, forKey: .spoken)
+        self.init(key: key, name: name, short: short, ids: ids, coordinate: CLLocationCoordinate2D(latitude: lat, longitude: lon), spoken: spoken)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(key, forKey: .key)
+        try c.encode(name, forKey: .name)
+        try c.encode(short, forKey: .short)
+        try c.encode(ids, forKey: .ids)
+        try c.encode(coordinate.latitude, forKey: .lat)
+        try c.encode(coordinate.longitude, forKey: .lon)
+        try c.encode(spoken, forKey: .spoken)
     }
 }
 

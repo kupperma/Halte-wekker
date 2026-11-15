@@ -330,7 +330,7 @@ struct HomeView: View {
     private func openGo() {
         // what the home screen just found from here, to start with: fresh, from about where you are, not from a bus
         var seed: [DoorTrip] = []
-        if live.onBoard == nil, let h = live.here, let u = live.updated, Date().timeIntervalSince(u) < 180,
+        if live.onBoard == nil, live.nextAsOf == nil, let h = live.here, let u = live.updated, Date().timeIntervalSince(u) < 180,
            let p = near.position, p.distance(from: h) < 300 {
             seed = live.next
         }
@@ -441,7 +441,7 @@ struct HomeView: View {
     /// What the app writes on the two screens on the wall: the trains on the LED strip, the rest on the planner.
     private func wallBoards(_ led: CGRect, _ plan: CGRect) -> some View {
         ZStack(alignment: .topLeading) {
-            PaperTrainSheet(title: ledTitle, sub: live.anywhere ? "Departures near you · tap one for its page" : "Departures · tap one for its page", home: home,
+            PaperTrainSheet(title: ledTitle, sub: ledSub, home: home,
                             rows: live.anywhere ? nearLedRows : ledRows, tap: live.anywhere ? tapNearTrain : tapTrain)
                 .frame(width: led.width, height: led.height, alignment: .top)
                 .position(x: led.midX, y: led.midY)
@@ -470,6 +470,19 @@ struct HomeView: View {
             return LEDTrain(id: p.id, time: Fmt.hhmm(f.scheduledDeparture), to: "\(to) \(f.line)", via: via, platform: track,
                             status: status, gone: gone, picked: isPicked)
         }
+    }
+
+    /// "Departures · tap one for its page", or while it shows a saved answer "Departures · as of 08:12".
+    private var ledSub: String {
+        let what = live.anywhere ? "Departures near you" : "Departures"
+        let at: Date? = live.anywhere ? live.nearAsOf : live.panelsAsOf
+        if let at { return "\(what) · \(Snapshots.asOf(at))" }
+        return "\(what) · tap one for its page"
+    }
+
+    /// "as of 08:12", under a list on the planner that shows a saved answer.
+    private func asOfNote(_ a: Date) -> some View {
+        Text(Snapshots.asOf(a)).font(BoardInk.sans(10, .regular)).foregroundStyle(Paper.ink.opacity(0.6))
     }
 
     private var ledTitle: String {
@@ -646,6 +659,9 @@ struct HomeView: View {
                     }
                 }
             }
+            if let a = live.nextAsOf {
+                Text(Snapshots.asOf(a)).font(BoardInk.sans(10, .regular)).foregroundStyle(Paper.ink.opacity(0.6))
+            }
             if let t = live.next[safe: live.pick] ?? live.next.first {
                 let r = live.anywhere ? RoutePlan.from(t) : t.via.flatMap { via in RoutePlan.all.first(where: { $0.station.short == via }) }
                 let dest = live.destination(trip.direction).short
@@ -704,6 +720,7 @@ struct HomeView: View {
                             title: live.onBoard.map { "On the \($0.vehicle.title) now" } ?? (live.here == nil ? "Your trip · fastest" : "Your trip · from here")) {
                 wake(t)
             }
+            if let a = live.nextAsOf { asOfNote(a) }
             if let ob = live.onBoard, t.first.tripId == ob.vehicle.tripId {
                 Label("You’re on the \(ob.vehicle.title) to \(ob.to): stay on until \(Fmt.place(t.first.toStop))", systemImage: ob.vehicle.isTrain ? "tram.fill" : "bus.fill")
                     .font(BoardInk.sans(11.5, .semibold)).foregroundStyle(Paper.ink.opacity(0.9))
@@ -739,7 +756,8 @@ struct HomeView: View {
         let fastest = live.next.map(\.end).min()
         let names = live.nearStops.map(\.name).reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
         let dest = live.destination(trip.direction).short
-        PlannerBar(title: "Near you", sub: live.here == nil ? nil : "from where you are")
+        let asOf = live.nearAsOf.map { " · " + Snapshots.asOf($0) } ?? ""
+        PlannerBar(title: "Near you", sub: live.here == nil ? nil : "from where you are\(asOf)")
         if live.nearStops.isEmpty {
             Text(live.here == nil ? "Turn location on for Haltewekker to see the stops around you." : "Looking for the stops around you…")
                 .font(BoardInk.sans(12, .regular)).foregroundStyle(Paper.ink.opacity(0.85))
@@ -829,10 +847,12 @@ struct HomeView: View {
             PlannerTripCard(trip: t, home: home, wakeTitle: r.map { "Wake me up · via \($0.station.short)" }) {
                 if let r { trip.start(r) }
             }
+            if let a = live.nextAsOf { asOfNote(a) }
         } else {
             Text(live.nextError ?? "Finding your next connection…").font(BoardInk.sans(12, .regular)).foregroundStyle(Paper.ink.opacity(0.85))
         }
         ForEach(panelOrder.filter(shown).filter { $0 != "train" }, id: \.self) { p in busPanel(p) }
+        if let a = live.panelsAsOf { asOfNote(a) }
         Button(live.showEarlier ? "Hide earlier ones" : "Show more earlier ones") { withAnimation { live.showEarlier.toggle() } }
             .font(BoardInk.sans(12, .semibold)).foregroundStyle(Paper.ink)
         RankLegend()
@@ -1091,6 +1111,9 @@ struct HomeView: View {
     @ViewBuilder private var nextPass: some View {
         if let t = live.next[safe: live.pick] {
             BoardingPass(trip: t, home: home, options: live.next, pick: $live.pick)
+            if let a = live.nextAsOf {
+                Text(Snapshots.asOf(a)).font(HWFont.body(10)).foregroundStyle(Paper.muted).frame(maxWidth: .infinity, alignment: .leading)
+            }
             if let via = t.via, let r = RoutePlan.all.first(where: { $0.station.short == via }) {
                 BandButton(title: "Wake me up · via \(via)", pal: pal) { trip.start(r) }
             }
@@ -1281,7 +1304,8 @@ struct HomeView: View {
                 .font(HWFont.body(12, bold: true)).foregroundStyle(pal.deep).padding(.top, 8)
             Text(key == "train" ? trainHint(list) : "Tap a bus to watch its line: you get told when it runs late, leaves early or is cancelled.")
                 .font(HWFont.body(11)).foregroundStyle(Paper.muted).padding(.top, 4)
-            if let u = live.panelsUpdated { Text("Updated at \(Fmt.hhmm(u)).").font(HWFont.body(10)).foregroundStyle(Paper.muted).padding(.top, 4) }
+            if let a = live.panelsAsOf { Text("\(Snapshots.asOf(a)).").font(HWFont.body(10)).foregroundStyle(Paper.muted).padding(.top, 4) }
+            else if let u = live.panelsUpdated { Text("Updated at \(Fmt.hhmm(u)).").font(HWFont.body(10)).foregroundStyle(Paper.muted).padding(.top, 4) }
         }
     }
 

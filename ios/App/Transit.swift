@@ -2,7 +2,7 @@ import CoreLocation
 import Foundation
 
 /// One bus or train ride inside a trip.
-struct Ride: Identifiable, Hashable {
+struct Ride: Identifiable, Hashable, Codable {
     var id: String { "\(tripId)|\(departure.timeIntervalSince1970)" }
     let tripId: String
     let line: String            // "306", "IC", "SPR"
@@ -44,7 +44,7 @@ extension Ride {
 }
 
 /// A door-to-door trip from the planner: the rides plus where it starts and ends.
-struct DoorTrip: Identifiable, Hashable {
+struct DoorTrip: Identifiable, Hashable, Codable {
     var id: String { rides.map(\.id).joined(separator: "+") }
     let rides: [Ride]
     let start: Date
@@ -62,7 +62,7 @@ struct DoorTrip: Identifiable, Hashable {
 }
 
 /// A departure from a stop's board (the Veghel buses).
-struct BoardDeparture: Identifiable, Hashable {
+struct BoardDeparture: Identifiable, Hashable, Codable {
     var id: String { "\(tripId)|\(stopId)" }
     let tripId: String
     let stopId: String
@@ -80,7 +80,7 @@ struct BoardDeparture: Identifiable, Hashable {
 }
 
 /// Which way a bus or train goes from a stop: the compass direction (0 is north, 90 east), and the next places it passes.
-struct Heading: Hashable {
+struct Heading: Hashable, Codable {
     let degrees: Double
     var via: String? = nil              // "De Muntelaar → Uden"
     /// "NE"
@@ -489,7 +489,7 @@ enum Transit {
     static let tripAnswers = Memo<String, Data>(ttl: 20, limit: 50)
 
     /// A stop near you: a bus stop, or a train station (by the station, not one platform).
-    struct NearStop: Identifiable, Hashable {
+    struct NearStop: Identifiable, Hashable, Codable {
         let id: String
         let name: String
         let lat: Double
