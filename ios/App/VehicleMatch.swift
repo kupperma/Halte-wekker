@@ -116,7 +116,7 @@ enum VehicleMatch {
     static let offPath = 60.0                   // m off a path with a road shape
     static let offPathUnshaped = 250.0          // m off a path of straight lines between stops
     static let accuracyFactor = 1.5             // or this times the fixes' accuracy, when more
-    static let backwards = 20.0                 // m it may see you go back along its path
+    static let backwards = 20.0                 // m it may see you go back along its path (or `jitter` × accuracy)
     static let busMax = 31.0                    // m/s: Dutch buses are limited to 100 km/h
     static let speedRatio = 3.0                 // your speed at least its speed ÷ 3
     static let steadyShare = 0.3                // steady: the two halves' speeds within 30 %
@@ -129,7 +129,9 @@ enum VehicleMatch {
     static let slack: TimeInterval = 30         // s before its first piece and after its last it still counts as there
     static let passSlack = 20.0                 // m: where its path passes you twice, a pass this much (or the fix's
                                                 //    accuracy) further than the nearest still counts
-    static let standingAccuracy = 2.0           // "standing" is judged only once you moved twice the fixes' accuracy
+    static let jitter = 2.0                     // GPS jitter at a stop moves you up to twice the fixes' accuracy: only
+                                                //    going back further is the wrong way, and only going further is
+                                                //    moving (for "standing")
 
     /// How far a bus or train can be from where its times put it and still be the one you're on: further the faster
     /// you go (at 130 km/h, half a minute off its times is a kilometre).
@@ -202,8 +204,8 @@ enum VehicleMatch {
         // 2. on its path
         let off = max(e.shaped ? offPath : offPathUnshaped, accuracyFactor * e.accuracy)
         guard e.crossTrack <= off else { return .failure(.offItsPath) }
-        // 3. going its way (GPS jitter at a stop can look like going back by up to the fixes' accuracy)
-        guard e.progress >= -max(backwards, e.accuracy) else { return .failure(.wrongWay) }
+        // 3. going its way (GPS jitter at a stop can look like going back by up to twice the fixes' accuracy)
+        guard e.progress >= -max(backwards, jitter * e.accuracy) else { return .failure(.wrongWay) }
         // 4. a possible speed (its times only say something about its speed when it isn't crawling: the same 5 m/s floor
         //    as the cost)
         if !isTrain, !(e.yourSpeed <= busMax) { return .failure(.implausibleSpeed) }
@@ -211,7 +213,7 @@ enum VehicleMatch {
         if byTimes {
             // 5. not standing while you go (once you moved further than GPS jitter can take you): by its times it went
             //    at least a fifth as far as you, in the same time
-            if abs(e.progress) >= max(standingMin, standingAccuracy * e.accuracy), e.itsSpeed < standingShare * e.yourSpeed {
+            if abs(e.progress) >= max(standingMin, jitter * e.accuracy), e.itsSpeed < standingShare * e.yourSpeed {
                 return .failure(.standing)
             }
             // 6. moves with you

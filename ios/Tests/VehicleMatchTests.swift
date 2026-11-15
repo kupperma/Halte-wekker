@@ -222,27 +222,30 @@ final class VehicleMatchTests: XCTestCase {
         }
     }
 
-    /// R-rel-14: 200 windows of standing in the station with the train, each fix up to 25 m off on each axis (30 m
-    /// accuracy, a fixed seed). The ends are the medians of 3 fixes, so jitter never reads as `standing`, and seldom as
-    /// going back: the rate is about 2.7 % of windows (single end fixes: 8 %), so this pins at most 10 of 200.
+    /// R-rel-14/15: standing in the station with the train, each fix up to 25 m off on each axis (30 m accuracy), 200
+    /// windows for each of 3 fixed seeds. The ends are the medians of 3 fixes, which jitter can move at most 50 m apart,
+    /// and only going back further than twice the accuracy (60 m) is the wrong way: never `wrongWay`, never `standing`.
     func test_jitterWindows() {
         let rail = VehicleTrack(tripId: "T", line: "IC", isTrain: true, realTime: true, pieces: [
             TimedPiece(departure: t0 - 320, arrival: t0 - 20, path: [Fx.east(0), Fx.east(3000)]),
             TimedPiece(departure: t0 + 60, arrival: t0 + 450, path: [Fx.east(3000), Fx.east(6900)])])
-        var random = SplitMix(seed: 1)
-        var back = 0
-        for _ in 0..<200 {
-            let you = (0..<15).map { k -> Fix in
-                let dx = random.next() * 50 - 25, dy = random.next() * 50 - 25
-                return Fix(t: t0 + Double(k) * 2, p: Fx.east(3000 + dx, north: dy), accuracy: 30, speed: 0, course: -1)
-            }
-            switch Fx.why(VehicleMatch.judgeAll(you, [rail]), "T") {
-            case nil: break
-            case .wrongWay?: back += 1
-            case let other?: XCTFail("\(other)")
+        for seed: UInt64 in [1, 2026, 42] {
+            var random = SplitMix(seed: seed)
+            for window in 0..<200 {
+                let you = (0..<15).map { k -> Fix in
+                    let dx = random.next() * 50 - 25, dy = random.next() * 50 - 25
+                    return Fix(t: t0 + Double(k) * 2, p: Fx.east(3000 + dx, north: dy), accuracy: 30, speed: 0, course: -1)
+                }
+                let why = Fx.why(VehicleMatch.judgeAll(you, [rail]), "T")
+                XCTAssertNil(why, "seed \(seed), window \(window)")
             }
         }
-        XCTAssertLessThanOrEqual(back, 10)
+        // one wild fix at each end, 40 m off either way (the end fixes alone would say 80 m back): the medians of 3 don't
+        let wild: [Double] = [40, 5, -8, 3, -2, 9, -6, 0, 4, -9, 7, -3, 8, -5, -40]
+        let you = wild.enumerated().map { k, dx in
+            Fix(t: t0 + Double(k) * 2, p: Fx.east(3000 + dx), accuracy: 30, speed: 0, course: -1)
+        }
+        XCTAssertNil(Fx.why(VehicleMatch.judgeAll(you, [rail]), "T"))
     }
 
     /// R-rel-13: across a 2 km gap between pieces that don't meet, its times run along the connector: the bus that
