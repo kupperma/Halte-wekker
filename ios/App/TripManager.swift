@@ -905,7 +905,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         if let found = await findBusYoureOn(not: v, at: last, limit: limit), vehicle == v {
             await switchVehicle(from: v, to: found.vehicle, stops: found.stops)
             // others fit about as well (lines that share the road out of a bus station): they stay in the running
-            if !found.others.isEmpty { beginChoosing([found.vehicle] + found.others) }
+            // (still on it after the switch: a stop or another switch meanwhile leaves no stale candidates)
+            if !found.others.isEmpty, vehicle == found.vehicle { beginChoosing([found.vehicle] + found.others) }
         } else {
             sameCheckAt = Date().addingTimeInterval(120)      // a detour, or no better one: look again in a while
         }
@@ -1019,7 +1020,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     private func findByJudging(not v: Vehicle) async -> (vehicle: Vehicle, stops: [TripStop], others: [Vehicle])? {
         let mode = leg?.mode
         var anyKind = false
-        if route?.isFixed == false, let road = roadOf, road.tripId == v.tripId,
+        if route?.custom != nil, let road = roadOf, road.tripId == v.tripId,
            let mine = VehicleTrack(tripId: v.tripId, line: v.line, isTrain: v.isTrain, trip: road.trip),
            case .failure(let why)? = VehicleMatch.judgeAll(recentFixes, [mine], strictTimes: false).first?.result {
             anyKind = VehicleMatch.otherKindPossible(why)

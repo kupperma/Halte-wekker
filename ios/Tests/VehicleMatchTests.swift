@@ -435,6 +435,36 @@ final class VehicleMatchTests: XCTestCase {
         XCTAssertEqual(hits[1].late, 120, accuracy: 2)
     }
 
+    func test_byRoadNoCourse() {
+        let still = Fix(t: t0, p: Fx.east(2000), accuracy: 20, speed: 30, course: -1)
+        let train = Fx.track("T", path: Fx.railway, at: 2000, speed: 30, start: t0)
+        XCTAssertEqual(VehicleMatch.byRoad(still, pieces(train)), [])
+    }
+
+    /// A road 200 m away isn't the one you're on; the railway under you is.
+    func test_byRoadTooFar() {
+        let fix = Fix(t: t0, p: Fx.east(2000), accuracy: 20, speed: 30, course: 90)
+        let train = Fx.track("T", path: Fx.railway, at: 2000, speed: 30, start: t0)
+        let bus = Fx.track("B", line: "306", train: false, path: Fx.road(north: 200), at: 2000, speed: 12, start: t0)
+        XCTAssertEqual(VehicleMatch.byRoad(fix, pieces(bus)), [])
+        XCTAssertEqual(VehicleMatch.byRoad(fix, pieces(bus) + pieces(train)).map(\.tripId), ["T"])
+    }
+
+    /// A piece that takes no time (minute-rounded times) is at your spot at its departure; one with no length has no
+    /// road to be on. Neither gives NaN.
+    func test_byRoadZeroLengthPiece() throws {
+        let fix = Fix(t: t0, p: Fx.east(2000), accuracy: 20, speed: 30, course: 90)
+        let instant = MapPiece(tripId: "Z", line: "IC", isTrain: true, realTime: true,
+                               piece: TimedPiece(departure: t0 - 10, arrival: t0 - 10, path: [Fx.east(1500), Fx.east(2500)]))
+        let point = MapPiece(tripId: "P", line: "IC", isTrain: true, realTime: true,
+                             piece: TimedPiece(departure: t0 - 10, arrival: t0 + 10, path: [Fx.east(2000), Fx.east(2000)]))
+        let hits = VehicleMatch.byRoad(fix, [instant, point])
+        XCTAssertEqual(hits.map(\.tripId), ["Z"])
+        let late = try XCTUnwrap(hits.first?.late)
+        XCTAssertTrue(late.isFinite)
+        XCTAssertEqual(late, 10, accuracy: 0.01)
+    }
+
     func test_otherKindPossible() {
         XCTAssertTrue(VehicleMatch.otherKindPossible(.implausibleSpeed))
         XCTAssertTrue(VehicleMatch.otherKindPossible(.drifting))
