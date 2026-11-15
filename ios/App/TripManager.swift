@@ -1198,17 +1198,24 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         defer { upcomingBusy = false }
         let rail = t.mode == .train
         let from = t.from.key == "veghel" ? StopsStore.shared.veghel : t.from
+        // For buses also the stop's own board (asked first, so it runs beside the plans): it shows cancelled buses
+        // (the planner leaves them out) and the ones that left.
+        async let boardAsk: [BoardDeparture] = rail ? [] : Transit.board(stopIds: from.ids, from: Date().addingTimeInterval(-30 * 60), n: 40)
+        let planJobs: [@Sendable () async -> [DoorTrip]] = t.to.map { dest in
+            { @Sendable in
+                await Transit.plan(from: from, to: dest, modes: rail ? "RAIL" : "BUS", at: Date().addingTimeInterval(-30 * 60), count: 10, maxTransfers: rail ? 1 : 0)
+            }
+        }
+        let planned = await Progressive.all(planJobs)
         var all: [PanelTrip] = []
-        for dest in t.to {
-            let l = await Transit.plan(from: from, to: dest, modes: rail ? "RAIL" : "BUS", at: Date().addingTimeInterval(-30 * 60), count: rail ? 10 : 10, maxTransfers: rail ? 1 : 0)
+        for (dest, l) in zip(t.to, planned) {
             Ratings.shared.learn(from, dest, l)
             all += l.map { PanelTrip(trip: $0, from: from, to: dest) }
         }
-        // For buses also the stop's own board: it shows cancelled buses (the planner leaves them out) and the ones that left.
         if !rail {
             let names = t.to.map(\.short) + t.to.map(\.name)
             let ids = Set(all.map { $0.trip.first.tripId })
-            let b = await Transit.board(stopIds: from.ids, from: Date().addingTimeInterval(-30 * 60), n: 40)
+            let b = await boardAsk
             guard k == upcomingKey else { return }
             upcomingBoard = b.filter { d in ids.contains(d.tripId) || names.contains { !$0.isEmpty && d.headsign.localizedCaseInsensitiveContains($0) } }
         } else { upcomingBoard = [] }
@@ -1225,7 +1232,10 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         let kept = once.filter { o in !once.contains { q in q.id != o.id && q.to == o.to && q.trip.first.departure > o.trip.first.departure && q.trip.last.arrival <= o.trip.last.arrival } }
         upcoming = kept.sorted { $0.trip.first.departure < $1.trip.first.departure }
         upcomingError = nil
-        if rail { await NSStore.shared.enrich(upcoming.map { ($0.trip, $0.from, $0.to) }) }
+        if rail {
+            let rows = upcoming.map { ($0.trip, $0.from, $0.to) }
+            Task { await NSStore.shared.enrich(rows) }     // the trains show first; NS fills in after
+        }
     }
 
     // MARK: starting by itself

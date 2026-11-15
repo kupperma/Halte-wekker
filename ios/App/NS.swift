@@ -224,17 +224,33 @@ final class NSStore: ObservableObject {
     func enrich(_ items: [(trip: DoorTrip, from: Place, to: Place)]) async {
         let rail = items.filter { $0.trip.first.isTrain && Self.code($0.from) != nil }
         guard !rail.isEmpty else { return }
-        for c in Set(rail.compactMap { Self.code($0.from) }) { await board(c) }
+        let codes = Array(Set(rail.compactMap { Self.code($0.from) }))
+        let boardJobs: [@Sendable () async -> Void] = codes.map { c in { @Sendable in _ = await self.board(c) } }
+        _ = await Progressive.all(boardJobs)
         var groups: [String: Date] = [:]
         for r in rail {
             guard let a = Self.code(r.from), let b = Self.code(r.to) else { continue }
             let k = "\(a)>\(b)", t = r.trip.first.scheduledDeparture
             if groups[k].map({ t < $0 }) ?? true { groups[k] = t }
         }
-        for (k, at) in groups {
-            let p = k.split(separator: ">").map(String.init)
-            await loadCrowd(from: p[0], to: p[1], at: at)
+        let crowdJobs: [@Sendable () async -> Void] = groups.map { k, at in
+            { @Sendable in
+                let p = k.split(separator: ">").map(String.init)
+                await self.loadCrowd(from: p[0], to: p[1], at: at)
+            }
         }
+        _ = await Progressive.all(crowdJobs)
+        // The sizes of the rides that will be shown, all at once.
+        let sized = rail.filter { r in
+            let f = r.trip.first
+            return !f.num.isEmpty && f.scheduledDeparture > Date().addingTimeInterval(-600) && f.scheduledDeparture.timeIntervalSinceNow < 6 * 3600
+        }
+        let sizeJobs: [@Sendable () async -> (String, TrainSize?)] = sized.map { r in
+            let f = r.trip.first, code = Self.code(r.from)!
+            return { @Sendable in (f.id, await self.trainSize(num: f.num, code: code)) }
+        }
+        var got: [String: TrainSize?] = [:]
+        for (id, s) in await Progressive.all(sizeJobs) { got[id] = s }
         for r in rail {
             let f = r.trip.first, code = Self.code(r.from)!
             var i = info[f.id] ?? RailInfo(track: f.platform, plannedTrack: f.plannedPlatform ?? f.platform, cancelled: f.cancelled)
@@ -244,9 +260,7 @@ final class NSStore: ObservableObject {
                 if m.cancelled { i.cancelled = true }
             }
             i.crowd = r.trip.rides.filter(\.isTrain).map { crowd[$0.num] ?? 0 }.max() ?? 0
-            if !f.num.isEmpty, f.scheduledDeparture > Date().addingTimeInterval(-600), f.scheduledDeparture.timeIntervalSinceNow < 6 * 3600 {
-                i.size = await trainSize(num: f.num, code: code)
-            }
+            if let s = got[f.id] { i.size = s }
             info[f.id] = i
         }
     }

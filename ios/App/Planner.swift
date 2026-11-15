@@ -198,14 +198,17 @@ final class Planner: ObservableObject {
         busy = true
         defer { busy = false }
         let out = t.out
-        var trains: [(DoorTrip, Place, Place)] = []
-        for st in [Place.eindhoven, Place.denBosch] {
-            if out {
-                trains += await Transit.plan(from: st, to: .breda, modes: "RAIL", at: T.addingTimeInterval(-80 * 60), count: 8, maxTransfers: 1).map { ($0, st, Place.breda) }
-            } else {
-                trains += await Transit.plan(from: .breda, to: st, modes: "RAIL", at: T.addingTimeInterval(-10 * 60), count: 6, maxTransfers: 1).map { ($0, Place.breda, st) }
+        // Both stations at once; the answers keep the station order.
+        let planJobs: [@Sendable () async -> [(DoorTrip, Place, Place)]] = [Place.eindhoven, Place.denBosch].map { st in
+            { @Sendable in
+                if out {
+                    return await Transit.plan(from: st, to: .breda, modes: "RAIL", at: T.addingTimeInterval(-80 * 60), count: 8, maxTransfers: 1).map { ($0, st, Place.breda) }
+                } else {
+                    return await Transit.plan(from: .breda, to: st, modes: "RAIL", at: T.addingTimeInterval(-10 * 60), count: 6, maxTransfers: 1).map { ($0, Place.breda, st) }
+                }
             }
         }
+        var trains: [(DoorTrip, Place, Place)] = await Progressive.all(planJobs).flatMap { $0 }
         guard trip == t else { return }
         guard !trains.isEmpty else {
             error = "Couldn’t plan this trip because no trains were found for that time. It tries again in a minute."
@@ -220,34 +223,42 @@ final class Planner: ObservableObject {
         }
         let exact = trains.filter { abs(ref($0.0).timeIntervalSince(T)) <= 60 }
         let picked = Array((exact.isEmpty ? Array(trains.prefix(1)) : exact).prefix(3))
-        var opts: [PlanOption] = []
-        for p in picked {
-            let b = await buses(for: p.0, station: out ? p.1 : p.2, out: out)
-            opts.append(PlanOption(train: p.0, from: p.1, to: p.2, busIn: b.0, busInAlt: b.1, busOut: b.2, busOutAlt: b.3))
+        // The buses of every picked train at once; the options keep the picked order.
+        let busJobs: [@Sendable () async -> (DoorTrip?, DoorTrip?, DoorTrip?, DoorTrip?)] = picked.map { p in
+            { @Sendable in await self.buses(for: p.0, station: out ? p.1 : p.2, out: out) }
+        }
+        let found = await Progressive.all(busJobs)
+        let opts: [PlanOption] = zip(picked, found).map { p, b in
+            PlanOption(train: p.0, from: p.1, to: p.2, busIn: b.0, busInAlt: b.1, busOut: b.2, busOutAlt: b.3)
         }
         guard trip == t else { return }
         for o in opts { Ratings.shared.learn(o.from, o.to, [o.train]) }
-        await NSStore.shared.enrich(opts.map { ($0.train, $0.from, $0.to) })
-        guard trip == t else { return }
         options = opts
         inexact = exact.isEmpty
         if pick >= opts.count { pick = 0 }
         error = nil
         updated = Date()
         watchChosen()
+        // The platform, crowding and size come in after the options are on screen.
+        let rows = opts.map { ($0.train, $0.from, $0.to) }
+        Task { await NSStore.shared.enrich(rows) }
     }
 
     /// The latest bus that still makes the train (2 min spare), and the first one after it.
     private func buses(for train: DoorTrip, station: Place, out: Bool) async -> (DoorTrip?, DoorTrip?, DoorTrip?, DoorTrip?) {
         let dep = train.first.departure, arr = train.last.arrival
-        var before: [DoorTrip], after: [DoorTrip]
+        let before: [DoorTrip], after: [DoorTrip]
         if out {
-            before = await Transit.plan(from: .veghel, to: station, modes: "BUS", at: dep.addingTimeInterval(-90 * 60), count: 8, maxTransfers: 0)
-            after = await Transit.plan(from: .breda, to: .buas, modes: "BUS", at: arr, count: 4, maxTransfers: 0)
+            async let b = Transit.plan(from: .veghel, to: station, modes: "BUS", at: dep.addingTimeInterval(-90 * 60), count: 8, maxTransfers: 0)
+            async let a = Transit.plan(from: .breda, to: .buas, modes: "BUS", at: arr, count: 4, maxTransfers: 0)
+            let (x, y) = await (b, a)
+            before = x; after = y
             Ratings.shared.learn(.veghel, station, before)
         } else {
-            before = await Transit.plan(from: .buas, to: .breda, modes: "BUS", at: dep.addingTimeInterval(-60 * 60), count: 8, maxTransfers: 0)
-            after = await Transit.plan(from: station, to: .veghel, modes: "BUS", at: arr, count: 3, maxTransfers: 0)
+            async let b = Transit.plan(from: .buas, to: .breda, modes: "BUS", at: dep.addingTimeInterval(-60 * 60), count: 8, maxTransfers: 0)
+            async let a = Transit.plan(from: station, to: .veghel, modes: "BUS", at: arr, count: 3, maxTransfers: 0)
+            let (x, y) = await (b, a)
+            before = x; after = y
             Ratings.shared.learn(station, .veghel, after)
         }
         // The same bus can come up from both Veghel stops. Keep it once, from the stop with the least walking.
