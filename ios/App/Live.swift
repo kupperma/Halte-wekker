@@ -47,9 +47,9 @@ final class LiveStore: ObservableObject {
     private var lastPanels = Date.distantPast
     private var nextAt: Date?                  // when the trips shown came in
     private var panelsFor: Direction?          // the direction the lists per leg are for
-    private var panelsAt: Date?                // when the lists per leg last came in
-    private var livePanels = LiveLists<PanelList>()     // the lists per leg that show a live answer for `loadedFor`
-    private var nearBoardAt: Date?             // when the boards near you last came in
+    private var livePanels = LiveLists<PanelList>()     // which lists per leg are live for `loadedFor`, and when each came in
+    private var nearBoardAt: Date?             // when the boards near you came in (the oldest rows they show)
+    private var nearRound = 0                  // a new one when the boards near you are replaced: older loads then stop
 
     /// The last answers, saved in `<Caches>/answers` and shown at once after launch or a planning-key change.
     struct SavedTrips: Codable { let trips: [DoorTrip]; let lat: Double?; let lon: Double? }          // "next|<key>"
@@ -272,8 +272,10 @@ final class LiveStore: ObservableObject {
 
     /// The stops near you (the two nearest bus stops, both sides, and the nearest station) and what leaves from them.
     private func loadNear(_ h: CLLocation) async {
+        let round = nearRound            // (a planning-key change that replaces the boards near you ends this load)
         if nearAt.map({ h.distance(from: $0.0) > 150 || Date().timeIntervalSince($0.1) > 600 }) ?? true {
             let s = await Transit.nearStops(h.coordinate)
+            guard round == nearRound else { return }
             if !s.isEmpty {
                 let names = s.filter { !$0.rail }.map(\.name).reduce(into: [String]()) { if !$0.contains($1) && $0.count < 2 { $0.append($1) } }
                 nearStops = s.filter { !$0.rail && names.contains($0.name) } + (s.first(where: { $0.rail }).map { [$0] } ?? [])
@@ -286,6 +288,7 @@ final class LiveStore: ObservableObject {
         async let past = Transit.board(stopIds: ids, from: Date().addingTimeInterval(-20 * 60), n: 6, stops: true)
         async let next = Transit.board(stopIds: ids, from: Date().addingTimeInterval(-60), n: 20, stops: true)
         let (p, n) = await (past, next)
+        guard round == nearRound, nearStops.map(\.id) == ids else { return }
         // A stop whose next ones didn't come (a bad moment on the connection, or a busy server): keep the ones it had that
         // haven't left, instead of a board with only what's gone, and ask again in a few seconds.
         let now = Date()
@@ -296,19 +299,20 @@ final class LiveStore: ObservableObject {
         let b = (n + kept + p).filter { seen.insert("\($0.tripId)|\($0.stopName)").inserted }
         if !b.isEmpty {
             nearBoard = b.sorted { ($0.cancelled ? $0.scheduled : $0.time) < ($1.cancelled ? $1.scheduled : $1.time) }
-            // (rows kept from a saved board, for a stop that didn't answer, are still that answer: it stays "as of")
+            // Rows kept from before, for a stop that didn't answer, keep the board's older time (and a saved board's
+            // "as of") until they're gone.
+            nearBoardAt = Snapshots.boardTime(previous: nearBoardAt, now: now, keptOld: !kept.isEmpty)
             if kept.isEmpty { nearAsOf = nil }
-            if !n.isEmpty, let at = nearAt?.0 {
-                nearBoardAt = now
+            if let at = nearAt?.0 {
                 SnapshotStore.shared.save(SavedNear(stops: nearStops, board: nearBoard, lat: at.coordinate.latitude, lon: at.coordinate.longitude),
-                                          key: "near", at: nearAsOf ?? now)
+                                          key: "near", at: nearBoardAt ?? now)
             }
         }
         if ids.contains(where: { !answered.contains($0) }), !nearRetrying {
             nearRetrying = true
             Task { @MainActor [weak self] in
                 try? await Task.sleep(nanoseconds: 8_000_000_000)
-                await self?.loadNear(h)
+                if self?.nearRound == round { await self?.loadNear(h) }
                 self?.nearRetrying = false
             }
         }
@@ -419,6 +423,7 @@ final class LiveStore: ObservableObject {
             next = []; nextAsOf = nil; nextAt = nil; pick = 0
         }
         nextError = nil; updated = nil; panelsUpdated = nil; lastPanels = .distantPast
+        onBoard = nil                           // (the bus or train you're on is found again for the new key)
 
         livePanels.reset()                      // what the lists per leg show isn't live for the new key
         if panelsFor != dir {
@@ -430,35 +435,43 @@ final class LiveStore: ObservableObject {
             buas = Snapshots.upcoming(v?.value.buas ?? [], now: now) { $0.trip.rides.first?.departure ?? .distantPast }
             toVeghel = Snapshots.upcoming(v?.value.toVeghel ?? [], now: now) { $0.trip.rides.first?.departure ?? .distantPast }
             if let v { boardRides = v.value.rides }
-            panelsAt = hasPanels ? v?.at : nil
-            panelsAsOf = panelsAt
-        } else if hasPanels {
-            panelsAsOf = panelsAsOf ?? panelsAt
+            for l in [PanelList.board, .trains, .buas, .toVeghel] { livePanels.restored(l, at: hasContent(l) ? v?.at : nil) }
         }
+        updatePanelsAsOf()
 
         if let f = from {
             if let n = nearAt, n.0.distance(from: f) <= 300 {
                 if !nearBoard.isEmpty { nearAsOf = nearAsOf ?? nearBoardAt }
             } else if let s = store.load(SavedNear.self, key: "near"),
                       Snapshots.closeEnough(saved: (lat: s.value.lat, lon: s.value.lon), here: you, metres: 300) {
+                nearRound += 1
                 nearStops = s.value.stops
                 nearBoard = Snapshots.upcoming(s.value.board, now: now) { $0.cancelled ? $0.scheduled : $0.time }
                 nearAt = (CLLocation(latitude: s.value.lat, longitude: s.value.lon), s.at)
                 nearBoardAt = nearBoard.isEmpty ? nil : s.at
                 nearAsOf = nearBoardAt
             } else {
+                nearRound += 1
                 nearBoard = []; nearAsOf = nil; nearBoardAt = nil
             }
         }
+        if old == nil {                         // once a launch: the answers nobody asked for in a week go
+            Task.detached(priority: .utility) { SnapshotStore.shared.prune(olderThan: 7 * 24 * 3600) }
+        }
     }
+
+    /// The lists per leg of `panelsFor` that show anything.
+    private var panelContent: [PanelList] {
+        (panelsFor == .home ? [PanelList.buas, .trains, .toVeghel] : [.board, .trains, .buas]).filter { hasContent($0) }
+    }
+
+    /// "as of" the oldest list's time while any list per leg shows what isn't live for this key.
+    private func updatePanelsAsOf() { panelsAsOf = livePanels.asOf(panelContent) }
 
     nonisolated private static func spot(_ lat: Double?, _ lon: Double?) -> (lat: Double, lon: Double)? {
         guard let lat, let lon else { return nil }
         return (lat, lon)
     }
-
-    /// The lists per leg show anything.
-    private var hasPanels: Bool { [PanelList.board, .trains, .buas, .toVeghel].contains { hasContent($0) } }
 
     /// One planner question for a list per leg.
     private struct PanelJob { let from: Place; let to: Place; let modes: String; let count: Int; let maxTransfers: Int }
@@ -497,13 +510,11 @@ final class LiveStore: ObservableObject {
         guard loadedFor == key else { return }
         panelsUpdated = Date()
         if got {
-            panelsAt = Date()
-            // A list whose answer didn't come still shows the saved one: the lists stay "as of" until each one is live
-            // (and are saved as of then).
-            let lists: [PanelList] = dir == .toSchool ? [.board, .trains, .buas] : [.buas, .trains, .toVeghel]
-            if !livePanels.anyStale(lists.filter { hasContent($0) }) { panelsAsOf = nil }
+            // A list whose answer didn't come (or was empty) still shows its older rows: the lists are saved as of the
+            // oldest of them, and stay "as of" while one of them isn't live.
+            updatePanelsAsOf()
             SnapshotStore.shared.save(SavedPanels(board: board, rides: boardRides, trains: trains, buas: buas, toVeghel: toVeghel),
-                                      key: "panels|\(dir.rawValue)", at: panelsAsOf ?? Date())
+                                      key: "panels|\(dir.rawValue)", at: livePanels.oldest(panelContent) ?? Date())
         }
         // Transitous now and then sends nothing back: try an empty list again at the next refresh (30 s), a few times.
         if empty && emptyRetries < 3 { emptyRetries += 1; lastPanels = .distantPast } else if !empty { emptyRetries = 0 }
@@ -514,7 +525,7 @@ final class LiveStore: ObservableObject {
     /// Your Veghel board, shown as soon as it's in.
     private func loadBoard(_ ids: [String], from: Date, key: String) async -> [BoardDeparture] {
         let b = await Transit.board(stopIds: ids, from: from, n: 40, stops: true)
-        if loadedFor == key, !b.isEmpty { board = b; livePanels.shown(.board) }      // (an empty answer keeps the last list)
+        if loadedFor == key, !b.isEmpty { board = b; livePanels.shown(.board, at: Date()); updatePanelsAsOf() }    // (an empty answer keeps the last list)
         return b
     }
 
@@ -567,7 +578,8 @@ final class LiveStore: ObservableObject {
         case .buas: buas = best
         case .toVeghel: toVeghel = best
         }
-        livePanels.shown(list)
+        livePanels.shown(list, at: Date())
+        updatePanelsAsOf()
     }
 
     private static func keepBest(_ l: [PanelTrip]) -> [PanelTrip] {

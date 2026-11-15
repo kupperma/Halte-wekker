@@ -115,6 +115,7 @@ struct HomeView: View {
     @State private var moveToken = 0
     @State private var loopToken = 0
     @State private var picked: BoardPick?            // the line you tapped on a board
+    @State private var pickedAsOf: Date?             // …when it was tapped in a saved answer: as of then
     @State private var choosingDestination = false
     @State private var nearShift: [String: Int] = [:]     // how far back or forward you've gone at each stop near you
     @State private var walkTo: WalkTarget?                 // the walk to a stop, on a map
@@ -150,9 +151,9 @@ struct HomeView: View {
         // the clock and the Dynamic Island. (Taps that miss them reach the map.)
         .background {
             HomeStage(home: home, stage: stage, moveToken: moveToken) {
-                MetroMapMenu(home: home, fastest: fastestSub, lines: linesSub, planned: plannedSub, via: live.next.first?.via,
-                             custom: live.custom?.short, trip: live.custom == nil ? nil : (live.next[safe: live.pick] ?? live.next.first),
-                             others: Array(live.next.prefix(3)),
+                MetroMapMenu(home: home, fastest: fastestSub, lines: linesSub, planned: plannedSub, via: liveNext.first?.via,
+                             custom: live.custom?.short, trip: live.custom == nil ? nil : (liveNext[safe: live.pick] ?? liveNext.first),
+                             others: Array(liveNext.prefix(3)),
                              open: { go($0) }, toggle: { toggleDirection() }, settings: { settings = true })
             } boards: { led, plan in
                 wallBoards(led, plan)
@@ -359,19 +360,26 @@ struct HomeView: View {
         }
     }
 
+    /// Your next trips while they're live (the map draws only those, not a saved answer).
+    private var liveNext: [DoorTrip] { live.nextAsOf == nil ? live.next : [] }
+
+    /// "Leaves 08:15 (in 7 min) · BUas 09:20"; from a saved answer, without the countdown: "Leaves 08:15 · BUas 09:20 · as of 08:12".
     private var fastestSub: String {
         guard let t = live.next.first else { return live.nextError == nil ? "Finding your next connection…" : "No trips found right now" }
         let m = Fmt.mins(t.first.departure.timeIntervalSinceNow)
-        return "Leaves \(Fmt.hhmm(t.first.departure))\(m <= 90 ? " (in \(m) min)" : "") · \(live.custom?.short ?? (home ? "home" : "BUas")) \(Fmt.hhmm(t.end))"
+        let leaves = live.nextAsOf == nil && m <= 90 ? " (in \(m) min)" : ""
+        return "Leaves \(Fmt.hhmm(t.first.departure))\(leaves) · \(live.custom?.short ?? (home ? "home" : "BUas")) \(Fmt.hhmm(t.end))"
+            + (live.nextAsOf.map { " · " + Snapshots.asOf($0) } ?? "")
     }
     private var linesSub: String {
         if let w = lines.watches.first { return "Watching \(w.line): \(w.status)" }
         let now = Date()
+        let tail = live.panelsAsOf.map { Snapshots.asOf($0) } ?? "every bus and train"
         if home, let t = live.trains.first(where: { $0.trip.first.departure > now }) {
-            return "\(t.trip.first.line) to \(t.to.short) \(Fmt.hhmm(t.trip.first.departure)) · every bus and train"
+            return "\(t.trip.first.line) to \(t.to.short) \(Fmt.hhmm(t.trip.first.departure)) · \(tail)"
         }
         if !home, let d = live.boardShown.first(where: { $0.time > now && !$0.cancelled }) {
-            return "Bus \(d.line) to \(d.headsign) \(Fmt.hhmm(d.time)) · every bus and train"
+            return "Bus \(d.line) to \(d.headsign) \(Fmt.hhmm(d.time)) · \(tail)"
         }
         return "Every bus and train, live"
     }
@@ -527,16 +535,19 @@ struct HomeView: View {
     // Tapping a line opens its page on the planner and starts tracking it.
     private func tapTrain(_ id: String) {
         guard let p = live.trains.first(where: { $0.id == id }) else { return }
+        pickedAsOf = live.panelsAsOf
         withAnimation(.easeInOut(duration: 0.2)) { picked = .train(p) }
         if !watch.isWatched(p.trip.first, from: p.from) { _ = watch.toggle(p.trip, from: p.from, to: p.to) }
     }
     private func tapBus(_ d: BoardDeparture) {
+        pickedAsOf = live.nearBoard.contains(d) ? live.nearAsOf : live.board.contains(d) ? live.panelsAsOf : nil
         withAnimation(.easeInOut(duration: 0.2)) { picked = .bus(d) }
         if !lines.isWatched(stopId: d.stopId, line: d.line, headsign: d.headsign) {
             lines.toggle(stopId: d.stopId, stopName: d.stopName, line: d.line, headsign: d.headsign, tripId: d.tripId, delay: d.live ? d.delay : nil)
         }
     }
     private func tapBusTrip(_ p: PanelTrip) {
+        pickedAsOf = live.panelsAsOf
         withAnimation(.easeInOut(duration: 0.2)) { picked = .busTrip(p) }
         let f = p.trip.first
         if !lines.isWatched(stopId: f.fromId, line: f.line, headsign: f.headsign) {
@@ -563,7 +574,7 @@ struct HomeView: View {
             let f = t.trip.first
             TrainPage(p: t, info: ns.rail(f), tracked: watch.isWatched(f, from: t.from), nsMissing: ns.available == false, pal: pal,
                       walk: walkAction(f), liveMap: liveAction(f), back: { withAnimation(.easeInOut(duration: 0.2)) { picked = nil } },
-                      track: { _ = watch.toggle(t.trip, from: t.from, to: t.to) })
+                      track: { _ = watch.toggle(t.trip, from: t.from, to: t.to) }, asOf: pickedAsOf)
         case .bus(let d):
             let ride = live.boardRides["\(d.stopId)|\(d.tripId)"]
             let isTrain = live.nearStops.contains { $0.rail && $0.id == d.stopId }
@@ -578,7 +589,8 @@ struct HomeView: View {
                                                            stopName: d.stopName, time: d.cancelled ? d.scheduled : d.time, rail: isTrain) },
                     tracked: lines.isWatched(stopId: d.stopId, line: d.line, headsign: d.headsign),
                     back: { withAnimation(.easeInOut(duration: 0.2)) { picked = nil } },
-                    track: { lines.toggle(stopId: d.stopId, stopName: d.stopName, line: d.line, headsign: d.headsign, tripId: d.tripId, delay: d.live ? d.delay : nil) })
+                    track: { lines.toggle(stopId: d.stopId, stopName: d.stopName, line: d.line, headsign: d.headsign, tripId: d.tripId, delay: d.live ? d.delay : nil) },
+                    asOf: pickedAsOf)
         case .busTrip(let t):
             let f = t.trip.first
             BusPage(line: f.line, to: f.headsign.isEmpty ? Fmt.place(t.trip.last.toStop) : f.headsign, stop: Fmt.place(f.fromStop),
@@ -588,12 +600,13 @@ struct HomeView: View {
                     walk: walkAction(f), liveMap: liveAction(f),
                     tracked: lines.isWatched(stopId: f.fromId, line: f.line, headsign: f.headsign),
                     back: { withAnimation(.easeInOut(duration: 0.2)) { picked = nil } },
-                    track: { lines.toggle(stopId: f.fromId, stopName: f.fromStop, line: f.line, headsign: f.headsign, tripId: f.tripId, delay: f.live ? f.delay : nil) })
+                    track: { lines.toggle(stopId: f.fromId, stopName: f.fromStop, line: f.line, headsign: f.headsign, tripId: f.tripId, delay: f.live ? f.delay : nil) },
+                    asOf: pickedAsOf)
         case .ride(let r):
             if r.isTrain, let pt = trainTrip(r) {
                 TrainPage(p: pt, info: ns.rail(r), tracked: watch.isWatched(r, from: pt.from), nsMissing: ns.available == false, pal: pal,
                           walk: walkAction(r), liveMap: liveAction(r), back: { withAnimation(.easeInOut(duration: 0.2)) { picked = nil } },
-                          track: { _ = watch.toggle(pt.trip, from: pt.from, to: pt.to) })
+                          track: { _ = watch.toggle(pt.trip, from: pt.from, to: pt.to) }, asOf: pickedAsOf)
             } else {
                 BusPage(line: r.line, to: r.headsign.isEmpty ? Fmt.place(r.toStop) : r.headsign, stop: Fmt.place(r.fromStop),
                         time: r.departure, scheduled: r.scheduledDeparture, live: r.live, cancelled: r.cancelled, status: RideText.status(r, ns.rail(r)).text,
@@ -602,7 +615,8 @@ struct HomeView: View {
                         walk: walkAction(r), liveMap: liveAction(r),
                         tracked: lines.isWatched(stopId: r.fromId, line: r.line, headsign: r.headsign),
                         back: { withAnimation(.easeInOut(duration: 0.2)) { picked = nil } },
-                        track: { lines.toggle(stopId: r.fromId, stopName: r.fromStop, line: r.line, headsign: r.headsign, tripId: r.tripId, delay: r.live ? r.delay : nil) })
+                        track: { lines.toggle(stopId: r.fromId, stopName: r.fromStop, line: r.line, headsign: r.headsign, tripId: r.tripId, delay: r.live ? r.delay : nil) },
+                        asOf: pickedAsOf)
             }
         }
     }
@@ -615,6 +629,7 @@ struct HomeView: View {
     }
 
     private func tapRide(_ r: Ride) {
+        pickedAsOf = live.nextAsOf                       // (a ride of your next trips, or from them in a bus list)
         withAnimation(.easeInOut(duration: 0.2)) { picked = .ride(r) }
         if r.isTrain {
             if let pt = trainTrip(r), !watch.isWatched(r, from: pt.from) { _ = watch.toggle(pt.trip, from: pt.from, to: pt.to) }
@@ -665,7 +680,9 @@ struct HomeView: View {
             if let t = live.next[safe: live.pick] ?? live.next.first {
                 let r = live.anywhere ? RoutePlan.from(t) : t.via.flatMap { via in RoutePlan.all.first(where: { $0.station.short == via }) }
                 let dest = live.destination(trip.direction).short
-                PlannerBar(title: live.onBoard != nil ? "Your trip · on board" : live.here != nil ? "Your trip · from here" : t.via.map { "Your trip · via \($0)" } ?? "Your trip",
+                // (saved trips may be from another start: no "from here" or "on board" for them)
+                PlannerBar(title: live.nextAsOf == nil && live.onBoard != nil ? "Your trip · on board" : live.nextAsOf == nil && live.here != nil ? "Your trip · from here"
+                                  : t.via.map { "Your trip · via \($0)" } ?? "Your trip",
                            sub: live.anywhere ? "at \(dest) \(Fmt.hhmm(t.end))" : "\(home ? "home" : "at BUas") \(Fmt.hhmm(t.end))")
                 ForEach(Array(t.rides.enumerated()), id: \.offset) { i, ride in
                     if i > 0 {
@@ -717,7 +734,7 @@ struct HomeView: View {
         if let t = live.next[safe: live.pick] ?? live.next.first {
             let r = RoutePlan.from(t)
             PlannerTripCard(trip: t, home: home, wakeTitle: r.map { _ in "Wake me up · to \(dest)" }, arrive: "at \(dest) \(Fmt.hhmm(t.end))",
-                            title: live.onBoard.map { "On the \($0.vehicle.title) now" } ?? (live.here == nil ? "Your trip · fastest" : "Your trip · from here")) {
+                            title: live.nextAsOf != nil ? "Your trip" : live.onBoard.map { "On the \($0.vehicle.title) now" } ?? (live.here == nil ? "Your trip · fastest" : "Your trip · from here")) {
                 wake(t)
             }
             if let a = live.nextAsOf { asOfNote(a) }
@@ -727,7 +744,7 @@ struct HomeView: View {
             } else if let ob = live.onBoard {
                 Label("You’re on the \(ob.vehicle.title): get off at \(ob.next) and change there", systemImage: ob.vehicle.isTrain ? "tram.fill" : "bus.fill")
                     .font(BoardInk.sans(11.5, .semibold)).foregroundStyle(Paper.ink.opacity(0.9))
-            } else if t.first.walkBefore > 0 || walkTarget(t.first) != nil {
+            } else if live.nextAsOf == nil, t.first.walkBefore > 0 || walkTarget(t.first) != nil {
                 HStack(spacing: 8) {
                     Label(t.first.walkBefore > 0 ? "First a \(t.first.walkBefore) min walk to \(Fmt.place(t.first.fromStop))" : "Your stop: \(Fmt.place(t.first.fromStop))",
                           systemImage: "figure.walk")
@@ -757,6 +774,7 @@ struct HomeView: View {
         let names = live.nearStops.map(\.name).reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
         let dest = live.destination(trip.direction).short
         let asOf = live.nearAsOf.map { " · " + Snapshots.asOf($0) } ?? ""
+        let tripAsOf = live.nextAsOf.map { " · " + Snapshots.asOf($0) } ?? ""       // for the marks from your next trips
         PlannerBar(title: "Near you", sub: live.here == nil ? nil : "from where you are\(asOf)")
         if live.nearStops.isEmpty {
             Text(live.here == nil ? "Turn location on for Haltewekker to see the stops around you." : "Looking for the stops around you…")
@@ -796,9 +814,10 @@ struct HomeView: View {
                 }
                 PlannerColumns()
                 ForEach(rows) { d in
+                    let fromTrip = compareNote(ends[d.tripId], fastest, dest) ?? (mine.contains(d.tripId) ? "Part of your trip to \(dest)" : nil)
                     PlannerBusRow(line: isRail ? Transit.trainLabel(d.line) : d.line, to: Fmt.place(d.headsign), time: d.cancelled ? d.scheduled : d.time,
                                   scheduled: d.scheduled, live: d.live, cancelled: d.cancelled, train: isRail,
-                                  note: compareNote(ends[d.tripId], fastest, dest) ?? (mine.contains(d.tripId) ? "Part of your trip to \(dest)" : d.platform.map { "platform \($0)" }),
+                                  note: fromTrip.map { $0 + tripAsOf } ?? d.platform.map { "platform \($0)" },
                                   heading: d.heading,
                                   watched: lines.isWatched(stopId: d.stopId, line: d.line, headsign: d.headsign), picked: picked == .bus(d)) { tapBus(d) }
                 }
@@ -916,6 +935,7 @@ struct HomeView: View {
                               heading: Heading.of(r), watched: lines.isWatched(stopId: r.fromId, line: r.line, headsign: r.headsign), picked: picked == .ride(r)) { tapRide(r) }
             }
             Text("From your next trips; the full list comes in on the next refresh.").font(BoardInk.sans(9.5, .regular)).foregroundStyle(Paper.ink.opacity(0.65))
+            if let a = live.nextAsOf { asOfNote(a) }
         } else if list.isEmpty {
             Text(live.panelsUpdated == nil ? "Loading…" : "Nothing coming up right now.").font(BoardInk.sans(12, .regular)).foregroundStyle(Paper.ink.opacity(0.85))
         } else {

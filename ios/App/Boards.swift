@@ -600,6 +600,7 @@ struct TrainPage: View {
     var liveMap: (() -> Void)? = nil    // where the train is now, on a map
     let back: () -> Void
     let track: () -> Void
+    var asOf: Date? = nil               // opened from a saved answer: as of then
 
     var body: some View {
         let f = p.trip.first
@@ -621,6 +622,7 @@ struct TrainPage: View {
                     Text(st.text).font(BoardInk.sans(12)).foregroundStyle(st.warn ? Paper.late : st.ok ? Paper.ok : Paper.ink.opacity(0.85))
                         .lineLimit(2).minimumScaleFactor(0.8)
                     Text(leaves(f.departure)).font(BoardInk.sans(11, .regular)).foregroundStyle(Paper.ink.opacity(0.8))
+                    if let asOf { Text(Snapshots.asOf(asOf)).font(BoardInk.sans(10, .regular)).foregroundStyle(Paper.ink.opacity(0.6)) }
                 }
                 Spacer(minLength: 4)
                 VStack(spacing: 0) {
@@ -679,6 +681,7 @@ struct BusPage: View {
     let tracked: Bool
     let back: () -> Void
     let track: () -> Void
+    var asOf: Date? = nil               // opened from a saved answer: as of then
 
     var body: some View {
         let _ = rank?.grade
@@ -697,6 +700,7 @@ struct BusPage: View {
                     Text(status).font(BoardInk.sans(12)).foregroundStyle(cancelled || (live && abs(time.timeIntervalSince(scheduled)) >= 60) ? Paper.late : live ? Paper.ok : Paper.ink.opacity(0.85))
                         .lineLimit(2).minimumScaleFactor(0.8)
                     Text(leaves(time)).font(BoardInk.sans(11, .regular)).foregroundStyle(Paper.ink.opacity(0.8))
+                    if let asOf { Text(Snapshots.asOf(asOf)).font(BoardInk.sans(10, .regular)).foregroundStyle(Paper.ink.opacity(0.6)) }
                 }
             }
             HStack(spacing: 8) {

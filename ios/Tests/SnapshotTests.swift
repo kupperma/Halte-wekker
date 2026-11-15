@@ -105,7 +105,7 @@ final class SnapshotTests: XCTestCase {
         var lists = LiveLists<String>()
         XCTAssertTrue(lists.takesPartial("trains", empty: false))
         XCTAssertTrue(lists.anyStale(["trains"]))
-        lists.shown("trains")
+        lists.shown("trains", at: t0)
         XCTAssertTrue(lists.isLive("trains"))
         XCTAssertFalse(lists.takesPartial("trains", empty: false))
         XCTAssertTrue(lists.takesPartial("trains", empty: true))
@@ -115,5 +115,71 @@ final class SnapshotTests: XCTestCase {
         lists.reset()
         XCTAssertFalse(lists.isLive("trains"))
         XCTAssertTrue(lists.takesPartial("trains", empty: false))
+    }
+
+    /// Saved and kept lists are labelled, and saved, with the oldest time among the lists that show something; an
+    /// empty answer keeps a list's rows and their time, so they're never re-dated.
+    func test_oldestTimeAmongLists() {
+        var lists = LiveLists<String>()
+        let saved = t0.addingTimeInterval(-3600)
+        lists.restored("trains", at: saved)
+        lists.restored("buas", at: saved)
+        XCTAssertEqual(lists.asOf(["trains", "buas"]), saved)
+        lists.shown("trains", at: t0)                                  // trains came in; buas' answer was empty
+        XCTAssertEqual(lists.oldest(["trains", "buas"]), saved)
+        XCTAssertEqual(lists.asOf(["trains", "buas"]), saved)          // still a saved list: labelled as of the oldest
+        lists.shown("buas", at: t0.addingTimeInterval(120))
+        XCTAssertNil(lists.asOf(["trains", "buas"]))                   // all live: no label
+        XCTAssertEqual(lists.oldest(["trains", "buas"]), t0)           // …and saved as of the oldest list, not of now
+        lists.reset()                                                   // another key: kept, as of when they came in
+        XCTAssertEqual(lists.asOf(["trains", "buas"]), t0)
+        XCTAssertNil(lists.asOf([]))
+        lists.restored("buas", at: nil)
+        XCTAssertEqual(lists.oldest(["trains"]), t0)
+    }
+
+    func test_boardTimeKeepsTheOlderTimeWhileRowsAreKept() {
+        let before = t0.addingTimeInterval(-600)
+        XCTAssertEqual(Snapshots.boardTime(previous: before, now: t0, keptOld: false), t0)
+        XCTAssertEqual(Snapshots.boardTime(previous: before, now: t0, keptOld: true), before)
+        XCTAssertEqual(Snapshots.boardTime(previous: nil, now: t0, keptOld: true), t0)
+    }
+
+    /// Two keys can share a file name: the key saved inside decides, and another key's answer is deleted.
+    func test_keyCheckedOnLoad() {
+        XCTAssertEqual(SnapshotStore.fileName("next|a:b"), SnapshotStore.fileName("next|a_b"))
+        store.save(deps([60]), key: "next|a:b", at: t0)
+        XCTAssertEqual(store.load([Dep].self, key: "next|a:b", now: t0)?.key, "next|a:b")
+        XCTAssertNil(store.load([Dep].self, key: "next|a_b", now: t0))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dir.appendingPathComponent(SnapshotStore.fileName("next|a_b")).path))
+        XCTAssertNil(store.load([Dep].self, key: "next|a:b", now: t0))
+    }
+
+    func test_expiredDeletedOnLoad() {
+        let key = "near"
+        store.save(deps([60]), key: key, at: t0)
+        XCTAssertNil(store.load([Dep].self, key: key, maxAge: 60, now: t0.addingTimeInterval(61)))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dir.appendingPathComponent(SnapshotStore.fileName(key)).path))
+        store.save(deps([60]), key: key, at: t0.addingTimeInterval(120))          // a minute and more ahead of the clock
+        XCTAssertNil(store.load([Dep].self, key: key, now: t0))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dir.appendingPathComponent(SnapshotStore.fileName(key)).path))
+    }
+
+    func test_pruneOldFiles() throws {
+        store.save(deps([60]), key: "old", at: t0)
+        store.save(deps([60]), key: "recent", at: t0)
+        let other = dir.appendingPathComponent("notes.txt")
+        try Data("keep".utf8).write(to: other)
+        let fm = FileManager.default
+        let week = 7 * 24 * 3600.0
+        try fm.setAttributes([.modificationDate: t0.addingTimeInterval(-week - 3600)], ofItemAtPath: dir.appendingPathComponent(SnapshotStore.fileName("old")).path)
+        try fm.setAttributes([.modificationDate: t0.addingTimeInterval(-24 * 3600)], ofItemAtPath: dir.appendingPathComponent(SnapshotStore.fileName("recent")).path)
+        try fm.setAttributes([.modificationDate: t0.addingTimeInterval(-week - 3600)], ofItemAtPath: other.path)
+        store.prune(olderThan: week, now: t0)
+        XCTAssertFalse(fm.fileExists(atPath: dir.appendingPathComponent(SnapshotStore.fileName("old")).path))
+        XCTAssertTrue(fm.fileExists(atPath: dir.appendingPathComponent(SnapshotStore.fileName("recent")).path))
+        XCTAssertTrue(fm.fileExists(atPath: other.path))
+        store.prune(olderThan: week, now: t0)                                   // nothing left to prune: no harm
+        SnapshotStore(directory: dir.appendingPathComponent("missing")).prune(olderThan: week, now: t0)
     }
 }
