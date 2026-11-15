@@ -63,8 +63,8 @@ final class DecideTests: XCTestCase {
 
     // MARK: - Dropping candidates
 
-    private func judged(_ id: String, _ r: Result<Double, Reject>) -> Judgement {
-        Judgement(id: id, line: "306", isTrain: false, realTime: true, evidence: nil, result: r)
+    private func judged(_ id: String, _ r: Result<Double, Reject>, live: Bool = true) -> Judgement {
+        Judgement(id: id, line: "306", isTrain: false, realTime: live, evidence: nil, result: r)
     }
 
     /// The ids `prune` returns for each look, carrying the misses from look to look.
@@ -111,5 +111,164 @@ final class DecideTests: XCTestCase {
         // failed, not sure, then failed 3 looks spanning 48 s: only the last 3 count
         let out = [look(200, unsure: []), look(224, unsure: ["A"]), look(248, unsure: []), look(272, unsure: []), look(296, unsure: [])]
         XCTAssertEqual(out, [.keep("A"), .keep("A"), .keep("A"), .keep("A"), .switchTo("B")])
+    }
+
+    // MARK: - The one shown, while it's not sure yet: today's road check
+
+    /// How far `f` is from the path (today's road check measures the same).
+    private func metres(_ f: Fix?, _ path: [GeoPoint]) -> Double? {
+        f.flatMap { Geo.project($0.p, on: path)?.crossTrack }
+    }
+
+    func test_offRoadPinsToday() {
+        XCTAssertFalse(VehicleMatch.offRoad(299, isTrain: false))
+        XCTAssertTrue(VehicleMatch.offRoad(300, isTrain: false))
+        XCTAssertFalse(VehicleMatch.offRoad(699, isTrain: true))
+        XCTAssertTrue(VehicleMatch.offRoad(700, isTrain: true))
+        XCTAssertFalse(VehicleMatch.offRoad(nil, isTrain: false))
+    }
+
+    /// The right bus, timetable-only and 4 minutes late: its times ended before your fixes, but you're on its road.
+    func test_lateRightBusOnItsRoadNotFailed() {
+        let path = Fx.railway
+        // by its times it got to the end (6900 m) 4 minutes ago; you're 300 m before the end
+        let bus = Fx.track("B", line: "306", train: false, live: false, path: path, at: 6900 + 10 * 240, speed: 10)
+        let you = Fx.fixes(from: 6300, speed: 10, count: 16, start: t0 - 30)
+        let j = VehicleMatch.judgeAll(you, [bus], strictTimes: false)
+        XCTAssertEqual(Fx.why(j, "B"), .noTimes)
+        let away = VehicleMatch.offRoad(metres(you.last, path), isTrain: false)
+        XCTAssertFalse(away)
+        XCTAssertEqual(VehicleMatch.verdict(j.first?.result, offRoad: away), .notSure)
+    }
+
+    /// The wrong one: its trip ended at a stop you passed, and you went on 500 m.
+    func test_wrongEndedTripOffItsRoadFails() {
+        let path = [Fx.east(0), Fx.east(1500), Fx.east(3000)]
+        let bus = Fx.track("A", line: "305", train: false, live: false, path: path, at: 3000 + 10 * 300, speed: 10)
+        let you = Fx.fixes(from: 3200, speed: 10, count: 16, start: t0 - 30)       // to 3500 m at t0
+        let j = VehicleMatch.judgeAll(you, [bus], strictTimes: false)
+        XCTAssertEqual(Fx.why(j, "A"), .noTimes)
+        let m = metres(you.last, path) ?? 0
+        XCTAssertEqual(m, 500, accuracy: 5)
+        XCTAssertEqual(VehicleMatch.verdict(j.first?.result, offRoad: VehicleMatch.offRoad(m, isTrain: false)), .fails)
+    }
+
+    func test_verdict() {
+        // no track: the road decides
+        XCTAssertEqual(VehicleMatch.verdict(nil, offRoad: false), .notSure)
+        XCTAssertEqual(VehicleMatch.verdict(nil, offRoad: true), .fails)
+        XCTAssertEqual(VehicleMatch.verdict(.failure(.tooFewFixes), offRoad: false), .notSure)
+        XCTAssertEqual(VehicleMatch.verdict(.failure(.tooFewFixes), offRoad: true), .fails)
+        // judged: the hard tests decide
+        XCTAssertEqual(VehicleMatch.verdict(.success(10), offRoad: true), .passes)
+        XCTAssertEqual(VehicleMatch.verdict(.failure(.wrongWay), offRoad: false), .fails)
+    }
+
+    // MARK: - One look while choosing
+
+    /// Looks every 12 s from 8 s into choosing; `look(k)` gives that look's judgements and whether the one shown is off
+    /// its road. Returns every look's result.
+    private func choosing(_ ids: [String], shown: String?, looks n: Int,
+                          _ look: (Int) -> (judged: [Judgement], offRoad: Bool)) -> [ChoiceLook] {
+        var misses: [String: Int] = [:], state = SwitchState()
+        var out: [ChoiceLook] = []
+        for k in 0..<n {
+            let at = 8 + 12 * Double(k), l = look(k)
+            let c = VehicleMatch.choose(ids, judged: l.judged, shown: shown, shownOffRoad: l.offRoad, choosingFor: at,
+                                        misses: &misses, state: &state, now: t0 + at)
+            out.append(c)
+            if c.settle != nil { break }
+        }
+        return out
+    }
+
+    func test_chooseOtherOutThenSure() {
+        let out = choosing(["A", "B"], shown: "A", looks: 10) { _ in
+            ([judged("A", .success(5)), judged("B", .failure(.offItsPath))], false)
+        }
+        XCTAssertEqual(out.map(\.alive), [["A", "B"], ["A"]])
+        XCTAssertEqual(out.last?.settle, "A")
+        XCTAssertEqual(out.last?.why, .onlyOneLeft)
+        XCTAssertEqual(out.last?.shownFailing, false)
+    }
+
+    func test_chooseShownFailsSwitchAfterThreeLooks() {
+        let out = choosing(["A", "B"], shown: "A", looks: 10) { _ in
+            ([judged("A", .failure(.offItsPath)), judged("B", .success(5))], false)
+        }
+        // looks at 8, 20, 32, 44, 56 s: 3 in a row spanning 48 s at the fifth
+        XCTAssertEqual(out.count, 5)
+        XCTAssertEqual(out.last?.settle, "B")
+        XCTAssertEqual(out.last?.why, .decided)
+        XCTAssertEqual(out.map(\.shownFailing), [false, true, true, true, true])
+        XCTAssertEqual(out.last?.alive, ["A", "B"])
+    }
+
+    /// Not sure yet, on its road: never failed, never switched away from.
+    func test_chooseShownNotSureOnItsRoad() {
+        let out = choosing(["A", "B"], shown: "A", looks: 20) { _ in
+            ([judged("A", .failure(.noTimes)), judged("B", .success(5))], false)
+        }
+        XCTAssertEqual(out.count, 20)
+        XCTAssertTrue(out.allSatisfy { $0.settle == nil && $0.decision == .keep("A") && $0.shown == .notSure && !$0.shownFailing })
+    }
+
+    /// Not sure yet, but off its road: it counts as failed.
+    func test_chooseShownNotSureOffItsRoad() {
+        let out = choosing(["A", "B"], shown: "A", looks: 10) { _ in
+            ([judged("A", .failure(.noTimes)), judged("B", .success(5))], true)
+        }
+        XCTAssertEqual(out.count, 5)
+        XCTAssertEqual(out.last?.settle, "B")
+        XCTAssertEqual(out.first?.shown, .fails)
+        XCTAssertEqual(out.last?.shownFailing, true)
+        // no track for the one shown: the same
+        let none = choosing(["A", "B"], shown: "A", looks: 10) { _ in ([judged("B", .success(5))], true) }
+        XCTAssertEqual(none.last?.settle, "B")
+        XCTAssertEqual(none.last?.why, .decided)
+    }
+
+    /// One it has no track for yet stays in the running; so does the one shown without a track, not failed.
+    func test_chooseUntrackedStays() {
+        let out = choosing(["A", "B", "C"], shown: "A", looks: 10) { _ in
+            ([judged("B", .success(5)), judged("C", .failure(.offItsPath))], false)
+        }
+        XCTAssertEqual(out.count, 10)
+        XCTAssertEqual(out.last?.alive, ["A", "B"])
+        XCTAssertTrue(out.allSatisfy { $0.settle == nil && $0.decision == .keep("A") })
+    }
+
+    /// The one shown failed, and the two others trade the lead: nothing is sure for 12 minutes; then the best that passed
+    /// that look.
+    func test_chooseTwelveMinutesFailingShown() {
+        let out = choosing(["A", "B", "C"], shown: "A", looks: 70) { k in
+            let b = k % 2 == 0
+            return ([judged("A", .failure(.offItsPath)), judged("B", .success(b ? 10 : 20)), judged("C", .success(b ? 20 : 10))], false)
+        }
+        // the first look past 720 s is at 728 s (k = 60, B leads)
+        XCTAssertEqual(out.count, 61)
+        XCTAssertTrue(out.dropLast().allSatisfy { $0.settle == nil })
+        XCTAssertEqual(out.last?.settle, "B")
+        XCTAssertEqual(out.last?.why, .timedOut)
+        XCTAssertEqual(out.last?.shownFailing, true)
+    }
+
+    /// S5 while choosing: the one shown passes but isn't the best (timetable-only): after 12 minutes it keeps it.
+    func test_chooseTwelveMinutesKeepsPassingShown() {
+        let out = choosing(["A", "B"], shown: "A", looks: 70) { _ in
+            ([judged("A", .success(250), live: false), judged("B", .success(4))], false)
+        }
+        XCTAssertEqual(out.count, 61)
+        XCTAssertEqual(out.last?.settle, "A")
+        XCTAssertEqual(out.last?.why, .timedOut)
+    }
+
+    func test_sameChoiceWithinTenMinutes() {
+        let last = TimedOut(ids: ["a", "b"], at: t0)
+        XCTAssertTrue(VehicleMatch.sameChoice(["b", "a"], as: last, now: t0 + 300))
+        XCTAssertFalse(VehicleMatch.sameChoice(["a", "b"], as: last, now: t0 + 600))
+        XCTAssertFalse(VehicleMatch.sameChoice(["a", "c"], as: last, now: t0 + 60))
+        XCTAssertFalse(VehicleMatch.sameChoice(["a", "b", "c"], as: last, now: t0 + 60))
+        XCTAssertFalse(VehicleMatch.sameChoice(["a", "b"], as: nil, now: t0))
     }
 }

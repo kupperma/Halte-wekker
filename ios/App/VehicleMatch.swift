@@ -593,6 +593,95 @@ extension VehicleMatch {
         }
         return judged.filter { $0.id == keep || misses[$0.id, default: 0] < dropAfter }
     }
+
+    /// Today's road check: your last fix this far from a bus's road (or `offRoadTrain` from a train's) is off it.
+    static let offRoadBus = 300.0, offRoadTrain = 700.0
+
+    /// Off its road by today's check: `metres` (your last fix from its road; nil: no road known) at least 300 m for a bus,
+    /// 700 m for a train.
+    static func offRoad(_ metres: Double?, isTrain: Bool) -> Bool {
+        guard let metres else { return false }
+        return metres >= (isTrain ? offRoadTrain : offRoadBus)
+    }
+
+    /// The one it shows, this look: it passes; it fails (a real hard-test failure, or, while it's not sure yet (too few
+    /// fixes, no times now, or no track at all: `r` nil), you're off its road by today's check); or it's not sure yet.
+    /// (A trip whose times have ended says nothing by its times: a late one you're on is still on its road, a wrong one
+    /// that ended at a stop you passed isn't.)
+    static func verdict(_ r: Result<Double, Reject>?, offRoad: Bool) -> Verdict {
+        switch r {
+        case .success?: return .passes
+        case .failure(let why)? where !why.notSure: return .fails
+        default: return offRoad ? .fails : .notSure
+        }
+    }
+
+    /// One look while choosing between `ids` (in the order shown; the one shown among them), `judged` those it has a
+    /// track for, `shownOffRoad` today's road check for the one shown, `choosingFor` the seconds since choosing began.
+    /// - A candidate that fails `dropAfter` looks in a row is out (`prune`); the one shown never is, and counts as failed
+    ///   while it's not sure yet but off its road (`verdict`). One it can't judge yet (no track) stays in the running.
+    /// - `decide` with the seconds as they are (no planned bonus), the not-sure ones not failed.
+    /// - Sure: the one `decide` switches to; the one shown when it's the only one left; after `timeout` (12 minutes) the
+    ///   one shown, or, when it's failing (`dropAfter` misses in a row), the best that passed this look.
+    static func choose(_ ids: [String], judged: [Judgement], shown: String?, shownOffRoad: Bool, choosingFor: TimeInterval,
+                       misses: inout [String: Int], state: inout SwitchState, now: Date,
+                       timeout: TimeInterval = 12 * 60) -> ChoiceLook {
+        let tracked = Set(judged.map(\.id))
+        let mine = judged.first { $0.id == shown }?.result
+        let shownVerdict = shown.map { _ in verdict(mine, offRoad: shownOffRoad) }
+        let pruned = prune(judged, misses: &misses, keep: shown)
+        // not sure yet but off its road: a miss like any failure (a real failure `prune` counted already)
+        if let shown, shownVerdict == .fails, verdict(mine, offRoad: false) != .fails { misses[shown, default: 0] += 1 }
+        let kept = Set(pruned.map(\.id))
+        let alive = ids.filter { kept.contains($0) || !tracked.contains($0) }
+        var unsure = Set(ids.filter { !tracked.contains($0) })
+        for j in judged { if case .failure(let why) = j.result, why.notSure { unsure.insert(j.id) } }
+        if let shown, shownVerdict == .fails { unsure.remove(shown) }
+        let ranked = rank(pruned, planned: nil)
+        let live = Set(judged.filter(\.realTime).map(\.id))
+        let decision = decide(shown: shown, ranked: ranked, liveIds: live, unsure: unsure, state: &state, now: now)
+        let failing = shown.map { misses[$0, default: 0] >= dropAfter } ?? false
+        var settle: String?, why: ChoiceLook.Why?
+        switch decision {
+        case .switchTo(let id): settle = id; why = .decided
+        case .keep(let id) where alive == [id]: settle = id; why = .onlyOneLeft
+        default: break
+        }
+        if settle == nil, choosingFor > timeout {
+            if failing, let best = ranked.first { settle = best.id }
+            else if let shown, alive.contains(shown) { settle = shown }
+            else { settle = ranked.first?.id }
+            if settle != nil { why = .timedOut }
+        }
+        return ChoiceLook(decision: decision, alive: alive, settle: settle, why: why, shown: shownVerdict, shownFailing: failing)
+    }
+
+    /// Choosing again between the same ones as a choice that ran out of time less than `within` (10 minutes) ago: no use,
+    /// their times can't tell them apart.
+    static func sameChoice(_ ids: [String], as last: TimedOut?, now: Date, within: TimeInterval = 600) -> Bool {
+        guard let last else { return false }
+        return Set(ids) == last.ids && now.timeIntervalSince(last.at) < within
+    }
+}
+
+/// The one shown, this look: passes, fails, or not sure yet.
+enum Verdict: Equatable, Sendable { case passes, notSure, fails }
+
+/// One look while choosing (see `VehicleMatch.choose`).
+struct ChoiceLook: Equatable, Sendable {
+    enum Why: Equatable, Sendable { case decided, onlyOneLeft, timedOut }
+    let decision: Decision
+    let alive: [String]             // still in the running, in the order given
+    let settle: String?             // sure now: the one to show (nil: still choosing)
+    let why: Why?
+    let shown: Verdict?             // the one shown, this look
+    let shownFailing: Bool          // the one shown failed `dropAfter` looks in a row
+}
+
+/// A choice that ran out of time (12 minutes) without being sure: between which ones, and when.
+struct TimedOut: Equatable, Sendable {
+    let ids: Set<String>
+    let at: Date
 }
 
 /// The one-look thresholds where the app picks the bus or train you're on. Classic matching compares metres from where
