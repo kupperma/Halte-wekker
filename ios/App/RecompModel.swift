@@ -50,6 +50,7 @@ struct ProteinSource: Codable, Identifiable, Equatable {
     var gramsPerUnit: Double
     var step: Double
     var barcode: String? = nil
+    var kcalPerUnit: Double = 0
 }
 
 /// A logged amount. It keeps its own grams-per-unit and labels, so editing or deleting a source later changes nothing here.
@@ -61,7 +62,15 @@ struct ProteinEntry: Codable, Identifiable, Equatable {
     var units: String
     var amount: Double
     var gramsPerUnit: Double
+    /// Kept from when it was logged, like the grams.
+    var kcalPerUnit: Double = 0
     var grams: Double { amount * gramsPerUnit }
+    var kcal: Double { amount * kcalPerUnit }
+
+    /// "Add kcal": food that isn't a source, logged as its kcal (`amount`) with no protein.
+    var isOtherFood: Bool { unit == ProteinEntry.kcalUnit && gramsPerUnit == 0 }
+    static let kcalUnit = "kcal"
+    static let otherFood = "Other food"
 }
 
 struct Habit: Codable, Identifiable, Equatable {
@@ -76,9 +85,23 @@ struct KnownProduct: Codable, Equatable {
     var portionName: String? = nil
     /// Grams of protein in one of those.
     var proteinPerPortion: Double? = nil
+    var kcalPerPack: Double? = nil
+    /// From Open Food Facts' serving. Without it, a portion's kcal is its share of the pack's.
+    var kcalPerPortion: Double? = nil
 
     /// One portion, when both its name and a believable protein are known.
     var portion: Portion? { Portion(name: portionName, protein: proteinPerPortion) }
+
+    /// kcal in a pack, when known and believable (0…5000).
+    var packKcal: Double? { KcalMath.sane(kcalPerPack) }
+
+    /// kcal in one portion: as stored, else the portion's share of the pack (by its protein).
+    var portionKcal: Double? {
+        guard let portion else { return nil }
+        if let k = KcalMath.sane(kcalPerPortion) { return k }
+        guard let pack = packKcal, proteinPerPack > 0, proteinPerPack.isFinite else { return nil }
+        return KcalMath.sane(pack * portion.protein / proteinPerPack)
+    }
 }
 
 /// One slice, piece or portion of a scanned product, and the protein in it.
@@ -144,14 +167,20 @@ enum PortionName {
 
 enum RecompDefaults {
     static let sources: [ProteinSource] = [
-        ProteinSource(name: "Kwark", unit: "tub", units: "tubs", gramsPerUnit: 42, step: 0.25),
-        ProteinSource(name: "Eggs", unit: "egg", units: "eggs", gramsPerUnit: 6.5, step: 1),
-        ProteinSource(name: "Milk", unit: "glass", units: "glasses", gramsPerUnit: 8, step: 1),
-        ProteinSource(name: "Tuna", unit: "can", units: "cans", gramsPerUnit: 25, step: 1),
-        ProteinSource(name: "Chicken", unit: "portion", units: "portions", gramsPerUnit: 27, step: 1),
-        ProteinSource(name: "Beans & lentils", unit: "can", units: "cans", gramsPerUnit: 18, step: 0.5),
-        ProteinSource(name: "Whey", unit: "scoop", units: "scoops", gramsPerUnit: 22, step: 1),
+        ProteinSource(name: "Kwark", unit: "tub", units: "tubs", gramsPerUnit: 42, step: 0.25, kcalPerUnit: 280),
+        ProteinSource(name: "Eggs", unit: "egg", units: "eggs", gramsPerUnit: 6.5, step: 1, kcalPerUnit: 72),
+        ProteinSource(name: "Milk", unit: "glass", units: "glasses", gramsPerUnit: 8, step: 1, kcalPerUnit: 115),
+        ProteinSource(name: "Tuna", unit: "can", units: "cans", gramsPerUnit: 25, step: 1, kcalPerUnit: 130),
+        ProteinSource(name: "Chicken", unit: "portion", units: "portions", gramsPerUnit: 27, step: 1, kcalPerUnit: 250),
+        ProteinSource(name: "Beans & lentils", unit: "can", units: "cans", gramsPerUnit: 18, step: 0.5, kcalPerUnit: 250),
+        ProteinSource(name: "Whey", unit: "scoop", units: "scoops", gramsPerUnit: 22, step: 1, kcalPerUnit: 120),
     ]
+    /// kcal per unit of a default source ("Kwark" per 500 g tub: 280), by name and unit; 0 for any other.
+    static func kcalPerUnit(name: String, unit: String) -> Double {
+        sources.first { $0.name.lowercased() == name.lowercased() && $0.unit.lowercased() == unit.lowercased() }?
+            .kcalPerUnit ?? 0
+    }
+
     static let habits: [Habit] = [
         Habit(title: "Only zero drinks"),
         Habit(title: "Half the plate veg"),
@@ -172,7 +201,21 @@ struct RecompData: Codable, Equatable {
     var waistSkippedOn: DayKey? = nil
     var check = CheckState()
     var products: [String: KnownProduct] = [:]   // barcode → product
+    var calories = CalorieSettings()
     static let maxSources = 7, maxHabits = 5
+}
+
+/// The daily kcal limit and its notice.
+struct CalorieSettings: Codable, Equatable {
+    /// The limit as last set by hand (or moved ±200 by the weekly check)…
+    var anchorLimit: Double = KcalMath.defaultLimit
+    /// …and the week average at that moment. nil until there is one; the first one there is then.
+    var anchorWeight: Double? = nil
+    /// The limit moves 15 kcal per kg the week average is off `anchorWeight`.
+    var followsWeight = true
+    var notify = true
+    /// The day the notice went out: once a day at most.
+    var notifiedOn: DayKey? = nil
 }
 
 // MARK: - Tolerant decoding (a missing key decodes to its default, never throws)
@@ -187,6 +230,9 @@ extension ProteinSource {
         gramsPerUnit = try c.decodeIfPresent(Double.self, forKey: RecompKey("gramsPerUnit")) ?? 0
         step = try c.decodeIfPresent(Double.self, forKey: RecompKey("step")) ?? 1
         barcode = try c.decodeIfPresent(String.self, forKey: RecompKey("barcode"))
+        // Added in 0.17.1: a default source gets its default, any other 0.
+        kcalPerUnit = (try? c.decodeIfPresent(Double.self, forKey: RecompKey("kcalPerUnit")))
+            ?? RecompDefaults.kcalPerUnit(name: name, unit: unit)
     }
 }
 
@@ -200,6 +246,9 @@ extension ProteinEntry {
         units = try c.decodeIfPresent(String.self, forKey: RecompKey("units")) ?? ""
         amount = try c.decodeIfPresent(Double.self, forKey: RecompKey("amount")) ?? 0
         gramsPerUnit = try c.decodeIfPresent(Double.self, forKey: RecompKey("gramsPerUnit")) ?? 0
+        // Logged before 0.17.1: what a default source has, so this morning's eggs still count.
+        kcalPerUnit = (try? c.decodeIfPresent(Double.self, forKey: RecompKey("kcalPerUnit")))
+            ?? RecompDefaults.kcalPerUnit(name: name, unit: unit)
     }
 }
 
@@ -219,6 +268,21 @@ extension KnownProduct {
         // Added in 0.17.1. Missing, or not what's expected: no portion, and everything else still loads.
         portionName = try? c.decodeIfPresent(String.self, forKey: RecompKey("portionName"))
         proteinPerPortion = try? c.decodeIfPresent(Double.self, forKey: RecompKey("proteinPerPortion"))
+        kcalPerPack = try? c.decodeIfPresent(Double.self, forKey: RecompKey("kcalPerPack"))
+        kcalPerPortion = try? c.decodeIfPresent(Double.self, forKey: RecompKey("kcalPerPortion"))
+    }
+}
+
+extension CalorieSettings {
+    /// Missing keys (or ones of the wrong type) decode to their defaults.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: RecompKey.self)
+        anchorLimit = (try? c.decodeIfPresent(Double.self, forKey: RecompKey("anchorLimit")))
+            .map(KcalMath.clampLimit) ?? KcalMath.defaultLimit
+        anchorWeight = try? c.decodeIfPresent(Double.self, forKey: RecompKey("anchorWeight"))
+        followsWeight = (try? c.decodeIfPresent(Bool.self, forKey: RecompKey("followsWeight"))) ?? true
+        notify = (try? c.decodeIfPresent(Bool.self, forKey: RecompKey("notify"))) ?? true
+        notifiedOn = try? c.decodeIfPresent(DayKey.self, forKey: RecompKey("notifiedOn"))
     }
 }
 
@@ -235,5 +299,6 @@ extension RecompData {
         waistSkippedOn = try c.decodeIfPresent(DayKey.self, forKey: RecompKey("waistSkippedOn"))
         check = try c.decodeIfPresent(CheckState.self, forKey: RecompKey("check")) ?? CheckState()
         products = try c.decodeIfPresent([String: KnownProduct].self, forKey: RecompKey("products")) ?? [:]
+        calories = (try? c.decodeIfPresent(CalorieSettings.self, forKey: RecompKey("calories"))) ?? CalorieSettings()
     }
 }

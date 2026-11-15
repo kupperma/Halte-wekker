@@ -46,7 +46,7 @@ final class OpenFoodFactsTests: XCTestCase {
 
     func test_lookup() async {
         let ok = await OpenFoodFacts.lookup("4012345678901") { req in (self.json(self.kwark), self.response(200, for: req)) }
-        guard case let .found(name, protein, portion) = ok else { return XCTFail("expected found, got \(ok)") }
+        guard case let .found(name, protein, portion, _) = ok else { return XCTFail("expected found, got \(ok)") }
         XCTAssertNil(portion)
         XCTAssertEqual(name, "AH Magere kwark")
         XCTAssertEqual(protein, 41.0, accuracy: 0.001)
@@ -232,7 +232,7 @@ final class OpenFoodFactsTests: XCTestCase {
     func test_lookupCarriesPortion() async throws {
         let bread = product(#""product_quantity":750,"product_quantity_unit":"g","serving_size":"1 slice (40 g)","serving_quantity":40,"nutriments":{"proteins_100g":9}"#)
         let r = await OpenFoodFacts.lookup("4012345678901") { req in (self.json(bread), self.response(200, for: req)) }
-        guard case let .found(name, protein, portion) = r else { return XCTFail("expected found, got \(r)") }
+        guard case let .found(name, protein, portion, _) = r else { return XCTFail("expected found, got \(r)") }
         XCTAssertEqual(name, "Grafschafter Brood")
         XCTAssertEqual(protein, 67.5, accuracy: 0.001)
         XCTAssertEqual(portion?.name, "slice")
@@ -241,9 +241,70 @@ final class OpenFoodFactsTests: XCTestCase {
         // a serving known, but no pack weight: asks for the label and keeps the slice
         let noPack = product(#""serving_size":"1 Scheibe (10 g)","serving_quantity":10,"nutriments":{"proteins_100g":14}"#)
         let n = await OpenFoodFacts.lookup("4012345678901") { req in (self.json(noPack), self.response(200, for: req)) }
-        guard case let .needsProtein(name2, portion2) = n else { return XCTFail("expected needsProtein, got \(n)") }
+        guard case let .needsProtein(name2, portion2, _) = n else { return XCTFail("expected needsProtein, got \(n)") }
         XCTAssertEqual(name2, "Grafschafter Brood")
         XCTAssertEqual(portion2?.name, "slice")
         XCTAssertEqual(try XCTUnwrap(portion2?.protein), 1.4, accuracy: 0.001)
+    }
+
+    // MARK: - Calories
+
+    func test_energyPer100g() throws {
+        let s = product(#""product_quantity":750,"product_quantity_unit":"g","serving_size":"1 slice (40 g)","serving_quantity":40,"nutriments":{"proteins_100g":9,"energy-kcal_100g":250}"#)
+        let e = try XCTUnwrap(OpenFoodFacts.parse(json(s))).energy
+        XCTAssertEqual(try XCTUnwrap(e.perPack), 1875, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(e.perPortion), 100, accuracy: 0.001)
+        // as a string, with a comma
+        let text = product(#""product_quantity":"200","nutriments":{"proteins_100g":14,"energy-kcal_100g":"312,5"}"#)
+        XCTAssertEqual(try XCTUnwrap(OpenFoodFacts.parse(json(text))?.energy.perPack), 625, accuracy: 0.001)
+    }
+
+    /// No kcal: the kJ number ÷ 4.184.
+    func test_energyFromKilojoules() throws {
+        let s = product(#""product_quantity":100,"nutriments":{"proteins_100g":10,"energy_100g":418.4}"#)
+        XCTAssertEqual(try XCTUnwrap(OpenFoodFacts.parse(json(s))?.energy.perPack), 100, accuracy: 0.001)
+        // kcal wins when both are there; an empty kcal is missing
+        let both = product(#""product_quantity":100,"nutriments":{"proteins_100g":10,"energy-kcal_100g":90,"energy_100g":418.4}"#)
+        XCTAssertEqual(try XCTUnwrap(OpenFoodFacts.parse(json(both))?.energy.perPack), 90, accuracy: 0.001)
+        let empty = product(#""product_quantity":100,"nutriments":{"proteins_100g":10,"energy-kcal_100g":"","energy_100g":"418,4"}"#)
+        XCTAssertEqual(try XCTUnwrap(OpenFoodFacts.parse(json(empty))?.energy.perPack), 100, accuracy: 0.001)
+    }
+
+    /// Per serving, split over "2 Scheiben"; kJ per serving works too.
+    func test_energyPerServing() throws {
+        let s = product(#""product_quantity":200,"serving_size":"2 Scheiben (25 g)","serving_quantity":25,"nutriments":{"proteins_100g":14,"energy-kcal_serving":70}"#)
+        let p = try XCTUnwrap(OpenFoodFacts.parse(json(s)))
+        XCTAssertEqual(try XCTUnwrap(p.energy.perPortion), 35, accuracy: 0.001)
+        // no kcal per 100 g: the pack is its 16 slices
+        XCTAssertEqual(try XCTUnwrap(p.energy.perPack), 560, accuracy: 0.001)
+        let kj = product(#""product_quantity":200,"serving_size":"1 Scheibe (10 g)","serving_quantity":10,"nutriments":{"proteins_100g":14,"energy_serving":"125,52"}"#)
+        XCTAssertEqual(try XCTUnwrap(OpenFoodFacts.parse(json(kj))?.energy.perPortion), 30, accuracy: 0.001)
+    }
+
+    func test_energyBounds() throws {
+        // 0 kcal is a real number (a diet drink)
+        let zero = product(#""product_quantity":330,"product_quantity_unit":"ml","nutriments":{"proteins_100g":0.1,"energy-kcal_100g":0}"#)
+        XCTAssertEqual(try XCTUnwrap(OpenFoodFacts.parse(json(zero))?.energy.perPack), 0, accuracy: 0.001)
+        // over 5000 a pack, or not a number: unknown
+        let huge = product(#""product_quantity":2,"product_quantity_unit":"kg","nutriments":{"proteins_100g":10,"energy-kcal_100g":900}"#)
+        XCTAssertNil(try XCTUnwrap(OpenFoodFacts.parse(json(huge))).energy.perPack)
+        let inf = product(#""product_quantity":100,"nutriments":{"proteins_100g":10,"energy-kcal_100g":"inf","energy_100g":-5}"#)
+        XCTAssertNil(try XCTUnwrap(OpenFoodFacts.parse(json(inf))).energy.perPack)
+        // nothing at all
+        XCTAssertEqual(try XCTUnwrap(OpenFoodFacts.parse(json(kwark))).energy, Energy())
+        // no portion: no kcal per portion
+        let noPortion = product(#""product_quantity":100,"nutriments":{"proteins_100g":10,"energy-kcal_serving":50}"#)
+        XCTAssertNil(try XCTUnwrap(OpenFoodFacts.parse(json(noPortion))).energy.perPortion)
+    }
+
+    func test_lookupCarriesEnergy() async throws {
+        let s = product(#""product_quantity":500,"nutriments":{"proteins_100g":8,"energy-kcal_100g":60}"#)
+        let r = await OpenFoodFacts.lookup("4012345678901") { req in (self.json(s), self.response(200, for: req)) }
+        guard case let .found(_, _, _, energy) = r else { return XCTFail("expected found, got \(r)") }
+        XCTAssertEqual(try XCTUnwrap(energy.perPack), 300, accuracy: 0.001)
+        let noProtein = product(#""product_quantity":500,"nutriments":{"energy-kcal_100g":60}"#)
+        let n = await OpenFoodFacts.lookup("4012345678901") { req in (self.json(noProtein), self.response(200, for: req)) }
+        guard case let .needsProtein(_, _, e2) = n else { return XCTFail("expected needsProtein, got \(n)") }
+        XCTAssertEqual(try XCTUnwrap(e2.perPack), 300, accuracy: 0.001)
     }
 }

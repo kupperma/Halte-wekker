@@ -121,4 +121,65 @@ final class RecompMathTests: XCTestCase {
         XCTAssertEqual(PortionName.english("Portie"), "portion")
         XCTAssertNil(PortionName.english("g"))
     }
+
+    // MARK: - Calories
+
+    /// Set at 2450 kcal at a week average of 88 kg: 15 kcal a kg either way, to the nearest 50.
+    func test_kcalLimitMovesWithWeight() {
+        func limit(_ w: Double?) -> Double {
+            KcalMath.limit(anchorLimit: 2450, anchorWeight: 88, weekAverage: w, follows: true)
+        }
+        XCTAssertEqual(limit(88), 2450)
+        XCTAssertEqual(limit(85), 2400)          // 2405
+        XCTAssertEqual(limit(91), 2500)          // 2495
+        XCTAssertEqual(limit(88.3), 2450)        // 2454.5
+        XCTAssertEqual(limit(89.7), 2500)        // 2475.5
+        XCTAssertEqual(limit(nil), 2450)         // no week average: the anchor
+        XCTAssertEqual(KcalMath.limit(anchorLimit: 2450, anchorWeight: 88, weekAverage: 91, follows: false), 2450)
+        XCTAssertEqual(KcalMath.limit(anchorLimit: 2450, anchorWeight: nil, weekAverage: 91, follows: true), 2450)
+    }
+
+    func test_kcalLimitClampAndRound() {
+        XCTAssertEqual(KcalMath.limit(anchorLimit: 1250, anchorWeight: 90, weekAverage: 70, follows: true), 1200)
+        XCTAssertEqual(KcalMath.limit(anchorLimit: 4950, anchorWeight: 90, weekAverage: 100, follows: true), 5000)
+        XCTAssertEqual(KcalMath.clampLimit(2437), 2450)
+        XCTAssertEqual(KcalMath.clampLimit(2424), 2400)
+        XCTAssertEqual(KcalMath.clampLimit(100), 1200)
+        XCTAssertEqual(KcalMath.clampLimit(99_999), 5000)
+        XCTAssertEqual(KcalMath.clampLimit(.nan), 2450)
+        XCTAssertEqual(KcalMath.clampLimit(.infinity), 2450)
+    }
+
+    func test_shouldNotify() {
+        let today = "2026-11-16"
+        XCTAssertTrue(KcalMath.shouldNotify(total: 2450, limit: 2450, lastNotified: nil, today: today, enabled: true))
+        XCTAssertTrue(KcalMath.shouldNotify(total: 2480, limit: 2450, lastNotified: "2026-11-15", today: today, enabled: true))
+        XCTAssertFalse(KcalMath.shouldNotify(total: 2449, limit: 2450, lastNotified: nil, today: today, enabled: true))
+        XCTAssertFalse(KcalMath.shouldNotify(total: 2480, limit: 2450, lastNotified: today, today: today, enabled: true))
+        XCTAssertFalse(KcalMath.shouldNotify(total: 2480, limit: 2450, lastNotified: nil, today: today, enabled: false))
+        XCTAssertFalse(KcalMath.shouldNotify(total: .nan, limit: 2450, lastNotified: nil, today: today, enabled: true))
+        XCTAssertFalse(KcalMath.shouldNotify(total: 10, limit: 0, lastNotified: nil, today: today, enabled: true))
+    }
+
+    func test_kcalText() {
+        let gb = Locale(identifier: "en_GB")
+        XCTAssertEqual(KcalMath.number(2480, locale: gb), "2,480")
+        XCTAssertEqual(KcalMath.number(1649.6, locale: gb), "1,650")
+        XCTAssertEqual(KcalMath.number(.nan, locale: gb), "0")
+        XCTAssertEqual(KcalMath.cardLine(total: 1650, limit: 2450, locale: gb), "≈ 1,650 of 2,450 kcal logged")
+        XCTAssertEqual(KcalMath.cardLine(total: 2480, limit: 2450, locale: gb), "Limit reached · 2,480 of 2,450 kcal logged")
+        XCTAssertEqual(KcalMath.cardLine(total: 2450, limit: 2450, locale: gb), "Limit reached · 2,450 of 2,450 kcal logged")
+        XCTAssertEqual(KcalMath.noticeBody(total: 2480, limit: 2450, locale: gb), "You've logged 2,480 of 2,450 kcal today.")
+        XCTAssertEqual(KcalMath.noticeTitle, "Calorie limit reached")
+    }
+
+    func test_kcalInput() {
+        XCTAssertEqual(RecompInput.kcalEntry("650"), 650)
+        XCTAssertNil(RecompInput.kcalEntry("0"))
+        XCTAssertNil(RecompInput.kcalEntry("3001"))
+        XCTAssertNil(RecompInput.kcalEntry(""))
+        XCTAssertEqual(RecompInput.kcal("0"), 0)
+        XCTAssertEqual(RecompInput.kcal("1875"), 1875)
+        XCTAssertNil(RecompInput.kcal("5001"))
+    }
 }

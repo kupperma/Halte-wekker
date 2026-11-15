@@ -7,12 +7,19 @@ struct OFFProduct: Equatable {
     var portion: Portion? = nil
     /// How many of those portions are in a pack, when the pack and the serving are both weighed (1…200).
     var portionsPerPack: Double? = nil
+    var energy = Energy()
+}
+
+/// kcal in a pack and in one portion, as far as Open Food Facts knows (each 0…5000).
+struct Energy: Equatable {
+    var perPack: Double? = nil
+    var perPortion: Double? = nil
 }
 
 enum LookupResult: Equatable {
-    case found(name: String, proteinPerPack: Double, portion: Portion? = nil)
-    /// No believable protein per pack. A portion that is known still comes along, to keep once the label is typed.
-    case needsProtein(name: String?, portion: Portion? = nil)
+    case found(name: String, proteinPerPack: Double, portion: Portion? = nil, energy: Energy = Energy())
+    /// No believable protein per pack. What else is known still comes along, to keep once the label is typed.
+    case needsProtein(name: String?, portion: Portion? = nil, energy: Energy = Energy())
     case offline
 }
 
@@ -47,6 +54,17 @@ enum OpenFoodFacts {
             return Double(s.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: "."))
         }
         return nil
+    }
+
+    /// A number from 0 up and finite, or nil.
+    private static func nonNegative(_ v: Any?) -> Double? {
+        guard let n = number(v), n.isFinite, n >= 0 else { return nil }
+        return n
+    }
+
+    /// kcal from a nutriment: "energy-kcal_…", else "energy_…" (kJ) ÷ 4.184.
+    private static func kcal(_ nutriments: [String: Any]?, _ suffix: String) -> Double? {
+        nonNegative(nutriments?["energy-kcal_" + suffix]) ?? nonNegative(nutriments?["energy_" + suffix]).map { $0 / 4.184 }
     }
 
     /// A number above 0 and finite, or nil: "", "0", "inf" and the like are missing.
@@ -100,10 +118,10 @@ enum OpenFoodFacts {
             ?? servingGrams.flatMap { g in per100.map { $0 * g / 100 } }
         var portion = Portion(name: served.name, protein: servingProtein.map { $0 / served.count })
 
+        let packGrams = quantity.map { ["kg", "l"].contains(unit?.lowercased() ?? "") ? $0 * 1000 : $0 }
         var portionsPerPack: Double?
-        if let q = quantity, let g = servingGrams {
-            let packGrams = ["kg", "l"].contains(unit?.lowercased() ?? "") ? q * 1000 : q
-            let n = packGrams / (g / served.count)
+        if let pg = packGrams, let g = servingGrams {
+            let n = pg / (g / served.count)
             if n.isFinite, Portion.perPackRange.contains(n) { portionsPerPack = n }
         }
         // No protein per 100 g, but per serving: the pack is its portions.
@@ -113,7 +131,17 @@ enum OpenFoodFacts {
         }
         // A portion that is about the whole pack (or more) is no help: count by the pack.
         if let p = portion, let whole = pack, !p.isPart(of: whole) { portion = nil }
-        return OFFProduct(name: name, proteinPerPack: pack, portion: portion, portionsPerPack: portionsPerPack)
+
+        // Calories the same way: per 100 g (or kJ), per serving, the pack from its portions when needed.
+        let kcal100 = kcal(nutriments, "100g")
+        let kcalServing = kcal(nutriments, "serving") ?? servingGrams.flatMap { g in kcal100.map { $0 * g / 100 } }
+        let kcalPortion = portion == nil ? nil : KcalMath.sane(kcalServing.map { $0 / served.count })
+        var kcalPack = packGrams.flatMap { g in kcal100.map { $0 * g / 100 } }
+        if kcalPack == nil, let k = kcalPortion, let n = portionsPerPack { kcalPack = k * n }
+        let energy = Energy(perPack: KcalMath.sane(kcalPack), perPortion: kcalPortion)
+
+        return OFFProduct(name: name, proteinPerPack: pack, portion: portion, portionsPerPack: portionsPerPack,
+                          energy: energy)
     }
 
     /// What one serving is called, in English, and how many of those it is: "2 Scheiben (25 g)" → ("slice", 2),
@@ -184,9 +212,10 @@ enum OpenFoodFacts {
         guard let product = parse(data) else { return .needsProtein(name: nil) }
         // perPack already leaves out a pack that can't be (infinite, 0, or over 1 kg of protein); checked again here.
         guard let protein = product.proteinPerPack, protein.isFinite, ProteinMath.packRange.contains(protein) else {
-            return .needsProtein(name: product.name, portion: product.portion)
+            return .needsProtein(name: product.name, portion: product.portion, energy: product.energy)
         }
         // Protein known but no name: still usable, with a generic name.
-        return .found(name: product.name ?? fallbackName, proteinPerPack: protein, portion: product.portion)
+        return .found(name: product.name ?? fallbackName, proteinPerPack: protein, portion: product.portion,
+                      energy: product.energy)
     }
 }

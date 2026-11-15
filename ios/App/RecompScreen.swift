@@ -18,13 +18,18 @@ struct RecompSheet: View {
     @State private var picked: ProteinSource?
     @State private var editing: ProteinEntry?
     @State private var scanning = false
+    /// "Add kcal", or a logged other food to change.
+    @State private var addingKcal = false
+    @State private var editingFood: ProteinEntry?
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     RecompWeightCard()
-                    RecompProteinCard(pick: { picked = $0 }, edit: { editing = $0 }, scan: { scanning = true })
+                    RecompProteinCard(pick: { picked = $0 },
+                                      edit: { e in if e.isOtherFood { editingFood = e } else { editing = e } },
+                                      scan: { scanning = true }, addKcal: { addingKcal = true })
                     RecompHabitsCard()
                     RecompCheckCard()
                     settingsLink
@@ -43,6 +48,14 @@ struct RecompSheet: View {
             .sheet(item: $editing) { e in editSheet(e) }
             .sheet(isPresented: $scanning) {
                 ScanSheet().presentationDetents([.large])
+            }
+            .sheet(isPresented: $addingKcal) {
+                KcalSheet(button: "Add") { name, kcal in store.addOtherFood(name: name, kcal: kcal) }
+            }
+            .sheet(item: $editingFood) { e in
+                KcalSheet(name: e.name == ProteinEntry.otherFood ? "" : e.name, kcal: e.amount, button: "Save") { name, kcal in
+                    store.updateOtherFood(e.id, name: name, kcal: kcal)
+                }
             }
         }
         .preferredColorScheme(.light)                   // ink on paper, the title too
@@ -63,7 +76,7 @@ struct RecompSheet: View {
             RecompSettingsView()
         } label: {
             HStack(spacing: 8) {
-                Text("Goal, sources and habits").font(BoardInk.sans(15, .medium))
+                Text("Goal, calories, sources and habits").font(BoardInk.sans(15, .medium))
                 Spacer(minLength: 8)
                 Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold))
             }
@@ -273,12 +286,13 @@ private struct RecompWeightCard: View {
 
 // MARK: - Protein
 
-/// What's left to eat, the bar, the sources to tap (and Scan), and what you've had today.
+/// What's left to eat, the bar, the sources to tap (and Scan), what you've had today, and the calories of it.
 private struct RecompProteinCard: View {
     @ObservedObject private var store = RecompStore.shared
     let pick: (ProteinSource) -> Void
     let edit: (ProteinEntry) -> Void
     let scan: () -> Void
+    let addKcal: () -> Void
 
     private static let rowHeight: CGFloat = 46
     private static let columns = [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)]
@@ -291,6 +305,7 @@ private struct RecompProteinCard: View {
             progress(todayTotal)
             sources
             if !entries.isEmpty { todayList(entries) }
+            kcalRow(entries.reduce(0.0) { $0 + $1.kcal })
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .paperCard()
@@ -349,6 +364,22 @@ private struct RecompProteinCard: View {
         }
     }
 
+    /// "≈ 1 650 of 2 450 kcal logged", quiet; only what's logged counts. At the limit it says so, no more.
+    private func kcalRow(_ total: Double) -> some View {
+        let limit = store.kcalLimit
+        return HStack(spacing: 8) {
+            Text(verbatim: KcalMath.cardLine(total: total, limit: limit))
+                .font(BoardInk.sans(13, .medium)).monospacedDigit().foregroundStyle(RecompStyle.quiet)
+                .lineLimit(2).minimumScaleFactor(0.8)
+                .contentTransition(.numericText(value: total))
+            Spacer(minLength: 8)
+            Button("Add kcal", action: addKcal)
+                .buttonStyle(RecompButtonStyle(filled: false))
+                .accessibilityHint("Food that isn't one of your sources")
+        }
+        .animation(.easeOut(duration: 0.25), value: total)
+    }
+
     private var scanTile: some View {
         HStack(spacing: 8) {
             Image(systemName: "barcode.viewfinder").font(.system(size: 20, weight: .semibold))
@@ -385,7 +416,7 @@ private struct RecompProteinCard: View {
                     .font(BoardInk.sans(15, .medium)).monospacedDigit().foregroundStyle(Paper.ink)
                     .lineLimit(1).minimumScaleFactor(0.8)
                 Spacer(minLength: 8)
-                Text(verbatim: RecompFormat.grams(e.grams))
+                Text(verbatim: e.isOtherFood ? "\(KcalMath.number(e.kcal)) kcal" : RecompFormat.grams(e.grams))
                     .font(BoardInk.sans(13, .medium)).monospacedDigit().foregroundStyle(RecompStyle.quiet)
             }
             .frame(maxWidth: .infinity, minHeight: Self.rowHeight, maxHeight: Self.rowHeight)
@@ -395,8 +426,9 @@ private struct RecompProteinCard: View {
         .overlay(alignment: .top) { Rectangle().fill(Paper.edge).frame(height: 1) }
     }
 
-    /// "¾ tub Kwark", and "3 eggs" rather than "3 eggs Eggs".
+    /// "¾ tub Kwark", and "3 eggs" rather than "3 eggs Eggs". Other food is just its name.
     private static func label(_ e: ProteinEntry) -> String {
+        if e.isOtherFood { return e.name.isEmpty ? ProteinEntry.otherFood : e.name }
         let amount = ProteinMath.amountLabel(e.amount, unit: e.unit, units: e.units)
         let name = e.name.lowercased()
         if name.isEmpty || name == e.unit.lowercased() || name == e.units.lowercased() { return amount }

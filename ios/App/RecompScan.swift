@@ -34,7 +34,7 @@ struct ScanSheet: View {
     }
 
     private enum Camera { case checking, ready, unavailable }
-    private enum Field: Hashable { case barcode, name, protein, count }
+    private enum Field: Hashable { case barcode, name, protein, kcal, count }
 
     /// A code just left with Back. The camera is usually still on it, so it's ignored for a moment.
     private struct LeftCode {
@@ -49,6 +49,8 @@ struct ScanSheet: View {
     @State private var typed = ""
     @State private var name = ""
     @State private var protein = ""
+    /// Calories per pack, from the label. Optional.
+    @State private var kcal = ""
     @State private var fraction: Double = 1
     /// Slices (or pieces, portions) for a product counted by portion.
     @State private var portions: Double = 1
@@ -57,9 +59,10 @@ struct ScanSheet: View {
     /// The "How many … are in the pack?" answer, and what they're called.
     @State private var count = ""
     @State private var portionPick = PortionName.choices[0]
-    /// A portion Open Food Facts knew for a pack it had no protein for: kept once the label is typed.
+    /// A portion (and calories) Open Food Facts knew for a pack it had no protein for: kept once the label is typed.
     @State private var pendingPortion: Portion?
-    /// For a product remembered before portions: Open Food Facts asked once more, quietly, for its serving.
+    @State private var pendingEnergy = Energy()
+    /// For a product remembered before 0.17.1: Open Food Facts asked once more, quietly, for its serving and kcal.
     @State private var refresh: Task<Void, Never>?
     @State private var attempt = 0
     @State private var lookup: Task<Void, Never>?
@@ -232,9 +235,13 @@ struct ScanSheet: View {
                     field("Protein per pack (from the label)", text: $protein, .protein, keyboard: .decimalPad,
                           prompt: "", unit: "g")
                 }
+                labelled("Calories per pack (optional)") {
+                    field("Calories per pack (optional)", text: $kcal, .kcal, keyboard: .numberPad,
+                          prompt: "", unit: "kcal")
+                }
                 Button("Save") { saveLabel(code) }
                     .buttonStyle(RecompButtonStyle(wide: true, height: 52))
-                    .disabled(RecompInput.protein(protein) == nil)
+                    .disabled(RecompInput.protein(protein) == nil || !Self.kcalOK(kcal))
                     .padding(.top, 4)
                 if offline {
                     Button("Try again") { lookUp(code) }
@@ -245,6 +252,11 @@ struct ScanSheet: View {
         }
         .scrollDismissesKeyboard(.interactively)
         .transition(.opacity)
+    }
+
+    /// Empty (it's optional), or 0…5000.
+    private static func kcalOK(_ text: String) -> Bool {
+        text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || RecompInput.kcal(text) != nil
     }
 
     /// The quiet line under the title: why there's a form at all.
@@ -567,7 +579,9 @@ struct ScanSheet: View {
         focus = nil
         name = ""
         protein = ""
+        kcal = ""
         pendingPortion = nil
+        pendingEnergy = Energy()
         if store.data.products[code] != nil {
             showAmount(code)
             refreshPortion(code)
@@ -576,24 +590,22 @@ struct ScanSheet: View {
         }
     }
 
-    /// A product remembered without a portion (scanned before 0.17.1, say): ask Open Food Facts again, quietly, and
-    /// count it by slice once it knows the serving. Offline or nothing new: it stays as it is.
+    /// A product remembered without a portion or calories (scanned before 0.17.1, say): ask Open Food Facts again,
+    /// quietly, and fill in what it knows now: count by slice once it knows the serving. Offline or nothing new: it
+    /// stays as it is; what's there (counted by hand, say) is never replaced.
     private func refreshPortion(_ code: String) {
         refresh?.cancel()
-        guard store.data.products[code]?.portion == nil else { return }
+        guard let p = store.data.products[code], p.portion == nil || p.packKcal == nil else { return }
         refresh = Task { @MainActor in
             let result = await OpenFoodFacts.lookup(code)
             guard !Task.isCancelled else { return }
-            let answer: Portion?
             switch result {
-            case .found(_, _, let p), .needsProtein(_, let p): answer = p
-            case .offline: answer = nil
-            }
-            // Counted by hand in the meantime, or not a part of the pack as remembered: leave it.
-            guard let found = answer, let now = store.data.products[code], now.portion == nil,
-                  found.isPart(of: now.proteinPerPack) else { return }
-            withAnimation(.easeOut(duration: 0.2)) {
-                store.rememberPortion(barcode: code, name: found.name, proteinPerPortion: found.protein)
+            case .found(_, _, let portion, let energy), .needsProtein(_, let portion, let energy):
+                withAnimation(.easeOut(duration: 0.2)) {
+                    store.fillIn(barcode: code, portion: portion, energy: energy)
+                }
+            case .offline:
+                break
             }
         }
     }
@@ -610,11 +622,14 @@ struct ScanSheet: View {
             // The sheet moved on (Back, another code, closed): this answer is for nobody.
             guard !Task.isCancelled, mine == attempt, step == .lookingUp(code) else { return }
             switch result {
-            case .found(let n, let g, let portion):
-                store.rememberProduct(barcode: code, name: n, proteinPerPack: g, portion: portion)
+            case .found(let n, let g, let portion, let energy):
+                store.rememberProduct(barcode: code, name: n, proteinPerPack: g, portion: portion,
+                                      kcalPerPack: energy.perPack, kcalPerPortion: energy.perPortion)
                 showAmount(code)
-            case .needsProtein(let n, let portion):
+            case .needsProtein(let n, let portion, let energy):
                 pendingPortion = portion
+                pendingEnergy = energy
+                if let k = energy.perPack { kcal = String(Int(k.rounded())) }
                 let known = !(n ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 askLabel(code, name: n, known ? .noProtein : .unknown)
             case .offline:
@@ -634,17 +649,21 @@ struct ScanSheet: View {
     private func correct(_ code: String, _ p: KnownProduct) {
         name = p.name
         protein = ""
+        kcal = ""                                   // left empty: the calories stay as they are
         pendingPortion = nil
+        pendingEnergy = Energy()
         askLabel(code, name: nil, .correcting)
     }
 
     private func saveLabel(_ code: String) {
-        guard let g = RecompInput.protein(protein) else { return }
+        guard let g = RecompInput.protein(protein), Self.kcalOK(kcal) else { return }
         let n = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let portion = pendingPortion.flatMap { $0.isPart(of: g) ? $0 : nil }
         store.rememberProduct(barcode: code, name: n.isEmpty ? OpenFoodFacts.fallbackName : n, proteinPerPack: g,
-                              portion: portion)
+                              portion: portion, kcalPerPack: RecompInput.kcal(kcal),
+                              kcalPerPortion: portion == nil ? nil : pendingEnergy.perPortion)
         pendingPortion = nil
+        pendingEnergy = Energy()
         focus = nil
         showAmount(code)
     }

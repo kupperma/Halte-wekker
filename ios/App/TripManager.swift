@@ -564,6 +564,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         let at = notification.date
         Task { @MainActor in NoticeLog.shared.add(key: id, title: title, body: body, kind: kind, at: at) }
         if id == "alarm" || id.hasPrefix("platform-") { done([]); return }
+        // the calorie limit: from the Recomp sheets, so a system banner, over them
+        if id.hasPrefix(RecompKcalNotice.idPrefix) { done([.banner, .list, .sound]); return }
         // in the app as a banner, with its sound; kept in the app's list instead of the notification centre
         Task { @MainActor in Notices.shared.show(title: title, body: body, kind: kind) }
         done([.sound])
