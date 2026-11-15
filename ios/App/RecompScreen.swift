@@ -42,8 +42,7 @@ struct RecompSheet: View {
             .sheet(item: $picked) { s in addSheet(s) }
             .sheet(item: $editing) { e in editSheet(e) }
             .sheet(isPresented: $scanning) {
-                // Task 7: ScanSheet
-                Text("Scanning comes next").presentationDetents([.large])
+                ScanSheet().presentationDetents([.large])
             }
         }
         .preferredColorScheme(.light)                   // ink on paper, the title too
