@@ -114,6 +114,9 @@ struct VehicleSegment {
     let departure: Date
     let arrival: Date
     let path: [CLLocationCoordinate2D]
+    var realTime = false                // its times are live (else timetable only)
+    var toLat: Double? = nil            // where the piece's next stop is
+    var toLon: Double? = nil
 
     /// Where the vehicle should be at `t`, by time along its path.
     func position(at t: Date) -> CLLocationCoordinate2D? {
@@ -594,7 +597,9 @@ enum Transit {
 
     /// Vehicles running near a point right now.
     /// `back`/`ahead`: the stretch of time (by their timetables) to look at, around now.
-    static func vehicles(near c: CLLocationCoordinate2D, radiusDeg: Double = 0.02, back: TimeInterval = 150, ahead: TimeInterval = 90) async -> [VehicleSegment] {
+    /// `allTrips`: a piece several trips share (coupled and through trains) gives one segment per trip, not just the first.
+    static func vehicles(near c: CLLocationCoordinate2D, radiusDeg: Double = 0.02, back: TimeInterval = 150, ahead: TimeInterval = 90,
+                         allTrips: Bool = false) async -> [VehicleSegment] {
         let now = Date()
         let q: [URLQueryItem] = [.init(name: "min", value: "\(c.latitude - radiusDeg),\(c.longitude - radiusDeg * 1.6)"),
                                  .init(name: "max", value: "\(c.latitude + radiusDeg),\(c.longitude + radiusDeg * 1.6)"),
@@ -602,13 +607,20 @@ enum Transit {
                                  .init(name: "endTime", value: iso.string(from: now.addingTimeInterval(ahead))),
                                  .init(name: "zoom", value: "15")]
         guard let list = try? await get("/v1/map/trips", q) as? [[String: Any]] else { return [] }
-        return list.compactMap { s in
-            guard let trips = s["trips"] as? [[String: Any]], let t = trips.first, let id = t["tripId"] as? String,
-                  let dep = date(s["departure"]), let arr = date(s["arrival"]), let poly = s["polyline"] as? String else { return nil }
+        return list.flatMap { s -> [VehicleSegment] in
+            guard let trips = s["trips"] as? [[String: Any]], let dep = date(s["departure"]), let arr = date(s["arrival"]),
+                  let poly = s["polyline"] as? String else { return [] }
             let mode = (s["mode"] as? String) ?? ""
-            return VehicleSegment(tripId: id, line: (t["routeShortName"] as? String) ?? "?", isTrain: !(mode.contains("BUS") || mode.contains("COACH")),
-                                  fromName: ((s["from"] as? [String: Any])?["name"] as? String) ?? "", toName: ((s["to"] as? [String: Any])?["name"] as? String) ?? "",
-                                  departure: dep, arrival: arr, path: decodePolyline(poly))
+            let from = s["from"] as? [String: Any], to = s["to"] as? [String: Any]
+            let path = decodePolyline(poly), live = (s["realTime"] as? Bool) ?? false
+            // the first trip only (a piece whose first trip has no id is left out, as before), or every trip on it
+            return (allTrips ? trips : Array(trips.prefix(1))).compactMap { t -> VehicleSegment? in
+                guard let id = t["tripId"] as? String else { return nil }
+                return VehicleSegment(tripId: id, line: (t["routeShortName"] as? String) ?? "?", isTrain: !(mode.contains("BUS") || mode.contains("COACH")),
+                                      fromName: (from?["name"] as? String) ?? "", toName: (to?["name"] as? String) ?? "",
+                                      departure: dep, arrival: arr, path: path,
+                                      realTime: live, toLat: to?["lat"] as? Double, toLon: to?["lon"] as? Double)
+            }
         }
     }
 
