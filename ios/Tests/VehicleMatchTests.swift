@@ -188,7 +188,7 @@ final class VehicleMatchTests: XCTestCase {
         XCTAssertNotEqual(Fx.why(j, "R"), .wrongWay)
         XCTAssertNotEqual(Fx.why(j, "R"), .drifting)
         XCTAssertEqual(try XCTUnwrap(Fx.ok(j, "R")), 0, accuracy: 1)
-        XCTAssertEqual(try XCTUnwrap(j.first?.evidence?.progress), 336, accuracy: 1)
+        XCTAssertEqual(try XCTUnwrap(j.first?.evidence?.progress), 288, accuracy: 1)    // from the 2nd fix's time to the 14th's
 
         // one fix, going out: the outgoing pass's direction, not the incoming one's
         let one = Fix(t: t0 + 10, p: Fx.east(2120, north: 50), accuracy: 20, speed: 12, course: 90)
@@ -214,12 +214,52 @@ final class VehicleMatchTests: XCTestCase {
         }
         let north: [Double] = [5, -8, 12, -3, 9, -12, 4, -6, 10, -9, 2, -5, 7, -10, 3]
         let back = jitter([12, -5, 20, -18, 8, -22, 15, 3, -10, 24, -15, 6, -20, 10, -13], north)   // 25 m back
-        let ahead = jitter([-22, 5, -10, 18, -25, 12, 0, -15, 20, -5, 25, -18, 8, -12, 23], north)  // 45 m ahead
+        let ahead = jitter([-22, -25, -20, 18, -5, 12, 0, -15, 20, -5, 25, -18, 23, 20, 25], north)  // 45 m ahead
         for (name, you) in [("back", back), ("ahead", ahead)] {
             let j = VehicleMatch.judgeAll(you, [rail, bus])
             XCTAssertNotNil(Fx.ok(j, "T"), "\(name): \(j)")
             XCTAssertEqual(VehicleMatch.rank(j, planned: nil).first?.id, "T", name)
         }
+    }
+
+    /// R-rel-14: 200 windows of standing in the station with the train, each fix up to 25 m off on each axis (30 m
+    /// accuracy, a fixed seed). The ends are the medians of 3 fixes, so jitter never reads as `standing`, and seldom as
+    /// going back: the rate is about 2.7 % of windows (single end fixes: 8 %), so this pins at most 10 of 200.
+    func test_jitterWindows() {
+        let rail = VehicleTrack(tripId: "T", line: "IC", isTrain: true, realTime: true, pieces: [
+            TimedPiece(departure: t0 - 320, arrival: t0 - 20, path: [Fx.east(0), Fx.east(3000)]),
+            TimedPiece(departure: t0 + 60, arrival: t0 + 450, path: [Fx.east(3000), Fx.east(6900)])])
+        var random = SplitMix(seed: 1)
+        var back = 0
+        for _ in 0..<200 {
+            let you = (0..<15).map { k -> Fix in
+                let dx = random.next() * 50 - 25, dy = random.next() * 50 - 25
+                return Fix(t: t0 + Double(k) * 2, p: Fx.east(3000 + dx, north: dy), accuracy: 30, speed: 0, course: -1)
+            }
+            switch Fx.why(VehicleMatch.judgeAll(you, [rail]), "T") {
+            case nil: break
+            case .wrongWay?: back += 1
+            case let other?: XCTFail("\(other)")
+            }
+        }
+        XCTAssertLessThanOrEqual(back, 10)
+    }
+
+    /// R-rel-13: across a 2 km gap between pieces that don't meet, its times run along the connector: the bus that
+    /// crosses it with you passes; one whose times cross it at half your speed doesn't.
+    func test_acrossAGap() {
+        func bus(_ id: String, speed: Double) -> VehicleTrack {
+            let reach = t0 - 500 / speed                 // at the gap's start (1000 m); 1500 m along at t0
+            return VehicleTrack(tripId: id, line: "306", isTrain: false, realTime: true, pieces: [
+                TimedPiece(departure: reach - 1000 / speed, arrival: reach, path: [Fx.east(0), Fx.east(500), Fx.east(1000)]),
+                TimedPiece(departure: reach + 2000 / speed, arrival: reach + 3000 / speed,
+                           path: [Fx.east(3000), Fx.east(3500), Fx.east(4000)])])
+        }
+        let you = Fx.fixes(from: 1500, speed: 12, count: 15)
+        let j = VehicleMatch.judgeAll(you, [bus("R", speed: 12), bus("S", speed: 6)])
+        XCTAssertEqual(try XCTUnwrap(Fx.ok(j, "R")), 0, accuracy: 1)
+        XCTAssertEqual(Fx.why(j, "S"), .drifting)
+        XCTAssertEqual(try XCTUnwrap(VehicleMatch.timePosition(bus("R", speed: 12), at: t0)), 1500, accuracy: 0.5)
     }
 
     /// R-rel-11: the straight line joining pieces that don't meet has no road shape: 150 m beside it is on its path,
@@ -329,5 +369,20 @@ final class VehicleMatchTests: XCTestCase {
         XCTAssertEqual(x?.realTime, true)
         XCTAssertEqual(tracks.first { $0.tripId == "y" }?.pieces, [early])
         XCTAssertEqual(tracks.first { $0.tripId == "y" }?.realTime, false)
+    }
+}
+
+/// A small deterministic random source (SplitMix64), so random-looking tests are the same on every run.
+private struct SplitMix {
+    var state: UInt64
+    init(seed: UInt64) { state = seed }
+    /// The next number in 0..<1.
+    mutating func next() -> Double {
+        state &+= 0x9E37_79B9_7F4A_7C15
+        var z = state
+        z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+        z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+        z ^= z >> 31
+        return Double(z >> 11) / Double(UInt64(1) << 53)
     }
 }

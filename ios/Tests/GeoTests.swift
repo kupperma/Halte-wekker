@@ -39,6 +39,10 @@ final class GeoTests: XCTestCase {
         XCTAssertEqual(back.projection.along, 1710, accuracy: 1)
         XCTAssertEqual(back.projection.bearing, 270, accuracy: 0.5)
         XCTAssertEqual(Geo.pass(p, on: path, near: nil, within: 20)?.projection.along ?? 0, 300, accuracy: 1)
+        // equally near `near`: the one nearest the previous fix's, else the first
+        XCTAssertEqual(try XCTUnwrap(Geo.pass(p, on: path, near: 1005, within: 20, previous: 1730)).projection.along, 1710, accuracy: 1)
+        XCTAssertEqual(try XCTUnwrap(Geo.pass(p, on: path, near: 1005, within: 20, previous: 280)).projection.along, 300, accuracy: 1)
+        XCTAssertEqual(try XCTUnwrap(Geo.pass(p, on: path, near: 1005, within: 20)).projection.along, 300, accuracy: 1)
         // a pass further than `within` beyond the nearest doesn't count
         let far = Fx.east(300, north: -30)
         XCTAssertEqual(try XCTUnwrap(Geo.pass(far, on: path, near: 1800, within: 5)).projection.along, 300, accuracy: 1)

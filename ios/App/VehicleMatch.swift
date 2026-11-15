@@ -62,11 +62,14 @@ struct Evidence: Equatable, Sendable {
     let span: TimeInterval
     let crossTrack: Double      // m off its path: the median of the last 3 fixes
     let accuracy: Double        // m, the median of the fixes'
-    let shaped: Bool            // its path has a road shape (some piece has more than 2 points)
-    let progress: Double        // m you went along its path
+    let shaped: Bool            // its path has a road shape where your last fixes are: some piece has more than 2
+                                // points, and none of the last 3 fixes is beside a straight connector between pieces
+                                // that don't meet
+    let progress: Double        // m you went along its path: from the first fixes to the last (the median of 3 at
+                                // each end once there are 6, so a stop's GPS jitter doesn't read as going back)
     let offset: Double          // m, your along-position minus its timetable along-position at the last fix
-    let drift: Double           // m/s, the change of the offset
-    let yourSpeed: Double       // m/s along its path
+    let drift: Double           // m/s, the change of the offset (between the same ends as `progress`)
+    let yourSpeed: Double       // m/s along its path (`progress` over the time between those ends)
     let itsSpeed: Double        // m/s by its times
     let steady: Bool            // your speed in both halves within 30 % of each other, both at least 3 m/s
 }
@@ -140,14 +143,16 @@ enum VehicleMatch {
         Joined(v.pieces).position(at: t)
     }
 
-    /// What the fixes of the last `window` seconds say about `v`, each compared with where its times put it at that
-    /// fix's own time. Nil when fewer than 2 fixes have a time position.
+    /// What the fixes of the last `window` seconds say about `v`, each put on the pass of its path nearest its times
+    /// and compared with where its times put it at that fix's own time. Nil when there is no evidence: no usable fix
+    /// (`judgeAll` says `tooFewFixes`), no fix with a time position on it (`noTimes`), or fewer than 2 usable fixes
+    /// (`tooFewFixes`).
     static func evidence(_ fixes: [Fix], _ v: VehicleTrack) -> Evidence? {
         try? gather(fixes, v).get()
     }
 
     /// The evidence, or why there is none: `noTimes` when none of the fixes has a time position on it, `tooFewFixes`
-    /// when fewer than 2 usable fixes are left.
+    /// when no fix is usable or fewer than 2 are.
     private static func gather(_ fixes: [Fix], _ v: VehicleTrack) -> Result<Evidence, Reject> {
         let good = fixes.filter {
             $0.accuracy.isFinite && $0.accuracy >= 0 && $0.accuracy <= maxAccuracy && $0.p.lat.isFinite && $0.p.lon.isFinite
@@ -160,24 +165,29 @@ enum VehicleMatch {
             let at = j.position(at: f.t)
             if at != nil { timed += 1 }
             // where its path passes you twice, the pass nearest its times (or, without, nearest your last fix)
-            guard let p = j.pass(f.p, near: at ?? previous, within: max(passSlack, f.accuracy)) else { continue }
+            guard let p = j.pass(f.p, near: at ?? previous, within: max(passSlack, f.accuracy), previous: previous) else { continue }
             previous = p.projection.along
             guard let at else { continue }
             rows.append((f.t, p.projection.along, p.projection.crossTrack, at, f.accuracy, p.connector))
         }
         guard timed > 0 else { return .failure(.noTimes) }
         guard rows.count >= 2, let first = rows.first, let last = rows.last else { return .failure(.tooFewFixes) }
-        let span = last.t.timeIntervalSince(first.t)
-        let progress = last.along - first.along
-        let offsetFirst = first.along - first.at, offset = last.along - last.at
-        let per: (Double) -> Double = { span > 0 ? $0 / span : 0 }
+        let span = last.t.timeIntervalSince(first.t), offset = last.along - last.at
+        // The ends you went from and to: the median of the first 3 and of the last 3 fixes (from their middle fixes'
+        // times) once there are 6, else the first and the last fix.
+        let ends = rows.count >= 6
+            ? (from: Array(rows.prefix(3)), to: Array(rows.suffix(3)), time: rows[rows.count - 2].t.timeIntervalSince(rows[1].t))
+            : (from: [first], to: [last], time: span)
+        let progress = median(ends.to.map { $0.along }) - median(ends.from.map { $0.along })
+        let drift = median(ends.to.map { $0.along - $0.at }) - median(ends.from.map { $0.along - $0.at })
+        let per: (Double, TimeInterval) -> Double = { x, t in t > 0 ? x / t : 0 }
         let recent = rows.suffix(3)
         let e = Evidence(fixes: rows.count, span: span,
                          crossTrack: median(recent.map { $0.cross }), accuracy: median(rows.map { $0.accuracy }),
                          // a straight line it adds between pieces that don't meet has no road shape either
                          shaped: v.pieces.contains { $0.path.count > 2 } && !recent.contains { $0.connector },
-                         progress: progress, offset: offset, drift: per(offset - offsetFirst),
-                         yourSpeed: per(abs(progress)), itsSpeed: per(last.at - first.at),
+                         progress: progress, offset: offset, drift: per(drift, ends.time),
+                         yourSpeed: per(abs(progress), ends.time), itsSpeed: per(last.at - first.at, span),
                          steady: steady(rows.map { ($0.t, $0.along) }))
         let numbers = [e.span, e.crossTrack, e.accuracy, e.progress, e.offset, e.drift, e.yourSpeed, e.itsSpeed]
         return numbers.allSatisfy(\.isFinite) ? .success(e) : .failure(.noTimes)
@@ -199,9 +209,9 @@ enum VehicleMatch {
         if !isTrain, !(e.yourSpeed <= busMax) { return .failure(.implausibleSpeed) }
         if byTimes, e.steady, e.itsSpeed >= costSpeedMin, e.yourSpeed < e.itsSpeed / speedRatio { return .failure(.implausibleSpeed) }
         if byTimes {
-            // 5. not standing while you go (once you moved further than GPS jitter can take you)
-            let moved = abs(e.progress)
-            if moved >= max(standingMin, standingAccuracy * e.accuracy), e.itsSpeed * e.span < standingShare * moved {
+            // 5. not standing while you go (once you moved further than GPS jitter can take you): by its times it went
+            //    at least a fifth as far as you, in the same time
+            if abs(e.progress) >= max(standingMin, standingAccuracy * e.accuracy), e.itsSpeed < standingShare * e.yourSpeed {
                 return .failure(.standing)
             }
             // 6. moves with you
@@ -376,13 +386,15 @@ enum VehicleMatch {
         }
 
         /// Where its path passes `p` (see `Geo.pass`), and whether that is on a connector.
-        func pass(_ p: GeoPoint, near: Double?, within: Double) -> (projection: Geo.Projection, connector: Bool)? {
-            guard let found = Geo.pass(p, on: path, near: near, within: within) else { return nil }
+        func pass(_ p: GeoPoint, near: Double?, within: Double, previous: Double? = nil) -> (projection: Geo.Projection, connector: Bool)? {
+            guard let found = Geo.pass(p, on: path, near: near, within: within, previous: previous) else { return nil }
             return (found.projection, connectors.contains(found.segment))
         }
 
         /// Metres along the joined path where its times put it at `t`.
-        /// - Inside a piece, by time (a piece that takes no time: at its end). Between pieces: at the start of the next.
+        /// - Inside a piece, by time (a piece that takes no time: at its end).
+        /// - Between pieces, by time along the connector from the earlier one's end (at its arrival) to the next one's
+        ///   start (at its departure). Pieces that meet have a connector of 0 m: it waits at the stop.
         /// - Up to `slack` before the first or after the last: at that end. Otherwise nil.
         func position(at t: Date) -> Double? {
             guard !pieces.isEmpty else { return nil }
@@ -392,8 +404,11 @@ enum VehicleMatch {
                 return starts[k] + lengths[k] * min(1, max(0, t.timeIntervalSince(p.departure) / d))
             }
             if let k = pieces.firstIndex(where: { $0.departure > t }) {
-                if k > 0 { return starts[k] }
-                return t >= pieces[0].departure.addingTimeInterval(-VehicleMatch.slack) ? starts[0] : nil
+                guard k > 0 else { return t >= pieces[0].departure.addingTimeInterval(-VehicleMatch.slack) ? starts[0] : nil }
+                let from = starts[k - 1] + lengths[k - 1], to = starts[k]
+                let a = pieces[k - 1].arrival, d = pieces[k].departure.timeIntervalSince(a)
+                guard d > 0 else { return to }
+                return from + (to - from) * min(1, max(0, t.timeIntervalSince(a) / d))
             }
             let k = pieces.count - 1
             return t <= pieces[k].arrival.addingTimeInterval(VehicleMatch.slack) ? starts[k] + lengths[k] : nil

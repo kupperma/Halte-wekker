@@ -56,16 +56,21 @@ enum Geo {
     }
 
     /// Where `path` passes `p`: when it passes more than once within `within` metres of the nearest pass (a road it
-    /// comes in and goes out by, a there-and-back detour), the pass whose along-position is closest to `near`. Without
-    /// `near`, the nearest. Nil for fewer than 2 points or a path of length 0.
-    static func pass(_ p: GeoPoint, on path: [GeoPoint], near: Double?, within: Double) -> Pass? {
+    /// comes in and goes out by, a there-and-back detour), the pass whose along-position is closest to `near`; of
+    /// passes equally close to it (within a metre), the one closest to `previous` (the last fix's), then the nearest,
+    /// then the first. Without `near`, the nearest. Nil for fewer than 2 points or a path of length 0.
+    static func pass(_ p: GeoPoint, on path: [GeoPoint], near: Double?, within: Double, previous: Double? = nil) -> Pass? {
         let all = passes(p, on: path)
         guard let nearest = all.map({ $0.projection.crossTrack }).min() else { return nil }
         let close = all.filter { $0.projection.crossTrack <= nearest + max(0, within) }
         guard let near, near.isFinite else { return close.first { $0.projection.crossTrack == nearest } }
-        return close.min { a, b in
-            let da = abs(a.projection.along - near), db = abs(b.projection.along - near)
-            return da != db ? da < db : a.projection.crossTrack < b.projection.crossTrack
+        let off = close.map { abs($0.projection.along - near) }
+        guard let best = off.min() else { return nil }
+        let tied = zip(close, off).filter { $0.1 <= best + 1 }.map { $0.0 }
+        let byPrevious: (Pass) -> Double = { pass in previous.map { abs(pass.projection.along - $0) } ?? 0 }
+        return tied.min { a, b in
+            let pa = byPrevious(a), pb = byPrevious(b)
+            return pa != pb ? pa < pb : a.projection.crossTrack < b.projection.crossTrack
         }
     }
 
