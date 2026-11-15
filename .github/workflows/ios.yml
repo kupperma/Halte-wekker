@@ -82,3 +82,13 @@ jobs:
         run: |
           gh release delete latest-ios -y --cleanup-tag 2>/dev/null || true
           gh release create latest-ios Haltewekker.ipa --title "iPhone app (latest)" --notes "Install with Sideloadly. Built from ${GITHUB_SHA}." --prerelease
+      - name: Publish versioned release (kept, to fall back to)
+        if: success() && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        working-directory: ios
+        run: |
+          V=$(sed -n -E 's/^[[:space:]]*MARKETING_VERSION:[[:space:]]*"?([0-9A-Za-z.]+)"?.*$/\1/p' project.yml | head -1)
+          test -n "$V"
+          echo "Version: $V"
+          gh release view "ios-v$V" >/dev/null 2>&1 || gh release create "ios-v$V" Haltewekker.ipa --target "${GITHUB_SHA}" --title "iPhone app $V" --notes "Install with Sideloadly. Built from ${GITHUB_SHA}." --prerelease

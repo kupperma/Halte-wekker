@@ -122,6 +122,7 @@ struct HomeView: View {
     @State private var showMoving = false                  // everything moving near you, on a map
     @State private var showSteady = false                  // how steady the lines are right now
     @State private var showOutfit = false                  // what to wear today
+    @State private var showRecomp = false                  // protein, habits and the weekly weight
     @State private var showDemo = false                    // try it at home
     @State private var showNotices = false                 // the notifications you had, and what's watched
     @State private var planByArrival = true                // the plan sheet opens on "be there by"
@@ -165,6 +166,7 @@ struct HomeView: View {
         .sheet(isPresented: $showMoving) { LiveAllSheet(center: near.position?.coordinate ?? Place.breda.coordinate).presentationDetents([.large]) }
         .sheet(isPresented: $showSteady) { SteadySheet().presentationDetents([.large]) }
         .sheet(isPresented: $showOutfit) { OutfitSheet().presentationDetents([.large]) }
+        .sheet(isPresented: $showRecomp) { RecompSheet().presentationDetents([.large]) }
         .sheet(isPresented: $choosingDestination) {
             DestinationSheet { d in
                 live.go(to: d)
@@ -179,12 +181,13 @@ struct HomeView: View {
         }
         .sheet(isPresented: $showDemo) { DemoSheet().presentationDetents([.large]) }
         .sheet(isPresented: $showNotices) { NotificationsSheet().presentationDetents([.medium, .large]) }
-        // on the map: the bell and what to wear, top left, clear of the map's own buttons
+        // on the map: the bell, what to wear and today's protein, top left, clear of the map's own buttons
         .overlay(alignment: .topLeading) {
             if stage == .map {
                 HStack(spacing: 8) {
                     NoticeBell { showNotices = true }
                     OutfitTag { showOutfit = true }
+                    RecompTag { showRecomp = true }
                 }
                 .padding(.leading, 18).padding(.top, 4).transition(.opacity)
             }
@@ -976,6 +979,7 @@ struct HomeView: View {
             .brass(pal, pad: 14)
         }
         .buttonStyle(.plain)
+        RecompCard(pal: pal) { showRecomp = true }
         Button { showSteady = true } label: {
             HStack(spacing: 10) {
                 Coin(grade: Steady.rank(line: "306", train: false), size: 32)
@@ -1596,6 +1600,7 @@ struct RideView: View {
         .frame(maxWidth: .infinity)
         Spacer(minLength: 6)
         rideStats(eta: eta).padding(.horizontal, 14)
+        RecompRideLine()
         if !trip.stopMarks.isEmpty || trip.legTo != nil { stopChips.padding(.horizontal, 14).padding(.top, 10) }
         if trip.phase == .awake {
             Text(trip.ringAtStop ? "You’re awake. A chime when you’re there." : "You’re awake. Get your things ready.")
