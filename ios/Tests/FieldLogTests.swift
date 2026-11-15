@@ -91,8 +91,8 @@ final class FieldLogTests: XCTestCase {
     func test_export() {
         let log = FieldLog(defaults: suite())
         // 07:12:03 UTC
-        let day: Double = 1_800_000_000 - 1_800_000_000 % 86_400
-        let at = Date(timeIntervalSince1970: day + 25_923)      // 7 h 12 min 3 s
+        let day: Int = 1_800_000_000 - 1_800_000_000 % 86_400
+        let at = Date(timeIntervalSince1970: TimeInterval(day + 25_923))      // 7 h 12 min 3 s
         log.add(.net, "x", at: at)
         XCTAssertEqual(log.export(timeZone: TimeZone(identifier: "Europe/Amsterdam")!), "08:12:03 net x")
     }
