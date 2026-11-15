@@ -154,6 +154,11 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     var here: CLLocationCoordinate2D? { location.location?.coordinate }
     /// Your last GPS fix.
     var lastFix: CLLocation? { samples.last ?? location.location }
+    /// Your fixes of the last 2 minutes with a known accuracy under 150 m, each at its own time, for the matcher.
+    var recentFixes: [Fix] {
+        let since = Date().addingTimeInterval(-120)
+        return samples.filter { $0.timestamp > since && $0.horizontalAccuracy >= 0 && $0.horizontalAccuracy < 150 }.map { Fix($0) }
+    }
 
     /// Moving like a bus or train in the last three minutes (by the GPS's speed, or between two fixes): standing at a
     /// stop on board still counts.
@@ -899,6 +904,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         offRoad = 0
         if let found = await findBusYoureOn(not: v, at: last, limit: limit), vehicle == v {
             await switchVehicle(from: v, to: found.vehicle, stops: found.stops)
+            // others fit about as well (lines that share the road out of a bus station): they stay in the running
+            if !found.others.isEmpty { beginChoosing([found.vehicle] + found.others) }
         } else {
             sameCheckAt = Date().addingTimeInterval(120)      // a detour, or no better one: look again in a while
         }
@@ -979,7 +986,10 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     /// The one you're on, when it's not the one it thought: first the one planned for this leg and the others it was
     /// choosing between when you got on, then every one whose timetable follows you. It has to run on the road you're
     /// on, and be about where its times say (it may be running late).
-    private func findBusYoureOn(not v: Vehicle, at here: CLLocation, limit: Double) async -> (vehicle: Vehicle, stops: [TripStop])? {
+    /// `others`: the ones that fit about as well as it, to keep choosing between (classic matching: none, and the first
+    /// that fits is the one).
+    private func findBusYoureOn(not v: Vehicle, at here: CLLocation, limit: Double) async -> (vehicle: Vehicle, stops: [TripStop], others: [Vehicle])? {
+        if !MatchSettings.classic() { return await findByJudging(not: v) }
         let mode = leg?.mode
         var ids: [(id: String, line: String, train: Bool)] = []
         if let p = route?.planned?[safe: index] { ids.append((p.tripId, p.line, p.isTrain)) }
@@ -997,9 +1007,62 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             guard here.distance(from: CLLocation(latitude: at.latitude, longitude: at.longitude)) < (c.train ? 6000 : 3000) else { continue }
             let line = t.line.isEmpty ? c.line : (c.train ? Transit.trainLabel(t.line) : t.line)
             let stops = await Transit.tripStops(c.id)
-            return (Vehicle(tripId: c.id, line: line, isTrain: c.train), stops)
+            return (Vehicle(tripId: c.id, line: line, isTrain: c.train), stops, [])
         }
         return nil
+    }
+
+    /// `findBusYoureOn` with the matcher: every candidate is judged on your fixes (a timetable-only one by its road and
+    /// your speed, not by its times), and the best is the one only when it's clearly the best; else it and the ones
+    /// close to it stay in the running. On a trip from Fastest trip, when your speed doesn't fit the one it has (or you
+    /// don't move with it), the other kind counts too: a train where it planned a bus.
+    private func findByJudging(not v: Vehicle) async -> (vehicle: Vehicle, stops: [TripStop], others: [Vehicle])? {
+        let mode = leg?.mode
+        var anyKind = false
+        if route?.isFixed == false, let road = roadOf, road.tripId == v.tripId,
+           let mine = VehicleTrack(tripId: v.tripId, line: v.line, isTrain: v.isTrain, trip: road.trip),
+           case .failure(let why)? = VehicleMatch.judgeAll(recentFixes, [mine], strictTimes: false).first?.result {
+            anyKind = VehicleMatch.otherKindPossible(why)
+        }
+        var ids: [(id: String, line: String, train: Bool)] = []
+        let planned = route?.planned?[safe: index]
+        if let p = planned { ids.append((p.tripId, p.line, p.isTrain)) }
+        ids += boardAlternatives.map { ($0.first.tripId, $0.first.line, $0.first.isTrain) }
+        ids += await matchVehicles(mode: anyKind ? nil : mode, excluding: [v.tripId]).map { ($0.vehicle.tripId, $0.vehicle.line, $0.vehicle.isTrain) }
+        // each once (not the one it has), of this leg's kind unless it may be the other, at most 8
+        var seen: Set<String> = [v.tripId]
+        let picked = Array(ids.filter { c in
+            guard seen.insert(c.id).inserted else { return false }
+            return anyKind || (mode.map { ($0 == .train) == c.train } ?? true)
+        }.prefix(8))
+        let jobs: [@Sendable () async -> LiveTrip?] = picked.map { $0.id }.map { id in
+            { @Sendable in await Transit.liveTrip(id) }
+        }
+        let trips = await Progressive.all(jobs)
+        var tracks: [VehicleTrack] = []
+        var found: [String: Vehicle] = [:]
+        for (c, t) in zip(picked, trips) {
+            guard let t else { continue }
+            let line = t.line.isEmpty ? c.line : (c.train ? Transit.trainLabel(t.line) : t.line)
+            guard let track = VehicleTrack(tripId: c.id, line: line, isTrain: c.train, trip: t) else { continue }
+            tracks.append(track)
+            found[c.id] = Vehicle(tripId: c.id, line: line, isTrain: c.train)
+        }
+        let judged = VehicleMatch.judgeAll(recentFixes, tracks, strictTimes: false)
+        let ranked = VehicleMatch.rank(judged, planned: planned?.tripId)
+        var state = SwitchState()
+        let live = Set(tracks.filter(\.realTime).map(\.tripId))
+        let d = VehicleMatch.decide(shown: nil, ranked: ranked, liveIds: live, state: &state, now: Date())
+        FieldLog.shared.add(.match, FieldFormat.match("find", judged, outcome: FieldFormat.outcome(d, lines: found.mapValues(\.line))))
+        let chosen: [String]
+        switch d {
+        case .switchTo(let id): chosen = [id]
+        case .undecided(let xs): chosen = xs
+        case .keep, .none: return nil
+        }
+        guard let first = chosen.first, let x = found[first] else { return nil }
+        let stops = await Transit.tripStops(first)
+        return (x, stops, chosen.dropFirst().compactMap { found[$0] })
     }
 
     /// Switch to the bus you're really on, and tell you.

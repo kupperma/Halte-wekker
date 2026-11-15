@@ -220,8 +220,15 @@ final class LiveStore: ObservableObject {
     /// The buses and trains whose road you're on and that go your way, nearest to their own times first. Found by the
     /// road, not by where their times put them: one running a few minutes late or early (twelve at most) is kilometres
     /// from its timetable position, but it's on this road, going this way, about now.
+    /// Its lateness is reckoned at the fix's own time (the fix can be seconds old), and every trip on a piece that
+    /// several share counts (classic matching: reckoned at now, and the first trip only).
     static func vehiclesByRoad(_ f: CLLocation) async -> [(tripId: String, line: String, isTrain: Bool, late: TimeInterval)] {
         guard f.course >= 0, f.speed >= 3 else { return [] }
+        if !MatchSettings.classic() {
+            let segs = await Transit.vehicles(near: f.coordinate, radiusDeg: 0.012, back: 12 * 60, ahead: 12 * 60, allTrips: true)
+            return VehicleMatch.byRoad(Fix(f), segs.map { MapPiece($0) })
+                .map { (tripId: $0.tripId, line: $0.line, isTrain: $0.isTrain, late: $0.late) }
+        }
         let segs = await Transit.vehicles(near: f.coordinate, radiusDeg: 0.012, back: 12 * 60, ahead: 12 * 60)
         let now = Date()
         var best: [String: (line: String, isTrain: Bool, late: TimeInterval)] = [:]

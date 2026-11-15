@@ -396,6 +396,51 @@ final class VehicleMatchTests: XCTestCase {
         XCTAssertEqual(tracks.first { $0.tripId == "y" }?.pieces, [early])
         XCTAssertEqual(tracks.first { $0.tripId == "y" }?.realTime, false)
     }
+
+    // MARK: - By the road you're on
+
+    /// A track's pieces as the live map gives them.
+    private func pieces(_ v: VehicleTrack) -> [MapPiece] {
+        v.pieces.map { MapPiece(tripId: v.tripId, line: v.line, isTrain: v.isTrain, realTime: v.realTime, piece: $0) }
+    }
+
+    /// S7: how late it is, is against the fix's own time (20 s ago), not now.
+    func test_byRoadUsesFixTime() throws {
+        let fix = Fix(t: t0 - 20, p: Fx.east(2000), accuracy: 20, speed: 30, course: 90)
+        let train = Fx.track("T", path: Fx.railway, at: 2000, speed: 30, start: t0 - 20)
+        let hits = VehicleMatch.byRoad(fix, pieces(train))
+        XCTAssertEqual(hits.count, 1)
+        XCTAssertEqual(hits.first?.tripId, "T")
+        XCTAssertEqual(try XCTUnwrap(hits.first?.late), 0, accuracy: 2)
+    }
+
+    func test_byRoadSkipsOtherWay() {
+        let fix = Fix(t: t0 - 20, p: Fx.east(2000), accuracy: 20, speed: 30, course: 90)
+        let back = Fx.track("T", path: Fx.railway.reversed(), at: Geo.length(Fx.railway) - 2000, speed: 30, start: t0 - 20)
+        XCTAssertEqual(VehicleMatch.byRoad(fix, pieces(back)), [])
+    }
+
+    /// Per trip the least late of its pieces; more than 12 minutes off its times doesn't count; least late first.
+    func test_byRoadLeastLateFirst() {
+        let fix = Fix(t: t0, p: Fx.east(2000), accuracy: 20, speed: 30, course: 90)
+        let late = Fx.track("L", path: Fx.railway, at: 2000, speed: 30, start: t0 - 120)                 // here 2 min ago
+        let later = Fx.track("L", path: Fx.railway, at: 2000, speed: 30, start: t0 - 300)                // the same trip, 5 min
+        let early = Fx.track("E", line: "SPR", path: Fx.railway, at: 2000, speed: 30, start: t0 + 30)    // here in half a minute
+        let gone = Fx.track("G", path: Fx.railway, at: 2000, speed: 30, start: t0 - 800)
+        let hits = VehicleMatch.byRoad(fix, pieces(later) + pieces(late) + pieces(early) + pieces(gone))
+        XCTAssertEqual(hits.map(\.tripId), ["E", "L"])
+        guard hits.count == 2 else { return }
+        XCTAssertEqual(hits[0].late, -30, accuracy: 2)
+        XCTAssertEqual(hits[0].line, "SPR")
+        XCTAssertEqual(hits[1].late, 120, accuracy: 2)
+    }
+
+    func test_otherKindPossible() {
+        XCTAssertTrue(VehicleMatch.otherKindPossible(.implausibleSpeed))
+        XCTAssertTrue(VehicleMatch.otherKindPossible(.drifting))
+        XCTAssertFalse(VehicleMatch.otherKindPossible(.offItsPath))
+        XCTAssertFalse(VehicleMatch.otherKindPossible(nil))
+    }
 }
 
 /// A small deterministic random source (SplitMix64), so random-looking tests are the same on every run.

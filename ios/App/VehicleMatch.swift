@@ -105,6 +105,14 @@ enum Decision: Equatable, Sendable {
     case keep(String), switchTo(String), undecided([String]), none
 }
 
+/// A bus or train found by the road you're on: how late it is there by its own times (negative: early).
+struct RoadHit: Equatable, Sendable {
+    let tripId: String
+    let line: String
+    let isTrain: Bool
+    let late: TimeInterval
+}
+
 /// Which bus or train you're on: the one that moves with you (on its path, going its way, at a possible speed, keeping
 /// pace with its own times), compared in seconds off its times. Every number here is a starting value, to be tuned from
 /// the field log.
@@ -428,6 +436,47 @@ enum VehicleMatch {
             let b = position(at: t.addingTimeInterval(15)).map { ($0, 15.0) } ?? position(at: t).map { ($0, 0.0) }
             guard let a, let b, b.1 > a.1 else { return 0 }
             return (b.0 - a.0) / (b.1 - a.1)
+        }
+    }
+}
+
+extension VehicleMatch {
+    /// The buses and trains whose road you're on and that go your way, found by the road, not by where their times put
+    /// them: one running a few minutes late or early is kilometres from its timetable position, but it's on this road,
+    /// going this way, about now. A piece counts where its road passes within `maxMetres` of you and runs within
+    /// `maxTurn` degrees of your GPS course; `late` is the fix's own time minus when the piece's times have it at that
+    /// spot, and only |late| < `maxLate` counts. Per trip the least late (of its pieces, and of the places a piece passes
+    /// you); least late first, ties by id. Nothing without a GPS course.
+    static func byRoad(_ f: Fix, _ pieces: [MapPiece], maxMetres: Double = 100, maxTurn: Double = 60,
+                       maxLate: TimeInterval = 720) -> [RoadHit] {
+        guard f.course.isFinite, f.course >= 0 else { return [] }
+        var best: [String: RoadHit] = [:]
+        for m in pieces {
+            let span = m.piece.arrival.timeIntervalSince(m.piece.departure)
+            for pass in Geo.passes(f.p, on: m.piece.path) where pass.projection.crossTrack <= maxMetres {
+                let p = pass.projection
+                var turn = abs(p.bearing - f.course).truncatingRemainder(dividingBy: 360)
+                if turn > 180 { turn = 360 - turn }
+                guard turn <= maxTurn else { continue }
+                // when its times have it here, and how far off that is from the fix's own time
+                let late = f.t.timeIntervalSince(m.piece.departure) - p.fraction * span
+                guard late.isFinite, abs(late) < maxLate else { continue }
+                if best[m.tripId].map({ abs(late) < abs($0.late) }) ?? true {
+                    best[m.tripId] = RoadHit(tripId: m.tripId, line: m.line, isTrain: m.isTrain, late: late)
+                }
+            }
+        }
+        return best.values.sorted { a, b in
+            abs(a.late) != abs(b.late) ? abs(a.late) < abs(b.late) : a.tripId < b.tripId
+        }
+    }
+
+    /// The one it has fails in a way the other kind could explain (a train where it planned a bus): your speed doesn't fit
+    /// it, or you don't move with it.
+    static func otherKindPossible(_ r: Reject?) -> Bool {
+        switch r {
+        case .implausibleSpeed?, .drifting?: return true
+        default: return false
         }
     }
 }
