@@ -443,7 +443,7 @@ enum Transit {
     /// wanders inside). Remembered for ten minutes per spot.
     static func stationAt(_ c: CLLocationCoordinate2D) async -> NearStop? {
         let key = "\(Int((c.latitude * 500).rounded())),\(Int((c.longitude * 300).rounded()))"         // about 200 m
-        return await stations.get(key) {
+        return await stations.get(key, group: urgent ? 1 : 0) {
             await nearStopsAnswer(c).map { StationAnswer(stop: $0.first { $0.rail && $0.meters < 350 }) }
         }?.stop
     }
@@ -451,7 +451,7 @@ enum Transit {
     struct StationAnswer: Sendable { let stop: NearStop? }
     static let stations = Memo<String, StationAnswer>(ttl: 600)
     /// The raw /v5/trip answers, for 20 seconds: the live map, the stop list and the alarm ask for the same trip.
-    static let tripAnswers = Memo<String, Data>(ttl: 20)
+    static let tripAnswers = Memo<String, Data>(ttl: 20, limit: 50)
 
     /// A stop near you: a bus stop, or a train station (by the station, not one platform).
     struct NearStop: Identifiable, Hashable {
@@ -597,9 +597,19 @@ enum Transit {
         }
     }
 
+    /// One /v5/trip answer, shared and remembered; only a body that is a trip (has `legs`) counts, so an error page is
+    /// never stored and never replaces a good copy.
+    private static func tripAnswer(_ tripId: String) async -> Data? {
+        await tripAnswers.get(tripId, group: urgent ? 1 : 0) {
+            guard let d = try? await raw("/v5/trip", [.init(name: "tripId", value: tripId)]),
+                  let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any], j["legs"] is [Any] else { return nil }
+            return d
+        }
+    }
+
     /// Every stop of one trip with its live arrival.
     static func tripStops(_ tripId: String) async -> [TripStop] {
-        guard let data = await tripAnswers.get(tripId, fetch: { try? await raw("/v5/trip", [.init(name: "tripId", value: tripId)]) }),
+        guard let data = await tripAnswer(tripId),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let legs = json["legs"] as? [[String: Any]] else { return [] }
         var out: [TripStop] = []
@@ -618,17 +628,19 @@ enum Transit {
     /// A bus or train's whole trip with its live times and the road it takes, for the live map.
     static func liveTrip(_ tripId: String) async -> LiveTrip? {
         if Demo.isDemo(tripId) { return await Demo.liveTrip(tripId) }
-        guard let data = await tripAnswers.get(tripId, fetch: { try? await raw("/v5/trip", [.init(name: "tripId", value: tripId)]) }),
+        guard let data = await tripAnswer(tripId),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
         return parseLiveTrip(json)
     }
 
     /// The last answer for a trip, however old, without asking again.
-    static func cachedLiveTrip(_ tripId: String) async -> LiveTrip? {
-        if Demo.isDemo(tripId) { return await Demo.liveTrip(tripId) }
-        guard let data = await tripAnswers.peek(tripId),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
-        return parseLiveTrip(json)
+    /// With the time it was asked, so the screen never shows it as fresh.
+    static func cachedLiveTrip(_ tripId: String) async -> (trip: LiveTrip, at: Date)? {
+        if Demo.isDemo(tripId) { return await Demo.liveTrip(tripId).map { ($0, Date()) } }
+        guard let hit = await tripAnswers.peekDated(tripId),
+              let json = try? JSONSerialization.jsonObject(with: hit.value) as? [String: Any],
+              let t = parseLiveTrip(json) else { return nil }
+        return (t, hit.at)
     }
 
     private static func parseLiveTrip(_ json: [String: Any]) -> LiveTrip? {

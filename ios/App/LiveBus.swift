@@ -102,6 +102,7 @@ struct LiveBusSheet: View {
     @State private var mine: Int?
     @State private var failed = false
     @State private var updated: Date?
+    @State private var refreshFailed = false
     @State private var camera: MapCameraPosition = .automatic
     @State private var follow = false
 
@@ -174,6 +175,9 @@ struct LiveBusSheet: View {
                 }
                 Text(trip.live ? "Live times\(updated.map { ", updated \(Fmt.hhmm($0))" } ?? ""). Its position is worked out from them." : "No live times for this one: its position follows the timetable.")
                     .font(BoardInk.sans(10, .regular)).foregroundStyle(Paper.ink.opacity(0.65))
+                if refreshFailed {
+                    Text("Couldn’t update just now.").font(BoardInk.sans(10, .regular)).foregroundStyle(Paper.ink.opacity(0.85))
+                }
                 HStack(spacing: 8) {
                     Button { follow.toggle(); if !follow { fit(trip, now) } } label: {
                         Label(follow ? "Following it" : "Follow it", systemImage: follow ? "location.fill" : "location")
@@ -230,18 +234,18 @@ struct LiveBusSheet: View {
 
     private func run() async {
         var last = Date.distantPast
-        if trip == nil, let t = await Transit.cachedLiveTrip(target.tripId) {
-            trip = t; mine = findMine(t); fit(t, Date())
+        if trip == nil, let c = await Transit.cachedLiveTrip(target.tripId) {
+            trip = c.trip; updated = c.at; mine = findMine(c.trip); fit(c.trip, Date())
         }
         while !Task.isCancelled {
             if Date().timeIntervalSince(last) >= 30 {
                 last = Date()
                 if let t = await Transit.liveTrip(target.tripId) {
                     let first = trip == nil
-                    trip = t; updated = Date(); failed = false
+                    trip = t; updated = Date(); failed = false; refreshFailed = false
                     if mine == nil { mine = findMine(t) }
                     if first { fit(t, Date()) }
-                } else if trip == nil { failed = true }
+                } else if trip == nil { failed = true } else { refreshFailed = true }
             }
             if follow, let t = trip {
                 withAnimation(.linear(duration: 1)) {
