@@ -196,36 +196,57 @@ struct HomeView: View {
         .sheet(isPresented: $liveSettings, onDismiss: { Task { await live.refresh(trip.direction, force: true) } }) { LiveSettingsSheet() }
         .sheet(item: $startReq) { r in StartSheet(req: r).presentationDetents([.medium, .large]) }
         .sheet(item: $stopEdit) { r in StopSheet(req: r) }
+        // Every 30 s while the app is in front: one loop per refresher, so a slow one never holds up the others.
         .task(id: trip.direction) {
-            while !Task.isCancelled {
-                if scene == .active {
-                    Watchdog.shared.mark("finding where you are")
-                    near.locate(ask: true)                       // where you are decides where your trips start
-                    updateOutfit()                               // the weather for it, alongside the rest
-                    Task { await OutfitStore.shared.refresh() }
-                    Watchdog.shared.mark("loading the live times")
-                    await live.refresh(trip.direction, at: near.position)
-                    Watchdog.shared.mark("planning your planned trips")
-                    await planner.refresh()
-                    Watchdog.shared.mark("planning the school alarms")
-                    await SchoolAlarm.shared.refresh()
-                    Watchdog.shared.mark("checking watched trains")
-                    await watch.check()
-                    Watchdog.shared.mark("getting the weather")
-                    updateOutfit()
-                    await OutfitStore.shared.refresh()
-                    autoGo()
-                    Watchdog.shared.mark("showing the home screen")
-                }
-                try? await Task.sleep(nanoseconds: 30_000_000_000)
+            await everyHalfMinute {
+                Watchdog.shared.mark("finding where you are")
+                near.locate(ask: true)                           // where you are decides where your trips start
+                Watchdog.shared.mark("loading the live times")
+                await live.refresh(trip.direction, at: near.position)
+                Watchdog.shared.mark("showing the home screen")
+            }
+        }
+        .task(id: trip.direction) {
+            await everyHalfMinute {
+                Watchdog.shared.mark("planning your planned trips")
+                await planner.refresh()
+                autoGo()
+                Watchdog.shared.mark("showing the home screen")
+            }
+        }
+        .task(id: trip.direction) {
+            await everyHalfMinute {
+                Watchdog.shared.mark("planning the school alarms")
+                await SchoolAlarm.shared.refresh()
+                Watchdog.shared.mark("checking watched trains")
+                await watch.check()
+                Watchdog.shared.mark("showing the home screen")
+            }
+        }
+        .task(id: trip.direction) {
+            await everyHalfMinute {
+                Watchdog.shared.mark("getting the weather")
+                updateOutfit()                                   // the weather for where you are and where you're going
+                await OutfitStore.shared.refresh()
+                Watchdog.shared.mark("showing the home screen")
             }
         }
         .onChange(of: scene) { _, s in
             if s == .active {
                 trip.appBecameActive()
                 autoGo()
-                Task { await live.refresh(trip.direction); await planner.refresh(); await watch.check(force: true) }
+                Task { await live.refresh(trip.direction) }
+                Task { await planner.refresh() }
+                Task { await watch.check(force: true) }
             }
+        }
+    }
+
+    /// `step` now and every 30 s after, while the app is in front, until the task is cancelled.
+    private func everyHalfMinute(_ step: () async -> Void) async {
+        while !Task.isCancelled {
+            if scene == .active { await step() }
+            try? await Task.sleep(nanoseconds: 30_000_000_000)
         }
     }
 

@@ -157,10 +157,13 @@ final class LiveStore: ObservableObject {
     private static func plans(from f: CLLocation, tripId: String, line: String, isTrain: Bool, toName: String,
                               stops: [TripStop], next: TripStop, at: Date, to dest: Place) async -> (OnBoard, [DoorTrip])? {
         let now = Date()
-        var its: [DoorTrip] = []
+        // to each of the destination's stops at once
+        let start = "\(next.coordinate.latitude),\(next.coordinate.longitude)", when = at.addingTimeInterval(-60)
+        var jobs: [@Sendable () async -> [DoorTrip]] = []
         for b in dest.ids {
-            its += await Transit.plan(from: "\(next.coordinate.latitude),\(next.coordinate.longitude)", to: b, modes: nil, at: at.addingTimeInterval(-60), count: 5, maxTransfers: 4)
+            jobs.append { await Transit.plan(from: start, to: b, modes: nil, at: when, count: 5, maxTransfers: 4) }
         }
+        let its = await Progressive.all(jobs).flatMap { $0 }
         let v = Vehicle(tripId: tripId, line: isTrain ? Transit.trainLabel(line) : line, isTrain: isTrain)
         func onIt(to name: String, lat: Double?, lon: Double?, arrival: Date, scheduled: Date) -> Ride {
             Ride(tripId: tripId, line: v.line, name: line, isTrain: isTrain, departure: now, scheduledDeparture: now,
@@ -326,8 +329,10 @@ final class LiveStore: ObservableObject {
         if !force, !moved, loadedFor == key, let u = updated, Date().timeIntervalSince(u) < 60 { return }
         busy = true; loadedFor = key; here = from
         defer { busy = false }
-        // the boards around you load at the same time as your trip (they used to wait for it)
+        // the boards around you load at the same time as your trip (they used to wait for it), and so do the lists per
+        // leg, each shown as soon as it's in (stopped when you've switched to somewhere else before your trip is in)
         async let boards: Void = loadNearIfAny(from)
+        async let panels: Void = loadPanelsIfDue(dir, key: key, force: force)
         let trips: [DoorTrip]
         if let f = from {
             plannedFrom = f
@@ -349,53 +354,43 @@ final class LiveStore: ObservableObject {
         updated = trips.isEmpty ? Date().addingTimeInterval(-40) : Date()
         // From anywhere: the stops around you instead of the lists for your two routes.
         await boards
-        if anywhere {
-            guard loadedFor == key else { return }
-            panelsUpdated = Date()
-            return
-        }
-        // The lists per leg every two minutes (Transitous is volunteer-run).
+        if anywhere, loadedFor == key { panelsUpdated = Date() }
+        await panels
+    }
+
+    /// One planner question for a list per leg.
+    private struct PanelJob { let from: Place; let to: Place; let modes: String; let count: Int; let maxTransfers: Int }
+    private enum PanelList { case trains, buas, toVeghel }
+
+    /// The lists per leg, every two minutes (Transitous is volunteer-run), alongside your trip. Each list shows as soon
+    /// as its own answer is in, if it's still for what you're looking at (an empty answer keeps the last list).
+    private func loadPanelsIfDue(_ dir: Direction, key: String, force: Bool) async {
+        // From anywhere: the stops around you instead of the lists for your two routes.
+        guard !anywhere, loadedFor == key else { return }
         guard force || Date().timeIntervalSince(lastPanels) > 120 else { return }
         lastPanels = Date()
         let now = Date().addingTimeInterval(-30 * 60)          // from half an hour ago, for "Show earlier"
         let veghel = stops.veghel
-        func panel(_ a: Place, _ b: Place, _ modes: String, _ n: Int, _ maxT: Int) async -> [PanelTrip] {
-            let l = await Transit.plan(from: a, to: b, modes: modes, at: now, count: n, maxTransfers: maxT)
-            Ratings.shared.learn(a, b, l)
-            return l.map { PanelTrip(trip: $0, from: a, to: b) }
-        }
-        func keepBest(_ l: [PanelTrip]) -> [PanelTrip] {
-            // Drop an option when one that leaves later still gets you there as early.
-            l.filter { o in !l.contains { q in q.id != o.id && q.from == o.from && q.to == o.to && q.trip.first.departure > o.trip.first.departure && q.trip.end <= o.trip.end } }
-                .sorted { $0.trip.first.departure < $1.trip.first.departure }
-        }
         var empty = false
         if dir == .toSchool {
-            async let b = Transit.board(stopIds: veghel.ids, from: now, n: 40, stops: true)
-            async let t1 = panel(.eindhoven, .breda, "RAIL", 8, 1)
-            async let t2 = panel(.denBosch, .breda, "RAIL", 8, 1)
-            async let u = panel(.breda, .buas, "BUS", 12, 0)
-            async let g = boardGrades(veghel)
-            let (bb, a, c, d, gg) = await (b, t1, t2, u, g)
-            guard loadedFor == key else { return }
-            empty = bb.isEmpty || (a + c).isEmpty || d.isEmpty
-            if !bb.isEmpty { board = bb }                       // (an empty answer keeps the last list)
-            if !gg.isEmpty { boardRides = gg }
-            if !(a + c).isEmpty { trains = keepBest(a + c) }
-            if !d.isEmpty { buas = keepBest(d) }
+            async let b = loadBoard(veghel.ids, from: now, key: key)
+            async let g: Void = loadBoardRides(veghel, key: key)
+            async let t = loadList(.trains, [PanelJob(from: .eindhoven, to: .breda, modes: "RAIL", count: 8, maxTransfers: 1),
+                                             PanelJob(from: .denBosch, to: .breda, modes: "RAIL", count: 8, maxTransfers: 1)], at: now, key: key)
+            async let u = loadList(.buas, [PanelJob(from: .breda, to: .buas, modes: "BUS", count: 12, maxTransfers: 0)], at: now, key: key)
+            let (bb, tt, uu) = await (b, t, u)
+            await g
+            empty = bb.isEmpty || tt.isEmpty || uu.isEmpty
         } else {
-            async let u = panel(.buas, .breda, "BUS", 12, 0)
-            async let t1 = panel(.breda, .eindhoven, "RAIL", 8, 1)
-            async let t2 = panel(.breda, .denBosch, "RAIL", 8, 1)
-            async let v1 = panel(.denBosch, veghel, "BUS", 8, 0)
-            async let v2 = panel(.eindhoven, veghel, "BUS", 8, 0)
-            let (uu, a, c, d, e) = await (u, t1, t2, v1, v2)
-            guard loadedFor == key else { return }
-            empty = uu.isEmpty || (a + c).isEmpty || (d + e).isEmpty
-            if !uu.isEmpty { buas = keepBest(uu) }
-            if !(a + c).isEmpty { trains = keepBest(a + c) }
-            if !(d + e).isEmpty { toVeghel = keepBest(d + e) }
+            async let u = loadList(.buas, [PanelJob(from: .buas, to: .breda, modes: "BUS", count: 12, maxTransfers: 0)], at: now, key: key)
+            async let t = loadList(.trains, [PanelJob(from: .breda, to: .eindhoven, modes: "RAIL", count: 8, maxTransfers: 1),
+                                             PanelJob(from: .breda, to: .denBosch, modes: "RAIL", count: 8, maxTransfers: 1)], at: now, key: key)
+            async let v = loadList(.toVeghel, [PanelJob(from: .denBosch, to: veghel, modes: "BUS", count: 8, maxTransfers: 0),
+                                               PanelJob(from: .eindhoven, to: veghel, modes: "BUS", count: 8, maxTransfers: 0)], at: now, key: key)
+            let (uu, tt, vv) = await (u, t, v)
+            empty = uu.isEmpty || tt.isEmpty || vv.isEmpty
         }
+        guard loadedFor == key else { return }
         panelsUpdated = Date()
         // Transitous now and then sends nothing back: try an empty list again at the next refresh (30 s), a few times.
         if empty && emptyRetries < 3 { emptyRetries += 1; lastPanels = .distantPast } else if !empty { emptyRetries = 0 }
@@ -403,20 +398,70 @@ final class LiveStore: ObservableObject {
         Task { await NSStore.shared.enrich(rail.map { ($0.trip, $0.from, $0.to) }) }
     }
 
-    /// The board has no arrival times, so ask the planner how long each bus takes to the stations.
+    /// Your Veghel board, shown as soon as it's in.
+    private func loadBoard(_ ids: [String], from: Date, key: String) async -> [BoardDeparture] {
+        let b = await Transit.board(stopIds: ids, from: from, n: 40, stops: true)
+        if loadedFor == key, !b.isEmpty { board = b }                 // (an empty answer keeps the last list)
+        return b
+    }
+
+    /// How long each bus on the board takes to the stations, shown as soon as it's in.
+    private func loadBoardRides(_ veghel: Place, key: String) async {
+        let g = await boardGrades(veghel)
+        if loadedFor == key, !g.isEmpty { boardRides = g }
+    }
+
+    /// One list per leg: its planner questions all at once, and after each answer the list with everything so far.
+    /// Returns all of it.
+    private func loadList(_ list: PanelList, _ jobs: [PanelJob], at: Date, key: String) async -> [PanelTrip] {
+        var work: [@Sendable () async -> [PanelTrip]] = []
+        for j in jobs { work.append { await self.panel(j, at: at) } }
+        return await Progressive.gather(work) { soFar in await self.show(soFar, as: list, key: key) }
+    }
+
+    private func panel(_ j: PanelJob, at: Date) async -> [PanelTrip] {
+        let l = await Transit.plan(from: j.from, to: j.to, modes: j.modes, at: at, count: j.count, maxTransfers: j.maxTransfers)
+        Ratings.shared.learn(j.from, j.to, l)
+        return l.map { PanelTrip(trip: $0, from: j.from, to: j.to) }
+    }
+
+    /// A list that's in, if it's still for what you're looking at (an empty answer keeps the last list).
+    private func show(_ l: [PanelTrip], as list: PanelList, key: String) {
+        guard loadedFor == key, !l.isEmpty else { return }
+        let best = Self.keepBest(l)
+        switch list {
+        case .trains: trains = best
+        case .buas: buas = best
+        case .toVeghel: toVeghel = best
+        }
+    }
+
+    private static func keepBest(_ l: [PanelTrip]) -> [PanelTrip] {
+        // Drop an option when one that leaves later still gets you there as early.
+        l.filter { o in !l.contains { q in q.id != o.id && q.from == o.from && q.to == o.to && q.trip.first.departure > o.trip.first.departure && q.trip.end <= o.trip.end } }
+            .sorted { $0.trip.first.departure < $1.trip.first.departure }
+    }
+
+    /// The board has no arrival times, so ask the planner how long each bus takes to the stations (all at once; the
+    /// first answer for a bus wins, in the order of your stops, then Eindhoven before Den Bosch).
     private func boardGrades(_ veghel: Place) async -> [String: BoardRide] {
-        var out: [String: BoardRide] = [:]
         let at = Date().addingTimeInterval(-120)
-        for id in veghel.ids {
-            for st in [Place.eindhoven, Place.denBosch] {
-                let l = await Transit.plan(from: id, to: st.ids[0], modes: "BUS", at: at, count: 8, maxTransfers: 0)
-                Ratings.shared.learn(veghel, st, l.filter { $0.first.walkBefore == 0 })
-                for t in l where t.first.walkBefore == 0 {           // a bus from the other Veghel stop has a walk first
-                    let k = "\(id)|\(t.first.tripId)"
-                    if out[k] == nil {
-                        out[k] = BoardRide(minutes: t.rideMinutes, station: Fmt.place(t.last.toStop), arrival: t.last.arrival, grade: t.first.grade,
-                                             best: Ratings.shared.best("\(t.first.fromId)>\(t.first.toStop)"))
-                    }
+        var asks: [(id: String, station: Place)] = []
+        for id in veghel.ids { for st in [Place.eindhoven, Place.denBosch] { asks.append((id, st)) } }
+        var jobs: [@Sendable () async -> [DoorTrip]] = []
+        for a in asks {
+            let from = a.id, to = a.station.ids[0]
+            jobs.append { await Transit.plan(from: from, to: to, modes: "BUS", at: at, count: 8, maxTransfers: 0) }
+        }
+        let answers = await Progressive.all(jobs)
+        var out: [String: BoardRide] = [:]
+        for (a, l) in zip(asks, answers) {
+            Ratings.shared.learn(veghel, a.station, l.filter { $0.first.walkBefore == 0 })
+            for t in l where t.first.walkBefore == 0 {           // a bus from the other Veghel stop has a walk first
+                let k = "\(a.id)|\(t.first.tripId)"
+                if out[k] == nil {
+                    out[k] = BoardRide(minutes: t.rideMinutes, station: Fmt.place(t.last.toStop), arrival: t.last.arrival, grade: t.first.grade,
+                                         best: Ratings.shared.best("\(t.first.fromId)>\(t.first.toStop)"))
                 }
             }
         }

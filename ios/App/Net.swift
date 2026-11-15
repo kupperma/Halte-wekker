@@ -156,3 +156,34 @@ enum Net {
         }
     }
 }
+
+/// Independent requests at once, each answer used as soon as it's in: a screen never waits for its slowest list.
+enum Progressive {
+    /// Runs every job at once; after each finishes, `publish` gets everything so far (in finishing order); returns it all.
+    static func gather<T: Sendable>(_ jobs: [@Sendable () async -> [T]], publish: @escaping @Sendable ([T]) async -> Void) async -> [T] {
+        await withTaskGroup(of: [T].self) { g in
+            for job in jobs { g.addTask { await job() } }
+            var all: [T] = []
+            for await part in g {
+                all += part
+                await publish(all)
+            }
+            return all
+        }
+    }
+
+    /// Runs every job at once; results in the jobs' order.
+    static func all<T: Sendable>(_ jobs: [@Sendable () async -> T]) async -> [T] {
+        await withTaskGroup(of: (Int, T).self) { g in
+            for (i, job) in jobs.enumerated() {
+                g.addTask {
+                    let value = await job()
+                    return (i, value)
+                }
+            }
+            var done: [(Int, T)] = []
+            for await r in g { done.append(r) }
+            return done.sorted { $0.0 < $1.0 }.map { $0.1 }
+        }
+    }
+}
