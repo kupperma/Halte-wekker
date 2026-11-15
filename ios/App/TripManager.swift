@@ -636,6 +636,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             var lastBest: String?
             var rejected = Set<String>()
             var wait: UInt64 = 3
+            var leftSince: Date?                                    // since when you've clearly left on the planned one
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: wait * 1_000_000_000)
                 wait = 7                                                // first look soon, then every 7 seconds
@@ -653,9 +654,14 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
                 guard var m = kind.first ?? ranked.first else {
                     lastBest = nil
                     // No live match (some have no live position): the one it planned, once you've clearly left on it.
-                    // (The matcher before your fixes span 20 s isn't "no match" but not sure yet: it waits.)
-                    let sure = MatchSettings.classic() || VehicleMatch.enough(self.recentFixes)
-                    if sure, let p = planned, let from = self.legs[safe: li]?.from, self.clearlyLeft(on: p, from: from) {
+                    // (The matcher before your fixes span 20 s isn't "no match" but not sure yet: it waits, but a minute
+                    // at most once you've clearly left: sparse GPS, on a train, may never give it enough fixes.)
+                    let now = Date()
+                    let left = planned.flatMap { p in self.legs[safe: li].map { self.clearlyLeft(on: p, from: $0.from) } } ?? false
+                    leftSince = VehicleMatch.heldSince(leftSince, holds: left, now: now)
+                    let sure = MatchSettings.classic()
+                        || VehicleMatch.fallbackSure(enough: VehicleMatch.enough(self.recentFixes), leftSince: leftSince, now: now)
+                    if sure, left, let p = planned {
                         let v = Vehicle(tripId: p.tripId, line: p.line, isTrain: p.isTrain)
                         if forNextLeg { if self.phase == .transfer { self.nextLeg(vehicle: v); self.byTimetable = true } }
                         else { self.byTimetable = true; await self.vehicleFound(v) }
@@ -1119,7 +1125,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         case .timedOut?: note += " · 12 minutes"
         case .decided?, nil: break
         }
-        FieldLog.shared.add(.match, FieldFormat.match("choose", judged, outcome: FieldFormat.outcome(c.decision, lines: lines) + note))
+        FieldLog.shared.add(.match, FieldFormat.match("choose", judged, outcome: FieldFormat.outcome(c, shown: shown, lines: lines) + note))
         if c.why == .timedOut { candTimedOut = TimedOut(ids: Set(c.alive), at: now) }
         cands = list.filter { c.alive.contains($0.vehicle.tripId) }
         choosing = cands.map(\.vehicle)
@@ -1209,7 +1215,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         var state = SwitchState()
         let live = Set(tracks.filter(\.realTime).map(\.tripId))
         let d = VehicleMatch.decide(shown: nil, ranked: ranked, liveIds: live, state: &state, now: Date())
-        FieldLog.shared.add(.match, FieldFormat.match("find", judged, outcome: FieldFormat.outcome(d, lines: found.mapValues(\.line))))
+        // (what it finds is only chosen between: sameBusByJudging starts choosing with it, and switches only once sure)
+        FieldLog.shared.add(.match, FieldFormat.match("find", judged, outcome: FieldFormat.outcome(d, lines: found.mapValues(\.line), choosing: true)))
         let chosen: [String]
         switch d {
         case .switchTo(let id): chosen = [id]

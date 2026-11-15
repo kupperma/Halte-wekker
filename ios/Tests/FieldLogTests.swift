@@ -81,6 +81,38 @@ final class FieldLogTests: XCTestCase {
         XCTAssertEqual(FieldFormat.outcome(.switchTo("x-a1b2"), lines: lines), "switch to IC·a1b2")
         XCTAssertEqual(FieldFormat.outcome(.undecided(["x-a1b2", "y-c3d4"]), lines: lines), "undecided: IC·a1b2, 306·c3d4")
         XCTAssertEqual(FieldFormat.outcome(.none, lines: lines), "none")
+        // what `find` found is only chosen between
+        XCTAssertEqual(FieldFormat.outcome(.switchTo("x-a1b2"), lines: lines, choosing: true), "choose IC·a1b2")
+        XCTAssertEqual(FieldFormat.outcome(.undecided(["x-a1b2", "y-c3d4"]), lines: lines, choosing: true), "undecided: IC·a1b2, 306·c3d4")
+    }
+
+    /// A look while choosing: the 12-minute pick names the one it settles on, also when the decision says keep.
+    func test_choiceOutcomeFormat() {
+        let lines = ["x-a1b2": "IC", "y-c3d4": "306"]
+        func look(_ d: Decision, settle: String?, why: ChoiceLook.Why?) -> ChoiceLook {
+            ChoiceLook(decision: d, alive: ["x-a1b2", "y-c3d4"], settle: settle, why: why, shown: .fails, shownFailing: true)
+        }
+        XCTAssertEqual(FieldFormat.outcome(look(.keep("x-a1b2"), settle: "y-c3d4", why: .timedOut), shown: "x-a1b2", lines: lines),
+                       "switch to 306·c3d4")
+        XCTAssertEqual(FieldFormat.outcome(look(.keep("x-a1b2"), settle: "x-a1b2", why: .timedOut), shown: "x-a1b2", lines: lines),
+                       "keep IC·a1b2")
+        XCTAssertEqual(FieldFormat.outcome(look(.switchTo("y-c3d4"), settle: "y-c3d4", why: .decided), shown: "x-a1b2", lines: lines),
+                       "switch to 306·c3d4")
+        XCTAssertEqual(FieldFormat.outcome(look(.keep("x-a1b2"), settle: nil, why: nil), shown: "x-a1b2", lines: lines),
+                       "keep IC·a1b2")
+    }
+
+    /// Adds and flushes from many threads at once: what's on disk at the end is the newest list, never an older copy.
+    func test_flushNewestLast() {
+        let d = suite()
+        let log = FieldLog(defaults: d, limit: 1000)
+        DispatchQueue.concurrentPerform(iterations: 200) { i in
+            log.add(.net, "\(i)")
+            log.flush()
+        }
+        log.flush()
+        XCTAssertEqual(log.entries.count, 200)
+        XCTAssertEqual(FieldLog(defaults: d, limit: 1000).entries.map(\.text), log.entries.map(\.text))
     }
 
     func test_classicFormat() {

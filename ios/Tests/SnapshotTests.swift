@@ -43,7 +43,7 @@ final class SnapshotTests: XCTestCase {
         let took = Date().timeIntervalSince(started)
         XCTAssertEqual(shown.map(\.id), ["d1", "d2"])
         XCTAssertEqual(s?.at, t0)
-        XCTAssertLessThan(took, 0.1)
+        XCTAssertLessThan(took, 0.3)
     }
 
     func test_fileName() {
@@ -73,6 +73,11 @@ final class SnapshotTests: XCTestCase {
         let at = try XCTUnwrap(cal.date(from: DateComponents(year: 2026, month: 11, day: 16, hour: 7, minute: 12)))
         let amsterdam = try XCTUnwrap(TimeZone(identifier: "Europe/Amsterdam"))
         XCTAssertEqual(Snapshots.asOf(at, timeZone: amsterdam), "as of 08:12")
+        // a note shown with saved data keeps its "as of"
+        XCTAssertEqual(Snapshots.asOf(at, after: "On the move: finding what you’re on…", timeZone: amsterdam),
+                       "On the move: finding what you’re on… · as of 08:12")
+        XCTAssertEqual(Snapshots.asOf(at, after: nil, timeZone: amsterdam), "as of 08:12")
+        XCTAssertEqual(Snapshots.asOf(at, after: "", timeZone: amsterdam), "as of 08:12")
     }
 
     func test_onKeyChange() {

@@ -46,14 +46,14 @@ final class FieldLog: @unchecked Sendable {
         }
     }
 
+    /// Written while holding the lock, so an older copy can never land after a newer one.
     func flush() {
         lock.lock()
+        defer { lock.unlock() }
         pending = false
-        guard dirty else { lock.unlock(); return }
+        guard dirty else { return }
         dirty = false
-        let data = try? JSONEncoder().encode(list)
-        lock.unlock()
-        if let data { defaults.set(data, forKey: key) }
+        if let data = try? JSONEncoder().encode(list) { defaults.set(data, forKey: key) }
     }
 
     var entries: [FieldEntry] {
@@ -133,13 +133,21 @@ enum FieldFormat {
         return "\(place) · \(items.isEmpty ? "no vehicles" : items.joined(separator: " | ")) → \(outcome)"
     }
 
-    static func outcome(_ d: Decision, lines: [String: String]) -> String {
+    /// `choosing`: what was found is only chosen between (it switches later, if at all): "choose" for the clear best.
+    static func outcome(_ d: Decision, lines: [String: String], choosing: Bool = false) -> String {
         switch d {
         case .keep(let id): return "keep \(label(id, lines))"
-        case .switchTo(let id): return "switch to \(label(id, lines))"
+        case .switchTo(let id): return "\(choosing ? "choose" : "switch to") \(label(id, lines))"
         case .undecided(let ids): return "undecided: " + ids.map { label($0, lines) }.joined(separator: ", ")
         case .none: return "none"
         }
+    }
+
+    /// One look while choosing: what it decided, or, sure after 12 minutes, the one it settles on (which can be another
+    /// than the one shown while the decision says keep).
+    static func outcome(_ c: ChoiceLook, shown: String?, lines: [String: String]) -> String {
+        if c.why == .timedOut, let id = c.settle { return "\(id == shown ? "keep" : "switch to") \(label(id, lines))" }
+        return outcome(c.decision, lines: lines)
     }
 
     /// "detect · not sure (4 fixes, 12 s)": the matcher had too few fixes to judge by (of the last half minute).

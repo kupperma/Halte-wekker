@@ -142,7 +142,9 @@ enum VehicleMatch {
     static let speedRatio = 3.0                 // your speed at least its speed ÷ 3
     static let steadyShare = 0.3                // steady: the two halves' speeds within 30 %
     static let driftMin = 3.0                   // m/s: moving with you…
-    static let driftShare = 0.25                // …or a quarter of your speed, when more
+    static let driftShare = 0.45                // …or 45 % of your speed, when more (a train or bus cruising faster
+                                                //    than its piece's even speed, between speeding up and braking, is
+                                                //    still the one)
     static let standingMin = 40.0               // m you moved before "standing" is judged
     static let standingShare = 0.2              // it moved at least a fifth as far
     static let costSpeedMin = 5.0               // m/s: the least speed a cost is divided by
@@ -591,6 +593,24 @@ extension VehicleMatch {
     /// Looks in a row a candidate may fail the hard tests before it's out of the running.
     static let dropAfter = 2
 
+    /// How long you may have clearly left on the planned one, with too few fixes to judge by, before it goes by the
+    /// timetable anyway (sparse GPS, on a train, may never give enough).
+    static let fallbackAfter: TimeInterval = 60
+
+    /// The timetable fallback may go ahead: enough fixes to judge by, or you've clearly left (`leftSince`) for
+    /// `after` (a minute) without them.
+    static func fallbackSure(enough: Bool, leftSince: Date?, now: Date, after: TimeInterval = VehicleMatch.fallbackAfter) -> Bool {
+        if enough { return true }
+        guard let leftSince else { return false }
+        return now.timeIntervalSince(leftSince) >= after
+    }
+
+    /// Since when something has held, look by look: from the first look it holds, kept while it holds, nil once it
+    /// doesn't.
+    static func heldSince(_ since: Date?, holds: Bool, now: Date) -> Date? {
+        holds ? (since ?? now) : nil
+    }
+
     /// A failure (other than tooFewFixes or noTimes) adds a miss; a success resets it. Returns those with < 2 misses, plus `keep` always.
     /// ("Not sure yet" neither adds nor resets: it's no look at all. `keep`, the one shown, is never dropped this way: the
     /// switching rule covers it.)
@@ -633,13 +653,26 @@ extension VehicleMatch {
     /// - `decide` with the seconds as they are (no planned bonus), the not-sure ones not failed.
     /// - Sure: the one `decide` switches to; the one shown when it's the only one left; after `timeout` (12 minutes) the
     ///   one shown, or, when it's failing (`dropAfter` misses in a row), the best that passed this look.
+    /// - A live one shown that fails by its times alone (`timesOnly`, on its road by today's check) while the best is
+    ///   timetable-only (judged without its times) is not sure for that look: no miss, the run starts again, and no
+    ///   12-minute pick of that best. (Times say nothing about a timetable-only one; failing by them can't make it the
+    ///   better one.) Off its path or going the other way still counts.
     static func choose(_ ids: [String], judged: [Judgement], shown: String?, shownOffRoad: Bool, choosingFor: TimeInterval,
                        misses: inout [String: Int], state: inout SwitchState, now: Date,
                        timeout: TimeInterval = 12 * 60) -> ChoiceLook {
         let tracked = Set(judged.map(\.id))
-        let mine = judged.first { $0.id == shown }?.result
-        let shownVerdict = shown.map { _ in verdict(mine, offRoad: shownOffRoad) }
+        let mineJudged = judged.first { $0.id == shown }
+        let mine = mineJudged?.result
+        var shownVerdict = shown.map { _ in verdict(mine, offRoad: shownOffRoad) }
+        let before = shown.flatMap { misses[$0] }
         let pruned = prune(judged, misses: &misses, keep: shown)
+        let ranked = rank(pruned, planned: nil)
+        let live = Set(judged.filter(\.realTime).map(\.id))
+        // failing by its times only, against a timetable-only best: not sure, this look (its miss undone)
+        let failsByTimes: Bool = mineJudged.map { timesOnly($0) } ?? false
+        let bestTimetableOnly: Bool = ranked.first.map { !live.contains($0.id) } ?? false
+        let byTimesOnly = !shownOffRoad && failsByTimes && bestTimetableOnly
+        if let shown, byTimesOnly { misses[shown] = before; shownVerdict = .notSure }
         // not sure yet but off its road: a miss like any failure (a real failure `prune` counted already)
         if let shown, shownVerdict == .fails, verdict(mine, offRoad: false) != .fails { misses[shown, default: 0] += 1 }
         let kept = Set(pruned.map(\.id))
@@ -647,10 +680,9 @@ extension VehicleMatch {
         var unsure = Set(ids.filter { !tracked.contains($0) })
         for j in judged { if case .failure(let why) = j.result, why.notSure { unsure.insert(j.id) } }
         if let shown, shownVerdict == .fails { unsure.remove(shown) }
-        let ranked = rank(pruned, planned: nil)
-        let live = Set(judged.filter(\.realTime).map(\.id))
+        if let shown, byTimesOnly { unsure.insert(shown) }
         let decision = decide(shown: shown, ranked: ranked, liveIds: live, unsure: unsure, state: &state, now: now)
-        let failing = shown.map { misses[$0, default: 0] >= dropAfter } ?? false
+        let failing = !byTimesOnly && (shown.map { misses[$0, default: 0] >= dropAfter } ?? false)
         var settle: String?, why: ChoiceLook.Why?
         switch decision {
         case .switchTo(let id): settle = id; why = .decided
@@ -664,6 +696,17 @@ extension VehicleMatch {
             if settle != nil { why = .timedOut }
         }
         return ChoiceLook(decision: decision, alive: alive, settle: settle, why: why, shown: shownVerdict, shownFailing: failing)
+    }
+
+    /// A failure by its times alone, with its road and your way along it fitting: drifting from its times, standing by
+    /// them, too far from them, or a speed its times don't fit (not a bus faster than a bus can go).
+    static func timesOnly(_ j: Judgement) -> Bool {
+        guard case .failure(let why) = j.result else { return false }
+        switch why {
+        case .drifting, .standing, .tooFarFromTimes: return true
+        case .implausibleSpeed: return j.isTrain || (j.evidence.map { $0.yourSpeed <= busMax } ?? false)
+        default: return false
+        }
     }
 
     /// Choosing again between the same ones as a choice that ran out of time less than `within` (10 minutes) ago: no use,

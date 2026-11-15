@@ -93,7 +93,7 @@ final class MemoTests: XCTestCase {
     func test_cancelledWaiterLeavesAtOnce() async {
         let memo = Memo<String, Int>(ttl: 20)
         let slow: @Sendable () async -> Int? = {
-            try? await Task.sleep(nanoseconds: 300_000_000)
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
             return 7
         }
         let a = Task { await memo.get("a", fetch: slow) }
@@ -106,7 +106,7 @@ final class MemoTests: XCTestCase {
         b.cancel()
         let (vb, took) = await b.value
         XCTAssertNil(vb)
-        XCTAssertLessThan(took, 0.25)   // well before the 0.3 s fetch ends (and 0.1 s after the cancel in practice)
+        XCTAssertLessThan(took, 0.5)    // well before the 1 s fetch ends (about 0.05 s, at the cancel, in practice)
         let va = await a.value
         XCTAssertEqual(va, 7)
     }

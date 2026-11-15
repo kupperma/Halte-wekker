@@ -263,6 +263,113 @@ final class DecideTests: XCTestCase {
         XCTAssertEqual(out.last?.why, .timedOut)
     }
 
+    // MARK: - A live one shown that fails by its times only, against a timetable-only best (item 3)
+
+    /// The live bus you're on runs ahead of its piece's even speed (drifting by its times); the same line 3 minutes on,
+    /// timetable-only, passes by its road and your speed alone. It never switches: each such look is not sure for the one
+    /// shown (no miss, the run starts again), and after 12 minutes it keeps the one shown.
+    func test_chooseDriftingLiveShownKeptAgainstTimetableOnly() {
+        let out = choosing(["A", "B"], shown: "A", looks: 20) { _ in
+            ([judged("A", .failure(.drifting)), judged("B", .success(5), live: false)], false)
+        }
+        XCTAssertEqual(out.count, 20)
+        XCTAssertTrue(out.allSatisfy { $0.settle == nil && $0.decision == .keep("A") && $0.shown == .notSure && !$0.shownFailing })
+        XCTAssertTrue(out.allSatisfy { $0.alive == ["A", "B"] })
+        for why in [Reject.standing, .tooFarFromTimes] {
+            let other = choosing(["A", "B"], shown: "A", looks: 70) { _ in
+                ([judged("A", .failure(why)), judged("B", .success(5), live: false)], false)
+            }
+            XCTAssertEqual(other.count, 61, "\(why)")
+            XCTAssertTrue(other.dropLast().allSatisfy { $0.settle == nil && $0.decision == .keep("A") }, "\(why)")
+            XCTAssertEqual(other.last?.settle, "A", "\(why)")
+            XCTAssertEqual(other.last?.why, .timedOut, "\(why)")
+        }
+    }
+
+    /// Off its path, or going the other way, still counts against it: it switches to the timetable-only one after the run.
+    func test_chooseOffItsPathShownSwitchesToTimetableOnly() {
+        for why in [Reject.offItsPath, .wrongWay] {
+            let out = choosing(["A", "B"], shown: "A", looks: 20) { _ in
+                ([judged("A", .failure(why)), judged("B", .success(5), live: false)], false)
+            }
+            XCTAssertEqual(out.count, 5, "\(why)")
+            XCTAssertEqual(out.last?.settle, "B", "\(why)")
+            XCTAssertEqual(out.last?.why, .decided, "\(why)")
+            XCTAssertEqual(out.map(\.shown), [ShownVerdict?](repeating: .fails, count: 5), "\(why)")
+        }
+    }
+
+    /// By its times against a live best, or while off its road by today's check: it counts as before.
+    func test_chooseTimesOnlyFailureStillCounts() {
+        let live = choosing(["A", "B"], shown: "A", looks: 20) { _ in
+            ([judged("A", .failure(.drifting)), judged("B", .success(5))], false)
+        }
+        XCTAssertEqual(live.count, 5)
+        XCTAssertEqual(live.last?.settle, "B")
+        let offRoad = choosing(["A", "B"], shown: "A", looks: 20) { _ in
+            ([judged("A", .failure(.tooFarFromTimes)), judged("B", .success(5), live: false)], true)
+        }
+        XCTAssertEqual(offRoad.count, 5)
+        XCTAssertEqual(offRoad.last?.settle, "B")
+        XCTAssertEqual(offRoad.last?.shownFailing, true)
+    }
+
+    /// Misses from looks before (no best then) don't let a timetable-only best take over at 12 minutes while the one
+    /// shown fails by its times only.
+    func test_chooseNoTwelveMinuteTakeoverByTimetableOnly() {
+        let out = choosing(["A", "B"], shown: "A", looks: 70) { k in
+            let b: Result<Double, Reject> = k < 3 ? .failure(.tooFewFixes) : .success(5)
+            return ([judged("A", .failure(.drifting)), judged("B", b, live: false)], false)
+        }
+        XCTAssertEqual(out.prefix(3).map(\.shownFailing), [false, true, true])
+        XCTAssertEqual(out.count, 61)
+        XCTAssertEqual(out.last?.settle, "A")
+        XCTAssertEqual(out.last?.why, .timedOut)
+        XCTAssertEqual(out.last?.shownFailing, false)
+    }
+
+    func test_timesOnly() {
+        func j(_ r: Result<Double, Reject>, train: Bool = false, you: Double? = nil) -> Judgement {
+            let e = you.map {
+                Evidence(fixes: 15, span: 28, crossTrack: 5, accuracy: 20, shaped: true, progress: $0 * 28, offset: 0,
+                         drift: 0, yourSpeed: $0, itsSpeed: 12, steady: true)
+            }
+            return Judgement(id: "x", line: "306", isTrain: train, realTime: true, evidence: e, result: r)
+        }
+        XCTAssertTrue(VehicleMatch.timesOnly(j(.failure(.drifting))))
+        XCTAssertTrue(VehicleMatch.timesOnly(j(.failure(.standing))))
+        XCTAssertTrue(VehicleMatch.timesOnly(j(.failure(.tooFarFromTimes))))
+        XCTAssertTrue(VehicleMatch.timesOnly(j(.failure(.implausibleSpeed), you: 3)))              // the ratio to its times
+        XCTAssertTrue(VehicleMatch.timesOnly(j(.failure(.implausibleSpeed), train: true)))
+        XCTAssertFalse(VehicleMatch.timesOnly(j(.failure(.implausibleSpeed), you: 35)))            // faster than a bus goes
+        XCTAssertFalse(VehicleMatch.timesOnly(j(.failure(.implausibleSpeed))))
+        for why in [Reject.offItsPath, .wrongWay, .tooFewFixes, .noTimes] {
+            XCTAssertFalse(VehicleMatch.timesOnly(j(.failure(why))), "\(why)")
+        }
+        XCTAssertFalse(VehicleMatch.timesOnly(j(.success(10))))
+    }
+
+    // MARK: - The timetable fallback with sparse fixes (item 4)
+
+    func test_fallbackSureAfterAMinuteClearlyLeft() {
+        XCTAssertTrue(VehicleMatch.fallbackSure(enough: true, leftSince: nil, now: t0))
+        XCTAssertFalse(VehicleMatch.fallbackSure(enough: false, leftSince: nil, now: t0))
+        XCTAssertFalse(VehicleMatch.fallbackSure(enough: false, leftSince: t0, now: t0 + 59))
+        XCTAssertTrue(VehicleMatch.fallbackSure(enough: false, leftSince: t0, now: t0 + 60))
+        // looks every 7 s, clearly left from the second: sure from the first look a minute after that
+        var since: Date?
+        var sureAt: [Int] = []
+        let holds = [false, true, true, true, true, true, true, true, true, true, true, true, true]
+        for (k, h) in holds.enumerated() {
+            since = VehicleMatch.heldSince(since, holds: h, now: t0 + 7 * Double(k))
+            if VehicleMatch.fallbackSure(enough: false, leftSince: since, now: t0 + 7 * Double(k)) { sureAt.append(k) }
+        }
+        XCTAssertEqual(since, t0 + 7)
+        XCTAssertEqual(sureAt, [10, 11, 12])                           // 63 s after 7 s
+        XCTAssertNil(VehicleMatch.heldSince(t0, holds: false, now: t0 + 30))     // a look where it doesn't hold: from the start
+        XCTAssertEqual(VehicleMatch.heldSince(nil, holds: true, now: t0 + 30), t0 + 30)
+    }
+
     func test_sameChoiceWithinTenMinutes() {
         let last = TimedOut(ids: ["a", "b"], at: t0)
         XCTAssertTrue(VehicleMatch.sameChoice(["b", "a"], as: last, now: t0 + 300))

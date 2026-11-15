@@ -89,6 +89,12 @@ enum Snapshots {
         "as of \(clocks.formatter(timeZone).string(from: at))"
     }
 
+    /// "On the move: finding what you’re on… · as of 08:12": a note shown with saved data keeps its "as of".
+    static func asOf(_ at: Date, after lead: String?, timeZone: TimeZone = .current) -> String {
+        guard let lead, !lead.isEmpty else { return asOf(at, timeZone: timeZone) }
+        return "\(lead) · \(asOf(at, timeZone: timeZone))"
+    }
+
     /// One "HH:mm" formatter per time zone (making one each time a list is drawn is slow).
     private static let clocks = Clocks()
     private final class Clocks: @unchecked Sendable {

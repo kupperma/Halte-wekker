@@ -38,8 +38,8 @@ final class ProgressiveTests: XCTestCase {
     func test_gatherPublishesAsTheyCome() async {
         let publishes = Publishes()
         let t0 = Date()
-        // the slow one first: one at a time, nothing would come in before 0.6 s
-        let jobs: [@Sendable () async -> [Int]] = [job(after: 0.6, [3]), job(after: 0.05, [1]), job(after: 0.1, [2])]
+        // the slow one first: one at a time, nothing would come in before 1 s
+        let jobs: [@Sendable () async -> [Int]] = [job(after: 1.0, [3]), job(after: 0.05, [1]), job(after: 0.1, [2])]
         let all = await Progressive.gather(jobs) { soFar in
             await publishes.note(soFar, Date().timeIntervalSince(t0))
         }
@@ -47,15 +47,17 @@ final class ProgressiveTests: XCTestCase {
         let seen = await publishes.seen
         XCTAssertEqual(seen.count, 3)
         guard seen.count == 3 else { return }
+        // the quick ones as they came, long before the slow one (at least twice as early as its 1 s)
         XCTAssertEqual(seen[0].items, [1])
-        XCTAssertLessThan(seen[0].at, 0.25)
+        XCTAssertLessThan(seen[0].at, 0.5)
         XCTAssertEqual(seen[1].items.count, 2)
         XCTAssertEqual(seen[1].items.sorted(), [1, 2])
-        XCTAssertLessThan(seen[1].at, 0.35)
+        XCTAssertLessThan(seen[1].at, 0.5)
+        XCTAssertLessThanOrEqual(seen[1].at, seen[2].at)
         XCTAssertEqual(seen[2].items.count, 3)
         XCTAssertEqual(all.count, 3)
         XCTAssertEqual(all.sorted(), [1, 2, 3])
-        XCTAssertGreaterThanOrEqual(took, 0.6)
+        XCTAssertGreaterThanOrEqual(took, 1.0)
     }
 
     func test_allKeepsOrderAndRunsAtOnce() async {

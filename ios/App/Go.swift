@@ -132,16 +132,23 @@ final class GoStore: ObservableObject {
                 await self.apply(start, loc: l, d: d, now: Date(), quiet: startAt != nil)
                 if self.best == nil { self.asOf = nil }
             }
+            var tried = Date.distantPast            // the last real look (also while it seemed offline)
             while !Task.isCancelled {
                 guard let self, self.watching else { return }
-                if !Net.online {
-                    // no connection: no requests, look again as soon as it's back
+                if !Net.online, Date().timeIntervalSince(tried) < Self.offlineTry {
+                    // No connection: no requests, look again as soon as it's back (or once every half minute anyway: the
+                    // phone can be wrong). Meanwhile what's on screen still loses what has left, and it still stops after
+                    // `maxHours`.
+                    if self.stopIfLong(now: Date()) { return }
+                    if self.asOf != nil { self.keepSaved() } else if self.best != nil, let l = self.here { await self.apply([], loc: l, d: d, now: Date()) }
                     if self.best == nil { self.error = "No internet connection right now. It looks again as soon as you’re back online." }
                     try? await Task.sleep(nanoseconds: 4_000_000_000)
                     continue
                 }
+                tried = Date()
                 await self.refresh()
-                if self.best != nil { self.emptyLooks = 0 } else if !self.movingUnknown { self.emptyLooks += 1 }
+                // (the saved answer on screen isn't an answer: a dead connection waits longer each time behind it too)
+                if self.best != nil && self.asOf == nil { self.emptyLooks = 0 } else if !self.movingUnknown { self.emptyLooks += 1 }
                 // quicker when the one you're catching is close
                 let soon = (self.best?.first.departure.timeIntervalSinceNow ?? .infinity) < 12 * 60
                 // nothing on screen yet (or only the saved answer): look again soon (no position yet: sooner still)
@@ -168,6 +175,17 @@ final class GoStore: ObservableObject {
         trip?.setGo(false)
     }
 
+    /// While it seems offline, one real look every this many seconds anyway (the phone can say offline when it isn't).
+    static let offlineTry: TimeInterval = 30
+
+    /// Watching for `maxHours`: it stops by itself, and says so.
+    private func stopIfLong(now: Date) -> Bool {
+        guard now.timeIntervalSince(since) > Self.maxHours * 3600 else { return false }
+        stopWatching()
+        tell("Stopped watching", "After \(Int(Self.maxHours)) hours · open Fastest trip again when you need it", kind: "info", sound: false)
+        return true
+    }
+
     // MARK: the fastest way, again and again
 
     private func refresh() async {
@@ -192,11 +210,7 @@ final class GoStore: ObservableObject {
         }
         movingUnknown = false
         let now = Date()
-        if now.timeIntervalSince(since) > Self.maxHours * 3600 {
-            stopWatching()
-            tell("Stopped watching", "After \(Int(Self.maxHours)) hours · open Fastest trip again when you need it", kind: "info", sound: false)
-            return
-        }
+        if stopIfLong(now: now) { return }
         let target = CLLocation(latitude: dest.coordinate.latitude, longitude: dest.coordinate.longitude)
         if loc.distance(from: target) < 400 && loc.horizontalAccuracy < 200 {
             arrived = true
@@ -234,7 +248,8 @@ final class GoStore: ObservableObject {
             // leads to a "Faster:" or "Too late".
             if firstOnScreen { best = nil; others = [] }
             forgetSaved()
-            firstOnly = false
+            // (what arrived before the time ran out is a first answer too: the next whole one replaces it the same way)
+            firstOnly = answer.timedOut
             shownLook = n
         }
         if found.isEmpty && savedOnScreen {
@@ -1194,7 +1209,7 @@ struct GoView: View {
                 Label("\(ch) min to change at \(Fmt.place(prev.toStop))\(ride.walkBefore > 0 ? ", \(ride.walkBefore) min walk" : "")", systemImage: "arrow.triangle.swap")
                     .font(BoardInk.sans(10.5, .semibold)).foregroundStyle(ch - ride.walkBefore < 2 ? Paper.late : Paper.ink.opacity(0.8))
                     .padding(.top, 4)
-                PlannerRideRow(ride: ride, info: ns.rail(ride), picked: false) {
+                PlannerRideRow(ride: ride, info: ns.rail(ride), picked: false, saved: go.asOf != nil) {
                     liveTrack = LiveTrackTarget(tripId: ride.tripId, line: ride.line, headsign: ride.headsign.isEmpty ? Fmt.place(ride.toStop) : ride.headsign,
                                                 stopName: ride.fromStop, time: ride.departure, rail: ride.isTrain)
                 }

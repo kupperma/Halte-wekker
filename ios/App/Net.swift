@@ -15,7 +15,7 @@ struct Budget: Equatable, Sendable {
     let backoff: TimeInterval
     let fastFailure: TimeInterval   // only a failure that came back within this is retried
     let minLeft: TimeInterval       // …and only with this much of `total` left after the pause
-    static let urgent = Budget(idle: 4, total: 8, retries: 1, backoff: 0.3, fastFailure: 2, minLeft: 3)
+    static let urgent = Budget(idle: 6, total: 10, retries: 1, backoff: 0.3, fastFailure: 2, minLeft: 3)
     static let background = Budget(idle: 8, total: 15, retries: 1, backoff: 1.0, fastFailure: 2, minLeft: 3)
 }
 
@@ -79,11 +79,12 @@ enum Net {
     /// One request within its lane's budget. Every HTTP status comes back as an answer (a non-HTTP response counts as
     /// 200); a transport failure that isn't retried throws its `URLError`; the total running out throws `.timedOut`;
     /// a cancelled caller gets `CancellationError` at once. With a `label` (the path, no query), the call is written to
-    /// the field log once, whichever way it ends.
+    /// `log` (the field log) once, whichever way it ends, with the tries it made and the bytes that came back.
     static func response(_ request: URLRequest, lane: Lane, budget: Budget? = nil,
                          gate: TimeInterval = gateWait, send: Send? = nil,
-                         label: String? = nil) async throws -> NetAnswer {
+                         label: String? = nil, log: FieldLog? = nil) async throws -> NetAnswer {
         let budget = budget ?? lane.budget
+        let tries = Tries()
         let send: Send = send ?? { req in try await session(for: lane).data(for: req) }
         if lane == .urgent {
             flight.begin()
@@ -99,12 +100,12 @@ enum Net {
         let began = Date()
         func note(status: Int?, error: URLError.Code?, bytes: Int, attempts: Int) {
             guard let label else { return }
-            FieldLog.shared.add(.net, FieldFormat.net(label, lane: lane, status: status, error: error, bytes: bytes,
-                                                      seconds: Date().timeIntervalSince(began), attempts: attempts))
+            (log ?? FieldLog.shared).add(.net, FieldFormat.net(label, lane: lane, status: status, error: error, bytes: bytes,
+                                                               seconds: Date().timeIntervalSince(began), attempts: attempts))
         }
         do {
             let answer = try await withThrowingTaskGroup(of: NetAnswer.self) { g -> NetAnswer in
-                g.addTask { try await attempts(request, budget: budget, send: send) }
+                g.addTask { try await attempts(request, budget: budget, send: send, tries: tries) }
                 g.addTask {
                     try await Task.sleep(nanoseconds: UInt64(budget.total * 1_000_000_000))
                     throw URLError(.timedOut)
@@ -117,15 +118,25 @@ enum Net {
             return answer
         } catch {
             if Task.isCancelled {
-                note(status: nil, error: .cancelled, bytes: 0, attempts: 1)
+                note(status: nil, error: .cancelled, bytes: tries.bytes, attempts: max(1, tries.count))
                 throw CancellationError()
             }
-            note(status: nil, error: (error as? URLError)?.code ?? .unknown, bytes: 0, attempts: 1)
+            note(status: nil, error: (error as? URLError)?.code ?? .unknown, bytes: tries.bytes, attempts: max(1, tries.count))
             throw error
         }
     }
 
-    private static func attempts(_ request: URLRequest, budget: Budget, send: Send) async throws -> NetAnswer {
+    /// The tries a request made so far, and the bytes that came back with them (for the field log, whichever way it ends).
+    final class Tries: @unchecked Sendable {
+        private let lock = NSLock()
+        private var n = 0, received = 0
+        func begin() { lock.lock(); n += 1; lock.unlock() }
+        func got(_ bytes: Int) { lock.lock(); received += max(0, bytes); lock.unlock() }
+        var count: Int { lock.lock(); defer { lock.unlock() }; return n }
+        var bytes: Int { lock.lock(); defer { lock.unlock() }; return received }
+    }
+
+    private static func attempts(_ request: URLRequest, budget: Budget, send: Send, tries: Tries) async throws -> NetAnswer {
         let start = Date()
         var attempt = 0
         while true {
@@ -134,8 +145,10 @@ enum Net {
             req.timeoutInterval = budget.idle
             let began = Date()
             let delay: TimeInterval
+            tries.begin()
             do {
                 let (data, resp) = try await send(req)
+                tries.got(data.count)
                 let http = resp as? HTTPURLResponse
                 let status = http?.statusCode ?? 200
                 if status == 429 || status >= 500,
@@ -172,6 +185,8 @@ enum Net {
         private var started = false
         private let queue = DispatchQueue(label: "haltewekker.connection")
         func set(_ v: Bool) { lock.lock(); up = v; lock.unlock() }
+        /// Online unless the path says it can't connect at all.
+        static func isOnline(_ status: NWPath.Status) -> Bool { status != .unsatisfied }
         var online: Bool { lock.lock(); defer { lock.unlock() }; return up }
         func start() {
             lock.lock()
@@ -179,7 +194,8 @@ enum Net {
             started = true
             lock.unlock()
             let m = NWPathMonitor()
-            m.pathUpdateHandler = { [weak self] path in self?.set(path.status == .satisfied) }
+            // (`.requiresConnection`: it can connect when asked, as on a cellular link that's asleep, so it counts as online)
+            m.pathUpdateHandler = { [weak self] path in self?.set(Connection.isOnline(path.status)) }
             m.start(queue: queue)
         }
     }

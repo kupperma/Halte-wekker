@@ -491,9 +491,10 @@ struct HomeView: View {
         return "\(what) · tap one for its page"
     }
 
-    /// "as of 08:12", under a list on the planner that shows a saved answer.
+    /// "as of 08:12", under a list on the planner that shows a saved answer (while you're on the move: "On the move:
+    /// finding what you’re on… · as of 08:12").
     private func asOfNote(_ a: Date, moving: Bool = false) -> some View {
-        Text(moving ? onTheMoveText : Snapshots.asOf(a)).font(BoardInk.sans(10, .regular)).foregroundStyle(Paper.ink.opacity(0.6))
+        Text(Snapshots.asOf(a, after: moving ? onTheMoveText : nil)).font(BoardInk.sans(10, .regular)).foregroundStyle(Paper.ink.opacity(0.6))
     }
 
     private var ledTitle: String {
@@ -1148,7 +1149,7 @@ struct HomeView: View {
         if let t = live.next[safe: live.pick] {
             BoardingPass(trip: t, home: home, options: live.next, pick: $live.pick)
             if let a = live.nextAsOf {
-                Text(live.onTheMove ? onTheMoveText : Snapshots.asOf(a)).font(HWFont.body(10)).foregroundStyle(Paper.muted).frame(maxWidth: .infinity, alignment: .leading)
+                Text(Snapshots.asOf(a, after: live.onTheMove ? onTheMoveText : nil)).font(HWFont.body(10)).foregroundStyle(Paper.muted).frame(maxWidth: .infinity, alignment: .leading)
             }
             if let via = t.via, let r = RoutePlan.all.first(where: { $0.station.short == via }) {
                 BandButton(title: "Wake me up · via \(via)", pal: pal) { trip.start(r) }
