@@ -154,31 +154,39 @@ enum VehicleMatch {
     }
 
     /// What the fixes of the last `window` seconds say about `v`, each put on the pass of its path nearest its times
-    /// and compared with where its times put it at that fix's own time. Nil when there is no evidence: no usable fix
-    /// (`judgeAll` says `tooFewFixes`), no fix with a time position on it (`noTimes`), or fewer than 2 usable fixes
-    /// (`tooFewFixes`).
+    /// and compared with where its times put it at that fix's own time. Fixes before its path's start (further than
+    /// `passSlack` or their accuracy) are left out: you're not on it yet. Nil when there is no evidence: no usable fix
+    /// (`judgeAll` says `tooFewFixes`), no fix with a time position on it (`noTimes`), your newest fix beyond its path's
+    /// end (`offItsPath`), or fewer than 2 fixes left (`tooFewFixes`).
     static func evidence(_ fixes: [Fix], _ v: VehicleTrack) -> Evidence? {
         try? gather(fixes, v).get()
     }
 
-    /// The evidence, or why there is none: `noTimes` when none of the fixes has a time position on it, `tooFewFixes`
-    /// when no fix is usable or fewer than 2 are.
+    /// The evidence, or why there is none: `noTimes` when none of the fixes has a time position on it, `offItsPath` when
+    /// the newest is beyond its path's end, `tooFewFixes` when no fix is usable or fewer than 2 are left.
     private static func gather(_ fixes: [Fix], _ v: VehicleTrack) -> Result<Evidence, Reject> {
         let good = fixes.filter(usable)
         guard let newest = good.map(\.t).max() else { return .failure(.tooFewFixes) }
         let j = Joined(v.pieces)
         var rows: [(t: Date, along: Double, cross: Double, at: Double, accuracy: Double, connector: Bool)] = []
-        var timed = 0, previous: Double?
+        var timed = 0, previous: Double?, newestBeyond = false
         for f in good.sorted(by: { $0.t < $1.t }) where newest.timeIntervalSince(f.t) <= window {
             let at = j.position(at: f.t)
             if at != nil { timed += 1 }
+            newestBeyond = false
             // where its path passes you twice, the pass nearest its times (or, without, nearest your last fix)
             guard let p = j.pass(f.p, near: at ?? previous, within: max(passSlack, f.accuracy), previous: previous) else { continue }
+            let away = beyondAnEnd(p.projection.crossTrack, f.accuracy)
+            // before its path starts (a trip that starts at a stop you're coming to): not on its path yet, left out
+            if p.beforeStart && away { continue }
+            // beyond its end (a trip that ended at a stop you passed): counts against it, when it's your newest fix
+            newestBeyond = p.beyondEnd && away
             previous = p.projection.along
             guard let at else { continue }
             rows.append((f.t, p.projection.along, p.projection.crossTrack, at, f.accuracy, p.connector))
         }
         guard timed > 0 else { return .failure(.noTimes) }
+        if newestBeyond { return .failure(.offItsPath) }
         guard rows.count >= 2, let first = rows.first, let last = rows.last else { return .failure(.tooFewFixes) }
         let span = last.t.timeIntervalSince(first.t), offset = last.along - last.at
         // The ends you went from and to: the median of the first 3 and of the last 3 fixes (from their middle fixes'
@@ -236,8 +244,8 @@ enum VehicleMatch {
         return .success(cost(offset: e.offset, itsSpeed: e.itsSpeed))
     }
 
-    /// Every vehicle judged on the same fixes; `noTimes` when no fix has a time position on it, `tooFewFixes` when fewer
-    /// than 2 usable fixes are left.
+    /// Every vehicle judged on the same fixes; `noTimes` when no fix has a time position on it, `offItsPath` when your
+    /// newest fix is beyond its path's end, `tooFewFixes` when fewer than 2 fixes are left.
     static func judgeAll(_ fixes: [Fix], _ vs: [VehicleTrack], strictTimes: Bool = true) -> [Judgement] {
         vs.map { v -> Judgement in
             switch gather(fixes, v) {
@@ -251,7 +259,8 @@ enum VehicleMatch {
     }
 
     /// With one fix only: on its path, going its way by the GPS course, a possible bus speed, and near its times, all at
-    /// the fix's own time.
+    /// the fix's own time. A fix before its path's start is too little to tell (`tooFewFixes`); one beyond its end is off
+    /// its path.
     static func judgeOne(_ f: Fix, _ v: VehicleTrack, tolerance: Double) -> Judgement {
         func verdict(_ e: Evidence?, _ r: Result<Double, Reject>) -> Judgement {
             Judgement(id: v.tripId, line: v.line, isTrain: v.isTrain, realTime: v.realTime, evidence: e, result: r)
@@ -260,12 +269,16 @@ enum VehicleMatch {
         let j = Joined(v.pieces)
         guard let at = j.position(at: f.t) else { return verdict(nil, .failure(.noTimes)) }
         guard let pass = j.pass(f.p, near: at, within: max(passSlack, f.accuracy)) else { return verdict(nil, .failure(.tooFewFixes)) }
+        let away = beyondAnEnd(pass.projection.crossTrack, f.accuracy)
+        // before its path starts (a trip that starts at a stop ahead of you): not on its path yet
+        if pass.beforeStart && away { return verdict(nil, .failure(.tooFewFixes)) }
         let p = pass.projection, its = j.speed(at: f.t), speed = f.speed.isFinite ? f.speed : -1
         let e = Evidence(fixes: 1, span: 0, crossTrack: p.crossTrack, accuracy: f.accuracy,
                          shaped: v.pieces.contains { $0.path.count > 2 } && !pass.connector, progress: 0, offset: p.along - at,
                          drift: 0, yourSpeed: max(0, speed), itsSpeed: its, steady: false)
         guard [e.crossTrack, e.offset, e.itsSpeed].allSatisfy(\.isFinite) else { return verdict(nil, .failure(.noTimes)) }
-        // on its path
+        // beyond its end (a trip that ended at a stop behind you), or off its path
+        if pass.beyondEnd && away { return verdict(e, .failure(.offItsPath)) }
         guard e.crossTrack <= max(e.shaped ? offPath : offPathUnshaped, accuracyFactor * f.accuracy) else { return verdict(e, .failure(.offItsPath)) }
         // going its way, by the GPS's course while you're moving (a straight line it adds between pieces that don't
         // meet says nothing about which way its road runs)
@@ -331,6 +344,12 @@ enum VehicleMatch {
     }
 
     // MARK: - Helpers
+
+    /// A fix whose nearest spot on a path is one of its ends, this far from it, is beyond that end: further than
+    /// `passSlack` or the fix's accuracy.
+    private static func beyondAnEnd(_ crossTrack: Double, _ accuracy: Double) -> Bool {
+        crossTrack > max(passSlack, accuracy)
+    }
 
     /// A fix the evidence uses: a known accuracy of at most `maxAccuracy`, at a real place.
     private static func usable(_ f: Fix) -> Bool {
@@ -404,10 +423,12 @@ enum VehicleMatch {
             self.connectors = connectors
         }
 
-        /// Where its path passes `p` (see `Geo.pass`), and whether that is on a connector.
-        func pass(_ p: GeoPoint, near: Double?, within: Double, previous: Double? = nil) -> (projection: Geo.Projection, connector: Bool)? {
+        /// Where its path passes `p` (see `Geo.pass`), whether that is on a connector, and whether it lies before the
+        /// joined path's start or beyond its end.
+        func pass(_ p: GeoPoint, near: Double?, within: Double, previous: Double? = nil)
+            -> (projection: Geo.Projection, connector: Bool, beforeStart: Bool, beyondEnd: Bool)? {
             guard let found = Geo.pass(p, on: path, near: near, within: within, previous: previous) else { return nil }
-            return (found.projection, connectors.contains(found.segment))
+            return (found.projection, connectors.contains(found.segment), found.beforeStart, found.beyondEnd)
         }
 
         /// Metres along the joined path where its times put it at `t`.
@@ -485,27 +506,33 @@ extension VehicleMatch {
 }
 
 extension VehicleMatch {
+    /// The usable fixes of the last `window` seconds (counted back from the newest usable one): how many, and the
+    /// time they span.
+    static func spread(_ fixes: [Fix]) -> (fixes: Int, span: TimeInterval) {
+        let good = fixes.filter(usable)
+        guard let newest = good.map(\.t).max() else { return (0, 0) }
+        let recent = good.filter { newest.timeIntervalSince($0.t) <= window }
+        guard let oldest = recent.map(\.t).min() else { return (0, 0) }
+        return (recent.count, newest.timeIntervalSince(oldest))
+    }
+
     /// Enough fixes to judge by (the first hard test's own minimum): of the usable ones of the last `window` seconds, at
     /// least `minFixes`, spanning at least `minSpan`. Until then nothing passes `judgeAll`: not sure yet.
     static func enough(_ fixes: [Fix]) -> Bool {
-        let good = fixes.filter(usable)
-        guard let newest = good.map(\.t).max() else { return false }
-        let recent = good.filter { newest.timeIntervalSince($0.t) <= window }
-        guard recent.count >= minFixes, let oldest = recent.map(\.t).min() else { return false }
-        return newest.timeIntervalSince(oldest) >= minSpan
+        let s = spread(fixes)
+        return s.fixes >= minFixes && s.span >= minSpan
     }
 
-    /// The ones worth judging, at most `limit`: with more, the likeliest by one look at your newest fix (`judgeOne` at
-    /// any distance from its times): those that pass by their cost, then the others as given. With `limit` or fewer,
-    /// all of them as given.
-    static func shortlist(_ tracks: [VehicleTrack], near f: Fix?, limit: Int = 10) -> [VehicleTrack] {
-        guard tracks.count > limit else { return tracks }
-        guard let f else { return Array(tracks.prefix(limit)) }
-        let scored = tracks.enumerated().map { k, v -> (k: Int, cost: Double) in
-            if case .success(let c) = judgeOne(f, v, tolerance: .infinity).result { return (k, c) }
-            return (k, .infinity)
+    /// The best `limit` of the ranked ones, always with `keep` (the planned or shown one) when it passed: then it takes
+    /// the last place if it isn't in them already.
+    static func top(_ ranked: [Ranked], keep: String?, limit: Int = 10) -> [Ranked] {
+        guard limit > 0 else { return [] }
+        var out = Array(ranked.prefix(limit))
+        if let keep, !out.contains(where: { $0.id == keep }), let k = ranked.first(where: { $0.id == keep }) {
+            if out.count >= limit { out.removeLast() }
+            out.append(k)
         }
-        return scored.sorted { $0.cost != $1.cost ? $0.cost < $1.cost : $0.k < $1.k }.prefix(limit).map { tracks[$0.k] }
+        return out
     }
 }
 

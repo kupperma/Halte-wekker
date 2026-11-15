@@ -142,6 +142,11 @@ enum FieldFormat {
         }
     }
 
+    /// "detect · not sure (4 fixes, 12 s)": the matcher had too few fixes to judge by (of the last half minute).
+    static func notSure(_ place: String, fixes: Int, span: TimeInterval) -> String {
+        "\(place) · not sure (\(fixes) \(fixes == 1 ? "fix" : "fixes"), \(Int(max(0, span).rounded())) s)"
+    }
+
     static func classic(_ place: String, _ found: [(label: String, metres: Double)]) -> String {
         "\(place) (classic) · " + (found.isEmpty ? "none" : found.prefix(6).map { "\($0.label) \(Int($0.metres.rounded())) m" }.joined(separator: " | "))
     }

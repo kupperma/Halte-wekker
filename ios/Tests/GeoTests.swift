@@ -20,6 +20,28 @@ final class GeoTests: XCTestCase {
         XCTAssertEqual(p.crossTrack, 100, accuracy: 1)
     }
 
+    /// Which passes lie beyond the path's ends, by the segment and where on it the foot falls (a repeated end point
+    /// doesn't count as a segment).
+    func test_passEnds() throws {
+        let path = [Fx.east(0), Fx.east(0), Fx.east(500), Fx.east(1000), Fx.east(1000)]
+        func at(_ m: Double, north: Double = 0) throws -> Geo.Pass { try XCTUnwrap(Geo.pass(Fx.east(m, north: north), on: path, near: nil, within: 0)) }
+        let before = try at(-200)
+        XCTAssertTrue(before.beforeStart); XCTAssertFalse(before.beyondEnd)
+        XCTAssertEqual(before.projection.along, 0, accuracy: 0.001); XCTAssertEqual(before.projection.crossTrack, 200, accuracy: 1)
+        XCTAssertTrue(try at(0, north: 50).beforeStart)                 // beside the start
+        let inside = try at(20, north: 50)
+        XCTAssertFalse(inside.beforeStart); XCTAssertFalse(inside.beyondEnd)
+        XCTAssertFalse(try at(500, north: 30).beforeStart)              // the corner between the two stretches
+        XCTAssertFalse(try at(500, north: 30).beyondEnd)
+        let beyond = try at(1300)
+        XCTAssertTrue(beyond.beyondEnd); XCTAssertFalse(beyond.beforeStart)
+        XCTAssertEqual(beyond.projection.along, 1000, accuracy: 1)
+        XCTAssertFalse(try at(980, north: 10).beyondEnd)
+        // one stretch: before its start and beyond its end
+        XCTAssertTrue(try XCTUnwrap(Geo.pass(Fx.east(-5), on: [Fx.east(0), Fx.east(100)], near: nil, within: 0)).beforeStart)
+        XCTAssertTrue(try XCTUnwrap(Geo.pass(Fx.east(105), on: [Fx.east(0), Fx.east(100)], near: nil, within: 0)).beyondEnd)
+    }
+
     func test_degenerate() {
         XCTAssertNil(Geo.project(Fx.east(10), on: [Fx.east(0)]))
         XCTAssertNil(Geo.project(Fx.east(10), on: [Fx.east(0), Fx.east(0)]))

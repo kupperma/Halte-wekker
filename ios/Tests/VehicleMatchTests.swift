@@ -46,7 +46,9 @@ final class VehicleMatchTests: XCTestCase {
         let ends = VehicleTrack(tripId: "e", line: "IC", isTrain: true, realTime: true, pieces: [a, b])
         XCTAssertEqual(try XCTUnwrap(VehicleMatch.timePosition(ends, at: t0 + 60)), 1500, accuracy: 1)
         XCTAssertEqual(try XCTUnwrap(VehicleMatch.timePosition(ends, at: t0 + 80)), 1500, accuracy: 1)
-        let f = try XCTUnwrap(VehicleMatch.evidence(Fx.fixes(from: 1000, speed: 25, count: 15, start: t0 + 40), ends))
+        // (fixes beyond its end count against it: off its path)
+        XCTAssertEqual(Fx.why(VehicleMatch.judgeAll(Fx.fixes(from: 1000, speed: 25, count: 15, start: t0 + 40), [ends]), "e"), .offItsPath)
+        let f = try XCTUnwrap(VehicleMatch.evidence(Fx.fixes(from: 800, speed: 25, count: 15, start: t0 + 40), ends))
         for x in [f.span, f.crossTrack, f.accuracy, f.progress, f.offset, f.drift, f.yourSpeed, f.itsSpeed] {
             XCTAssertTrue(x.isFinite, "\(f)")
         }
@@ -310,21 +312,99 @@ final class VehicleMatchTests: XCTestCase {
         XCTAssertTrue(VehicleMatch.enough(Fx.fixes(from: 0, speed: 15, count: 11) + [bad]))
     }
 
-    /// At most 10 judged: the likeliest by one look at your newest fix; with 10 or fewer, all as given.
-    func test_shortlist() {
-        let me = Fix(t: t0, p: Fx.east(3500), accuracy: 20, speed: 15, course: 90)
-        let few = (0..<3).map { Fx.track("v\($0)", line: "306", train: false, path: Fx.railway, at: 3500 + Double($0) * 300, speed: 15) }
-        XCTAssertEqual(VehicleMatch.shortlist(few, near: me).map(\.tripId), ["v0", "v1", "v2"])
-        // 12: one with you, 9 ahead of you by their times by 30…270 m, one far off its path, one going the other way
-        var many = (1...9).map { Fx.track("b\($0)", line: "306", train: false, path: Fx.railway, at: 3500 + Double($0) * 30, speed: 15) }
-        many.insert(Fx.track("off", line: "305", train: false, path: Fx.road(north: 900), at: 3500, speed: 15), at: 0)
-        many.insert(Fx.track("back", line: "305", train: false, path: Array(Fx.railway.reversed()), at: 3400, speed: 15), at: 1)
-        many.append(Fx.track("mine", line: "306", train: false, path: Fx.railway, at: 3500, speed: 15))
-        let picked = VehicleMatch.shortlist(many, near: me).map(\.tripId)
-        XCTAssertEqual(picked.count, 10)
-        XCTAssertEqual(picked.first, "mine")
-        XCTAssertEqual(picked, ["mine"] + (1...9).map { "b\($0)" })
-        XCTAssertEqual(VehicleMatch.shortlist(many, near: nil).count, 10)
+    func test_spread() {
+        XCTAssertTrue(VehicleMatch.spread([]) == (0, 0))
+        let s = VehicleMatch.spread(Fx.fixes(from: 0, speed: 15, count: 20))     // 38 s of fixes: the last 30 s count
+        XCTAssertEqual(s.fixes, 16)
+        XCTAssertEqual(s.span, 30, accuracy: 0.001)
+        XCTAssertTrue(VehicleMatch.spread(Fx.fixes(from: 0, speed: 15, count: 4, accuracy: 200)) == (0, 0))
+    }
+
+    /// The best 10 are kept, and always the planned (or shown) one when it passed.
+    func test_top() {
+        let ranked = (0..<12).map { Ranked(id: "r\($0)", cost: Double($0) * 10) }
+        XCTAssertEqual(VehicleMatch.top(ranked, keep: nil).map(\.id), (0..<10).map { "r\($0)" })
+        XCTAssertEqual(VehicleMatch.top(ranked, keep: "r11").map(\.id), (0..<9).map { "r\($0)" } + ["r11"])
+        XCTAssertEqual(VehicleMatch.top(ranked, keep: "r3").map(\.id), (0..<10).map { "r\($0)" })
+        XCTAssertEqual(VehicleMatch.top(ranked, keep: "gone").map(\.id), (0..<10).map { "r\($0)" })
+        XCTAssertEqual(VehicleMatch.top(Array(ranked.prefix(3)), keep: "r1").map(\.id), ["r0", "r1", "r2"])
+        XCTAssertEqual(VehicleMatch.top(ranked, keep: "r5", limit: 0), [])
+    }
+
+    /// R-rel-20: every vehicle is judged (none left out before), so one multipath newest fix 70 m off your bus's road
+    /// among 14 vehicles doesn't lose you your bus.
+    func test_judgedAllWithMultipath() {
+        var you = Fx.fixes(from: 1000, speed: 10, count: 11, every: 3, accuracy: 15)
+        let last = you.removeLast()
+        you.append(Fix(t: last.t, p: Fx.east(1300, north: 70), accuracy: 15, speed: 10, course: 90))
+        let mine = Fx.track("mine", line: "306", train: false, path: Fx.railway, at: 1000, speed: 10)
+        let same = (1...5).map { Fx.track("same\($0)", line: "306", train: false, path: Fx.railway, at: 1000 - 300 * Double($0), speed: 10) }
+        let elsewhere = (0..<8).map { Fx.track("else\($0)", line: "305", train: false, path: Fx.road(north: 400 + 100 * Double($0)), at: 1000, speed: 10) }
+        for k in [0, 6, 13] {
+            var tracks = same + elsewhere
+            tracks.insert(mine, at: k)
+            XCTAssertEqual(tracks.count, 14)
+            let judged = VehicleMatch.judgeAll(you, tracks)
+            let kept = VehicleMatch.top(VehicleMatch.rank(judged, planned: nil), keep: nil)
+            XCTAssertEqual(kept.first?.id, "mine", "\(judged)")
+            XCTAssertEqual(Fx.ok(judged, "mine") ?? -1, 0, accuracy: 2)
+        }
+    }
+
+    // MARK: - Path ends (R-rel-17b)
+
+    /// Your fixes `n` s after you pass 1500 m at t0 (10 m/s, every 2 s, the last 30 s).
+    private func passing(_ n: Double) -> [Fix] {
+        Fx.fixes(from: 1500 + 10 * (n - 30), speed: 10, count: 16, every: 2, accuracy: 10, start: t0 + (n - 30))
+    }
+
+    /// A trip that starts at a stop you pass (1500 m), on a straight chord: your fixes before its start are left out, so
+    /// it's not sure until 20 s past; then by its times: with you, standing, or drifting.
+    func test_tripStartingAtAStopYouPass() {
+        func trip(_ id: String, leaves: Double, speed: Double = 10) -> VehicleTrack {
+            VehicleTrack(tripId: id, line: "154", isTrain: false, realTime: true, pieces: [
+                TimedPiece(departure: t0 + leaves, arrival: t0 + leaves + 1000 / speed, path: [Fx.east(1500), Fx.east(2500)])])
+        }
+        let soon = trip("soon", leaves: 5), later = trip("later", leaves: 40), slow = trip("slow", leaves: -10, speed: 5)
+        for n in [0.0, 6, 10, 16] {
+            let j = VehicleMatch.judgeAll(passing(n), [soon, slow])
+            XCTAssertEqual(Fx.why(j, "soon"), .tooFewFixes, "\(n) s past: \(j)")
+            XCTAssertEqual(Fx.why(j, "slow"), .tooFewFixes, "\(n) s past: \(j)")
+        }
+        XCTAssertEqual(Fx.why(VehicleMatch.judgeAll(passing(24), [later]), "later"), .tooFewFixes)   // no times yet for most
+        let j = VehicleMatch.judgeAll(passing(24), [soon, slow])
+        XCTAssertEqual(Fx.ok(j, "soon") ?? -1, 7, accuracy: 2, "\(j)")           // leaves 5 s after you, with you
+        XCTAssertEqual(Fx.why(j, "slow"), .drifting, "\(j)")
+        XCTAssertEqual(Fx.why(VehicleMatch.judgeAll(passing(34), [later]), "later"), .standing)
+    }
+
+    /// The same with one fix: a trip starting at a stop 21 to 250 m ahead of you, leaving within 30 s, isn't one you're on.
+    func test_judgeOneBeforeItsStart() {
+        for path in [[Fx.east(1500), Fx.east(2500)], [Fx.east(1500), Fx.east(2000), Fx.east(2500)]] {
+            let v = VehicleTrack(tripId: "s", line: "154", isTrain: false, realTime: true,
+                                 pieces: [TimedPiece(departure: t0 + 15, arrival: t0 + 115, path: path)])
+            for before in [21.0, 60, 100, 200, 250] {
+                let f = Fix(t: t0, p: Fx.east(1500 - before), accuracy: 10, speed: 10, course: 90)
+                XCTAssertEqual(VehicleMatch.judgeOne(f, v, tolerance: 450).result, .failure(.tooFewFixes), "\(before) m before")
+            }
+            let at = Fix(t: t0, p: Fx.east(1495), accuracy: 10, speed: 10, course: 90)
+            XCTAssertNotNil(try? VehicleMatch.judgeOne(at, v, tolerance: 450).result.get())       // at its stop
+        }
+    }
+
+    /// A trip that ends at a stop you passed: off its path once your newest fix is beyond its end (by more than 20 m or
+    /// the fix's accuracy); with one fix too.
+    func test_tripEndingAtAStopYouPassed() {
+        let v = VehicleTrack(tripId: "e", line: "306", isTrain: false, realTime: true,
+                             pieces: [TimedPiece(departure: t0 - 100, arrival: t0, path: [Fx.east(500), Fx.east(1000), Fx.east(1500)])])
+        XCTAssertNotNil(Fx.ok(VehicleMatch.judgeAll(passing(0), [v]), "e"))
+        XCTAssertNotNil(Fx.ok(VehicleMatch.judgeAll(passing(1.5), [v]), "e"))                      // 15 m past: jitter
+        XCTAssertEqual(Fx.why(VehicleMatch.judgeAll(passing(6), [v]), "e"), .offItsPath)
+        XCTAssertEqual(Fx.why(VehicleMatch.judgeAll(passing(12), [v]), "e"), .offItsPath)
+        let past = Fix(t: t0 + 6, p: Fx.east(1560), accuracy: 10, speed: 10, course: 90)
+        XCTAssertEqual(VehicleMatch.judgeOne(past, v, tolerance: 450).result, .failure(.offItsPath))
+        let near = Fix(t: t0, p: Fx.east(1490), accuracy: 10, speed: 10, course: 90)
+        XCTAssertNotNil(try? VehicleMatch.judgeOne(near, v, tolerance: 450).result.get())
     }
 
     /// R-rel-13: across a 2 km gap between pieces that don't meet, its times run along the connector: the bus that

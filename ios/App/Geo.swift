@@ -44,10 +44,14 @@ enum Geo {
     }
 
     /// One place where a path passes a point (the nearest spot of one stretch of it), and the segment it is on: the
-    /// index of the segment's first point.
+    /// index of the segment's first point. `beforeStart`: the spot is the path's first point, with the point before it
+    /// or beside it (the foot falls at or before the start of its first segment); `beyondEnd`: the spot is its last
+    /// point, with the point beyond it.
     struct Pass: Equatable {
         let projection: Projection
         let segment: Int
+        let beforeStart: Bool
+        let beyondEnd: Bool
     }
 
     /// The nearest place on `path` to `p`. Nil for fewer than 2 points or a path of length 0.
@@ -100,19 +104,21 @@ enum Geo {
             guard d.isFinite else { continue }
             feet.append((d, start + u * lens[i - 1], u, i - 1))
         }
-        func made(_ f: (d: Double, along: Double, u: Double, seg: Int)) -> Pass {
-            Pass(projection: Projection(crossTrack: f.d, along: f.along, fraction: min(1, max(0, f.along / total)),
-                                        bearing: bearing(path[f.seg], path[f.seg + 1])),
-                 segment: f.seg)
+        // (the first and the last stretch with a length: a repeated point at an end has no direction)
+        func made(_ k: Int) -> Pass {
+            let f = feet[k]
+            return Pass(projection: Projection(crossTrack: f.d, along: f.along, fraction: min(1, max(0, f.along / total)),
+                                               bearing: bearing(path[f.seg], path[f.seg + 1])),
+                        segment: f.seg, beforeStart: k == 0 && f.u <= 0, beyondEnd: k == feet.count - 1 && f.u >= 1)
         }
         var out: [Pass] = []
         for (k, f) in feet.enumerated() {
             // A stretch's nearest spot at its start counts only at the path's start or at a corner (the stretch before
             // ends there too); one at its end only at the path's end (the next stretch has it, or something nearer).
             let isPass = f.u <= 0 ? (k == 0 || feet[k - 1].u >= 1) : f.u >= 1 ? k == feet.count - 1 : true
-            if isPass { out.append(made(f)) }
+            if isPass { out.append(made(k)) }
         }
-        if out.isEmpty, let f = feet.min(by: { $0.d < $1.d }) { out.append(made(f)) }
+        if out.isEmpty, let k = feet.indices.min(by: { feet[$0].d < feet[$1].d }) { out.append(made(k)) }
         return out
     }
 

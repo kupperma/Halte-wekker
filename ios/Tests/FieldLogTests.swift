@@ -88,6 +88,11 @@ final class FieldLogTests: XCTestCase {
                        "detect (classic) · 306·a1b2 120 m | 305·c3d4 310 m")
     }
 
+    func test_notSureFormat() {
+        XCTAssertEqual(FieldFormat.notSure("detect", fixes: 4, span: 12.4), "detect · not sure (4 fixes, 12 s)")
+        XCTAssertEqual(FieldFormat.notSure("board", fixes: 1, span: 0), "board · not sure (1 fix, 0 s)")
+    }
+
     func test_export() {
         let log = FieldLog(defaults: suite())
         // 07:12:03 UTC

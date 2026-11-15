@@ -138,10 +138,11 @@ final class LiveStore: ObservableObject {
     /// `wasMoving`: you were going at train or bus speed just now (stopped at a signal, or slowing down): not "standing".
     /// `late` (with `tripId`): it was found by the road you're on, this many seconds off its times: its next stop is the
     /// next one ahead by its times moved by that much (its timetable position may be kilometres from you).
-    /// `history`: your fixes of the last minutes. Without a `tripId` it's the one that moves with you (`movesWithYou`);
-    /// classic matching: the one whose position by its times now is nearest to you.
+    /// `history`: your fixes of the last minutes, read once the vehicles near you are in. Without a `tripId` it's the
+    /// one that moves with you (`movesWithYou`); classic matching: the one whose position by its times now is nearest to you.
     static func onBoardTrips(_ f: CLLocation, to dest: Place, tripId: String? = nil, wasMoving: Bool = false,
-                             late: TimeInterval? = nil, line: String? = nil, isTrain: Bool? = nil, history: [Fix] = []) async -> (OnBoard, [DoorTrip])? {
+                             late: TimeInterval? = nil, line: String? = nil, isTrain: Bool? = nil,
+                             history: @MainActor @Sendable () -> [Fix] = { [] }) async -> (OnBoard, [DoorTrip])? {
         let now = Date()
         if let tripId, let late {
             let stops = await Transit.tripStops(tripId)
@@ -176,7 +177,7 @@ final class LiveStore: ObservableObject {
             }
             chosen = best?.0
         } else {
-            chosen = movesWithYou(f, segs, history: history, still: still, speed: speedNow, now: now)
+            chosen = movesWithYou(f, segs, history: history(), still: still, speed: speedNow, now: now)
         }
         guard let seg = chosen else { return nil }
         // Its next stop is where this piece goes (it left its last one, or leaves it within 20 s, and gets there after
@@ -210,12 +211,12 @@ final class LiveStore: ObservableObject {
 
     /// The matcher's pick for `onBoardTrips`: the bus or train that moves with you. Judged on your fixes once they span
     /// 20 s, else on this fix alone at its own time (on its path, going your way by the GPS's course, a possible speed,
-    /// near its times: today's allowed distance, 250 m when you're standing), at most 10 of them; the best by the
-    /// seconds you are off its times. Its piece now: the last of its pieces that has left (else its first).
+    /// near its times: today's allowed distance, 250 m when you're standing); the best by the seconds you are off its
+    /// times. Its piece now: the last of its pieces that has left (else its first).
     private static func movesWithYou(_ f: CLLocation, _ segs: [VehicleSegment], history: [Fix], still: Bool, speed: Double,
                                      now: Date) -> VehicleSegment? {
         let one = Fix(f)
-        let tracks = VehicleMatch.shortlist(VehicleTrack.group(segs.map { MapPiece($0) }), near: one)
+        let tracks = VehicleTrack.group(segs.map { MapPiece($0) })
         let judged: [Judgement]
         if VehicleMatch.enough(history) {
             judged = VehicleMatch.judgeAll(history, tracks)
