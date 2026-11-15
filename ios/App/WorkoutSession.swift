@@ -230,10 +230,10 @@ enum Session {
 
     // MARK: - Lines
 
-    /// Minutes, to the nearest 5: a minute per work set plus its rest (none for a superset member before the last),
-    /// and 5 minutes of warming up.
+    /// Minutes, to the nearest 5: 5 minutes of warming up, 40 s per exercise to set up, and a minute per work set plus
+    /// its rest (none for a superset member before the last).
     static func estimate(_ w: Workout) -> Int {
-        var seconds = 300
+        var seconds = 300 + 40 * w.exercises.count
         for (i, e) in w.exercises.enumerated() {
             let members = group(i, w)
             let rest = members.last == i ? max(0, e.target?.rest ?? 0) : 0
@@ -290,6 +290,7 @@ enum Session {
             state.plannedShort = WorkoutFormat.set(set, kind, .short)
             state.last = Previous.row(a.previous[e.id.uuidString] ?? [], warmup: p.warmup, number: p.number - 1)
                 .map { WorkoutFormat.set($0, kind, .short) }
+            state.setId = upcoming == nil ? nil : set.id
         }
         if let r = a.rest, r.ends > now {
             state.restStarted = r.started
@@ -300,7 +301,8 @@ enum Session {
 
     // MARK: - Finishing
 
-    /// Only the done sets, and only exercises that have one. nil when nothing is done.
+    /// Only the done sets, and only exercises that have one. nil without a done work set: warm-ups alone are not
+    /// saved, so they don't move the rotation.
     static func finished(_ a: ActiveWorkout, end: Date, note: String) -> Workout? {
         var w = a.workout
         w.exercises = w.exercises.compactMap { e in
@@ -308,7 +310,7 @@ enum Session {
             kept.sets = e.sets.filter(\.done)
             return kept.sets.isEmpty ? nil : kept
         }
-        guard !w.exercises.isEmpty else { return nil }
+        guard w.hardSets > 0 else { return nil }
         w.end = end
         w.note = note
         return w
@@ -357,12 +359,32 @@ enum Session {
         return FinishSummary(heading: heading.joined(separator: " · "), records: records, lines: lines)
     }
 
-    /// "+2 kg" for a heavier top set, else "+2 reps" / "−1 rep" for a different total; nil without a last time.
+    /// Against last time's counting sets; nil without a last time.
+    /// - weight and weighted: "+2 kg" for a heavier top set, else the reps;
+    /// - assisted: "2.5 kg less help" / "2.5 kg more help" for the top set (the one with the least help), else the reps;
+    /// - time: "+10 s" / "−5 s" for the longest hold, nothing else;
+    /// - the reps: "+2 reps" / "−1 rep" for a different total.
     private static func change(_ today: [LoggedSet], _ last: [LoggedSet], _ kind: ExerciseKind) -> String? {
         guard !today.isEmpty, !last.isEmpty else { return nil }
-        if kind == .weight || kind == .weighted, let top = today.compactMap(\.kg).max() {
-            let before = last.compactMap(\.kg).max() ?? 0
-            if top > before + 1e-9 { return "+\(WorkoutFormat.kg(top - before)) kg" }
+        switch kind {
+        case .time:
+            guard let now = today.compactMap(\.seconds).max(), let then = last.compactMap(\.seconds).max(),
+                  now != then else { return nil }
+            return "\(now > then ? "+" : "\u{2212}")\(abs(now - then)) s"
+        case .assisted:
+            // No kg is no help.
+            let now = today.map { $0.kg ?? 0 }.min() ?? 0
+            let then = last.map { $0.kg ?? 0 }.min() ?? 0
+            if abs(now - then) > 1e-9 {
+                return "\(WorkoutFormat.kg(abs(now - then))) kg \(now < then ? "less" : "more") help"
+            }
+        case .weight, .weighted:
+            if let top = today.compactMap(\.kg).max() {
+                let before = last.compactMap(\.kg).max() ?? 0
+                if top > before + 1e-9 { return "+\(WorkoutFormat.kg(top - before)) kg" }
+            }
+        case .bodyweight, .cardio:
+            break
         }
         let diff = today.reduce(0) { $0 + ($1.reps ?? 0) } - last.reduce(0) { $0 + ($1.reps ?? 0) }
         guard diff != 0 else { return nil }

@@ -102,8 +102,8 @@ final class WorkoutSessionTests: XCTestCase {
         XCTAssertEqual(w.exercises[5].superset, 1)
         XCTAssertEqual(Set(a.previous.keys), Set(w.exercises.map(\.id.uuidString)))
 
-        XCTAssertEqual(Session.estimate(w), 70)
-        XCTAssertEqual(Session.planLine(a), "9 exercises · 25 sets · about 70 min")
+        XCTAssertEqual(Session.estimate(w), 75)
+        XCTAssertEqual(Session.planLine(a), "9 exercises · 25 sets · about 75 min")
         XCTAssertEqual(Session.namesLine(a, library: lib, ladders: ladders),
                        "Dragon flag · Pull-up · Lat pulldown · Seated cable row (V-grip) · …")
         XCTAssertEqual(Session.namesLine(a, library: lib, ladders: ladders, max: 9).components(separatedBy: " · ").count, 9)
@@ -163,6 +163,18 @@ final class WorkoutSessionTests: XCTestCase {
         XCTAssertEqual(Session.title(["gone"], routines: r), "Workout")
     }
 
+    func test_estimate() {
+        XCTAssertEqual(Session.estimate(Session.plan(["push"], input()).workout), 70)
+        XCTAssertEqual(Session.estimate(Session.plan(["pull"], input()).workout), 70)
+        // The first two weeks of Legs: 2 sets each.
+        XCTAssertEqual(Session.estimate(Session.plan(["pull", "legs"], input()).workout), 75)
+        var state = WorkoutState()
+        state.firstLegsDay = "2026-11-01"
+        XCTAssertEqual(Session.estimate(Session.plan(["pull", "legs"], input(state: state, today: "2026-11-15")).workout), 85)
+        // 5 minutes of warming up even when empty.
+        XCTAssertEqual(Session.estimate(Workout(title: "Workout", start: t0)), 5)
+    }
+
     func test_emptyWorkout() {
         let a = Session.plan([], input())
         XCTAssertEqual(a.workout.title, "Workout")
@@ -205,6 +217,35 @@ final class WorkoutSessionTests: XCTestCase {
         XCTAssertEqual(second.rest, RestState(started: t, ends: t.addingTimeInterval(75)))
         XCTAssertEqual(a.rest, second.rest)
         XCTAssertEqual(Session.next(a), SessionCursor(exercise: 4, set: 1))
+    }
+
+    func test_threeMemberSuperset() {
+        func ex(_ id: String, _ sets: Int, rest: Int, superset: Int?, warmup: Bool = false) -> LoggedExercise {
+            let work = (0..<sets).map { _ in LoggedSet(kg: 20, reps: 10) }
+            return LoggedExercise(exerciseId: id, target: Target(sets: sets, lo: 8, hi: 12, rest: rest), superset: superset,
+                                  sets: (warmup ? [LoggedSet(kind: .warmup, kg: 10, reps: 8)] : []) + work)
+        }
+        // A 3, B 1 (with a warm-up), C 2 sets, then D on its own.
+        var a = ActiveWorkout(workout: Workout(title: "Workout", start: t0, exercises: [
+            ex("a", 3, rest: 30, superset: 7), ex("b", 1, rest: 45, superset: 7, warmup: true),
+            ex("c", 2, rest: 90, superset: 7), ex("d", 1, rest: 60, superset: nil),
+        ]))
+        let c = { (e: Int, s: Int) in SessionCursor(exercise: e, set: s) }
+        let expected = [c(1, 0), c(0, 0), c(1, 1), c(2, 0), c(0, 1), c(2, 1), c(0, 2), c(3, 0)]
+        XCTAssertEqual(Session.order(a.workout), expected)
+
+        // Rest after each set, done in order: the warm-up's minute; none on to a later member; the last member's
+        // 90 s before the next round and after the group; none after the very last set.
+        var rests: [Int?] = []
+        for x in expected {
+            XCTAssertEqual(Session.next(a), x)
+            let r = complete(&a, x)
+            rests.append(r.rest.map { Int($0.ends.timeIntervalSince($0.started)) })
+        }
+        XCTAssertEqual(rests, [60, nil, nil, 90, nil, 90, 90, nil])
+        XCTAssertNil(Session.next(a))
+        // 300 + 4 × 40 + 6 × 60 for A, B and C + 2 × 90 for C + 1 × 120 for D = 1120 s → 20 min.
+        XCTAssertEqual(Session.estimate(a.workout), 20)
     }
 
     func test_restAndNoneAtEnd() throws {
@@ -335,6 +376,7 @@ final class WorkoutSessionTests: XCTestCase {
         XCTAssertNil(s.restStarted)
         XCTAssertNil(s.restEnds)
         XCTAssertFalse(s.allDone)
+        XCTAssertEqual(s.setId, a.workout.exercises[lat].sets[1].id)
 
         let t = t0.addingTimeInterval(600)
         complete(&a, SessionCursor(exercise: lat, set: 1), at: t)
@@ -342,6 +384,7 @@ final class WorkoutSessionTests: XCTestCase {
         XCTAssertEqual(resting.restStarted, t)
         XCTAssertEqual(resting.restEnds, t.addingTimeInterval(120))
         XCTAssertEqual(resting.setNumber, 3)
+        XCTAssertEqual(resting.setId, a.workout.exercises[lat].sets[2].id)
         XCTAssertEqual(resting.last, "55 × 11")
         // Once the rest is over, it isn't shown as one.
         XCTAssertNil(Session.liveState(a, library: lib, now: t.addingTimeInterval(121)).restEnds)
@@ -349,6 +392,7 @@ final class WorkoutSessionTests: XCTestCase {
         doneAll(&a)
         let end = Session.liveState(a, library: lib, now: t)
         XCTAssertTrue(end.allDone)
+        XCTAssertNil(end.setId)
         // The last done set: the lat pulldown set at t is the only one with a time.
         XCTAssertEqual(end.exercise, "Lat pulldown")
         XCTAssertEqual(end.setNumber, 2)
@@ -368,6 +412,57 @@ final class WorkoutSessionTests: XCTestCase {
         XCTAssertEqual(s.exercise, String(repeating: "Ü😀", count: 20))
         XCTAssertEqual(s.title.count, 40)
         XCTAssertLessThan(try JSONEncoder().encode(s).count, 4096)
+    }
+
+    func test_liveStateCutsBytes() {
+        // One character of 201 bytes: it can't fit, and it is never split.
+        let accents = "e" + String(repeating: "\u{0301}", count: 100)
+        XCTAssertEqual(accents.count, 1)
+        XCTAssertEqual(accents.utf8.count, 201)
+        let heavy = String(repeating: accents, count: 3) + "abc"
+        let cut = WorkoutLiveState.cut(heavy)
+        XCTAssertLessThanOrEqual(cut.utf8.count, WorkoutLiveState.maxBytes)
+        XCTAssertTrue(heavy.hasPrefix(cut))
+        XCTAssertEqual(cut, "")
+        XCTAssertEqual(WorkoutLiveState.cut(accents + "abc").count, 0)
+        XCTAssertEqual(WorkoutLiveState.cut("abc" + accents), "abc")
+
+        // A family is 25 bytes: 6 fit in 160.
+        let family = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}\u{200D}\u{1F466}"
+        XCTAssertEqual(family.count, 1)
+        XCTAssertEqual(family.utf8.count, 25)
+        let families = WorkoutLiveState.cut(String(repeating: family, count: 40))
+        XCTAssertEqual(families, String(repeating: family, count: 6))
+        XCTAssertTrue(families.allSatisfy { String($0) == family })
+        XCTAssertLessThanOrEqual(families.utf8.count, 160)
+
+        // Plain text is cut by characters only.
+        XCTAssertEqual(WorkoutLiveState.cut(String(repeating: "a", count: 50)), String(repeating: "a", count: 40))
+        XCTAssertEqual(WorkoutLiveState.cut("Lat pulldown"), "Lat pulldown")
+
+        // Through liveState too.
+        let library = lib + [Exercise(id: "custom-x", name: String(repeating: family, count: 40), custom: true)]
+        let a = ActiveWorkout(workout: Workout(title: String(repeating: accents, count: 2), start: t0, exercises: [
+            LoggedExercise(exerciseId: "custom-x", target: Target(sets: 1, lo: 8, hi: 12, rest: 60), sets: [LoggedSet(reps: 8)]),
+        ]))
+        let s = Session.liveState(a, library: library, now: t0)
+        XCTAssertEqual(s.exercise, String(repeating: family, count: 6))
+        XCTAssertEqual(s.title, "")
+    }
+
+    func test_liveStateDecodesTolerantly() throws {
+        let s = try JSONDecoder().decode(WorkoutLiveState.self, from: Data(#"{"title":"Pull","setNumber":2,"last":null}"#.utf8))
+        XCTAssertEqual(s.title, "Pull")
+        XCTAssertEqual(s.setNumber, 2)
+        XCTAssertEqual(s.exercise, "")
+        XCTAssertNil(s.last)
+        XCTAssertNil(s.setId)
+        XCTAssertFalse(s.allDone)
+
+        let (a, _) = try latPulldownSet2()
+        let state = Session.liveState(a, library: lib, now: t0)
+        XCTAssertNotNil(state.setId)
+        XCTAssertEqual(try JSONDecoder().decode(WorkoutLiveState.self, from: JSONEncoder().encode(state)), state)
     }
 
     func test_nextNilWhenAllDone() {
@@ -403,6 +498,12 @@ final class WorkoutSessionTests: XCTestCase {
         XCTAssertEqual(w?.id, a.workout.id)
 
         XCTAssertNil(Session.finished(Session.plan(["pull"], input()), end: end, note: ""))
+
+        // Warm-ups alone are not a workout.
+        var warm = Session.plan(["pull"], input())
+        complete(&warm, SessionCursor(exercise: 1, set: 0))
+        XCTAssertEqual(warm.workout.exercises[1].sets[0].done, true)
+        XCTAssertNil(Session.finished(warm, end: end, note: ""))
     }
 
     private func logged(_ id: String, routine: String?, ladder: String? = nil, target: Target?,
@@ -488,5 +589,42 @@ final class WorkoutSessionTests: XCTestCase {
         XCTAssertEqual(s.heading, "Push · 45 min · 2 sets")
         XCTAssertEqual(s.lines, [FinishLine(exerciseId: "incline-db-press", text: "Incline DB press 26×10 · 26×10",
                                             change: nil, next: nil)])
+    }
+
+    func test_summaryChanges() throws {
+        let earlier = Workout(title: "Push", routineIds: ["push"], start: t0.addingTimeInterval(-2 * 86_400), bodyWeight: 88,
+                              exercises: [
+            logged("incline-db-press", routine: "push", target: nil, 26, [10, 10, 10]),
+            logged("weighted-dip", routine: "push", target: nil, 7.5, [8, 8, 8]),
+            logged("assisted-pull-up", routine: "push", target: nil, 22.5, [8, 8, 8]),
+            LoggedExercise(exerciseId: "hollow-body-hold", routineId: "push",
+                           sets: [30, 25, 30].map { LoggedSet(seconds: $0, done: true) }),
+        ])
+        let before = WorkoutIndex.build([earlier], library: lib)
+        func change(_ e: LoggedExercise) -> String? {
+            let w = Workout(title: "Push", routineIds: ["push"], start: t0, end: t0.addingTimeInterval(3600), bodyWeight: 88,
+                            exercises: [e])
+            return Session.summary(w, before: before, library: lib, ladders: ladders, state: WorkoutState()).lines[0].change
+        }
+        func hold(_ seconds: [Int]) -> LoggedExercise {
+            LoggedExercise(exerciseId: "hollow-body-hold", routineId: "push",
+                           sets: seconds.map { LoggedSet(seconds: $0, done: true) })
+        }
+
+        // Weighted: more extra weight.
+        XCTAssertEqual(change(logged("weighted-dip", routine: "push", target: nil, 10, [8, 8, 8])), "+2.5 kg")
+        XCTAssertEqual(change(logged("weighted-dip", routine: "push", target: nil, 7.5, [9, 8, 8])), "+1 rep")
+        // A lighter top kg is no "kg" line: it falls through to the reps.
+        XCTAssertEqual(change(logged("incline-db-press", routine: "push", target: nil, 24, [12, 12, 12])), "+6 reps")
+        XCTAssertEqual(change(logged("incline-db-press", routine: "push", target: nil, 24, [10, 10, 10])), nil)
+        // Assisted: the help on the top set.
+        XCTAssertEqual(change(logged("assisted-pull-up", routine: "push", target: nil, 20, [8, 8, 8])), "2.5 kg less help")
+        XCTAssertEqual(change(logged("assisted-pull-up", routine: "push", target: nil, 25, [8, 8, 8])), "2.5 kg more help")
+        XCTAssertEqual(change(logged("assisted-pull-up", routine: "push", target: nil, 22.5, [9, 8, 8])), "+1 rep")
+        XCTAssertEqual(change(logged("assisted-pull-up", routine: "push", target: nil, 22.5, [8, 8, 8])), nil)
+        // Time: the longest hold.
+        XCTAssertEqual(change(hold([40, 35, 30])), "+10 s")
+        XCTAssertEqual(change(hold([25, 25, 20])), "\u{2212}5 s")
+        XCTAssertEqual(change(hold([30, 30, 30])), nil)
     }
 }
