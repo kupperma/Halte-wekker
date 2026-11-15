@@ -80,12 +80,20 @@ Ze staan op hetzelfde scherm als het eiwit, onder de bronnen. Een gewoonte die n
 
 ### Wekelijkse check
 
+⚙︎ **Wanneer:** de check rekent **één keer per week, op maandag**. Hij vergelijkt vaste weken van maandag tot en met zondag, niet een schuivend venster van 7 dagen. Tot de volgende maandag blijft hetzelfde oordeel staan.
+
 ⚙︎ Regels, alleen als er genoeg gewichten zijn (minstens 4 in elk van de vergeleken weken):
 
 - **Te langzaam:** is het weekgemiddelde nu minder dan 0,25 kg lager dan 3 weken geleden, dan staat er: "Your weight hasn't moved in 3 weeks. Eat about 200 kcal less a day." Met een korte tip, bijvoorbeeld een kleiner bord, olie afmeten of geen tweede portie.
+  - ⚙︎ **Behalve als de taille daalt.** Is de taille in diezelfde 3 weken minstens 1 cm kleiner geworden, dan is dat precies wat een recomp moet doen: vet eraf, spier erbij. De app zegt dan: "Weight steady, waist down 1.5 cm. That's a recomp working." Er komt geen advies om minder te eten.
 - **Te snel:** daalt het weekgemiddelde 2 weken achter elkaar met meer dan 0,5 kg per week, dan staat er: "You're losing faster than 0.5 kg a week. Eat a bit more so you keep your muscle."
 - **Op koers:** anders staat er rustig dat hij op koers zit, met het tempo per week.
+- ⚙︎ **Niet twee keer hetzelfde advies.** Bij "eet minder" of "eet meer" staat een knop "Done, I've adjusted". Een tik daarop, of 3 weken voorbij zonder tik, maakt van die maandag het nieuwe beginpunt. De check vergelijkt daarna alleen weken ná dat beginpunt. Zolang er nog geen 3 weken na het beginpunt zijn, staat er: "Adjusted on 16 Nov. Next check on 7 Dec." Zo leest hij het advies nooit als "nog eens 200 eraf" terwijl de vorige keer nog doorwerkt. De app bewaart wanneer het laatste advies kwam en wanneer hij het opvolgde.
 - ⚙︎ De check staat op het Recomp-scherm. Er komt geen melding, want het moet niet zeuren.
+
+### Taille tonen
+
+⚙︎ Bij het gewicht staat klein de laatste taillemeting en het verschil met de eerste meting, bijvoorbeeld "Waist 92 cm · −2.5 since 16 Nov". Er komt geen grafiek.
 
 ## Waar het in de app zit
 
@@ -96,6 +104,7 @@ Ze staan op hetzelfde scherm als het eiwit, onder de bronnen. Een gewoonte die n
 - Het Recomp-scherm opent als sheet (`.presentationDetents([.large])`), net als `OutfitSheet`.
 - Op het Recomp-scherm staan van boven naar beneden: gewicht (en de taillevraag als die aan de beurt is), eiwit met bronnen, gewoontes en de wekelijkse check.
 - ⚙︎ Instellingen (dagdoel, bronnen en gewoontes aanpassen) staan onderaan het Recomp-scherm, niet in de algemene instellingen.
+- ⚙︎ **Ook op het ochtendscherm.** Het ochtendscherm na de schoolwekker (`MorningView` in `Morning.swift`) heeft al een Outfit-regel (`OutfitLine`). Daaronder komt een weegregel: een veld voor het gewicht en een knop Save. Is de taille aan de beurt, dan staat er nog een veld bij. Op schooldagen weegt hij zich zo in één stap, zonder het Recomp-scherm te openen. Op andere dagen gebruikt hij het weegblok bovenaan het Recomp-scherm. "Ochtendscherm" hierboven betekent dus allebei.
 
 ## Hoe het eruitziet
 
