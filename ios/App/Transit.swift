@@ -443,11 +443,15 @@ enum Transit {
     /// wanders inside). Remembered for ten minutes per spot.
     static func stationAt(_ c: CLLocationCoordinate2D) async -> NearStop? {
         let key = "\(Int((c.latitude * 500).rounded())),\(Int((c.longitude * 300).rounded()))"         // about 200 m
-        if let hit = StationMemo.shared.get(key) { return hit.stop }
-        let s = await nearStops(c).first { $0.rail && $0.meters < 350 }
-        StationMemo.shared.set(key, s)
-        return s
+        return await stations.get(key) {
+            await nearStopsAnswer(c).map { StationAnswer(stop: $0.first { $0.rail && $0.meters < 350 }) }
+        }?.stop
     }
+
+    struct StationAnswer: Sendable { let stop: NearStop? }
+    static let stations = Memo<String, StationAnswer>(ttl: 600)
+    /// The raw /v5/trip answers, for 20 seconds: the live map, the stop list and the alarm ask for the same trip.
+    static let tripAnswers = Memo<String, Data>(ttl: 20)
 
     /// A stop near you: a bus stop, or a train station (by the station, not one platform).
     struct NearStop: Identifiable, Hashable {
@@ -461,10 +465,15 @@ enum Transit {
 
     /// The stops within about 1.3 km of you, nearest first.
     static func nearStops(_ c: CLLocationCoordinate2D) async -> [NearStop] {
+        await nearStopsAnswer(c) ?? []
+    }
+
+    /// The same, or nil when the request failed.
+    static func nearStopsAnswer(_ c: CLLocationCoordinate2D) async -> [NearStop]? {
         let dLat = 0.012, dLon = 0.019
         let q: [URLQueryItem] = [.init(name: "min", value: "\(c.latitude - dLat),\(c.longitude - dLon)"),
                                  .init(name: "max", value: "\(c.latitude + dLat),\(c.longitude + dLon)")]
-        guard let list = try? await get("/v1/map/stops", q) as? [[String: Any]] else { return [] }
+        guard let list = try? await get("/v1/map/stops", q) as? [[String: Any]] else { return nil }
         let here = CLLocation(latitude: c.latitude, longitude: c.longitude)
         var seen = Set<String>()
         return list.compactMap { m -> NearStop? in
@@ -590,7 +599,8 @@ enum Transit {
 
     /// Every stop of one trip with its live arrival.
     static func tripStops(_ tripId: String) async -> [TripStop] {
-        guard let json = try? await get("/v5/trip", [.init(name: "tripId", value: tripId)]) as? [String: Any],
+        guard let data = await tripAnswers.get(tripId, fetch: { try? await raw("/v5/trip", [.init(name: "tripId", value: tripId)]) }),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let legs = json["legs"] as? [[String: Any]] else { return [] }
         var out: [TripStop] = []
         for l in legs {
@@ -608,8 +618,21 @@ enum Transit {
     /// A bus or train's whole trip with its live times and the road it takes, for the live map.
     static func liveTrip(_ tripId: String) async -> LiveTrip? {
         if Demo.isDemo(tripId) { return await Demo.liveTrip(tripId) }
-        guard let json = try? await get("/v5/trip", [.init(name: "tripId", value: tripId)]) as? [String: Any],
-              let legs = json["legs"] as? [[String: Any]], !legs.isEmpty else { return nil }
+        guard let data = await tripAnswers.get(tripId, fetch: { try? await raw("/v5/trip", [.init(name: "tripId", value: tripId)]) }),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        return parseLiveTrip(json)
+    }
+
+    /// The last answer for a trip, however old, without asking again.
+    static func cachedLiveTrip(_ tripId: String) async -> LiveTrip? {
+        if Demo.isDemo(tripId) { return await Demo.liveTrip(tripId) }
+        guard let data = await tripAnswers.peek(tripId),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        return parseLiveTrip(json)
+    }
+
+    private static func parseLiveTrip(_ json: [String: Any]) -> LiveTrip? {
+        guard let legs = json["legs"] as? [[String: Any]], !legs.isEmpty else { return nil }
         var stops: [LiveTrip.Stop] = [], path: [CLLocationCoordinate2D] = [], live = false, line = "", head = ""
         func stop(_ o: [String: Any]?) -> LiveTrip.Stop? {
             guard let o, let la = o["lat"] as? Double, let lo = o["lon"] as? Double else { return nil }
@@ -685,22 +708,5 @@ final class Ratings {
         if e <= 3 || r <= 1.18 { return "A" }
         if r <= 1.3 { return "B" }
         return "C"
-    }
-}
-
-/// The station near a spot, remembered (a lock: it's asked from anywhere).
-final class StationMemo: @unchecked Sendable {
-    static let shared = StationMemo()
-    private let lock = NSLock()
-    private var items: [String: (stop: Transit.NearStop?, at: Date)] = [:]
-    func get(_ k: String) -> (stop: Transit.NearStop?, at: Date)? {
-        lock.lock(); defer { lock.unlock() }
-        guard let v = items[k], Date().timeIntervalSince(v.at) < 600 else { return nil }
-        return v
-    }
-    func set(_ k: String, _ s: Transit.NearStop?) {
-        lock.lock(); defer { lock.unlock() }
-        if items.count > 200 { items = [:] }
-        items[k] = (s, Date())
     }
 }

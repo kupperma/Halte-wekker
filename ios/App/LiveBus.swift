@@ -230,6 +230,9 @@ struct LiveBusSheet: View {
 
     private func run() async {
         var last = Date.distantPast
+        if trip == nil, let t = await Transit.cachedLiveTrip(target.tripId) {
+            trip = t; mine = findMine(t); fit(t, Date())
+        }
         while !Task.isCancelled {
             if Date().timeIntervalSince(last) >= 30 {
                 last = Date()
