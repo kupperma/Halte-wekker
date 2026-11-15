@@ -47,6 +47,12 @@ final class DecideTests: XCTestCase {
         XCTAssertEqual(out, [.undecided(["b1", "b2", "b3"])])
     }
 
+    /// S8: only those within 60 s of the best stay in the running.
+    func test_S8_sixtySecondFilter() {
+        let ranked = [Ranked(id: "b1", cost: 10), Ranked(id: "b2", cost: 12), Ranked(id: "b3", cost: 90)]
+        XCTAssertEqual(looks(shown: nil, live: ["b1", "b2", "b3"], [(0, ranked)]), [.undecided(["b1", "b2"])])
+    }
+
     func test_clearWinnerNoShown() {
         let two = [Ranked(id: "b1", cost: 10), Ranked(id: "b2", cost: 200)]
         XCTAssertEqual(looks(shown: nil, live: ["b1", "b2"], [(0, two)]), [.switchTo("b1")])

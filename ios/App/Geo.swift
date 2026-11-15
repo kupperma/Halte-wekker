@@ -43,17 +43,44 @@ enum Geo {
         let bearing: Double
     }
 
+    /// One place where a path passes a point (the nearest spot of one stretch of it), and the segment it is on: the
+    /// index of the segment's first point.
+    struct Pass: Equatable {
+        let projection: Projection
+        let segment: Int
+    }
+
     /// The nearest place on `path` to `p`. Nil for fewer than 2 points or a path of length 0.
     static func project(_ p: GeoPoint, on path: [GeoPoint]) -> Projection? {
-        guard path.count >= 2, p.lat.isFinite, p.lon.isFinite else { return nil }
+        pass(p, on: path, near: nil, within: 0)?.projection
+    }
+
+    /// Where `path` passes `p`: when it passes more than once within `within` metres of the nearest pass (a road it
+    /// comes in and goes out by, a there-and-back detour), the pass whose along-position is closest to `near`. Without
+    /// `near`, the nearest. Nil for fewer than 2 points or a path of length 0.
+    static func pass(_ p: GeoPoint, on path: [GeoPoint], near: Double?, within: Double) -> Pass? {
+        let all = passes(p, on: path)
+        guard let nearest = all.map({ $0.projection.crossTrack }).min() else { return nil }
+        let close = all.filter { $0.projection.crossTrack <= nearest + max(0, within) }
+        guard let near, near.isFinite else { return close.first { $0.projection.crossTrack == nearest } }
+        return close.min { a, b in
+            let da = abs(a.projection.along - near), db = abs(b.projection.along - near)
+            return da != db ? da < db : a.projection.crossTrack < b.projection.crossTrack
+        }
+    }
+
+    /// Every place `path` passes `p`, in path order: each spot where the distance to `p` is least for a stretch of the
+    /// path (the foot of a perpendicular, a corner pointing at `p`, or an end it lies beyond).
+    static func passes(_ p: GeoPoint, on path: [GeoPoint]) -> [Pass] {
+        guard path.count >= 2, p.lat.isFinite, p.lon.isFinite else { return [] }
         var lens: [Double] = [], total = 0.0
         for i in 1..<path.count {
             let l = metres(path[i - 1], path[i])
             lens.append(l); total += l
         }
-        guard total > 0, total.isFinite else { return nil }
+        guard total > 0, total.isFinite else { return [] }
         let sx = kx(p.lat), sy = ky
-        var best: (d: Double, along: Double, seg: Int)?
+        var feet: [(d: Double, along: Double, u: Double, seg: Int)] = []
         var acc = 0.0
         for i in 1..<path.count {
             let start = acc
@@ -65,11 +92,23 @@ enum Geo {
             guard l2 > 0 else { continue }
             let u = max(0, min(1, -(ax * dx + ay * dy) / l2))
             let px = ax + u * dx, py = ay + u * dy, d = (px * px + py * py).squareRoot()
-            if d.isFinite, best.map({ d < $0.d }) ?? true { best = (d, start + u * lens[i - 1], i) }
+            guard d.isFinite else { continue }
+            feet.append((d, start + u * lens[i - 1], u, i - 1))
         }
-        guard let b = best else { return nil }
-        return Projection(crossTrack: b.d, along: b.along, fraction: min(1, max(0, b.along / total)),
-                          bearing: bearing(path[b.seg - 1], path[b.seg]))
+        func made(_ f: (d: Double, along: Double, u: Double, seg: Int)) -> Pass {
+            Pass(projection: Projection(crossTrack: f.d, along: f.along, fraction: min(1, max(0, f.along / total)),
+                                        bearing: bearing(path[f.seg], path[f.seg + 1])),
+                 segment: f.seg)
+        }
+        var out: [Pass] = []
+        for (k, f) in feet.enumerated() {
+            // A stretch's nearest spot at its start counts only at the path's start or at a corner (the stretch before
+            // ends there too); one at its end only at the path's end (the next stretch has it, or something nearer).
+            let isPass = f.u <= 0 ? (k == 0 || feet[k - 1].u >= 1) : f.u >= 1 ? k == feet.count - 1 : true
+            if isPass { out.append(made(f)) }
+        }
+        if out.isEmpty, let f = feet.min(by: { $0.d < $1.d }) { out.append(made(f)) }
+        return out
     }
 
     /// The point `m` metres along `path`, clamped to its ends. Nil for an empty path.

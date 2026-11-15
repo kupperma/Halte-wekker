@@ -26,6 +26,24 @@ final class GeoTests: XCTestCase {
         XCTAssertNil(Geo.project(Fx.east(10), on: []))
     }
 
+    /// A path that goes out and comes back along the same road passes a point twice; `pass` picks the one nearest
+    /// `near`, and without it the first of the nearest.
+    func test_passTwice() throws {
+        let path = [Fx.east(0), Fx.east(1000), Fx.east(1000, north: 10), Fx.east(0, north: 10)]
+        let p = Fx.east(300, north: 5)
+        XCTAssertEqual(Geo.passes(p, on: path).filter { $0.projection.crossTrack < 50 }.count, 2)   // (and the turn, 700 m off)
+        let out = try XCTUnwrap(Geo.pass(p, on: path, near: 250, within: 20))
+        XCTAssertEqual(out.projection.along, 300, accuracy: 1)
+        XCTAssertEqual(out.projection.bearing, 90, accuracy: 0.5)
+        let back = try XCTUnwrap(Geo.pass(p, on: path, near: 1800, within: 20))
+        XCTAssertEqual(back.projection.along, 1710, accuracy: 1)
+        XCTAssertEqual(back.projection.bearing, 270, accuracy: 0.5)
+        XCTAssertEqual(Geo.pass(p, on: path, near: nil, within: 20)?.projection.along ?? 0, 300, accuracy: 1)
+        // a pass further than `within` beyond the nearest doesn't count
+        let far = Fx.east(300, north: -30)
+        XCTAssertEqual(try XCTUnwrap(Geo.pass(far, on: path, near: 1800, within: 5)).projection.along, 300, accuracy: 1)
+    }
+
     func test_pointAtMetres() throws {
         let path = [Fx.east(0), Fx.east(1000)]
         let p = try XCTUnwrap(Geo.point(atMetres: 250, on: path))

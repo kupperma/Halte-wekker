@@ -173,6 +173,141 @@ final class VehicleMatchTests: XCTestCase {
         XCTAssertEqual(VehicleMatch.judgeAll(noisy, vehicles), VehicleMatch.judgeAll(you, vehicles))
     }
 
+    // MARK: - Fix round 1
+
+    /// R-rel-9: a bus comes into the station along the road it leaves by. You're on it, going out: each fix goes on the
+    /// pass nearest its times (the outgoing one), not the first one found.
+    func test_sameRoadInAndOut() throws {
+        let inbound = TimedPiece(departure: t0 - 230, arrival: t0 - 30,
+                                 path: [Fx.east(4000, north: 50), Fx.east(3000, north: 50), Fx.east(2000, north: 50)])
+        let outbound = TimedPiece(departure: t0, arrival: t0 + 2000 / 12.0,
+                                  path: [Fx.east(2000, north: 50), Fx.east(3000, north: 50), Fx.east(4000, north: 50)])
+        let bus = VehicleTrack(tripId: "R", line: "306", isTrain: false, realTime: true, pieces: [inbound, outbound])
+        let you = Fx.fixes(from: 2000, speed: 12, count: 15, north: 50)
+        let j = VehicleMatch.judgeAll(you, [bus])
+        XCTAssertNotEqual(Fx.why(j, "R"), .wrongWay)
+        XCTAssertNotEqual(Fx.why(j, "R"), .drifting)
+        XCTAssertEqual(try XCTUnwrap(Fx.ok(j, "R")), 0, accuracy: 1)
+        XCTAssertEqual(try XCTUnwrap(j.first?.evidence?.progress), 336, accuracy: 1)
+
+        // one fix, going out: the outgoing pass's direction, not the incoming one's
+        let one = Fix(t: t0 + 10, p: Fx.east(2120, north: 50), accuracy: 20, speed: 12, course: 90)
+        let r = VehicleMatch.judgeOne(one, bus, tolerance: 400).result
+        XCTAssertEqual(r.map { $0 < 1 }, .success(true), "\(r)")
+    }
+
+    /// R-rel-10: standing in the station with ±25 m GPS jitter (30 m accuracy) while the train stands there by its times.
+    /// The jitter looks like going back 25 m, or forward 45 m: neither is "the wrong way" or "standing while you go". The
+    /// bus beside the station that leaves the other way doesn't win over it.
+    func test_jitterAtStation() {
+        let rail = VehicleTrack(tripId: "T", line: "IC", isTrain: true, realTime: true, pieces: [
+            TimedPiece(departure: t0 - 320, arrival: t0 - 20, path: [Fx.east(0), Fx.east(3000)]),
+            TimedPiece(departure: t0 + 60, arrival: t0 + 450, path: [Fx.east(3000), Fx.east(6900)])])
+        let road = Array(Fx.road(north: 30).reversed())       // westbound: 6900 → 3000 → 0
+        let bus = VehicleTrack(tripId: "W", line: "306", isTrain: false, realTime: true, pieces: [
+            TimedPiece(departure: t0 - 414, arrival: t0 - 30, path: [road[0], Fx.east(3060, north: 30)]),
+            TimedPiece(departure: t0 + 60, arrival: t0 + 366, path: [Fx.east(3060, north: 30), road[1], road[2]])])
+        func jitter(_ east: [Double], _ north: [Double]) -> [Fix] {
+            (0..<east.count).map { k in
+                Fix(t: t0 + Double(k) * 2, p: Fx.east(3000 + east[k], north: 10 + north[k]), accuracy: 30, speed: 0, course: -1)
+            }
+        }
+        let north: [Double] = [5, -8, 12, -3, 9, -12, 4, -6, 10, -9, 2, -5, 7, -10, 3]
+        let back = jitter([12, -5, 20, -18, 8, -22, 15, 3, -10, 24, -15, 6, -20, 10, -13], north)   // 25 m back
+        let ahead = jitter([-22, 5, -10, 18, -25, 12, 0, -15, 20, -5, 25, -18, 8, -12, 23], north)  // 45 m ahead
+        for (name, you) in [("back", back), ("ahead", ahead)] {
+            let j = VehicleMatch.judgeAll(you, [rail, bus])
+            XCTAssertNotNil(Fx.ok(j, "T"), "\(name): \(j)")
+            XCTAssertEqual(VehicleMatch.rank(j, planned: nil).first?.id, "T", name)
+        }
+    }
+
+    /// R-rel-11: the straight line joining pieces that don't meet has no road shape: 150 m beside it is on its path,
+    /// and it doesn't give the one-fix direction.
+    func test_connectorLenient() throws {
+        let first = TimedPiece(departure: t0 - 300, arrival: t0 - 200, path: [Fx.east(0), Fx.east(500), Fx.east(1000)])
+        let middle = TimedPiece(departure: t0 - 200, arrival: t0 + 200, path: [Fx.east(1000), Fx.east(2000), Fx.east(3000)])
+        let last = TimedPiece(departure: t0 + 200, arrival: t0 + 300, path: [Fx.east(3000), Fx.east(3500), Fx.east(4000)])
+        let gap = VehicleTrack(tripId: "K", line: "306", isTrain: false, realTime: true, pieces: [first, last])
+        let whole = VehicleTrack(tripId: "K", line: "306", isTrain: false, realTime: true, pieces: [first, middle, last])
+
+        let you = Fx.fixes(from: 1500, speed: 12, count: 15, north: 150)
+        let onGap = VehicleMatch.judgeAll(you, [gap])
+        XCTAssertNotEqual(Fx.why(onGap, "K"), .offItsPath)
+        XCTAssertEqual(onGap.first?.evidence?.shaped, false)
+        XCTAssertEqual(Fx.why(VehicleMatch.judgeAll(you, [whole]), "K"), .offItsPath)
+
+        let west = Fix(t: t0, p: Fx.east(2000), accuracy: 20, speed: 12, course: 270)
+        XCTAssertNotNil(try? VehicleMatch.judgeOne(west, gap, tolerance: 4000).result.get())
+        XCTAssertEqual(VehicleMatch.judgeOne(west, whole, tolerance: 4000).result, .failure(.wrongWay))
+        let beside = Fix(t: t0, p: Fx.east(2000, north: 150), accuracy: 20, speed: 12, course: 90)
+        XCTAssertNotEqual(VehicleMatch.judgeOne(beside, gap, tolerance: 4000).result, .failure(.offItsPath))
+        XCTAssertEqual(VehicleMatch.judgeOne(beside, whole, tolerance: 4000).result, .failure(.offItsPath))
+    }
+
+    /// The steady gate: speeding up out of the station, a train whose times go 15 m/s drifts 7 m/s from you, but drift
+    /// isn't judged while you aren't steady. The same evidence, steady, would be `drifting`.
+    func test_steadyGate() throws {
+        func x(_ t: Double) -> Double { t <= 30 ? 2000 + t * t / 6 : 2150 + 10 * (t - 30) }
+        func v(_ t: Double) -> Double { t <= 30 ? t / 3 : 10 }
+        let you = stride(from: 0.0, through: 40, by: 2).map { t in
+            Fix(t: Fx.t0 + t, p: Fx.east(x(t)), accuracy: 20, speed: v(t), course: 90)
+        }
+        let train = Fx.track("T", path: Fx.railway, at: 2000, speed: 15)
+        let j = VehicleMatch.judgeAll(you, [train])
+        XCTAssertNotNil(Fx.ok(j, "T"), "\(j)")
+        let e = try XCTUnwrap(j.first?.evidence)
+        XCTAssertFalse(e.steady)
+        XCTAssertGreaterThan(abs(e.drift), max(VehicleMatch.driftMin, VehicleMatch.driftShare * e.yourSpeed))
+        let steady = Evidence(fixes: e.fixes, span: e.span, crossTrack: e.crossTrack, accuracy: e.accuracy, shaped: e.shaped,
+                              progress: e.progress, offset: e.offset, drift: e.drift, yourSpeed: e.yourSpeed,
+                              itsSpeed: e.itsSpeed, steady: true)
+        XCTAssertEqual(VehicleMatch.judge(steady, isTrain: true, realTime: true), .failure(.drifting))
+    }
+
+    /// The ratio test: steady at 4 m/s, you can't be on a bus whose times go 15 m/s.
+    func test_ratioTest() {
+        let you = Fx.fixes(from: 2000, speed: 4, count: 15, north: 50)
+        let bus = Fx.track("B", line: "306", train: false, path: Fx.road(north: 50), at: 2000, speed: 15)
+        XCTAssertEqual(Fx.why(VehicleMatch.judgeAll(you, [bus]), "B"), .implausibleSpeed)
+    }
+
+    func test_judgeOne() {
+        let train = Fx.track("T", path: Fx.railway, at: 2000, speed: 30)
+        func one(_ course: Double, speed: Double = 30, accuracy: Double = 20, at m: Double = 2000) -> Fix {
+            Fix(t: t0, p: Fx.east(m), accuracy: accuracy, speed: speed, course: course)
+        }
+        XCTAssertEqual(VehicleMatch.judgeOne(one(270), train, tolerance: 1800).result, .failure(.wrongWay))
+        XCTAssertNotNil(try? VehicleMatch.judgeOne(one(150), train, tolerance: 1800).result.get())        // 60° off
+        XCTAssertNotNil(try? VehicleMatch.judgeOne(one(-1), train, tolerance: 1800).result.get())         // no course
+        XCTAssertNotNil(try? VehicleMatch.judgeOne(one(270, speed: -1), train, tolerance: 1800).result.get())  // no speed
+        XCTAssertEqual(VehicleMatch.judgeOne(one(90, accuracy: 200), train, tolerance: 1800).result, .failure(.tooFewFixes))
+        XCTAssertEqual(VehicleMatch.judgeOne(one(90, at: 3500), train, tolerance: 1000).result, .failure(.tooFarFromTimes))
+
+        // the course and its road on either side of north
+        let north = [Fx.east(2000), Fx.east(2000 - 17.45, north: 1000)]       // bearing about 359°
+        let up = Fx.track("N", path: north, at: 0, speed: 30)
+        let wrapped = Fix(t: t0, p: Fx.east(2000), accuracy: 20, speed: 30, course: 1)
+        XCTAssertNotNil(try? VehicleMatch.judgeOne(wrapped, up, tolerance: 1800).result.get())
+
+        // a bus can't go 35 m/s
+        let bus = Fx.track("B", line: "306", train: false, path: Fx.railway, at: 2000, speed: 30)
+        XCTAssertEqual(VehicleMatch.judgeOne(one(90, speed: 35), bus, tolerance: 1000).result, .failure(.implausibleSpeed))
+    }
+
+    /// R-rel-5: one usable fix is too few; `noTimes` only when no fix has a time position on it.
+    func test_tooFewFixesVsNoTimes() {
+        let train = Fx.track("T", path: Fx.railway, at: 1100, speed: 30)
+        let once = Fx.fixes(from: 2000, speed: 30, count: 1)
+        XCTAssertEqual(Fx.why(VehicleMatch.judgeAll(once, [train]), "T"), .tooFewFixes)
+        XCTAssertEqual(Fx.why(VehicleMatch.judgeAll([], [train]), "T"), .tooFewFixes)
+        let blurred = Fx.fixes(from: 2000, speed: 30, count: 15, accuracy: 500)
+        XCTAssertEqual(Fx.why(VehicleMatch.judgeAll(blurred, [train]), "T"), .tooFewFixes)
+        let later = Fx.track("L", path: Fx.railway, at: 1100, speed: 30, start: t0 + 3600)
+        XCTAssertEqual(Fx.why(VehicleMatch.judgeAll(Fx.fixes(from: 2000, speed: 30, count: 15), [later]), "L"), .noTimes)
+        XCTAssertNil(VehicleMatch.evidence(once, train))
+    }
+
     // MARK: - Ranking and tracks
 
     func test_S10_plannedBonus() {
