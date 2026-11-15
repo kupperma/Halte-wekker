@@ -19,6 +19,14 @@ final class WeeklyCheckTests: XCTestCase {
         XCTAssertNil(WeightMath.weekAverage(w, endingOn: "2026-11-01"))
     }
 
+    func test_weekChange() {
+        // the week before (1–7 Dec) averages 88.6, this one (8–14 Dec) 88.2
+        let w = week("2026-12-01", kg: 88.6, days: 7)
+            + [Measure(day: "2026-12-08", value: 88.0), Measure(day: "2026-12-14", value: 88.4)]
+        XCTAssertEqual(WeightMath.weekChange(w, on: today)!, -0.4, accuracy: 0.001)
+        XCTAssertNil(WeightMath.weekChange(week("2026-12-08", kg: 88, days: 7), on: today))
+    }
+
     func test_waistDue() {
         XCTAssertTrue(WeightMath.waistDue([], skippedOn: nil, today: today))
         XCTAssertFalse(WeightMath.waistDue([Measure(day: "2026-12-01", value: 90)], skippedOn: nil, today: today))
@@ -97,14 +105,24 @@ final class WeeklyCheckTests: XCTestCase {
     }
 
     func test_text() {
-        XCTAssertEqual(WeeklyCheck.text(.eatLess).title, "Your weight hasn't moved in 3 weeks. Eat about 200 kcal less a day.")
-        XCTAssertEqual(WeeklyCheck.text(.eatLess).detail, "A smaller plate, measured oil, or no second helping.")
-        XCTAssertEqual(WeeklyCheck.text(.eatMore).title, "You're losing faster than 0.5 kg a week. Eat a bit more so you keep your muscle.")
-        XCTAssertNil(WeeklyCheck.text(.eatMore).detail)
-        XCTAssertEqual(WeeklyCheck.text(.recompWorking(waistCm: -1.5)).title, "Weight steady, waist down 1.5 cm. That's a recomp working.")
-        XCTAssertEqual(WeeklyCheck.text(.onTrack(kgPerWeek: -0.3)).title, "On track: losing 0.3 kg a week.")
-        XCTAssertEqual(WeeklyCheck.text(.waiting(adjustedOn: "2026-11-16", nextCheck: "2026-12-14")).title, "Adjusted on 16 Nov. Next check on 14 Dec.")
-        XCTAssertEqual(WeeklyCheck.text(.notEnoughData).title, "Not enough weigh-ins yet.")
-        XCTAssertEqual(WeeklyCheck.text(.notEnoughData).detail, "Weigh in at least 4 mornings a week. The check compares this week with 3 weeks ago.")
+        let gb = Locale(identifier: "en_GB")
+        XCTAssertEqual(WeeklyCheck.text(.eatLess, locale: gb).title, "Your weight hasn't moved in 3 weeks. Eat about 200 kcal less a day.")
+        XCTAssertEqual(WeeklyCheck.text(.eatLess, locale: gb).detail, "A smaller plate, measured oil, or no second helping.")
+        XCTAssertEqual(WeeklyCheck.text(.eatMore, locale: gb).title, "You're losing faster than 0.5 kg a week. Eat a bit more so you keep your muscle.")
+        XCTAssertNil(WeeklyCheck.text(.eatMore, locale: gb).detail)
+        XCTAssertEqual(WeeklyCheck.text(.recompWorking(waistCm: -1.5), locale: gb).title, "Weight steady, waist down 1.5 cm. That's a recomp working.")
+        XCTAssertEqual(WeeklyCheck.text(.onTrack(kgPerWeek: -0.3), locale: gb).title, "On track: losing 0.3 kg a week.")
+        XCTAssertEqual(WeeklyCheck.text(.waiting(adjustedOn: "2026-11-16", nextCheck: "2026-12-14"), locale: gb).title, "Adjusted on 16 Nov. Next check on 14 Dec.")
+        XCTAssertEqual(WeeklyCheck.text(.notEnoughData, locale: gb).title, "Not enough weigh-ins yet.")
+        XCTAssertEqual(WeeklyCheck.text(.notEnoughData, locale: gb).detail, "Weigh in at least 4 mornings a week. The check compares this week with 3 weeks ago.")
+    }
+
+    /// The numbers follow the phone's locale like the rest of Recomp; the dates stay English.
+    func test_textLocale() {
+        let nl = Locale(identifier: "nl_NL")
+        XCTAssertEqual(WeeklyCheck.text(.onTrack(kgPerWeek: -0.3), locale: nl).title, "On track: losing 0,3 kg a week.")
+        XCTAssertEqual(WeeklyCheck.text(.recompWorking(waistCm: -1.5), locale: nl).title, "Weight steady, waist down 1,5 cm. That's a recomp working.")
+        XCTAssertEqual(WeeklyCheck.text(.eatMore, locale: nl).title, "You're losing faster than 0,5 kg a week. Eat a bit more so you keep your muscle.")
+        XCTAssertEqual(WeeklyCheck.text(.waiting(adjustedOn: "2026-11-16", nextCheck: "2026-12-14"), locale: nl).title, "Adjusted on 16 Nov. Next check on 14 Dec.")
     }
 }

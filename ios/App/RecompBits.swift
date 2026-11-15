@@ -91,13 +91,15 @@ struct RecompCard: View {
 
 // MARK: - On the ride home
 
-/// Under the tiles, going home: the protein still to go today. Nothing once the goal is reached, or going out.
+/// Under the tiles, going home: the protein still to go today. Nothing once the goal is reached, going out, or on
+/// the wake-up screen (that one is about your stop).
 struct RecompRideLine: View {
     @EnvironmentObject var trip: TripManager
     @ObservedObject private var store = RecompStore.shared
 
     var body: some View {
-        if trip.direction == .home, let line = ProteinMath.rideLine(total: store.todayTotal, goal: store.data.goal) {
+        if trip.direction == .home, trip.phase != .awake,
+           let line = ProteinMath.rideLine(total: store.todayTotal, goal: store.data.goal) {
             HStack(spacing: 6) {
                 Circle().fill(RecompStyle.accent).frame(width: 6, height: 6)
                 Text(verbatim: line)
@@ -138,17 +140,32 @@ struct RecompMorningLine: View {
                 }
                 if store.waistDue { waistRow(withSave: false) }
             }
+            if focus != nil { doneLine }
         }
         .paperCard()
         .environment(\.colorScheme, .light)             // ink on paper: the prompts in the fields too
         .sensoryFeedback(.success, trigger: saves)
         .toolbar {
-            // the decimal pad has no return key
+            // the decimal pad has no return key. Outside a NavigationStack this bar may not show, hence `doneLine`.
             ToolbarItemGroup(placement: .keyboard) {
                 Spacer()
                 Button("Done") { focus = nil }
             }
         }
+    }
+
+    /// While a field is being typed in: puts the keyboard away, keeping what's typed. Always there, unlike the bar
+    /// above the keyboard.
+    private var doneLine: some View {
+        Button { focus = nil } label: {
+            Text("Done")
+                .font(BoardInk.sans(15, .semibold)).foregroundStyle(RecompStyle.accent)
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity, alignment: .trailing)
+        .accessibilityLabel("Done typing")
     }
 
     /// "Weighed: 88,4 kg · week avg 88,1 kg"

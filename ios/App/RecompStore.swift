@@ -34,14 +34,18 @@ final class RecompStore: ObservableObject {
 
     var today: DayKey { RecompCalendar.day(for: now()) }
 
+    /// Newest first.
     var todayEntries: [ProteinEntry] {
-        let t = today
-        return data.entries
-            .filter { RecompCalendar.day(for: $0.at) == t }
-            .sorted { $0.at > $1.at }
+        entriesToday().sorted { $0.at > $1.at }
     }
 
-    var todayTotal: Double { todayEntries.reduce(0) { $0 + $1.grams } }
+    var todayTotal: Double { entriesToday().reduce(0) { $0 + $1.grams } }
+
+    /// Today's 04:00–04:00 worked out once, then a plain comparison per entry.
+    private func entriesToday() -> [ProteinEntry] {
+        let b = RecompCalendar.bounds(of: today)
+        return data.entries.filter { $0.at >= b.start && $0.at < b.end }
+    }
 
     var todayWeight: Double? {
         let t = today
@@ -184,8 +188,9 @@ final class RecompStore: ObservableObject {
 
     private func prune() {
         let cutoff = RecompCalendar.adding(-90, to: today)
+        let cutoffStart = RecompCalendar.bounds(of: cutoff).start
         let before = data
-        data.entries.removeAll { RecompCalendar.day(for: $0.at) < cutoff }
+        data.entries.removeAll { $0.at < cutoffStart }
         data.habitsDone = data.habitsDone.filter { $0.key >= cutoff }
         if data != before { save() }
     }

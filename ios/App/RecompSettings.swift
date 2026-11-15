@@ -46,8 +46,10 @@ struct RecompSettingsView: View {
 
     private var sourcesSection: some View {
         Section {
-            ForEach($sources) { $source in
-                SourceEditor(source: $source)
+            // By id, not `ForEach($sources)`: a field still typing in a row being deleted must not reach for an
+            // index that is gone.
+            ForEach(sources) { s in
+                SourceEditor(source: binding(for: s))
             }
             .onDelete { sources.remove(atOffsets: $0) }
             .onMove { sources.move(fromOffsets: $0, toOffset: $1) }
@@ -72,8 +74,8 @@ struct RecompSettingsView: View {
 
     private var habitsSection: some View {
         Section {
-            ForEach($habits) { $habit in
-                TextField("Habit", text: $habit.title)
+            ForEach(habits) { h in
+                TextField("Habit", text: title(for: h))
                     .frame(minHeight: 44)
             }
             .onDelete { habits.remove(atOffsets: $0) }
@@ -92,6 +94,28 @@ struct RecompSettingsView: View {
                 Text("Up to \(RecompData.maxHabits) habits.").monospacedDigit()
             }
         }
+    }
+
+    // MARK: bindings by id
+
+    /// The source with that id. Once it's deleted, reads give the last value and writes do nothing.
+    private func binding(for source: ProteinSource) -> Binding<ProteinSource> {
+        let id = source.id
+        return Binding(
+            get: { sources.first { $0.id == id } ?? source },
+            set: { new in
+                if let i = sources.firstIndex(where: { $0.id == id }) { sources[i] = new }
+            })
+    }
+
+    /// The habit's title, the same way.
+    private func title(for habit: Habit) -> Binding<String> {
+        let id = habit.id
+        return Binding(
+            get: { habits.first { $0.id == id }?.title ?? habit.title },
+            set: { new in
+                if let i = habits.firstIndex(where: { $0.id == id }) { habits[i].title = new }
+            })
     }
 }
 

@@ -15,15 +15,25 @@ enum OpenFoodFacts {
     static let userAgent = "Haltewekker/1.0 (iPhone app)"
     static let fallbackName = "Product"
 
-    /// Digits only, 8...14 long.
+    private static func isDigit(_ u: Unicode.Scalar) -> Bool { u.value >= 0x30 && u.value <= 0x39 }
+
+    /// ASCII digits only, 8...14 long. Checked per scalar: "5" with a combining mark is one Character but not a digit.
     static func isBarcode(_ s: String) -> Bool {
-        guard (8...14).contains(s.count) else { return false }
-        return s.allSatisfy { $0 >= "0" && $0 <= "9" }
+        let scalars = s.unicodeScalars
+        guard (8...14).contains(scalars.count) else { return false }
+        return scalars.allSatisfy(isDigit)
     }
 
-    static func url(for barcode: String) -> URL {
+    /// Only the ASCII digits in `s`, so a pasted "87 10400 …" still works.
+    static func digits(in s: String) -> String {
+        String(s.unicodeScalars.filter(isDigit).map { Character($0) })
+    }
+
+    /// nil for anything that isn't a barcode.
+    static func url(for barcode: String) -> URL? {
+        guard isBarcode(barcode) else { return nil }
         let fields = "product_name,brands,product_quantity,product_quantity_unit,nutriments"
-        return URL(string: "https://world.openfoodfacts.org/api/v2/product/\(barcode).json?fields=\(fields)")!
+        return URL(string: "https://world.openfoodfacts.org/api/v2/product/\(barcode).json?fields=\(fields)")
     }
 
     private static func number(_ v: Any?) -> Double? {
@@ -39,6 +49,14 @@ enum OpenFoodFacts {
         return s
     }
 
+    /// `t` begins with the word `w`, ignoring case: "AH Magere kwark" begins with "ah", "Ahornsirup" doesn't begin with "AH".
+    private static func startsWith(_ t: String, word w: String) -> Bool {
+        guard let r = t.range(of: w, options: [.caseInsensitive, .anchored]) else { return false }
+        guard r.upperBound < t.endIndex else { return true }
+        let next = t[r.upperBound]
+        return !(next.isLetter || next.isNumber)
+    }
+
     /// nil when status != 1 or the JSON is bad.
     static func parse(_ data: Data) -> OFFProduct? {
         guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
@@ -52,7 +70,7 @@ enum OpenFoodFacts {
         let title = text(product["product_name"])
         let name: String?
         switch (brand, title) {
-        case let (b?, t?): name = "\(b) \(t)"
+        case let (b?, t?): name = startsWith(t, word: b) ? t : "\(b) \(t)"     // "AH" + "AH Magere kwark" once
         case let (b?, nil): name = b
         case let (nil, t?): name = t
         default: name = nil
@@ -68,7 +86,8 @@ enum OpenFoodFacts {
 
     static func lookup(_ barcode: String,
                        fetch: @escaping (URLRequest) async throws -> (Data, URLResponse) = { try await URLSession.shared.data(for: $0) }) async -> LookupResult {
-        var request = URLRequest(url: url(for: barcode))
+        guard let url = url(for: barcode) else { return .needsProtein(name: nil) }
+        var request = URLRequest(url: url)
         request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
         request.timeoutInterval = 10
         let data: Data
@@ -82,7 +101,10 @@ enum OpenFoodFacts {
             return .needsProtein(name: nil)
         }
         guard let product = parse(data) else { return .needsProtein(name: nil) }
-        guard let protein = product.proteinPerPack else { return .needsProtein(name: product.name) }
+        // perPack already leaves out a pack that can't be (infinite, 0, or over 1 kg of protein); checked again here.
+        guard let protein = product.proteinPerPack, protein.isFinite, ProteinMath.packRange.contains(protein) else {
+            return .needsProtein(name: product.name)
+        }
         // Protein known but no name: still usable, with a generic name.
         return .found(name: product.name ?? fallbackName, proteinPerPack: protein)
     }

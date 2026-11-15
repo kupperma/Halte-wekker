@@ -13,9 +13,21 @@ struct ScanSheet: View {
     private enum Step: Equatable {
         case scan
         case lookingUp(String)
-        /// Type the protein from the label: Open Food Facts doesn't have it, or there was no internet.
-        case label(String, offline: Bool)
+        /// Type the protein from the label: Open Food Facts doesn't have it, there was no internet, or the
+        /// remembered number was wrong.
+        case label(String, LabelReason)
         case amount(String)
+    }
+
+    /// Why the label form is up. It sets the one line under its title.
+    private enum LabelReason: Equatable {
+        /// Open Food Facts doesn't know the code.
+        case unknown
+        /// It knows the product, but not its protein (or not a believable amount).
+        case noProtein
+        case offline
+        /// From the amount step: the remembered protein was wrong.
+        case correcting
     }
 
     private enum Camera { case checking, ready, unavailable }
@@ -85,8 +97,8 @@ struct ScanSheet: View {
             }
         case .lookingUp(let code):
             lookingUpView(code)
-        case .label(let code, let offline):
-            labelView(code, offline: offline)
+        case .label(let code, let reason):
+            labelView(code, reason)
         case .amount(let code):
             if let p = store.data.products[code] {
                 amountView(code, p)
@@ -122,8 +134,8 @@ struct ScanSheet: View {
 
     // MARK: - Typing the code
 
-    /// Digits only, so a pasted "87 10400 …" still works.
-    private var typedCode: String { typed.filter { $0 >= "0" && $0 <= "9" } }
+    /// ASCII digits only, so a pasted "87 10400 …" still works.
+    private var typedCode: String { OpenFoodFacts.digits(in: typed) }
 
     private var typeView: some View {
         ScrollView {
@@ -173,8 +185,9 @@ struct ScanSheet: View {
 
     // MARK: - From the label
 
-    private func labelView(_ code: String, offline: Bool) -> some View {
-        ScrollView {
+    private func labelView(_ code: String, _ reason: LabelReason) -> some View {
+        let offline = reason == .offline
+        return ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 Text("How much protein is in a pack?")
                     .font(HWFont.display(22)).foregroundStyle(Paper.ink)
@@ -182,6 +195,10 @@ struct ScanSheet: View {
                 if offline {
                     Text("No internet. Type the protein from the label, or try again later.")
                         .font(BoardInk.sans(14, .medium)).foregroundStyle(Paper.ink)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else if let why = Self.why(reason) {
+                    Text(verbatim: why)
+                        .font(BoardInk.sans(14, .medium)).foregroundStyle(RecompStyle.quiet)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 labelled("Name") {
@@ -204,6 +221,15 @@ struct ScanSheet: View {
         }
         .scrollDismissesKeyboard(.interactively)
         .transition(.opacity)
+    }
+
+    /// The quiet line under the title: why there's a form at all.
+    private static func why(_ reason: LabelReason) -> String? {
+        switch reason {
+        case .unknown: return "Open Food Facts doesn't know this one."
+        case .noProtein: return "Open Food Facts has no protein for this one."
+        case .offline, .correcting: return nil
+        }
     }
 
     private func labelled<Content: View>(_ title: String, @ViewBuilder _ content: () -> Content) -> some View {
@@ -246,6 +272,14 @@ struct ScanSheet: View {
             .buttonStyle(RecompButtonStyle(wide: true, height: 52))
             sourceButton(code)
                 .padding(.top, 6)
+            Button { correct(code, p) } label: {
+                Text("Wrong? Type it from the label")
+                    .underline()
+                    .font(BoardInk.sans(13, .medium)).foregroundStyle(RecompStyle.quiet)
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
         }
         .padding(.horizontal, 20).padding(.top, 24).padding(.bottom, 12)
         .transition(.opacity)
@@ -318,17 +352,18 @@ struct ScanSheet: View {
 
     @MainActor
     private func checkCamera() async {
-        guard DataScannerViewController.isSupported else {
-            camera = .unavailable
-            return
+        var ready = false
+        if DataScannerViewController.isSupported {
+            if AVCaptureDevice.authorizationStatus(for: .video) == .notDetermined {
+                _ = await AVCaptureDevice.requestAccess(for: .video)
+            }
+            let status = AVCaptureDevice.authorizationStatus(for: .video)
+            cameraOff = status == .denied || status == .restricted
+            ready = !cameraOff && DataScannerViewController.isAvailable
         }
-        if AVCaptureDevice.authorizationStatus(for: .video) == .notDetermined {
-            _ = await AVCaptureDevice.requestAccess(for: .video)
-        }
-        let status = AVCaptureDevice.authorizationStatus(for: .video)
-        cameraOff = status == .denied || status == .restricted
-        let ready = !cameraOff && DataScannerViewController.isAvailable
         withAnimation(.easeOut(duration: 0.2)) { camera = ready ? .ready : .unavailable }
+        // No camera from the start: the barcode field is all there is, so the keyboard comes up with it.
+        if !ready, step == .scan, !typing { focusSoon(.barcode) }
     }
 
     /// The camera stopped working while it was on screen (taken away, or access turned off): type the code instead.
@@ -381,17 +416,25 @@ struct ScanSheet: View {
                 store.rememberProduct(barcode: code, name: n, proteinPerPack: g)
                 showAmount(code)
             case .needsProtein(let n):
-                askLabel(code, name: n, offline: false)
+                let known = !(n ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                askLabel(code, name: n, known ? .noProtein : .unknown)
             case .offline:
-                askLabel(code, name: nil, offline: true)
+                askLabel(code, name: nil, .offline)
             }
         }
     }
 
-    private func askLabel(_ code: String, name n: String?, offline: Bool) {
+    private func askLabel(_ code: String, name n: String?, _ reason: LabelReason) {
         if let n, !n.isEmpty { name = n }
-        move(to: .label(code, offline: offline))
+        move(to: .label(code, reason))
         focusSoon(.protein)
+    }
+
+    /// From the amount step: type the protein again for a product already remembered. Saving overwrites it.
+    private func correct(_ code: String, _ p: KnownProduct) {
+        name = p.name
+        protein = ""
+        askLabel(code, name: nil, .correcting)
     }
 
     private func saveLabel(_ code: String) {
@@ -412,6 +455,11 @@ struct ScanSheet: View {
         lookup?.cancel()
         attempt += 1
         focus = nil
+        // Correcting a remembered product: Back is to its amount again, as it was.
+        if case .label(let code, .correcting) = step, store.data.products[code] != nil {
+            move(to: .amount(code))
+            return
+        }
         switch step {
         case .lookingUp(let code), .label(let code, _), .amount(let code):
             justLeft = LeftCode(code: code, at: Date())

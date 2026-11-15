@@ -4,13 +4,28 @@ import Foundation
 typealias DayKey = String
 
 enum RecompCalendar {
-    /// Gregorian, weeks start on Monday, local time zone.
-    static var calendar: Calendar {
-        var c = Calendar(identifier: .gregorian)
-        c.firstWeekday = 2
-        c.timeZone = TimeZone.current
-        return c
+    /// Gregorian, weeks start on Monday, local time zone. Built once per time zone, not on every use.
+    static var calendar: Calendar { calendarCache.current() }
+
+    /// The calendar for the time zone the phone is in now; a new one only when that changes. Behind a lock.
+    private final class CalendarCache: @unchecked Sendable {
+        private let lock = NSLock()
+        private var cached: Calendar?
+
+        func current() -> Calendar {
+            let zone = TimeZone.current
+            lock.lock()
+            defer { lock.unlock() }
+            if let c = cached, c.timeZone.identifier == zone.identifier { return c }
+            var c = Calendar(identifier: .gregorian)
+            c.firstWeekday = 2
+            c.timeZone = zone
+            cached = c
+            return c
+        }
     }
+
+    private static let calendarCache = CalendarCache()
 
     /// One "yyyy-MM-dd" formatter per time zone, created lazily. DateFormatter is not thread-safe, so use goes through a lock.
     private final class FormatterCache: @unchecked Sendable {
@@ -53,6 +68,16 @@ enum RecompCalendar {
             d = calendar.date(bySettingHour: 12, minute: 0, second: 0, of: prev) ?? prev
         }
         return keyString(d, calendar)
+    }
+
+    /// When that recomp day starts and ends: 04:00 local on the day, up to (not including) 04:00 the day after.
+    /// 23 or 25 hours on a night the clocks change.
+    static func bounds(of day: DayKey, calendar: Calendar = RecompCalendar.calendar) -> (start: Date, end: Date) {
+        func four(_ d: DayKey) -> Date {
+            let noon = date(of: d, calendar: calendar)
+            return calendar.date(bySettingHour: 4, minute: 0, second: 0, of: noon) ?? noon.addingTimeInterval(-8 * 3600)
+        }
+        return (four(day), four(adding(1, to: day, calendar: calendar)))
     }
 
     /// 12:00 local on that day.
@@ -161,22 +186,33 @@ enum ProteinMath {
         "\(amountText(amount)) \(amount <= 1 ? unit : units)"
     }
 
-    /// Grams of protein in a whole pack. nil when a value is missing or ≤ 0.
+    /// What a pack can sensibly hold, in grams of protein. Outside it the numbers are wrong, not the pack.
+    static let packRange: ClosedRange<Double> = 0.1...1000
+
+    /// Grams of protein in a whole pack. nil when a value is missing or ≤ 0, or the result isn't a real pack
+    /// (not finite, or outside `packRange`).
     static func perPack(proteinPer100: Double?, quantity: Double?, unit: String?) -> Double? {
         guard let p = proteinPer100, let q = quantity, p > 0, q > 0 else { return nil }
         let u = unit?.lowercased()
         let amount = (u == "kg" || u == "l") ? q * 1000 : q
-        return p * amount / 100
+        let grams = p * amount / 100
+        guard grams.isFinite, packRange.contains(grams) else { return nil }
+        return grams
     }
 
+    /// 0 for anything that isn't a number.
     static func percent(total: Double, goal: Double) -> Int {
-        guard goal > 0 else { return 0 }
-        return Int((total / goal * 100).rounded())
+        guard goal > 0, total.isFinite, goal.isFinite else { return 0 }
+        let p = (total / goal * 100).rounded()
+        guard p.isFinite else { return 0 }
+        return Int(min(max(p, -1_000_000), 1_000_000))     // Int(_:) traps far outside its range
     }
 
+    /// nil once less than half a gram is left, so "0 g protein to go" never shows.
     static func toGo(total: Double, goal: Double) -> String? {
-        guard total < goal else { return nil }
-        return "\(RecompFormat.grams(goal - total)) protein to go"
+        let left = goal - total
+        guard left.isFinite, left >= 0.5 else { return nil }
+        return "\(RecompFormat.grams(left)) protein to go"
     }
 
     static func rideLine(total: Double, goal: Double) -> String? {
@@ -188,7 +224,8 @@ enum ProteinMath {
 // MARK: - Formatting
 
 enum RecompFormat {
-    private static func oneDecimal(_ v: Double, _ locale: Locale) -> String {
+    /// "88,1" in nl_NL, "88.1" in en_GB. No grouping.
+    static func oneDecimal(_ v: Double, locale: Locale) -> String {
         let f = NumberFormatter()
         f.locale = locale
         f.numberStyle = .decimal
@@ -200,18 +237,20 @@ enum RecompFormat {
 
     /// "88,1 kg" in nl_NL.
     static func kg(_ v: Double, locale: Locale = .current) -> String {
-        oneDecimal(v, locale) + " kg"
+        oneDecimal(v, locale: locale) + " kg"
     }
 
     /// "↓ 0,3" / "↑ 0,2" / "± 0,0". The arrow carries the sign.
     static func change(_ v: Double, locale: Locale = .current) -> String {
         let a = abs(v)
-        if (a * 10).rounded() == 0 { return "± " + oneDecimal(0, locale) }
-        return (v < 0 ? "↓ " : "↑ ") + oneDecimal(a, locale)
+        if (a * 10).rounded() == 0 { return "± " + oneDecimal(0, locale: locale) }
+        return (v < 0 ? "↓ " : "↑ ") + oneDecimal(a, locale: locale)
     }
 
-    /// "20 g"
+    /// "20 g". "0 g" for anything that isn't a number.
     static func grams(_ v: Double) -> String {
-        "\(Int(v.rounded())) g"
+        guard v.isFinite else { return "0 g" }
+        let r = min(max(v, -1e12), 1e12).rounded()     // Int(_:) traps far outside its range
+        return "\(Int(r)) g"
     }
 }

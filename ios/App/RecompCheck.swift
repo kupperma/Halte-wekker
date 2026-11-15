@@ -116,28 +116,19 @@ enum WeeklyCheck {
         return s
     }
 
-    private static func oneDecimal(_ v: Double) -> String {
-        let f = NumberFormatter()
-        f.locale = Locale(identifier: "en_GB")
-        f.numberStyle = .decimal
-        f.minimumFractionDigits = 1
-        f.maximumFractionDigits = 1
-        f.usesGroupingSeparator = false
-        return f.string(from: NSNumber(value: v)) ?? String(format: "%.1f", v)
-    }
-
-    static func text(_ v: Verdict) -> (title: String, detail: String?) {
+    /// Numbers the phone's way (`locale`), like the rest of Recomp; the dates stay English, like the words.
+    static func text(_ v: Verdict, locale: Locale = .current) -> (title: String, detail: String?) {
         let gb = Locale(identifier: "en_GB")
         switch v {
         case .eatLess:
             return ("Your weight hasn't moved in 3 weeks. Eat about 200 kcal less a day.",
                     "A smaller plate, measured oil, or no second helping.")
         case .eatMore:
-            return ("You're losing faster than 0.5 kg a week. Eat a bit more so you keep your muscle.", nil)
+            return ("You're losing faster than \(RecompFormat.kg(0.5, locale: locale)) a week. Eat a bit more so you keep your muscle.", nil)
         case .recompWorking(let cm):
-            return ("Weight steady, waist down \(oneDecimal(abs(cm))) cm. That's a recomp working.", nil)
+            return ("Weight steady, waist down \(RecompFormat.oneDecimal(abs(cm), locale: locale)) cm. That's a recomp working.", nil)
         case .onTrack(let kg):
-            return ("On track: losing \(RecompFormat.kg(abs(kg), locale: gb)) a week.", nil)
+            return ("On track: losing \(RecompFormat.kg(abs(kg), locale: locale)) a week.", nil)
         case .waiting(let on, let next):
             return ("Adjusted on \(RecompCalendar.shortText(on, locale: gb)). Next check on \(RecompCalendar.shortText(next, locale: gb)).", nil)
         case .notEnoughData:

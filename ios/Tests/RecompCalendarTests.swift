@@ -24,6 +24,29 @@ final class RecompCalendarTests: XCTestCase {
         XCTAssertEqual(RecompCalendar.day(for: at(2026, 10, 25, 4, 0), calendar: cal), "2026-10-25")
     }
 
+    func test_bounds() {
+        let b = RecompCalendar.bounds(of: "2026-11-16", calendar: cal)
+        XCTAssertEqual(b.start, at(2026, 11, 16, 4, 0))
+        XCTAssertEqual(b.end, at(2026, 11, 17, 4, 0))
+    }
+
+    /// The nights the clocks change: 23 and 25 hours, and the edges agree with `day(for:)`.
+    func test_boundsOnDstNights() {
+        let spring = RecompCalendar.bounds(of: "2026-03-28", calendar: cal)
+        XCTAssertEqual(spring.start, at(2026, 3, 28, 4, 0))
+        XCTAssertEqual(spring.end, at(2026, 3, 29, 4, 0))
+        XCTAssertEqual(spring.end.timeIntervalSince(spring.start), 23 * 3600, accuracy: 0.5)
+        XCTAssertEqual(RecompCalendar.day(for: spring.end.addingTimeInterval(-60), calendar: cal), "2026-03-28")
+        XCTAssertEqual(RecompCalendar.day(for: spring.end, calendar: cal), "2026-03-29")
+
+        let autumn = RecompCalendar.bounds(of: "2026-10-24", calendar: cal)
+        XCTAssertEqual(autumn.start, at(2026, 10, 24, 4, 0))
+        XCTAssertEqual(autumn.end, at(2026, 10, 25, 4, 0))
+        XCTAssertEqual(autumn.end.timeIntervalSince(autumn.start), 25 * 3600, accuracy: 0.5)
+        XCTAssertEqual(RecompCalendar.day(for: autumn.end.addingTimeInterval(-60), calendar: cal), "2026-10-24")
+        XCTAssertEqual(RecompCalendar.day(for: autumn.end, calendar: cal), "2026-10-25")
+    }
+
     func test_monday() {
         XCTAssertEqual(RecompCalendar.monday(of: "2026-11-15", calendar: cal), "2026-11-09")
         XCTAssertEqual(RecompCalendar.monday(of: "2026-11-16", calendar: cal), "2026-11-16")

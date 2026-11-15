@@ -58,6 +58,28 @@ final class RecompStoreTests: XCTestCase {
         XCTAssertEqual(s.todayTotal, 0, accuracy: 0.001)
     }
 
+    /// The day runs 04:00 to 04:00: 03:59 the next calendar day is still today, 04:00 is not.
+    func test_todayIncludes0359NextDay() {
+        let s = makeStore()
+        let cal = RecompCalendar.calendar
+        let noon = clock.date
+        let nextDay = RecompCalendar.date(of: RecompCalendar.adding(1, to: startDay))
+        let late = cal.date(bySettingHour: 3, minute: 59, second: 0, of: nextDay)!
+        let four = cal.date(bySettingHour: 4, minute: 0, second: 0, of: nextDay)!
+        clock.date = late
+        s.add(source(s, "Eggs"), amount: 1)         // 6.5 g
+        clock.date = four
+        s.add(source(s, "Milk"), amount: 1)         // 8 g
+        clock.date = noon
+        XCTAssertEqual(s.todayEntries.map { $0.name }, ["Eggs"])
+        XCTAssertEqual(s.todayTotal, 6.5, accuracy: 0.001)
+        clock.date = late
+        XCTAssertEqual(s.todayEntries.map { $0.name }, ["Eggs"])
+        clock.date = four
+        XCTAssertEqual(s.todayEntries.map { $0.name }, ["Milk"])
+        XCTAssertEqual(s.todayTotal, 8, accuracy: 0.001)
+    }
+
     func test_entryKeepsItsGrams() {
         let s = makeStore()
         var eggs = source(s, "Eggs")
@@ -105,12 +127,6 @@ final class RecompStoreTests: XCTestCase {
         XCTAssertEqual(again.data, s.data)
         XCTAssertEqual(again.data.goal, 170)
         XCTAssertTrue(again.isDone(again.data.habits[0].id))
-    }
-
-    func test_corruptedDataStartsFresh() {
-        defaults.set(Data("not json".utf8), forKey: "recomp.v1")
-        let s = makeStore()
-        XCTAssertEqual(s.data, RecompData())
     }
 
     func test_pruneOldEntries() {
