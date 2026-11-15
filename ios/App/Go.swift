@@ -29,6 +29,11 @@ final class GoStore: ObservableObject {
     @Published private(set) var lookingOnBoard = false       // just opened: checking whether you're on a bus or train
     @Published private(set) var movingUnknown = false        // going at train or bus speed, but which one isn't clear yet
     @Published private(set) var slow = false                 // the answer is taking long (a slow connection)
+    /// What's on screen is its last answer, saved as of then, while it asks again (nil: a live answer, or nothing).
+    /// Shown as "as of 08:12 · checking again…"; it never tells you anything about it, nor starts your trip from it.
+    @Published private(set) var asOf: Date?
+    /// Its last answer per destination, saved in `<Caches>/answers` with where it was asked.
+    struct SavedGo: Codable { let trips: [DoorTrip]; let lat: Double; let lon: Double }      // "go|<destination>"
     private var why: String?                                 // why the last look found nothing
     private var looks = 0                                    // the looks for the ways from here, numbered
     private var shownLook = 0                                // the look whose answer is on screen: an older one never replaces it
@@ -104,7 +109,7 @@ final class GoStore: ObservableObject {
         loop?.cancel(); detect?.cancel()
         dest = d
         best = nil; others = []; error = nil; updated = nil; notes = []; arrived = false; seen = nil; overdue = false; onBoard = nil; movingUnknown = false; slow = false; hurry = nil
-        firstOnly = false
+        firstOnly = false; asOf = nil
         told = [:]; toldEnd = nil; toldGo = []; missed = nil
         since = Date()
         watching = true
@@ -112,22 +117,26 @@ final class GoStore: ObservableObject {
         trip?.setGo(true)
         look?.cancel()
         look = Task { [weak self] in await self?.firstLook() }    // on a bus or train already? at the same time as planning
-        let start = seed
+        // Nothing from the home screen: its own last answer to `d`, from about here and recent, "as of" then.
+        let saved = seed.isEmpty ? savedAnswer(d) : nil
+        let start = saved?.trips ?? seed, startAt = saved?.at
         seed = []
         loop = Task { [weak self] in
-            // what the home screen just found from here, on screen at once
+            // what the home screen just found from here (or the last answer), on screen at once
             if let self, !start.isEmpty, let l = self.fallback ?? self.trip?.lastFix {
                 self.here = l
                 Self.waitFrom = l
-                await self.apply(start, loc: l, d: d, now: Date())
+                self.asOf = startAt
+                await self.apply(start, loc: l, d: d, now: Date(), quiet: startAt != nil)
+                if self.best == nil { self.asOf = nil }
             }
             while !Task.isCancelled {
                 guard let self, self.watching else { return }
                 await self.refresh()
                 // quicker when the one you're catching is close
                 let soon = (self.best?.first.departure.timeIntervalSinceNow ?? .infinity) < 12 * 60
-                // nothing on screen yet: look again soon (no position yet: sooner still)
-                let wait: Double = self.best == nil ? (self.here == nil ? 1.5 : 4) : soon ? 20 : 40
+                // nothing on screen yet (or only the saved answer): look again soon (no position yet: sooner still)
+                let wait: Double = self.best == nil || self.asOf != nil ? (self.here == nil ? 1.5 : 4) : soon ? 20 : 40
                 try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
             }
         }
@@ -169,7 +178,7 @@ final class GoStore: ObservableObject {
         if LiveStore.movingFix(loc), loc.speed >= 8, loc.timestamp.timeIntervalSinceNow > -30, trip?.phase == .idle, !demo {
             lookAgain()
             movingUnknown = true
-            best = nil; others = []; error = nil
+            best = nil; others = []; asOf = nil; error = nil
             return
         }
         movingUnknown = false
@@ -205,40 +214,105 @@ final class GoStore: ObservableObject {
         slow = false
         guard !Task.isCancelled, watching, dest == d, onBoard == nil, n >= shownLook else { return }
         let firstOnScreen = firstOnly && best != nil
-        // Out of time with a whole answer on screen: that stays (what arrived only fills an empty screen, or replaces a
-        // first answer).
-        let found: [DoorTrip] = answer.timedOut && best != nil && !firstOnScreen ? [] : (answer.value ?? [])
+        let savedOnScreen = asOf != nil && best != nil
+        // Out of time with a whole live answer on screen: that stays (what arrived only fills an empty screen, or replaces
+        // a first answer or the saved one).
+        let found: [DoorTrip] = answer.timedOut && best != nil && !firstOnScreen && !savedOnScreen ? [] : (answer.value ?? [])
         why = answer.timedOut && found.isEmpty ? "No answer within 25 seconds: a slow connection."
             : found.isEmpty ? (Transit.trouble.recent().map { "\($0)." } ?? "Transitous found no way from here.") : nil
         if !found.isEmpty {
-            // A first answer on screen: this replaces it as if the screen were empty, so a first answer never leads to a
-            // "Faster:" or "Too late".
+            // A first answer or the saved one on screen: this replaces it as if the screen were empty, so neither ever
+            // leads to a "Faster:" or "Too late".
             if firstOnScreen { best = nil; others = [] }
+            forgetSaved()
             firstOnly = false
             shownLook = n
         }
-        await apply(found, loc: loc, d: d, now: now)
+        if found.isEmpty && savedOnScreen {
+            // No live answer yet: the saved one stays, "as of", minus what's gone; once nothing of it is left, as an
+            // empty screen.
+            keepSaved()
+            if best == nil { await apply([], loc: loc, d: d, now: now) }
+        } else {
+            await apply(found, loc: loc, d: d, now: now)
+            saveShown(found, loc: loc, d: d, at: now)
+        }
         // Then, with that on screen, the extras: earlier ways onto the same connection, which the planner leaves out (the
         // same arrival, but you'd leave earlier: the Sprinter that's in Breda before the Intercity and makes the same bus,
         // the earlier 306 that leaves room to change), and for a planned trip the latest that still get you there in time.
+        // (Not onto a saved answer's trip: it waits for a live one.)
         var more: [DoorTrip] = []
         async let late: [DoorTrip] = latestInTime(from: c, to: d, now: now)
-        if let top = best { more += await Transit.$urgent.withValue(true) { await Net.within(8) { await self.earlierWays(onto: top) } } ?? [] }
+        if asOf == nil, let top = best { more += await Transit.$urgent.withValue(true) { await Net.within(8) { await self.earlierWays(onto: top) } } ?? [] }
         more += await late
         var ids = Set(found.map(\.id))
         more = more.filter { ids.insert($0.id).inserted }
         guard !more.isEmpty, !Task.isCancelled, watching, dest == d, onBoard == nil, n >= shownLook else { return }
+        forgetSaved()               // (the saved answer still on screen: these live ones replace it as if it were empty)
         await apply(found + more, loc: loc, d: d, now: Date())
+        saveShown(found + more, loc: loc, d: d, at: now)
     }
 
-    /// The first answer that's in, while the rest is still coming: shown only on an empty screen (so it never replaces
-    /// what you have, and never says "Faster:" or "Too late").
+    /// Its last answer to `d`, to show at once: asked at most 30 minutes ago within 400 m of where you are, minus the ones
+    /// you can't make any more (nil: nothing saved, or nothing left of it).
+    private func savedAnswer(_ d: Place) -> (trips: [DoorTrip], at: Date)? {
+        let now = Date()
+        let you = (fallback ?? trip?.lastFix).map { (lat: $0.coordinate.latitude, lon: $0.coordinate.longitude) }
+        guard let s = SnapshotStore.shared.load(SavedGo.self, key: "go|\(d.key)", maxAge: 1800, now: now),
+              Snapshots.closeEnough(saved: (lat: s.value.lat, lon: s.value.lon), here: you, metres: 400) else { return nil }
+        let left = Self.stillOn(s.value.trips, now: now)
+        guard !left.isEmpty else { return nil }
+        return (trips: left, at: s.at)
+    }
+
+    /// The ones of a saved answer you can still make: not gone, not cancelled, and you'd have had to set off at most a
+    /// minute and a half ago (the ones `apply` would keep).
+    private static func stillOn(_ l: [DoorTrip], now: Date) -> [DoorTrip] {
+        l.filter { t in
+            guard let f = t.rides.first else { return false }
+            return f.departure > now && !f.cancelled && t.start >= now.addingTimeInterval(-90)
+        }
+    }
+
+    /// No live answer yet while the saved one is on screen: it stays, minus what's gone (and still tells you nothing);
+    /// once nothing of it is left, the screen is empty.
+    private func keepSaved() {
+        let left = Self.stillOn([best].compactMap { $0 } + others, now: Date())
+        guard let b = left.first(where: { $0.id == best?.id }) ?? left.min(by: Self.sooner) else {
+            best = nil; others = []; asOf = nil
+            return
+        }
+        best = b
+        others = left.filter { $0.id != b.id }
+    }
+
+    /// A live answer is in while the saved one is on screen: it replaces that as if the screen were empty, so a saved
+    /// answer never leads to a "Faster:", a "Too late" or any other notification.
+    private func forgetSaved() {
+        guard asOf != nil else { return }
+        asOf = nil
+        best = nil; others = []
+    }
+
+    /// After a live answer: what's on screen is saved (with where it was asked) to show at once next time, when the one
+    /// it's watching came in with this answer. (One kept from before, while you're waiting for it or on your way to it,
+    /// is older: the file keeps the answer it came with.)
+    private func saveShown(_ list: [DoorTrip], loc: CLLocation, d: Place, at: Date) {
+        guard asOf == nil, dest == d, let b = best, list.contains(b) else { return }
+        SnapshotStore.shared.save(SavedGo(trips: [b] + others, lat: loc.coordinate.latitude, lon: loc.coordinate.longitude),
+                                  key: "go|\(d.key)", at: at)
+    }
+
+    /// The first answer that's in, while the rest is still coming: shown only on an empty screen, or over the saved
+    /// answer (so it never replaces a live one, and never says "Faster:" or "Too late").
     private func fill(_ list: [DoorTrip], look n: Int, loc: CLLocation, d: Place, now: Date) async {
-        guard !Task.isCancelled, watching, dest == d, onBoard == nil, best == nil, !list.isEmpty, n >= shownLook else { return }
+        guard !Task.isCancelled, watching, dest == d, onBoard == nil, best == nil || asOf != nil, !list.isEmpty, n >= shownLook else { return }
+        forgetSaved()
         slow = false
         shownLook = n
         firstOnly = true
         await apply(list, loc: loc, d: d, now: now)
+        saveShown(list, loc: loc, d: d, at: now)
     }
 
     /// A planned trip: the latest ways that still get you there in time (within 6 seconds).
@@ -260,8 +334,9 @@ final class GoStore: ObservableObject {
         look = Task { [weak self] in await self?.firstLook() }
     }
 
-    /// Choose from what it found, put it on screen, and tell you what changed.
-    private func apply(_ found: [DoorTrip], loc: CLLocation, d: Place, now: Date) async {
+    /// Choose from what it found, put it on screen, and tell you what changed. `quiet`: the saved answer, put on screen
+    /// with nothing to tell (only a live answer tells you things).
+    private func apply(_ found: [DoorTrip], loc: CLLocation, d: Place, now: Date, quiet: Bool = false) async {
         // Nothing from here, and you were just going at train or bus speed (slowing down, or stopped at a signal between
         // stations): you're on board. Find which one, and don't say there's no way.
         if found.isEmpty, best == nil, trip?.movedRecently == true, onBoard == nil, trip?.phase == .idle, !demo {
@@ -323,6 +398,7 @@ final class GoStore: ObservableObject {
             }
         }
         guard let p = pick else {
+            if quiet { return }
             if !found.isEmpty || best == nil {
                 best = nil; others = []
                 error = "No way to \(d.short) found from here right now. It tries again in a few seconds." + (why.map { "\n\($0)" } ?? "")
@@ -333,6 +409,7 @@ final class GoStore: ObservableObject {
         best = p
         others = Array(ok.filter { $0.first.tripId != p.first.tripId }.sorted(by: Self.sooner).prefix(5))
         error = nil
+        if quiet { return }
         updated = now
         if let prev, prev.first.tripId != p.first.tripId {
             await switched(from: prev, to: p, found: found)
@@ -487,6 +564,7 @@ final class GoStore: ObservableObject {
         guard var ob = await Transit.$urgent.withValue(true, operation: { await Net.within(10, { await LiveStore.onBoardTrips(f, to: d, wasMoving: moving) }) }) ?? nil,
               watching, dest == d, trip.phase == .idle, !ob.1.isEmpty else { return }
         movingUnknown = false
+        forgetSaved()
         onBoard = ob.0.vehicle
         best = ob.1.first; others = Array(ob.1.dropFirst())
         here = f; updated = Date(); error = nil
@@ -524,17 +602,19 @@ final class GoStore: ObservableObject {
         guard watching, trip.phase == .idle else { return nil }
         // at bus speed, not running for it while it passes you
         guard (trip.speed ?? 0) >= 3.5 else { return last }
-        let all = [best].compactMap { $0 } + others
+        // (the saved answer on screen isn't one it's watching: only a live answer can start your trip)
+        let live = asOf == nil
+        let all: [DoorTrip] = live ? [best].compactMap { $0 } + others : []
         // Buses that leave the same stop together (the 305 and the 306 at Veghel) fit about the same at first: the one
         // it's watching wins when it fits nearly as well.
-        if let b = best, m.vehicle.tripId != b.first.tripId,
+        if live, let b = best, m.vehicle.tripId != b.first.tripId,
            let bm = ranked.first(where: { $0.vehicle.tripId == b.first.tripId }), bm.meters < m.meters + 200 { m = bm }
         let twice = last == m.vehicle.tripId
         // the others that fit about as well: the ride keeps them in the running until there's real distance between them
         let close = ranked.filter { $0.vehicle.tripId != m.vehicle.tripId && $0.meters < m.meters + 300 }.map(\.vehicle)
         if let t = all.first(where: { $0.first.tripId == m.vehicle.tripId }) {
             // one look for the line it's watching; another line has to be the same twice
-            let sameLine = best.map { $0.first.line == m.vehicle.line } ?? true
+            let sameLine = (live ? best : nil).map { $0.first.line == m.vehicle.line } ?? true
             if (m.meters < 250 && sameLine) || twice {
                 board(t, m.vehicle, alternatives: all, couldBe: close)
                 return nil
@@ -544,7 +624,7 @@ final class GoStore: ObservableObject {
         }
         if twice, let loc = trip.lastFix, let ob = await LiveStore.onBoardTrips(loc, to: dest), ob.0.vehicle.tripId == m.vehicle.tripId, let t = ob.1.first {
             // a long way round is probably not a bus you're on (a car or bike next to one)
-            if let b = best, t.end > b.end.addingTimeInterval(30 * 60) { seen = nil; return m.vehicle.tripId }
+            if asOf == nil, let b = best, t.end > b.end.addingTimeInterval(30 * 60) { seen = nil; return m.vehicle.tripId }
             guard watching, trip.phase == .idle else { return nil }
             board(t, ob.0.vehicle, alternatives: all, couldBe: ranked.map(\.vehicle).filter { $0.tripId != ob.0.vehicle.tripId && close.contains($0) })
             return nil
@@ -587,6 +667,7 @@ final class GoStore: ObservableObject {
         demo = true
         isOpen = true
         dest = .breda
+        asOf = nil
         best = nil; others = []; error = nil; updated = nil; notes = []; arrived = false; seen = nil; overdue = false; onBoard = nil; movingUnknown = false; slow = false; hurry = nil
         here = loc ?? trip?.lastFix
         watching = true
@@ -871,6 +952,8 @@ struct GoView: View {
         let toName = Fmt.place(f.headsign.isEmpty ? f.toStop : f.headsign)
         let mins = Fmt.mins(t.end.timeIntervalSinceNow)
         let changes = t.rides.count > 1 ? " · \(t.rides.count - 1) change\(t.rides.count > 2 ? "s" : "")" : ""
+        // (the saved answer: when it was the live one, instead of how long from now)
+        let sub: String = go.asOf.map { "\(Snapshots.asOf($0)) · checking again…" } ?? "\(Fmt.rideText(Double(mins)))\(changes)"
         return VStack(alignment: .leading, spacing: 10) {
             // where it gets you, and when (and when to set off)
             PaperBand(home: trip.direction == .home) {
@@ -878,7 +961,7 @@ struct GoView: View {
                     VStack(alignment: .leading, spacing: 1) {
                         Text(go.deadlineLabel.map { "For \($0)" } ?? (goingHome ? "Fastest way home" : "Fastest way to \(destWord)")).font(BoardInk.sans(10)).tracking(1.6).textCase(.uppercase).opacity(0.85)
                         Text("\(destWord) at \(Fmt.hhmm(t.end))").font(HWFont.display(26)).lineLimit(1).minimumScaleFactor(0.6)
-                        Text("\(Fmt.rideText(Double(mins)))\(changes)").font(BoardInk.sans(11, .medium)).opacity(0.85)
+                        Text(sub).font(BoardInk.sans(11, .medium)).opacity(0.85)
                     }
                     Spacer(minLength: 6)
                     VStack(alignment: .trailing, spacing: 0) {
@@ -905,9 +988,11 @@ struct GoView: View {
                 } else {
                     VStack(alignment: .trailing, spacing: 2) {
                         Text(Fmt.hhmm(f.cancelled ? f.scheduledDeparture : f.departure)).font(HWFont.display(28)).foregroundStyle(Paper.ink).monospacedDigit()
-                        TimelineView(.periodic(from: .now, by: 15)) { _ in
-                            let m = Int((f.departure.timeIntervalSinceNow / 60).rounded(.down))
-                            Text(m <= 0 ? "now" : "in \(m) min").font(BoardInk.sans(12)).foregroundStyle(m <= 2 ? Paper.late : Paper.muted)
+                        if go.asOf == nil {             // (no countdown from the saved answer)
+                            TimelineView(.periodic(from: .now, by: 15)) { _ in
+                                let m = Int((f.departure.timeIntervalSinceNow / 60).rounded(.down))
+                                Text(m <= 0 ? "now" : "in \(m) min").font(BoardInk.sans(12)).foregroundStyle(m <= 2 ? Paper.late : Paper.muted)
+                            }
                         }
                     }
                 }
@@ -1002,8 +1087,10 @@ struct GoView: View {
         if f.fromId == "onboard" {
             EmptyView()                        // you're on it: nothing to walk to
         } else if let a = f.fromLat, let o = f.fromLon {
+            // (from the saved answer: just the way there, without "Leave by … (in 5 min)")
+            let saved = go.asOf != nil
             let target = WalkTarget(name: Fmt.place(f.fromStop), lat: a, lon: o, rail: f.isTrain,
-                                    catchText: "the \(GoStore.what(f)) at \(Fmt.hhmm(f.departure))", leaves: f.departure)
+                                    catchText: saved ? nil : "the \(GoStore.what(f)) at \(Fmt.hhmm(f.departure))", leaves: saved ? nil : f.departure)
             let away = go.here.map { $0.distance(from: CLLocation(latitude: a, longitude: o)) } ?? 9999
             if f.walkBefore == 0 && away < 120 {
                 HStack(spacing: 10) {
@@ -1017,11 +1104,17 @@ struct GoView: View {
                 .frame(maxWidth: .infinity, alignment: .leading).padding(14).glass()
             } else {
                 HStack(alignment: .center, spacing: 12) {
-                    TimelineView(.periodic(from: .now, by: 10)) { _ in leaveRing(t) }
+                    if saved {
+                        Image(systemName: "figure.walk").font(.system(size: 20, weight: .bold)).foregroundStyle(Paper.ink)
+                            .frame(width: 62, height: 62).overlay(Circle().stroke(Paper.ink.opacity(0.18), lineWidth: 6))
+                    } else {
+                        TimelineView(.periodic(from: .now, by: 10)) { _ in leaveRing(t) }
+                    }
                     VStack(alignment: .leading, spacing: 3) {
                         Text(f.walkBefore > 0 ? "\(f.walkBefore) min walk to \(Fmt.place(f.fromStop))" : "Get to \(Fmt.place(f.fromStop))")
                             .font(BoardInk.sans(15)).foregroundStyle(Paper.ink).lineLimit(2).minimumScaleFactor(0.8)
-                        Text(leaveText(t)).font(BoardInk.sans(12)).foregroundStyle(t.start <= Date().addingTimeInterval(60) ? Paper.late : Paper.ok)
+                        Text(saved ? "Leave by \(Fmt.hhmm(t.start))" : leaveText(t)).font(BoardInk.sans(12))
+                            .foregroundStyle(saved ? Paper.ink.opacity(0.85) : t.start <= Date().addingTimeInterval(60) ? Paper.late : Paper.ok)
                         Text("Follow the dotted line on the map.").font(BoardInk.sans(11, .regular)).foregroundStyle(Paper.ink.opacity(0.75))
                     }
                     Spacer(minLength: 0)
@@ -1114,7 +1207,9 @@ struct GoView: View {
                     Text(n.text).font(BoardInk.sans(11.5, .regular)).foregroundStyle(Paper.ink).fixedSize(horizontal: false, vertical: true)
                 }
             }
-            if let u = go.updated {
+            if let a = go.asOf {
+                Text("\(Snapshots.asOf(a)) · checking again…").font(BoardInk.sans(10, .regular)).foregroundStyle(Paper.ink.opacity(0.6))
+            } else if let u = go.updated {
                 Text("Checked at \(Fmt.hhmm(u)). It stops when you leave this screen.").font(BoardInk.sans(10, .regular)).foregroundStyle(Paper.ink.opacity(0.6))
             }
         }
@@ -1128,7 +1223,7 @@ struct GoView: View {
     private func compareCard(_ best: DoorTrip) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline) {
-                kicker("Compare", "if you take another one")
+                kicker("Compare", go.asOf.map { Snapshots.asOf($0) } ?? "if you take another one")
                 Spacer(minLength: 4)
                 Button { showSteady = true } label: {
                     Label("How steady now", systemImage: "gauge.with.dots.needle.33percent").font(BoardInk.sans(11)).foregroundStyle(Paper.navy)

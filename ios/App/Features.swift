@@ -749,6 +749,7 @@ struct TransferList: View {
     let mode: Mode
     let dest: String
     let pal: HWPalette
+    var asOf: Date? = nil               // the leg's saved answer: as of then
     @EnvironmentObject var ns: NSStore
     @EnvironmentObject var watch: WatchStore
     @EnvironmentObject var planner: Planner
@@ -757,7 +758,7 @@ struct TransferList: View {
         let mine = planner.chosen?.tripIds ?? []
         let list = Array(all.filter { $0.trip.first.departure > Date().addingTimeInterval(earlier ? -30 * 60 : -60) }.prefix(earlier ? 10 : 6))
         VStack(alignment: .leading, spacing: 6) {
-            PlannerBar(title: "Next \(what) to \(dest)", sub: updated.map { "updated \(Fmt.hhmm($0))" })
+            PlannerBar(title: "Next \(what) to \(dest)", sub: asOf.map { Snapshots.asOf($0) } ?? updated.map { "updated \(Fmt.hhmm($0))" })
             if list.isEmpty {
                 Text(error ?? (updated == nil ? "Looking up the next \(what)…" : "No \(what) to \(dest) coming up."))
                     .font(BoardInk.sans(12, .regular)).foregroundStyle(Paper.ink.opacity(0.85)).padding(.vertical, 6)

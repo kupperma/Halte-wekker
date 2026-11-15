@@ -1545,15 +1545,18 @@ struct RideView: View {
             .font(HWFont.body(12)).foregroundStyle(Paper.muted).fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 16).padding(.top, 6)
         if let l = trip.leg {
+            // (from a saved list: just the way there, without "Leave by … (in 5 min)")
+            let first = trip.upcomingAsOf == nil ? list.first : nil
             WalkButton(title: "Show the way to \(l.from.short)") {
                 walkTo = WalkTarget(name: l.from.short, lat: l.from.coordinate.latitude, lon: l.from.coordinate.longitude, rail: rail,
-                                    catchText: list.first.map { "the \($0.trip.first.line) at \(Fmt.hhmm($0.trip.first.departure))" }, leaves: list.first?.trip.first.departure)
+                                    catchText: first.map { "the \($0.trip.first.line) at \(Fmt.hhmm($0.trip.first.departure))" }, leaves: first?.trip.first.departure)
             }
             .padding(.horizontal, 16).padding(.top, 8)
         }
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 HStack {
+                    if let a = trip.upcomingAsOf, !(list.isEmpty && board.isEmpty) { Text(Snapshots.asOf(a)).font(HWFont.body(11, bold: true)).foregroundStyle(Paper.muted) }
                     Spacer()
                     Button(earlier ? "Hide earlier ones" : "Show earlier ones") { withAnimation { earlier.toggle() } }
                         .font(HWFont.body(12, bold: true)).foregroundStyle(pal.deep)
@@ -1588,7 +1591,8 @@ struct RideView: View {
                 }
                 }
                 if !rail { Text("Tap the bell to get told when a bus runs late, leaves early or is cancelled.").font(HWFont.body(11)).foregroundStyle(Paper.muted).padding(.top, 6) }
-                if let u = trip.upcomingAt { Text("Updated at \(Fmt.hhmm(u)).").font(HWFont.body(10)).foregroundStyle(Paper.muted).padding(.top, 6) }
+                if let a = trip.upcomingAsOf { Text("\(Snapshots.asOf(a)).").font(HWFont.body(10)).foregroundStyle(Paper.muted).padding(.top, 6) }
+                else if let u = trip.upcomingAt { Text("Updated at \(Fmt.hhmm(u)).").font(HWFont.body(10)).foregroundStyle(Paper.muted).padding(.top, 6) }
             }
         }
         .brass(pal, pad: 14)
@@ -2074,7 +2078,8 @@ struct ArrivalView: View {
         }
         .padding(12)
         .background(Paper.card, in: RoundedRectangle(cornerRadius: 8)).overlay(RoundedRectangle(cornerRadius: 8).stroke(Paper.edge, lineWidth: 1.2))
-        TransferList(all: trip.upcoming, updated: trip.upcomingAt, error: trip.upcomingError, mode: n.mode, dest: n.mode == .train ? n.to.short : "Veghel", pal: pal)
+        TransferList(all: trip.upcoming, updated: trip.upcomingAt, error: trip.upcomingError, mode: n.mode, dest: n.mode == .train ? n.to.short : "Veghel", pal: pal,
+                     asOf: trip.upcomingAsOf)
             .padding(12)
             .background(Paper.card, in: RoundedRectangle(cornerRadius: 8)).overlay(RoundedRectangle(cornerRadius: 8).stroke(Paper.edge, lineWidth: 1.2))
     }

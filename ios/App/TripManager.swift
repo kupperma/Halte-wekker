@@ -71,6 +71,11 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     @Published private(set) var upcomingAt: Date?
     @Published private(set) var upcomingError: String?
     @Published private(set) var upcomingBoard: [BoardDeparture] = []    // buses: the stop's board, with cancelled and departed ones
+    /// When the next departures shown were the live answer, while they're the leg's saved answer (nil: live). Shown as
+    /// "as of 08:12".
+    @Published private(set) var upcomingAsOf: Date?
+    /// The last next departures per leg, saved in `<Caches>/answers` and shown at once when that leg comes up again.
+    struct SavedUpcoming: Codable { let upcoming: [PanelTrip]; let board: [BoardDeparture] }     // "upcoming|<leg key>"
     // Once it knows which bus or train you're on.
     @Published private(set) var vehicleStops: [TripStop] = []
     @Published private(set) var matchMeters: Int?            // how far its live position was from yours
@@ -335,7 +340,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         location.allowsBackgroundLocationUpdates = false
         phase = .idle
         route = nil; legs = []; distance = nil; arrival = nil; next = nil; vehicle = nil; legArrival = nil; arrivedAt = nil
-        upcoming = []; upcomingAt = nil; upcomingError = nil; upcomingKey = ""; upcomingBoard = []; vehicleStops = []; matchMeters = nil; speed = nil; startDistance = nil
+        upcoming = []; upcomingAt = nil; upcomingError = nil; upcomingKey = ""; upcomingBoard = []; upcomingAsOf = nil; vehicleStops = []; matchMeters = nil; speed = nil; startDistance = nil
         roadOf = nil; offRoad = 0; farLooks = 0; boardAlternatives = []
         cands = []; choosing = []; candSince = nil; candLead = nil
         legFrom = nil; legTo = nil; maxDistance = nil
@@ -639,7 +644,9 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
                 // One look is enough for one it expects, or one right with you of the line it planned; others it wants
                 // to see twice.
                 let otherKind = mode != nil && m.vehicle.isTrain != (mode == .train)
-                let expected = (self.upcoming.contains { $0.trip.first.tripId == m.vehicle.tripId } || planned?.tripId == m.vehicle.tripId) && m.meters < 350 && !otherKind
+                // (a saved list of next departures isn't one it expects: only a live answer can)
+                let expected = ((self.upcomingAsOf == nil && self.upcoming.contains { $0.trip.first.tripId == m.vehicle.tripId })
+                                || planned?.tripId == m.vehicle.tripId) && m.meters < 350 && !otherKind
                 let sameLine = (planned.map { $0.line == m.vehicle.line } ?? true) && !otherKind
                 if expected || (m.meters < 150 && sameLine) || m.vehicle.tripId == lastBest {
                     // Its own timetable must still have your stop ahead: not one going the other way, not an earlier run.
@@ -1192,10 +1199,19 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         }
         guard let t = target else { return }
         let k = "\(t.from.key)>\(t.to.map(\.key).joined(separator: ","))>\(t.mode.rawValue)>\(index)"
-        if k != upcomingKey { upcomingKey = k; upcoming = []; upcomingAt = nil; upcomingError = nil; upcomingBoard = [] }
+        if k != upcomingKey {
+            upcomingKey = k; upcomingAt = nil; upcomingError = nil
+            // This leg's last answer at once, minus what has left, "as of" until the live one is in; nothing saved: none.
+            let now = Date()
+            let s = SnapshotStore.shared.load(SavedUpcoming.self, key: "upcoming|\(k)", now: now)
+            upcoming = Snapshots.upcoming(s?.value.upcoming ?? [], now: now) { $0.trip.rides.first?.departure ?? .distantPast }
+            upcomingBoard = Snapshots.upcoming(s?.value.board ?? [], now: now) { $0.cancelled ? $0.scheduled : $0.time }
+            upcomingAsOf = upcoming.isEmpty && upcomingBoard.isEmpty ? nil : s?.at
+        }
         guard !upcomingBusy, force || upcomingAt.map({ Date().timeIntervalSince($0) >= 60 }) ?? true else { return }
         upcomingBusy = true
         defer { upcomingBusy = false }
+        let asked = Date()          // (what comes in is at least this new: it's saved as of then)
         let rail = t.mode == .train
         let from = t.from.key == "veghel" ? StopsStore.shared.veghel : t.from
         // For buses also the stop's own board (asked first, so it runs beside the plans): it shows cancelled buses
@@ -1232,6 +1248,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         let kept = once.filter { o in !once.contains { q in q.id != o.id && q.to == o.to && q.trip.first.departure > o.trip.first.departure && q.trip.last.arrival <= o.trip.last.arrival } }
         upcoming = kept.sorted { $0.trip.first.departure < $1.trip.first.departure }
         upcomingError = nil
+        upcomingAsOf = nil
+        SnapshotStore.shared.save(SavedUpcoming(upcoming: upcoming, board: upcomingBoard), key: "upcoming|\(k)", at: asked)
         if rail {
             let rows = upcoming.map { ($0.trip, $0.from, $0.to) }
             Task { await NSStore.shared.enrich(rows) }     // the trains show first; NS fills in after
