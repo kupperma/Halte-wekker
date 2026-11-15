@@ -47,6 +47,12 @@ final class WeeklyCheckTests: XCTestCase {
         XCTAssertNil(s.pending)
     }
 
+    func test_oldWaistDoesNotCount() {
+        let waists = [Measure(day: "2026-08-01", value: 95.0), Measure(day: "2026-12-09", value: 91.5)]
+        let (v, _) = eval(flatEatLess, waists)
+        XCTAssertEqual(v, .eatLess)
+    }
+
     func test_onTrack() {
         let (v, _) = eval(week("2026-11-16", kg: 88.6) + week("2026-12-07", kg: 87.7))
         guard case .onTrack(let kg) = v else { return XCTFail("got \(v)") }
@@ -61,7 +67,10 @@ final class WeeklyCheckTests: XCTestCase {
 
     func test_pendingStaysUntilAdjusted() {
         let state = CheckState(pending: PendingAdvice(kind: .eatLess, shownOn: "2026-12-14"), baseline: nil)
-        let w = week("2026-11-30", kg: 88.6) + week("2026-12-14", kg: 87.7)
+        let w = week("2026-11-23", kg: 88.6) + week("2026-12-14", kg: 87.7)
+        let (plain, _) = eval(w, [], CheckState(), today: "2026-12-21")
+        guard case .onTrack(let kg) = plain else { return XCTFail("got \(plain)") }
+        XCTAssertEqual(kg, -0.3, accuracy: 0.001)
         let (v, s) = eval(w, [], state, today: "2026-12-21")
         XCTAssertEqual(v, .eatLess)
         XCTAssertEqual(s, state)

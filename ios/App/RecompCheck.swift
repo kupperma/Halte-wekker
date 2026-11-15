@@ -96,10 +96,12 @@ enum WeeklyCheck {
         return (.notEnoughData, state)
     }
 
-    /// Last waist on or before `to` minus last waist on or before `from`, if those are two different entries.
+    /// Start: last waist in [W3−14, W3+6] (`from` is W3+6).
+    /// End: last waist on or before `to`. They must be two different entries.
     private static func waistChange(_ waists: [Measure], from: DayKey, to: DayKey) -> Double? {
         let sorted = waists.sorted { $0.day < $1.day }
-        guard let early = sorted.last(where: { $0.day <= from }),
+        let windowStart = RecompCalendar.adding(-20, to: from)
+        guard let early = sorted.last(where: { $0.day >= windowStart && $0.day <= from }),
               let late = sorted.last(where: { $0.day <= to }),
               early.day != late.day else { return nil }
         return late.value - early.value
