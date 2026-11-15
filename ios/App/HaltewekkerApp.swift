@@ -28,6 +28,9 @@ struct HaltewekkerApp: App {
                     near.onPosition = { t.guessFromPlace($0); t.maybeAutoHome($0) }
                     Task { await NoticeLog.shared.collectDelivered() }
                     Morning.shared.checkAfterAlarm()
+                    RecompStore.shared.limitReached = { total, limit, day in
+                        RecompKcalNotice.post(total: total, limit: limit, day: day)
+                    }
                 }
         }
         .backgroundTask(.appRefresh(SchoolAlarm.backgroundId)) {

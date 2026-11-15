@@ -1,15 +1,22 @@
 import SwiftUI
 
-/// Goal, sources and habits. Every change is saved straight away.
+/// Goal, calorie limit, sources and habits. Every change is saved straight away.
 struct RecompSettingsView: View {
     private let store = RecompStore.shared
     @State private var goal: Double
+    @State private var kcalLimit: Double
+    @State private var followsWeight: Bool
+    @State private var notify: Bool
     @State private var sources: [ProteinSource]
     @State private var habits: [Habit]
 
     init() {
-        let data = RecompStore.shared.data
+        let store = RecompStore.shared
+        let data = store.data
         _goal = State(initialValue: data.goal)
+        _kcalLimit = State(initialValue: store.kcalLimit)
+        _followsWeight = State(initialValue: data.calories.followsWeight)
+        _notify = State(initialValue: data.calories.notify)
         _sources = State(initialValue: data.sources)
         _habits = State(initialValue: data.habits)
     }
@@ -17,14 +24,18 @@ struct RecompSettingsView: View {
     var body: some View {
         Form {
             goalSection
+            kcalSection
             sourcesSection
             habitsSection
         }
         .tint(RecompStyle.accent)
-        .navigationTitle("Goal, sources and habits")
+        .navigationTitle("Recomp settings")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { EditButton() }
         .onChange(of: goal) { store.setGoal(goal) }
+        .onChange(of: kcalLimit) { store.setKcalLimit(kcalLimit) }
+        .onChange(of: followsWeight) { store.setKcalFollowsWeight(followsWeight) }
+        .onChange(of: notify) { store.setKcalNotify(notify) }
         .onChange(of: sources) { store.saveSources(sources) }
         .onChange(of: habits) { store.saveHabits(habits) }
     }
@@ -42,6 +53,30 @@ struct RecompSettingsView: View {
         }
     }
 
+    // MARK: calories
+
+    /// The limit, set by hand with − and +; it moves with the week average when that's on.
+    private var kcalSection: some View {
+        Section {
+            Stepper(value: $kcalLimit, in: KcalMath.limitRange, step: KcalMath.limitStep) {
+                Text(verbatim: "\(KcalMath.number(kcalLimit)) kcal" + (followsWeight ? " · moves with your weight" : ""))
+                    .monospacedDigit()
+                    .font(.system(size: 17, weight: .semibold))
+                    .lineLimit(2).minimumScaleFactor(0.8)
+            }
+            .frame(minHeight: 44)
+            Toggle("Move with my weight", isOn: $followsWeight)
+                .frame(minHeight: 44)
+            Toggle("Notify me at my limit", isOn: $notify)
+                .frame(minHeight: 44)
+        } header: {
+            Text("Daily calorie limit")
+        } footer: {
+            Text("Counts only what you log. With your weight, it moves 15 kcal for every kg of your week average.")
+                .monospacedDigit()
+        }
+    }
+
     // MARK: sources
 
     private var sourcesSection: some View {
@@ -55,7 +90,7 @@ struct RecompSettingsView: View {
             .onMove { sources.move(fromOffsets: $0, toOffset: $1) }
             Button {
                 sources.append(ProteinSource(name: "New", unit: "portion", units: "portions",
-                                             gramsPerUnit: 10, step: 1))
+                                             gramsPerUnit: 10, step: 1, kcalPerUnit: 0))
             } label: {
                 Label("Add source", systemImage: "plus")
                     .frame(minHeight: 44, alignment: .leading)
@@ -119,14 +154,16 @@ struct RecompSettingsView: View {
     }
 }
 
-/// One source. The grams field keeps its own text, so a half-typed number never fights the store.
+/// One source. The grams and kcal fields keep their own text, so a half-typed number never fights the store.
 private struct SourceEditor: View {
     @Binding var source: ProteinSource
     @State private var gramsText: String
+    @State private var kcalText: String
 
     init(source: Binding<ProteinSource>) {
         _source = source
         _gramsText = State(initialValue: Self.text(source.wrappedValue.gramsPerUnit))
+        _kcalText = State(initialValue: Self.text(source.wrappedValue.kcalPerUnit.rounded()))
     }
 
     private static func text(_ v: Double) -> String {
@@ -156,6 +193,21 @@ private struct SourceEditor: View {
             .frame(minHeight: 44)
             .onChange(of: gramsText) {
                 if let g = RecompInput.protein(gramsText) { source.gramsPerUnit = g }
+            }
+            HStack {
+                Text("Calories per \(source.unit.isEmpty ? "unit" : source.unit)")
+                    .foregroundStyle(RecompStyle.quiet)
+                Spacer(minLength: 8)
+                TextField("kcal", text: $kcalText)
+                    .keyboardType(.numberPad)
+                    .multilineTextAlignment(.trailing)
+                    .monospacedDigit()
+                    .frame(width: 80)
+                Text("kcal").foregroundStyle(RecompStyle.quiet)
+            }
+            .frame(minHeight: 44)
+            .onChange(of: kcalText) {
+                if let k = RecompInput.kcal(kcalText) { source.kcalPerUnit = k }
             }
             Picker("Step", selection: $source.step) {
                 Text("¼").tag(0.25)

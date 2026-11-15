@@ -5,7 +5,8 @@ import VisionKit
 
 /// Scan a pack (or type its barcode), find out how much protein a pack has, and say how much of it you had.
 /// One step at a time inside the sheet: the camera, "Looking it up…", the label (when Open Food Facts can't help),
-/// and the amount. A product found once is remembered on the phone, so it works without internet the next time.
+/// and the amount: in slices or pieces when the serving is known (or counted), else part of the pack.
+/// A product found once is remembered on the phone, so it works without internet the next time.
 struct ScanSheet: View {
     @ObservedObject private var store = RecompStore.shared
     @Environment(\.dismiss) private var dismiss
@@ -17,6 +18,8 @@ struct ScanSheet: View {
         /// remembered number was wrong.
         case label(String, LabelReason)
         case amount(String)
+        /// "How many slices are in the pack?", to count it by portion from then on.
+        case portions(String)
     }
 
     /// Why the label form is up. It sets the one line under its title.
@@ -31,7 +34,7 @@ struct ScanSheet: View {
     }
 
     private enum Camera { case checking, ready, unavailable }
-    private enum Field: Hashable { case barcode, name, protein }
+    private enum Field: Hashable { case barcode, name, protein, kcal, count }
 
     /// A code just left with Back. The camera is usually still on it, so it's ignored for a moment.
     private struct LeftCode {
@@ -46,7 +49,21 @@ struct ScanSheet: View {
     @State private var typed = ""
     @State private var name = ""
     @State private var protein = ""
+    /// Calories per pack, from the label. Optional.
+    @State private var kcal = ""
     @State private var fraction: Double = 1
+    /// Slices (or pieces, portions) for a product counted by portion.
+    @State private var portions: Double = 1
+    /// A product counted by portion, and a part of the pack tapped instead: Add logs that part.
+    @State private var packChosen = false
+    /// The "How many … are in the pack?" answer, and what they're called.
+    @State private var count = ""
+    @State private var portionPick = PortionName.choices[0]
+    /// A portion (and calories) Open Food Facts knew for a pack it had no protein for: kept once the label is typed.
+    @State private var pendingPortion: Portion?
+    @State private var pendingEnergy = Energy()
+    /// For a product remembered before 0.17.1: Open Food Facts asked once more, quietly, for its serving and kcal.
+    @State private var refresh: Task<Void, Never>?
     @State private var attempt = 0
     @State private var lookup: Task<Void, Never>?
     @State private var justLeft: LeftCode?
@@ -81,9 +98,15 @@ struct ScanSheet: View {
         .preferredColorScheme(.light)
         .presentationDragIndicator(.visible)
         .task { await checkCamera() }
-        .onDisappear { lookup?.cancel() }
+        .onDisappear {
+            lookup?.cancel()
+            refresh?.cancel()
+        }
         .sensoryFeedback(.impact(weight: .medium), trigger: scans)
         .sensoryFeedback(.selection, trigger: fraction)
+        .sensoryFeedback(.selection, trigger: portions)
+        .sensoryFeedback(.selection, trigger: packChosen)
+        .sensoryFeedback(.selection, trigger: portionPick)
         .sensoryFeedback(.success, trigger: addedSource) { _, new in new }
     }
 
@@ -102,6 +125,10 @@ struct ScanSheet: View {
         case .amount(let code):
             if let p = store.data.products[code] {
                 amountView(code, p)
+            }
+        case .portions(let code):
+            if let p = store.data.products[code] {
+                portionsView(code, p)
             }
         }
     }
@@ -208,9 +235,13 @@ struct ScanSheet: View {
                     field("Protein per pack (from the label)", text: $protein, .protein, keyboard: .decimalPad,
                           prompt: "", unit: "g")
                 }
+                labelled("Calories per pack (optional)") {
+                    field("Calories per pack (optional)", text: $kcal, .kcal, keyboard: .numberPad,
+                          prompt: "", unit: "kcal")
+                }
                 Button("Save") { saveLabel(code) }
                     .buttonStyle(RecompButtonStyle(wide: true, height: 52))
-                    .disabled(RecompInput.protein(protein) == nil)
+                    .disabled(RecompInput.protein(protein) == nil || !Self.kcalOK(kcal))
                     .padding(.top, 4)
                 if offline {
                     Button("Try again") { lookUp(code) }
@@ -221,6 +252,11 @@ struct ScanSheet: View {
         }
         .scrollDismissesKeyboard(.interactively)
         .transition(.opacity)
+    }
+
+    /// Empty (it's optional), or 0…5000.
+    private static func kcalOK(_ text: String) -> Bool {
+        text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || RecompInput.kcal(text) != nil
     }
 
     /// The quiet line under the title: why there's a form at all.
@@ -243,46 +279,150 @@ struct ScanSheet: View {
 
     // MARK: - How much
 
+    /// Most portions at once, as on the source sheets.
+    private static let mostPortions: Double = 20
+
+    /// With a portion known: − 1 slice + first, part of the pack below it. Without: part of the pack, and the way
+    /// to count it by portion.
     private func amountView(_ code: String, _ p: KnownProduct) -> some View {
-        VStack(spacing: 14) {
+        let portion = p.portion
+        let byPortion = portion != nil && !packChosen
+        let grams = byPortion ? portions * (portion?.protein ?? 0) : fraction * p.proteinPerPack
+        return VStack(spacing: 14) {
             Text(verbatim: p.name.isEmpty ? OpenFoodFacts.fallbackName : p.name)
                 .font(HWFont.display(24)).foregroundStyle(Paper.ink)
                 .multilineTextAlignment(.center)
                 .lineLimit(2).minimumScaleFactor(0.7)
-            HStack(spacing: 8) {
-                ForEach(ProteinMath.packFractions, id: \.self) { f in
-                    let on = abs(fraction - f) < 0.001
-                    Button {
-                        withAnimation(.easeOut(duration: 0.15)) { fraction = f }
-                    } label: {
-                        Text(verbatim: Self.fractionText(f))
-                    }
-                    .buttonStyle(RecompFractionStyle(selected: on))
-                    .accessibilityLabel(Self.fractionSpoken(f))
-                    .accessibilityAddTraits(on ? .isSelected : [])
-                }
+            if let portion {
+                portionStepper(portion, active: byPortion)
+            } else {
+                fractionRow(small: false)
             }
-            Text(verbatim: "≈ \(RecompFormat.grams(fraction * p.proteinPerPack)) protein")
+            Text(verbatim: "≈ \(RecompFormat.grams(grams)) protein")
                 .font(BoardInk.sans(15, .medium)).monospacedDigit().foregroundStyle(RecompStyle.quiet)
-                .contentTransition(.numericText(value: fraction))
+                .contentTransition(.numericText(value: grams))
+            if portion != nil {
+                VStack(spacing: 6) {
+                    Text("Or by the pack")
+                        .font(BoardInk.sans(13, .medium)).foregroundStyle(RecompStyle.quiet)
+                        .accessibilityHidden(true)              // each button says "… of the pack"
+                    fractionRow(small: true)
+                }
+            } else {
+                Button("Count by slice or portion") { askPortions(code, p) }
+                    .buttonStyle(RecompButtonStyle(filled: false, wide: true))
+            }
             Button("Add") {
-                store.addProduct(barcode: code, fraction: fraction)
+                add(code, p)
                 dismiss()
             }
             .buttonStyle(RecompButtonStyle(wide: true, height: 52))
+            .padding(.top, 6)
             sourceButton(code)
                 .padding(.top, 6)
-            Button { correct(code, p) } label: {
-                Text("Wrong? Type it from the label")
-                    .underline()
-                    .font(BoardInk.sans(13, .medium)).foregroundStyle(RecompStyle.quiet)
-                    .frame(minHeight: 44)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
+            links(code, p)
         }
         .padding(.horizontal, 20).padding(.top, 24).padding(.bottom, 12)
         .transition(.opacity)
+    }
+
+    /// − "2 slices" +: from 1 to 20. Dimmed while a part of the pack is chosen; a tap on any of it counts slices again.
+    private func portionStepper(_ portion: Portion, active: Bool) -> some View {
+        HStack(spacing: 12) {
+            stepButton("minus", label: "Fewer \(portion.units)", enabled: !active || portions > 1) {
+                portions = max(1, portions - 1)
+                packChosen = false
+            }
+            Button {
+                withAnimation(.easeOut(duration: 0.15)) { packChosen = false }
+            } label: {
+                Text(verbatim: ProteinMath.amountLabel(portions, unit: portion.name, units: portion.units))
+                    .font(HWFont.display(32)).monospacedDigit()
+                    .foregroundStyle(active ? Paper.ink : RecompStyle.quiet)
+                    .lineLimit(1).minimumScaleFactor(0.6)
+                    .frame(maxWidth: .infinity, minHeight: 64)
+                    .contentShape(Rectangle())
+                    .contentTransition(.numericText(value: portions))
+            }
+            .buttonStyle(.plain)
+            .accessibilityAddTraits(active ? .isSelected : [])
+            stepButton("plus", label: "More \(portion.units)", enabled: !active || portions < Self.mostPortions) {
+                portions = min(Self.mostPortions, portions + 1)
+                packChosen = false
+            }
+        }
+    }
+
+    private func stepButton(_ icon: String, label: String, enabled: Bool, _ go: @escaping () -> Void) -> some View {
+        Button {
+            withAnimation(.easeOut(duration: 0.15)) { go() }
+        } label: {
+            Image(systemName: icon)
+                .font(.system(size: 24, weight: .bold)).foregroundStyle(Paper.ink)
+                .frame(width: 64, height: 64)
+                .background(Paper.card, in: Circle())
+                .overlay(Circle().stroke(Paper.edge, lineWidth: 1.2))
+                .contentShape(Circle())
+        }
+        .buttonStyle(RecompPressStyle())
+        .disabled(!enabled)
+        .opacity(enabled ? 1 : 0.35)
+        .accessibilityLabel(label)
+    }
+
+    /// ¼ ½ ¾ All. Big when it's the only way to say how much; small under the slices, and only lit once tapped.
+    private func fractionRow(small: Bool) -> some View {
+        HStack(spacing: 8) {
+            ForEach(ProteinMath.packFractions, id: \.self) { f in
+                let on = (!small || packChosen) && abs(fraction - f) < 0.001
+                Button {
+                    withAnimation(.easeOut(duration: 0.15)) {
+                        fraction = f
+                        packChosen = true
+                    }
+                } label: {
+                    Text(verbatim: Self.fractionText(f))
+                }
+                .buttonStyle(RecompFractionStyle(selected: on, font: HWFont.display(small ? 19 : 26),
+                                                 height: small ? 44 : 64))
+                .accessibilityLabel(Self.fractionSpoken(f) + (small ? " of the pack" : ""))
+                .accessibilityAddTraits(on ? .isSelected : [])
+            }
+        }
+    }
+
+    /// The quiet ways to put a number right: the pack's protein, and (counted by portion) how many are in a pack.
+    @ViewBuilder private func links(_ code: String, _ p: KnownProduct) -> some View {
+        let wrong = quietLink("Wrong? Type it from the label") { correct(code, p) }
+        if let portion = p.portion {
+            let recount = quietLink("Count the \(portion.units)") { askPortions(code, p) }
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 20) { wrong; recount }
+                VStack(spacing: 0) { wrong; recount }
+            }
+        } else {
+            wrong
+        }
+    }
+
+    private func quietLink(_ title: String, _ go: @escaping () -> Void) -> some View {
+        Button(action: go) {
+            Text(verbatim: title)
+                .underline()
+                .font(BoardInk.sans(13, .medium)).foregroundStyle(RecompStyle.quiet)
+                .lineLimit(1)
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func add(_ code: String, _ p: KnownProduct) {
+        if p.portion != nil, !packChosen {
+            store.addProductPortions(barcode: code, count: portions)
+        } else {
+            store.addProduct(barcode: code, fraction: fraction)
+        }
     }
 
     /// "Add to my sources", or why it can't be.
@@ -320,6 +460,52 @@ struct ScanSheet: View {
         case ..<0.9: return "Three quarters"
         default: return "All"
         }
+    }
+
+    // MARK: - How many in a pack
+
+    /// "How many slices are in the pack?": slice, piece or portion, the number, and what one is in protein.
+    private func portionsView(_ code: String, _ p: KnownProduct) -> some View {
+        let units = PortionName.plural(portionPick)
+        let n = RecompInput.portions(count)
+        let one = n.flatMap { Portion.split(pack: p.proteinPerPack, into: $0, name: portionPick) }
+        let hint: String = one.map { "≈ \(RecompFormat.grams($0.protein)) protein a \($0.name)" }
+            ?? (count.isEmpty ? " "
+                : n == nil ? "A whole number from 1 to 200."
+                : "Too little protein a \(portionPick) to count. Count by the pack.")
+        // A name it came with that isn't one of the three ("bar") stays on offer.
+        var names = PortionName.choices
+        if let other = p.portionName, !names.contains(other) { names.append(other) }
+        return ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(verbatim: "How many \(units) are in the pack?")
+                    .font(HWFont.display(22)).foregroundStyle(Paper.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 8) {
+                    ForEach(names, id: \.self) { name in
+                        let on = portionPick == name
+                        Button {
+                            withAnimation(.easeOut(duration: 0.15)) { portionPick = name }
+                        } label: {
+                            Text(verbatim: name.capitalized)
+                        }
+                        .buttonStyle(RecompFractionStyle(selected: on, font: BoardInk.sans(15), height: 44))
+                        .accessibilityAddTraits(on ? .isSelected : [])
+                    }
+                }
+                field("Number of \(units)", text: $count, .count, keyboard: .numberPad, prompt: "", unit: units)
+                Text(verbatim: hint)
+                    .font(BoardInk.sans(14, .medium)).monospacedDigit().foregroundStyle(RecompStyle.quiet)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("Save") { savePortions(code, p) }
+                    .buttonStyle(RecompButtonStyle(wide: true, height: 52))
+                    .disabled(one == nil)
+                    .padding(.top, 4)
+            }
+            .padding(.horizontal, 20).padding(.top, 20).padding(.bottom, 12)
+        }
+        .scrollDismissesKeyboard(.interactively)
+        .transition(.opacity)
     }
 
     // MARK: - Fields
@@ -393,10 +579,34 @@ struct ScanSheet: View {
         focus = nil
         name = ""
         protein = ""
+        kcal = ""
+        pendingPortion = nil
+        pendingEnergy = Energy()
         if store.data.products[code] != nil {
             showAmount(code)
+            refreshPortion(code)
         } else {
             lookUp(code)
+        }
+    }
+
+    /// A product remembered without a portion or calories (scanned before 0.17.1, say): ask Open Food Facts again,
+    /// quietly, and fill in what it knows now: count by slice once it knows the serving. Offline or nothing new: it
+    /// stays as it is; what's there (counted by hand, say) is never replaced.
+    private func refreshPortion(_ code: String) {
+        refresh?.cancel()
+        guard let p = store.data.products[code], p.portion == nil || p.packKcal == nil else { return }
+        refresh = Task { @MainActor in
+            let result = await OpenFoodFacts.lookup(code)
+            guard !Task.isCancelled else { return }
+            switch result {
+            case .found(_, _, let portion, let energy), .needsProtein(_, let portion, let energy):
+                withAnimation(.easeOut(duration: 0.2)) {
+                    store.fillIn(barcode: code, portion: portion, energy: energy)
+                }
+            case .offline:
+                break
+            }
         }
     }
 
@@ -412,10 +622,14 @@ struct ScanSheet: View {
             // The sheet moved on (Back, another code, closed): this answer is for nobody.
             guard !Task.isCancelled, mine == attempt, step == .lookingUp(code) else { return }
             switch result {
-            case .found(let n, let g):
-                store.rememberProduct(barcode: code, name: n, proteinPerPack: g)
+            case .found(let n, let g, let portion, let energy):
+                store.rememberProduct(barcode: code, name: n, proteinPerPack: g, portion: portion,
+                                      kcalPerPack: energy.perPack, kcalPerPortion: energy.perPortion)
                 showAmount(code)
-            case .needsProtein(let n):
+            case .needsProtein(let n, let portion, let energy):
+                pendingPortion = portion
+                pendingEnergy = energy
+                if let k = energy.perPack { kcal = String(Int(k.rounded())) }
                 let known = !(n ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 askLabel(code, name: n, known ? .noProtein : .unknown)
             case .offline:
@@ -430,23 +644,56 @@ struct ScanSheet: View {
         focusSoon(.protein)
     }
 
-    /// From the amount step: type the protein again for a product already remembered. Saving overwrites it.
+    /// From the amount step: type the protein again for a product already remembered. Saving overwrites it, and
+    /// keeps its portion.
     private func correct(_ code: String, _ p: KnownProduct) {
         name = p.name
         protein = ""
+        kcal = ""                                   // left empty: the calories stay as they are
+        pendingPortion = nil
+        pendingEnergy = Energy()
         askLabel(code, name: nil, .correcting)
     }
 
     private func saveLabel(_ code: String) {
-        guard let g = RecompInput.protein(protein) else { return }
+        guard let g = RecompInput.protein(protein), Self.kcalOK(kcal) else { return }
         let n = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        store.rememberProduct(barcode: code, name: n.isEmpty ? OpenFoodFacts.fallbackName : n, proteinPerPack: g)
+        let portion = pendingPortion.flatMap { $0.isPart(of: g) ? $0 : nil }
+        store.rememberProduct(barcode: code, name: n.isEmpty ? OpenFoodFacts.fallbackName : n, proteinPerPack: g,
+                              portion: portion, kcalPerPack: RecompInput.kcal(kcal),
+                              kcalPerPortion: portion == nil ? nil : pendingEnergy.perPortion)
+        pendingPortion = nil
+        pendingEnergy = Energy()
+        focus = nil
+        showAmount(code)
+    }
+
+    /// Count by portion: slice to start with; with a portion already, its name and about how many a pack holds.
+    private func askPortions(_ code: String, _ p: KnownProduct) {
+        if let portion = p.portion {
+            portionPick = portion.name
+            let n = (p.proteinPerPack / portion.protein).rounded()
+            count = n.isFinite && Portion.perPackRange.contains(n) ? String(Int(n)) : ""
+        } else {
+            portionPick = PortionName.choices[0]
+            count = ""
+        }
+        move(to: .portions(code))
+        focusSoon(.count)
+    }
+
+    private func savePortions(_ code: String, _ p: KnownProduct) {
+        guard let n = RecompInput.portions(count),
+              let one = Portion.split(pack: p.proteinPerPack, into: n, name: portionPick) else { return }
+        store.rememberPortion(barcode: code, name: one.name, proteinPerPortion: one.protein)
         focus = nil
         showAmount(code)
     }
 
     private func showAmount(_ code: String) {
         fraction = 1
+        portions = 1
+        packChosen = false
         addedSource = false
         move(to: .amount(code))
     }
@@ -455,13 +702,17 @@ struct ScanSheet: View {
         lookup?.cancel()
         attempt += 1
         focus = nil
-        // Correcting a remembered product: Back is to its amount again, as it was.
+        // Correcting a remembered product, or counting its portions: Back is to its amount again, as it was.
         if case .label(let code, .correcting) = step, store.data.products[code] != nil {
             move(to: .amount(code))
             return
         }
+        if case .portions(let code) = step, store.data.products[code] != nil {
+            move(to: .amount(code))
+            return
+        }
         switch step {
-        case .lookingUp(let code), .label(let code, _), .amount(let code):
+        case .lookingUp(let code), .label(let code, _), .amount(let code), .portions(let code):
             justLeft = LeftCode(code: code, at: Date())
         case .scan:
             break
@@ -576,18 +827,20 @@ private struct BarcodeScanner: UIViewControllerRepresentable {
 
 // MARK: - Buttons
 
-/// ¼ ½ ¾ All: big paper buttons; the chosen one is filled with the accent.
+/// ¼ ½ ¾ All (and slice / piece / portion): paper buttons side by side; the chosen one is filled with the accent.
 private struct RecompFractionStyle: ButtonStyle {
     let selected: Bool
+    var font: Font = HWFont.display(26)
+    var height: CGFloat = 64
 
     func makeBody(configuration: Configuration) -> some View {
         let shape = RoundedRectangle(cornerRadius: 4)
         let pressed = configuration.isPressed
         return configuration.label
-            .font(HWFont.display(26)).monospacedDigit()
+            .font(font).monospacedDigit()
             .foregroundStyle(selected ? Color.white : Paper.ink)
             .lineLimit(1).minimumScaleFactor(0.7)
-            .frame(maxWidth: .infinity, minHeight: 64)
+            .frame(maxWidth: .infinity, minHeight: height)
             .background(selected ? RecompStyle.accent : Paper.paper, in: shape)
             .overlay(shape.stroke(selected ? Color.clear : Paper.edge, lineWidth: 1.2))
             .contentShape(shape)

@@ -148,6 +148,19 @@ enum RecompInput {
     static func waist(_ text: String) -> Double? { ranged(text, 40...200) }
     /// Grams of protein per pack, from a label.
     static func protein(_ text: String) -> Double? { ranged(text, 0.1...300) }
+
+    /// Calories per pack (from a label) or per unit of a source.
+    static func kcal(_ text: String) -> Double? { ranged(text, KcalMath.packRange) }
+    /// Calories of one other food, typed.
+    static func kcalEntry(_ text: String) -> Double? { ranged(text, KcalMath.entryRange) }
+
+    /// How many portions are in a pack: a whole number from 1 to 200.
+    static func portions(_ text: String) -> Int? {
+        let s = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !s.isEmpty, s.count <= 3, s.allSatisfy({ $0.isASCII && $0.isNumber }),
+              let n = Int(s), (1...200).contains(n) else { return nil }
+        return n
+    }
 }
 
 // MARK: - Protein maths
@@ -218,6 +231,72 @@ enum ProteinMath {
     static func rideLine(total: Double, goal: Double) -> String? {
         guard let t = toGo(total: total, goal: goal) else { return nil }
         return t + " today"
+    }
+}
+
+// MARK: - Calories
+
+/// Calories from what's logged, the daily limit (moving with the week's weight), and the one notice a day at it.
+enum KcalMath {
+    static let defaultLimit: Double = 2450
+    static let limitRange: ClosedRange<Double> = 1200...5000
+    static let limitStep: Double = 50
+    /// kcal a day per kg of week average: about 10 resting × 1.5 for moving about.
+    static let perKg: Double = 15
+    /// What "Done, I've adjusted" moves the limit by, down for "eat less", up for "eat more".
+    static let adjustStep: Double = 200
+    /// What a pack (or a unit of a source) can sensibly hold.
+    static let packRange: ClosedRange<Double> = 0...5000
+    /// One other food, typed.
+    static let entryRange: ClosedRange<Double> = 1...3000
+
+    /// Rounded to 50 and kept inside 1200…5000; the default for anything that isn't a number.
+    static func clampLimit(_ v: Double) -> Double {
+        guard v.isFinite else { return defaultLimit }
+        let r = (v / limitStep).rounded() * limitStep
+        return min(max(r, limitRange.lowerBound), limitRange.upperBound)
+    }
+
+    /// The limit today: the anchor, plus 15 kcal for every kg the week average is above the weight it was set at
+    /// (less below). Just the anchor while it doesn't move, or with no week average (or anchor weight) yet.
+    static func limit(anchorLimit: Double, anchorWeight: Double?, weekAverage: Double?, follows: Bool) -> Double {
+        guard follows, let a = anchorWeight, let w = weekAverage, a.isFinite, w.isFinite else {
+            return clampLimit(anchorLimit)
+        }
+        return clampLimit(anchorLimit + perKg * (w - a))
+    }
+
+    /// Notify when today's logged kcal is at or over the limit, it's switched on, and it hasn't gone out today.
+    static func shouldNotify(total: Double, limit: Double, lastNotified: DayKey?, today: DayKey, enabled: Bool) -> Bool {
+        enabled && total.isFinite && limit.isFinite && limit > 0 && total >= limit && lastNotified != today
+    }
+
+    /// "2,480" in en_GB, "2.480" in nl_NL: whole kcal, grouped the phone's way.
+    static func number(_ v: Double, locale: Locale = .current) -> String {
+        let whole = v.isFinite ? Int(min(max(v, -1e9), 1e9).rounded()) : 0     // Int(_:) traps far outside its range
+        let f = NumberFormatter()
+        f.locale = locale
+        f.numberStyle = .decimal
+        f.maximumFractionDigits = 0
+        return f.string(from: NSNumber(value: whole)) ?? "\(whole)"
+    }
+
+    /// On the protein card. It says "logged": only what's logged is counted.
+    static func cardLine(total: Double, limit: Double, locale: Locale = .current) -> String {
+        let numbers = "\(number(total, locale: locale)) of \(number(limit, locale: locale)) kcal logged"
+        return total >= limit ? "Limit reached · " + numbers : "≈ " + numbers
+    }
+
+    static let noticeTitle = "Calorie limit reached"
+
+    static func noticeBody(total: Double, limit: Double, locale: Locale = .current) -> String {
+        "You've logged \(number(total, locale: locale)) of \(number(limit, locale: locale)) kcal today."
+    }
+
+    /// nil unless finite and inside `range`.
+    static func sane(_ v: Double?, _ range: ClosedRange<Double> = packRange) -> Double? {
+        guard let v, v.isFinite, range.contains(v) else { return nil }
+        return v
     }
 }
 
