@@ -282,29 +282,62 @@ enum Transit {
         }
     }
 
-    /// Door-to-door trips from where you are to a place, without the ones a later trip beats.
-    static func tripsFrom(_ c: CLLocationCoordinate2D, to: Place, count: Int = 5, keep: Int = 5) async -> [DoorTrip] {
+    /// Door-to-door trips from where you are to a place, without the ones a later trip beats. `publish` gets them as
+    /// each plan comes in (from your spot, from the station you're at), before the rest.
+    static func tripsFrom(_ c: CLLocationCoordinate2D, to: Place, count: Int = 5, keep: Int = 5,
+                          publish: (@Sendable ([DoorTrip]) async -> Void)? = nil) async -> [DoorTrip] {
         let now = Date()
         let here = CLLocation(latitude: c.latitude, longitude: c.longitude)
-        // all at once: from your spot, which station you're at (if any), then from the station too
-        async let fromHere = planAll(from: "\(c.latitude),\(c.longitude)", to: to.ids, at: now.addingTimeInterval(-120), count: count)
-        let station = await stationAt(c)
-        async let fromStation = planAll(from: station?.id, to: to.ids, at: now.addingTimeInterval(-120), count: count)
-        var all = await fromHere
-        // At a station: from the station itself too. From your GPS spot inside a big one, the walk to the platforms can
-        // come out long or odd, and a bus to the station you're standing in looks quicker. Your walk to the platform:
-        // about how far it is.
-        all += (await fromStation).map { t in
-            let f = t.first
-            let m = f.fromLat.flatMap { a in f.fromLon.map { o in here.distance(from: CLLocation(latitude: a, longitude: o)) } } ?? 150
-            let walk = min(8, max(2, Int((m / 1.2 / 60).rounded(.up))))
-            return DoorTrip(rides: [f.walking(walk)] + t.rides.dropFirst(), start: f.departure.addingTimeInterval(-Double(walk) * 60), end: t.end)
+        // all at once: from your spot, which station you're at (if any), then from the station too; each plan handed on
+        // as soon as it's in, once it's known which station you're at (the filter needs it)
+        var fromHere: [DoorTrip]?, fromStation: [DoorTrip]?
+        var station: NearStop?, stationKnown = false
+        await withTaskGroup(of: FromHerePart.self) { g in
+            g.addTask { FromHerePart.spot(await planAll(from: "\(c.latitude),\(c.longitude)", to: to.ids, at: now.addingTimeInterval(-120), count: count)) }
+            g.addTask { FromHerePart.station(await stationAt(c)) }
+            while let part = await g.next() {
+                switch part {
+                case .spot(let trips):
+                    fromHere = trips
+                case .station(let s):
+                    station = s
+                    stationKnown = true
+                    g.addTask { FromHerePart.fromStation(await planAll(from: s?.id, to: to.ids, at: now.addingTimeInterval(-120), count: count)) }
+                case .fromStation(let trips):
+                    // At a station: from the station itself too. From your GPS spot inside a big one, the walk to the
+                    // platforms can come out long or odd, and a bus to the station you're standing in looks quicker. Your
+                    // walk to the platform: about how far it is.
+                    fromStation = trips.map { t in
+                        let f = t.first
+                        let m = f.fromLat.flatMap { a in f.fromLon.map { o in here.distance(from: CLLocation(latitude: a, longitude: o)) } } ?? 150
+                        let walk = min(8, max(2, Int((m / 1.2 / 60).rounded(.up))))
+                        return DoorTrip(rides: [f.walking(walk)] + t.rides.dropFirst(), start: f.departure.addingTimeInterval(-Double(walk) * 60), end: t.end)
+                    }
+                }
+                guard let publish, stationKnown, fromHere != nil || fromStation != nil else { continue }
+                await publish(keepUseful((fromHere ?? []) + (fromStation ?? []), here: here, station: station, now: now, keep: keep))
+            }
         }
+        var all = (fromHere ?? []) + (fromStation ?? [])
         // Out in the country (between Tilburg Reeshof and Gilze-Rijen, say) the planner finds no stop it'll walk to:
         // then from the nearest station and the nearest stop within about 3 km, with the walk there.
         if all.isEmpty {
             all = await fromNearest(here, to: to.ids, at: now.addingTimeInterval(-120), count: count)
         }
+        return keepUseful(all, here: here, station: station, now: now, keep: keep)
+    }
+
+    /// What `tripsFrom` hears back, each as it comes in.
+    private enum FromHerePart: Sendable {
+        case spot([DoorTrip])
+        case station(NearStop?)
+        case fromStation([DoorTrip])
+    }
+
+    /// The trips worth showing, soonest first: no ride to where you are already, nothing that has left, none a later
+    /// trip beats, at most `keep`.
+    private static func keepUseful(_ all: [DoorTrip], here: CLLocation, station: NearStop?, now: Date, keep: Int) -> [DoorTrip] {
+        var all = all
         // A ride that only takes you to where you are (the station you're at): you're there already. Only when there's
         // another way, though.
         let at = station.map { CLLocation(latitude: $0.lat, longitude: $0.lon) }
@@ -415,17 +448,19 @@ enum Transit {
                      m: here.distance(from: CLLocation(latitude: a, longitude: o)))
         }
         let picks = [stops.filter(\.rail).min { $0.m < $1.m }, stops.filter { !$0.rail }.min { $0.m < $1.m }].compactMap { $0 }.filter { $0.m < 3500 }
-        var out: [DoorTrip] = []
-        for s in picks {
-            let walk = max(2, Int((s.m * 1.33 / 1.2 / 60).rounded(.up)))
-            // you can be there in `walk` minutes: plan from then
-            let trips = await planAll(from: s.id, to: ids, at: max(at, Date().addingTimeInterval(Double(walk) * 60 - 60)), count: count)
-            out += trips.map { t in
-                let f = t.first
-                return DoorTrip(rides: [f.walking(walk)] + t.rides.dropFirst(), start: f.departure.addingTimeInterval(-Double(walk) * 60), end: t.end)
+        // both at once (the answers keep the order: the station first)
+        let jobs: [@Sendable () async -> [DoorTrip]] = picks.map { s in
+            { @Sendable in
+                let walk = max(2, Int((s.m * 1.33 / 1.2 / 60).rounded(.up)))
+                // you can be there in `walk` minutes: plan from then
+                let trips = await planAll(from: s.id, to: ids, at: max(at, Date().addingTimeInterval(Double(walk) * 60 - 60)), count: count)
+                return trips.map { t in
+                    let f = t.first
+                    return DoorTrip(rides: [f.walking(walk)] + t.rides.dropFirst(), start: f.departure.addingTimeInterval(-Double(walk) * 60), end: t.end)
+                }
             }
         }
-        return out
+        return await Progressive.all(jobs).flatMap { $0 }
     }
 
     /// The planner from one place to each of `ids`, all at once (nil: nothing).

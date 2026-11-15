@@ -30,6 +30,9 @@ final class GoStore: ObservableObject {
     @Published private(set) var movingUnknown = false        // going at train or bus speed, but which one isn't clear yet
     @Published private(set) var slow = false                 // the answer is taking long (a slow connection)
     private var why: String?                                 // why the last look found nothing
+    private var looks = 0                                    // the looks for the ways from here, numbered
+    private var shownLook = 0                                // the look whose answer is on screen: an older one never replaces it
+    private var firstOnly = false                            // what's on screen is a first answer, from before the rest was in
     private var seed: [DoorTrip] = []                        // the home screen's trips from here, to start with
     @Published private(set) var here: CLLocation?
     @Published private(set) var demo = false                 // pretend buses, to try it at home
@@ -101,6 +104,7 @@ final class GoStore: ObservableObject {
         loop?.cancel(); detect?.cancel()
         dest = d
         best = nil; others = []; error = nil; updated = nil; notes = []; arrived = false; seen = nil; overdue = false; onBoard = nil; movingUnknown = false; slow = false; hurry = nil
+        firstOnly = false
         told = [:]; toldEnd = nil; toldGo = []; missed = nil
         since = Date()
         watching = true
@@ -185,20 +189,34 @@ final class GoStore: ObservableObject {
         // The ways from here, within 8 seconds (a slow answer doesn't hold the screen: it tries again on the next look).
         let c = loc.coordinate
         // On its own connections (never behind the boards and the school alarm), and kept when it's slow: after 8 seconds
-        // it says so, and only after 25 it gives up for this look.
+        // it says so, and after 25 it stops for this look, keeping what arrived. The first answer that's in (the plan
+        // from your spot) shows at once on an empty screen; the whole answer replaces it.
+        looks += 1
+        let n = looks
         let slowNote = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 8_000_000_000)
             if !Task.isCancelled, let self, self.best == nil { self.slow = true }
         }
         let answer = await Transit.$urgent.withValue(true) {
-            await Net.within(25) { await Transit.tripsFrom(c, to: d, count: 6, keep: 8) }
+            await Net.withPartials(25, { publish in await Transit.tripsFrom(c, to: d, count: 6, keep: 8, publish: publish) },
+                                   partial: { [weak self] list in await self?.fill(list, look: n, loc: loc, d: d, now: now) })
         }
-        let found = answer ?? []
-        why = answer == nil ? "No answer within 25 seconds: a slow connection."
-            : found.isEmpty ? (Transit.trouble.recent().map { "\($0)." } ?? "Transitous found no way from here.") : nil
         slowNote.cancel()
         slow = false
-        guard watching, dest == d, onBoard == nil else { return }
+        guard !Task.isCancelled, watching, dest == d, onBoard == nil, n >= shownLook else { return }
+        let firstOnScreen = firstOnly && best != nil
+        // Out of time with a whole answer on screen: that stays (what arrived only fills an empty screen, or replaces a
+        // first answer).
+        let found: [DoorTrip] = answer.timedOut && best != nil && !firstOnScreen ? [] : (answer.value ?? [])
+        why = answer.timedOut && found.isEmpty ? "No answer within 25 seconds: a slow connection."
+            : found.isEmpty ? (Transit.trouble.recent().map { "\($0)." } ?? "Transitous found no way from here.") : nil
+        if !found.isEmpty {
+            // A first answer on screen: this replaces it as if the screen were empty, so a first answer never leads to a
+            // "Faster:" or "Too late".
+            if firstOnScreen { best = nil; others = [] }
+            firstOnly = false
+            shownLook = n
+        }
         await apply(found, loc: loc, d: d, now: now)
         // Then, with that on screen, the extras: earlier ways onto the same connection, which the planner leaves out (the
         // same arrival, but you'd leave earlier: the Sprinter that's in Breda before the Intercity and makes the same bus,
@@ -209,18 +227,29 @@ final class GoStore: ObservableObject {
         more += await late
         var ids = Set(found.map(\.id))
         more = more.filter { ids.insert($0.id).inserted }
-        guard !more.isEmpty, watching, dest == d, onBoard == nil else { return }
+        guard !more.isEmpty, !Task.isCancelled, watching, dest == d, onBoard == nil, n >= shownLook else { return }
         await apply(found + more, loc: loc, d: d, now: Date())
+    }
+
+    /// The first answer that's in, while the rest is still coming: shown only on an empty screen (so it never replaces
+    /// what you have, and never says "Faster:" or "Too late").
+    private func fill(_ list: [DoorTrip], look n: Int, loc: CLLocation, d: Place, now: Date) async {
+        guard !Task.isCancelled, watching, dest == d, onBoard == nil, best == nil, !list.isEmpty, n >= shownLook else { return }
+        slow = false
+        shownLook = n
+        firstOnly = true
+        await apply(list, loc: loc, d: d, now: now)
     }
 
     /// A planned trip: the latest ways that still get you there in time (within 6 seconds).
     private func latestInTime(from c: CLLocationCoordinate2D, to d: Place, now: Date) async -> [DoorTrip] {
         guard let dl = deadline else { return [] }
         return await Transit.$urgent.withValue(true) { await Net.within(8) {
-            var out: [DoorTrip] = []
-            for b in d.ids {
-                out += await Transit.plan(from: "\(c.latitude),\(c.longitude)", to: b, modes: nil, at: dl, count: 5, maxTransfers: 4, arriveBy: true)
+            // every destination stop at once (the answers keep their order)
+            let jobs: [@Sendable () async -> [DoorTrip]] = d.ids.map { b in
+                { @Sendable in await Transit.plan(from: "\(c.latitude),\(c.longitude)", to: b, modes: nil, at: dl, count: 5, maxTransfers: 4, arriveBy: true) }
             }
+            let out = await Progressive.all(jobs).flatMap { $0 }
             return out.filter { $0.first.departure >= now.addingTimeInterval(-60) }
         } } ?? []
     }

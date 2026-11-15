@@ -187,3 +187,34 @@ enum Progressive {
         }
     }
 }
+
+extension Net {
+    /// The final value if `work` finishes within `seconds`; else the last value it published (or nil) with timedOut, and the work is cancelled.
+    /// `partial` gets each value as it's published, while the work runs (nothing once it's stopped). When the caller is
+    /// cancelled, the work stops too, and the answer isn't marked as timed out.
+    static func withPartials<T: Sendable>(_ seconds: Double,
+        _ work: @escaping @Sendable (_ publish: @escaping @Sendable (T) async -> Void) async -> T,
+        partial: @escaping @Sendable (T) async -> Void) async -> (value: T?, timedOut: Bool) {
+        let latest = Latest<T>()
+        let publish: @Sendable (T) async -> Void = { value in
+            guard !Task.isCancelled else { return }       // stopped: what it still sends may be cut short
+            await latest.keep(value)
+            await partial(value)
+        }
+        let done: T? = await withTaskGroup(of: T?.self) { g in
+            g.addTask { await work(publish) }
+            g.addTask { try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000)); return nil }
+            let first = await g.next() ?? nil
+            g.cancelAll()
+            return first
+        }
+        if let done { return (done, false) }
+        return (await latest.value, !Task.isCancelled)
+    }
+}
+
+/// The last value a piece of work published.
+private actor Latest<T: Sendable> {
+    private(set) var value: T?
+    func keep(_ v: T) { value = v }
+}
