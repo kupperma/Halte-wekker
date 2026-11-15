@@ -65,7 +65,7 @@ targets:
   HaltewekkerTests:
     type: bundle.unit-test
     platform: iOS
-    sources: [Tests, App/RecompMath.swift, App/RecompModel.swift, App/RecompCheck.swift, App/OpenFoodFacts.swift, App/RecompStore.swift, App/Net.swift, App/Memo.swift, App/Snapshots.swift, App/Geo.swift, App/VehicleMatch.swift, App/FieldLog.swift, App/WorkoutModel.swift, App/WorkoutFormat.swift, App/WorkoutProgram.swift]
+    sources: [Tests, App/RecompMath.swift, App/RecompModel.swift, App/RecompCheck.swift, App/OpenFoodFacts.swift, App/RecompStore.swift, App/Net.swift, App/Memo.swift, App/Snapshots.swift, App/Geo.swift, App/VehicleMatch.swift, App/FieldLog.swift, App/WorkoutModel.swift, App/WorkoutFormat.swift, App/WorkoutProgram.swift, App/WorkoutRules.swift]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: nl.haltewekker.tests
