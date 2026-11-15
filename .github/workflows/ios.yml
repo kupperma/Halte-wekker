@@ -2,7 +2,7 @@ name: Build iPhone app
 
 on:
   push:
-    branches: [main]
+    branches: [main, "claude/**"]
     paths: ["ios/**", ".github/workflows/ios.yml"]
   workflow_dispatch:
 
@@ -25,6 +25,25 @@ jobs:
       - name: Generate Xcode project
         working-directory: ios
         run: xcodegen generate
+      - name: Unit tests
+        working-directory: ios
+        run: |
+          set -o pipefail
+          UDID=$(xcrun simctl list devices available -j | python3 -c "
+          import json, sys
+          data = json.load(sys.stdin)['devices']
+          for runtime in sorted(data, reverse=True):
+              if 'iOS' not in runtime:
+                  continue
+              for d in data[runtime]:
+                  if d['name'].startswith('iPhone') and d.get('isAvailable', True):
+                      print(d['udid']); sys.exit(0)
+          sys.exit(1)
+          ")
+          echo "Simulator: $UDID"
+          xcodebuild test -project Haltewekker.xcodeproj -scheme HaltewekkerTests \
+            -destination "id=$UDID" -derivedDataPath build-test CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee test.log | { grep -E "error:|Test Case .* failed|\*\* TEST (SUCCEEDED|FAILED)|Test Case .* passed" || true; }
       - name: Build (unsigned)
         working-directory: ios
         run: |
@@ -42,7 +61,7 @@ jobs:
           cp -R build/Build/Products/Release-iphoneos/Haltewekker.app Payload/
           zip -qry Haltewekker.ipa Payload
       - name: Publish build result to the ios-builds branch
-        if: always()
+        if: always() && github.ref == 'refs/heads/main'
         working-directory: ios
         run: |
           mkdir -p /tmp/out
@@ -56,7 +75,7 @@ jobs:
           git add -A && git commit -qm "Build for ${GITHUB_SHA}"
           git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" ios-builds
       - name: Publish release
-        if: success()
+        if: success() && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         working-directory: ios

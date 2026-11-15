@@ -61,3 +61,22 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: nl.haltewekker.app.widget
+  HaltewekkerTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [Tests, App/RecompMath.swift]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: nl.haltewekker.tests
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  Haltewekker:
+    build:
+      targets:
+        Haltewekker: all
+  HaltewekkerTests:
+    build:
+      targets:
+        HaltewekkerTests: [test]
+    test:
+      targets: [HaltewekkerTests]
