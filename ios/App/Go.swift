@@ -570,7 +570,7 @@ final class GoStore: ObservableObject {
         best = ob.1.first; others = Array(ob.1.dropFirst())
         here = f; updated = Date(); error = nil
         // (The matcher: a look before your fixes span 20 s isn't sure either way and doesn't count, for a minute at
-        // most; the plan from the one it found stays on screen meanwhile.)
+        // most; the plan from the one it found stays on screen meanwhile, and after that minute it's as if not seen.)
         let confirming = Date()
         var looks = 0
         while looks < 4 {
@@ -596,9 +596,8 @@ final class GoStore: ObservableObject {
                 best = o2.1.first; others = Array(o2.1.dropFirst()); updated = Date()
             }
         }
-        // Not sure for a whole minute: its plan stays, and the boarding check carries on from it.
-        guard looks > 0 else { return }
-        // not seen with it again: it plans from where you are right away (and still notices when you're on one)
+        // not seen with it again (or not sure for a whole minute): it plans from where you are right away (and still
+        // notices when you're on one)
         onBoard = nil; best = nil; others = []
         await refresh()
     }

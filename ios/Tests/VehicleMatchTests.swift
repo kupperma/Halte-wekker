@@ -351,6 +351,51 @@ final class VehicleMatchTests: XCTestCase {
         }
     }
 
+    /// R-rel-22: standing past its stop point (a long stop: your train's next piece isn't in the map yet) is still at
+    /// its end; only moving on past it counts against it.
+    func test_standingPastItsEnd() {
+        let v = VehicleTrack(tripId: "d", line: "IC", isTrain: true, realTime: true,
+                             pieces: [TimedPiece(departure: t0 - 150, arrival: t0, path: [Fx.east(0), Fx.east(750), Fx.east(1500)])])
+        // in at 10 m/s, then standing 40 m past its stop point from t0 + 4
+        let moving = Fx.fixes(from: 1400, speed: 10, count: 8, every: 2, accuracy: 10, start: t0 - 10)     // to 1540 at t0 + 4
+        let standing = (1...8).map { k in Fix(t: t0 + 4 + 2 * Double(k), p: Fx.east(1540), accuracy: 10, speed: 0, course: -1) }
+        let j = VehicleMatch.judgeAll(moving + standing, [v])
+        XCTAssertNotEqual(Fx.why(j, "d"), .offItsPath, "\(j)")
+        XCTAssertNotNil(Fx.ok(j, "d"), "\(j)")
+        let one = VehicleMatch.judgeOne(standing.last!, v, tolerance: 600)
+        XCTAssertNotEqual(one.result, .failure(.offItsPath))
+        // still moving at the newest fix, 40 m past: off its path
+        XCTAssertEqual(Fx.why(VehicleMatch.judgeAll(moving, [v]), "d"), .offItsPath)
+        XCTAssertEqual(VehicleMatch.judgeOne(moving.last!, v, tolerance: 600).result, .failure(.offItsPath))
+    }
+
+    /// The box pre-filter changes no result: the same verdicts as projecting every fix, on the scenarios' fixtures and
+    /// with a vehicle far away (which it does leave out).
+    func test_prefilterLossless() {
+        let far = Fx.track("far", line: "305", train: false, path: Fx.road(north: 5000), at: 2000, speed: 30)
+        let edge = Fx.track("edge", line: "305", train: false, path: Fx.road(north: 280), at: 2000, speed: 30)
+        var cases: [([Fix], [VehicleTrack])] = [
+            (Fx.fixes(from: 2000, speed: 30, count: 15),
+             [Fx.track("T", path: Fx.railway, at: 2000, speed: 30), Fx.track("B", line: "306", train: false, path: Fx.road(north: 200), at: 1100, speed: 30), far, edge]),
+            (passing(24), [far]),
+            (Fx.fixes(from: 1000, speed: 10, count: 11, every: 3, accuracy: 15),
+             (0..<8).map { Fx.track("else\($0)", line: "305", train: false, path: Fx.road(north: 400 + 100 * Double($0)), at: 1000, speed: 10) }),
+            (Fx.fixes(from: 2000, speed: 30, count: 15, accuracy: 120), [far, edge, Fx.track("T", path: Fx.railway, at: 2100, speed: 30)]),
+        ]
+        cases.append((passing(6), [VehicleTrack(tripId: "e", line: "306", isTrain: false, realTime: true,
+                                                pieces: [TimedPiece(departure: t0 - 100, arrival: t0, path: [Fx.east(500), Fx.east(1500)])]), far]))
+        var filtered = 0
+        for (fixes, tracks) in cases {
+            let quick = VehicleMatch.judgeAll(fixes, tracks), full = VehicleMatch.judgeAll(fixes, tracks, prefilter: false)
+            XCTAssertEqual(quick.map(\.result), full.map(\.result))
+            XCTAssertEqual(quick.map(\.id), full.map(\.id))
+            filtered += zip(quick, full).filter { $0.0.evidence == nil && $0.1.evidence != nil }.count
+        }
+        XCTAssertGreaterThanOrEqual(filtered, 4)           // the far ones were left out without projecting
+        XCTAssertEqual(Fx.why(VehicleMatch.judgeAll(passing(24), [far]), "far"), .offItsPath)
+        XCTAssertNotNil(VehicleMatch.judgeAll(Fx.fixes(from: 2000, speed: 30, count: 15), [edge]).first?.evidence)   // inside the margin: judged
+    }
+
     // MARK: - Path ends (R-rel-17b)
 
     /// Your fixes `n` s after you pass 1500 m at t0 (10 m/s, every 2 s, the last 30 s).
@@ -399,6 +444,7 @@ final class VehicleMatchTests: XCTestCase {
                              pieces: [TimedPiece(departure: t0 - 100, arrival: t0, path: [Fx.east(500), Fx.east(1000), Fx.east(1500)])])
         XCTAssertNotNil(Fx.ok(VehicleMatch.judgeAll(passing(0), [v]), "e"))
         XCTAssertNotNil(Fx.ok(VehicleMatch.judgeAll(passing(1.5), [v]), "e"))                      // 15 m past: jitter
+        XCTAssertEqual(Fx.why(VehicleMatch.judgeAll(passing(3), [v]), "e"), .offItsPath)                  // 30 m past
         XCTAssertEqual(Fx.why(VehicleMatch.judgeAll(passing(6), [v]), "e"), .offItsPath)
         XCTAssertEqual(Fx.why(VehicleMatch.judgeAll(passing(12), [v]), "e"), .offItsPath)
         let past = Fix(t: t0 + 6, p: Fx.east(1560), accuracy: 10, speed: 10, course: 90)

@@ -137,6 +137,8 @@ enum VehicleMatch {
     static let slack: TimeInterval = 30         // s before its first piece and after its last it still counts as there
     static let passSlack = 20.0                 // m: where its path passes you twice, a pass this much (or the fix's
                                                 //    accuracy) further than the nearest still counts
+    static let prefilterMargin = 300.0          // m around a path where a fix can still be on it (the path test allows
+                                                //    250 m at most)
     static let jitter = 2.0                     // GPS jitter at a stop moves you up to twice the fixes' accuracy: only
                                                 //    going back further is the wrong way, and only going further is
                                                 //    moving (for "standing")
@@ -179,8 +181,10 @@ enum VehicleMatch {
             let away = beyondAnEnd(p.projection.crossTrack, f.accuracy)
             // before its path starts (a trip that starts at a stop you're coming to): not on its path yet, left out
             if p.beforeStart && away { continue }
-            // beyond its end (a trip that ended at a stop you passed): counts against it, when it's your newest fix
-            newestBeyond = p.beyondEnd && away
+            // beyond its end (a trip that ended at a stop you passed): counts against it, when it's your newest fix and
+            // you're moving (standing past its stop, in a long stop whose next piece the map doesn't have yet, it's at
+            // its end)
+            newestBeyond = p.beyondEnd && away && f.speed.isFinite && f.speed >= 3
             previous = p.projection.along
             guard let at else { continue }
             rows.append((f.t, p.projection.along, p.projection.crossTrack, at, f.accuracy, p.connector))
@@ -245,9 +249,16 @@ enum VehicleMatch {
     }
 
     /// Every vehicle judged on the same fixes; `noTimes` when no fix has a time position on it, `offItsPath` when your
-    /// newest fix is beyond its path's end, `tooFewFixes` when fewer than 2 fixes are left.
-    static func judgeAll(_ fixes: [Fix], _ vs: [VehicleTrack], strictTimes: Bool = true) -> [Judgement] {
-        vs.map { v -> Judgement in
+    /// newest fix is beyond its path's end (while you move), `tooFewFixes` when fewer than 2 fixes are left.
+    /// `prefilter`: a vehicle whose path's box, widened by `prefilterMargin`, has none of the fixes of the last `window`
+    /// seconds is off its path at once, without projecting them (none could pass the path test); `false` projects
+    /// every fix, for the tests that the outcome is the same.
+    static func judgeAll(_ fixes: [Fix], _ vs: [VehicleTrack], strictTimes: Bool = true, prefilter: Bool = true) -> [Judgement] {
+        let recent = prefilter ? lastWindow(fixes) : []
+        return vs.map { v -> Judgement in
+            if !recent.isEmpty, !nearPath(recent, v) {
+                return Judgement(id: v.tripId, line: v.line, isTrain: v.isTrain, realTime: v.realTime, evidence: nil, result: .failure(.offItsPath))
+            }
             switch gather(fixes, v) {
             case .success(let e):
                 let r = judge(e, isTrain: v.isTrain, realTime: v.realTime, strictTimes: strictTimes)
@@ -259,8 +270,8 @@ enum VehicleMatch {
     }
 
     /// With one fix only: on its path, going its way by the GPS course, a possible bus speed, and near its times, all at
-    /// the fix's own time. A fix before its path's start is too little to tell (`tooFewFixes`); one beyond its end is off
-    /// its path.
+    /// the fix's own time. A fix before its path's start is too little to tell (`tooFewFixes`); one beyond its end, while
+    /// you're moving, is off its path.
     static func judgeOne(_ f: Fix, _ v: VehicleTrack, tolerance: Double) -> Judgement {
         func verdict(_ e: Evidence?, _ r: Result<Double, Reject>) -> Judgement {
             Judgement(id: v.tripId, line: v.line, isTrain: v.isTrain, realTime: v.realTime, evidence: e, result: r)
@@ -277,8 +288,8 @@ enum VehicleMatch {
                          shaped: v.pieces.contains { $0.path.count > 2 } && !pass.connector, progress: 0, offset: p.along - at,
                          drift: 0, yourSpeed: max(0, speed), itsSpeed: its, steady: false)
         guard [e.crossTrack, e.offset, e.itsSpeed].allSatisfy(\.isFinite) else { return verdict(nil, .failure(.noTimes)) }
-        // beyond its end (a trip that ended at a stop behind you), or off its path
-        if pass.beyondEnd && away { return verdict(e, .failure(.offItsPath)) }
+        // beyond its end while you're moving (a trip that ended at a stop behind you), or off its path
+        if pass.beyondEnd && away && speed >= 3 { return verdict(e, .failure(.offItsPath)) }
         guard e.crossTrack <= max(e.shaped ? offPath : offPathUnshaped, accuracyFactor * f.accuracy) else { return verdict(e, .failure(.offItsPath)) }
         // going its way, by the GPS's course while you're moving (a straight line it adds between pieces that don't
         // meet says nothing about which way its road runs)
@@ -349,6 +360,33 @@ enum VehicleMatch {
     /// `passSlack` or the fix's accuracy.
     private static func beyondAnEnd(_ crossTrack: Double, _ accuracy: Double) -> Bool {
         crossTrack > max(passSlack, accuracy)
+    }
+
+    /// The usable fixes of the last `window` seconds, counted back from the newest usable one.
+    private static func lastWindow(_ fixes: [Fix]) -> [Fix] {
+        let good = fixes.filter(usable)
+        guard let newest = good.map(\.t).max() else { return [] }
+        return good.filter { newest.timeIntervalSince($0.t) <= window }
+    }
+
+    /// Some of `fixes` lies in the box around `v`'s path points (its connectors run between them), widened by
+    /// `prefilterMargin`. True for a path without a real point: then the full judgement decides.
+    private static func nearPath(_ fixes: [Fix], _ v: VehicleTrack) -> Bool {
+        var south = Double.infinity, north = -Double.infinity, west = Double.infinity, east = -Double.infinity
+        for piece in v.pieces {
+            for p in piece.path where p.lat.isFinite && p.lon.isFinite {
+                south = min(south, p.lat); north = max(north, p.lat); west = min(west, p.lon); east = max(east, p.lon)
+            }
+        }
+        guard south <= north, west <= east else { return true }
+        // degrees for the margin: east-west at the box's latitude furthest from the equator (the widest in degrees)
+        let dLat = prefilterMargin / 110_540
+        let c = cos(max(abs(south), abs(north)) * .pi / 180)
+        guard c > 0.01 else { return true }
+        let dLon = prefilterMargin / (111_320 * c)
+        return fixes.contains {
+            $0.p.lat >= south - dLat && $0.p.lat <= north + dLat && $0.p.lon >= west - dLon && $0.p.lon <= east + dLon
+        }
     }
 
     /// A fix the evidence uses: a known accuracy of at most `maxAccuracy`, at a real place.
@@ -509,10 +547,8 @@ extension VehicleMatch {
     /// The usable fixes of the last `window` seconds (counted back from the newest usable one): how many, and the
     /// time they span.
     static func spread(_ fixes: [Fix]) -> (fixes: Int, span: TimeInterval) {
-        let good = fixes.filter(usable)
-        guard let newest = good.map(\.t).max() else { return (0, 0) }
-        let recent = good.filter { newest.timeIntervalSince($0.t) <= window }
-        guard let oldest = recent.map(\.t).min() else { return (0, 0) }
+        let recent = lastWindow(fixes)
+        guard let newest = recent.map(\.t).max(), let oldest = recent.map(\.t).min() else { return (0, 0) }
         return (recent.count, newest.timeIntervalSince(oldest))
     }
 
