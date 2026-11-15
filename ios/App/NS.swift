@@ -88,7 +88,7 @@ final class NSStore: ObservableObject {
         guard let url = URL(string: Self.relay + path) else { return (nil, 0) }
         var r = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData)
         r.setValue(Transit.userAgent, forHTTPHeaderField: "User-Agent")
-        guard let a = try? await Net.response(r, lane: .background) else { return (nil, -1) }
+        guard let a = try? await Net.response(r, lane: .background, label: String(path.prefix { $0 != "?" })) else { return (nil, -1) }
         let json = (a.contentType ?? "").contains("json")
         return (a.status == 200 && json ? try? JSONSerialization.jsonObject(with: a.data) : nil, a.status)
     }

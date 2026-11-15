@@ -212,3 +212,53 @@ struct FreezeSection: View {
         }
     }
 }
+
+/// In Settings: the switch back to the old way of picking buses and trains, and the log of requests and choices.
+struct FieldLogSection: View {
+    @AppStorage(MatchSettings.key) private var classic = false
+    var body: some View {
+        Section {
+            Toggle("Classic vehicle matching", isOn: $classic)
+            NavigationLink("Connection and matching log") { FieldLogScreen() }
+        } header: { Text("Vehicle matching") } footer: {
+            Text("Picks buses and trains the way the app did before version 0.18. Turn it on only if the new way keeps choosing the wrong one, and send the log.")
+        }
+    }
+}
+
+struct FieldLogScreen: View {
+    @State private var list = FieldLog.shared.entries
+    @State private var copied = false
+    private static let clock: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "HH:mm:ss"; return f
+    }()
+    var body: some View {
+        List {
+            Section {
+                if list.isEmpty {
+                    Text("Nothing logged yet.").font(HWFont.body(13)).foregroundStyle(Paper.muted)
+                }
+                ForEach(Array(list.enumerated()), id: \.offset) { _, e in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(Self.clock.string(from: e.at)) · \(e.kind.rawValue)").font(HWFont.body(12, bold: true))
+                        Text(e.text).font(.system(size: 11, design: .monospaced)).foregroundStyle(Paper.muted)
+                    }
+                }
+            }
+            Section {
+                Button(copied ? "Copied: paste it in the chat" : "Copy the log") {
+                    FieldLog.shared.flush()
+                    UIPasteboard.general.string = FieldLog.shared.export()
+                    copied = true
+                }
+                .foregroundStyle(Paper.navy)
+                Button("Clear") { FieldLog.shared.clear(); FieldLog.shared.flush(); list = [] }.foregroundStyle(Paper.navy)
+            } footer: {
+                Text("The last 400 requests and vehicle choices, kept on this phone only. No places or coordinates.")
+            }
+        }
+        .navigationTitle("Connection and matching log")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear { list = FieldLog.shared.entries }
+    }
+}

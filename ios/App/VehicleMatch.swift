@@ -177,9 +177,15 @@ enum VehicleMatch {
         let span = last.t.timeIntervalSince(first.t), offset = last.along - last.at
         // The ends you went from and to: the median of the first 3 and of the last 3 fixes (from their middle fixes'
         // times) once there are 6, else the first and the last fix.
-        let ends = rows.count >= 6
-            ? (from: Array(rows.prefix(3)), to: Array(rows.suffix(3)), time: rows[rows.count - 2].t.timeIntervalSince(rows[1].t))
-            : (from: [first], to: [last], time: span)
+        var ends: (from: [(t: Date, along: Double, cross: Double, at: Double, accuracy: Double, connector: Bool)],
+                   to: [(t: Date, along: Double, cross: Double, at: Double, accuracy: Double, connector: Bool)],
+                   time: TimeInterval) = ([first], [last], span)
+        if rows.count >= 6 {
+            let middle = rows[rows.count - 2].t.timeIntervalSince(rows[1].t)
+            // fixes bunched in the middle of the window give a short time between the ends: then the end fixes and the
+            // whole span are the better measure
+            if middle > 0, middle >= span / 2 { ends = (Array(rows.prefix(3)), Array(rows.suffix(3)), middle) }
+        }
         let progress = median(ends.to.map { $0.along }) - median(ends.from.map { $0.along })
         let drift = median(ends.to.map { $0.along - $0.at }) - median(ends.from.map { $0.along - $0.at })
         let per: (Double, TimeInterval) -> Double = { x, t in t > 0 ? x / t : 0 }

@@ -248,6 +248,29 @@ final class VehicleMatchTests: XCTestCase {
         XCTAssertNil(Fx.why(VehicleMatch.judgeAll(you, [rail]), "T"))
     }
 
+    /// Fixes bunched in the middle of the window (t = 0, 12, 13, 14, 15, 27 s) leave only 3 s between the middle fixes
+    /// of the two ends: the speeds and the drift come from the end fixes and the whole span, so the right vehicle,
+    /// moving with its times, isn't called drifting.
+    func test_irregularSamplingFallsBack() {
+        var random = SplitMix(seed: 7)
+        let times: [Double] = [0, 12, 13, 14, 15, 27]
+        let you = times.map { dt -> Fix in
+            let dx = random.next() * 30 - 15, dy = random.next() * 30 - 15
+            return Fix(t: t0 + dt, p: Fx.east(2000 + 15 * dt + dx, north: dy), accuracy: 20, speed: 15, course: 90)
+        }
+        let bus = Fx.track("V", line: "306", train: false, path: Fx.railway, at: 2000, speed: 15)
+        let j = VehicleMatch.judgeAll(you, [bus])
+        XCTAssertNil(Fx.why(j, "V"), "\(j)")
+        if let e = j.first?.evidence { XCTAssertEqual(e.yourSpeed, 15, accuracy: 3, "\(e)") }
+    }
+
+    func test_newMatcherIsDefault() {
+        let d = UserDefaults(suiteName: UUID().uuidString)!
+        XCTAssertFalse(MatchSettings.classic(d))
+        d.set(true, forKey: MatchSettings.key)
+        XCTAssertTrue(MatchSettings.classic(d))
+    }
+
     /// R-rel-13: across a 2 km gap between pieces that don't meet, its times run along the connector: the bus that
     /// crosses it with you passes; one whose times cross it at half your speed doesn't.
     func test_acrossAGap() {

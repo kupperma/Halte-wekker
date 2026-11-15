@@ -78,9 +78,11 @@ enum Net {
 
     /// One request within its lane's budget. Every HTTP status comes back as an answer (a non-HTTP response counts as
     /// 200); a transport failure that isn't retried throws its `URLError`; the total running out throws `.timedOut`;
-    /// a cancelled caller gets `CancellationError` at once.
+    /// a cancelled caller gets `CancellationError` at once. With a `label` (the path, no query), the call is written to
+    /// the field log once, whichever way it ends.
     static func response(_ request: URLRequest, lane: Lane, budget: Budget? = nil,
-                         gate: TimeInterval = gateWait, send: Send? = nil) async throws -> NetAnswer {
+                         gate: TimeInterval = gateWait, send: Send? = nil,
+                         label: String? = nil) async throws -> NetAnswer {
         let budget = budget ?? lane.budget
         let send: Send = send ?? { req in try await session(for: lane).data(for: req) }
         if lane == .urgent {
@@ -94,8 +96,14 @@ enum Net {
             }
         }
         defer { if lane == .urgent { flight.end() } }
+        let began = Date()
+        func note(status: Int?, error: URLError.Code?, bytes: Int, attempts: Int) {
+            guard let label else { return }
+            FieldLog.shared.add(.net, FieldFormat.net(label, lane: lane, status: status, error: error, bytes: bytes,
+                                                      seconds: Date().timeIntervalSince(began), attempts: attempts))
+        }
         do {
-            return try await withThrowingTaskGroup(of: NetAnswer.self) { g -> NetAnswer in
+            let answer = try await withThrowingTaskGroup(of: NetAnswer.self) { g -> NetAnswer in
                 g.addTask { try await attempts(request, budget: budget, send: send) }
                 g.addTask {
                     try await Task.sleep(nanoseconds: UInt64(budget.total * 1_000_000_000))
@@ -105,8 +113,14 @@ enum Net {
                 guard let first = try await g.next() else { throw URLError(.unknown) }
                 return first
             }
+            note(status: answer.status, error: nil, bytes: answer.data.count, attempts: answer.attempts)
+            return answer
         } catch {
-            if Task.isCancelled { throw CancellationError() }
+            if Task.isCancelled {
+                note(status: nil, error: .cancelled, bytes: 0, attempts: 1)
+                throw CancellationError()
+            }
+            note(status: nil, error: (error as? URLError)?.code ?? .unknown, bytes: 0, attempts: 1)
             throw error
         }
     }

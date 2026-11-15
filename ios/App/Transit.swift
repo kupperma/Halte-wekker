@@ -184,7 +184,7 @@ enum Transit {
         let isUrgent = urgent
         let answer: NetAnswer
         do {
-            answer = try await Net.response(req, lane: isUrgent ? .urgent : .background)
+            answer = try await Net.response(req, lane: isUrgent ? .urgent : .background, label: path)
         } catch let e as URLError {
             if isUrgent, e.code != .cancelled { trouble.note(e.code == .timedOut ? "Transitous didn’t answer in time" : e.localizedDescription) }
             throw e

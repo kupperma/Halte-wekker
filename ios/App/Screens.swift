@@ -234,6 +234,7 @@ struct HomeView: View {
             }
         }
         .onChange(of: scene) { _, s in
+            if s == .background { FieldLog.shared.flush() }
             if s == .active {
                 trip.appBecameActive()
                 autoGo()
@@ -2141,6 +2142,7 @@ struct SettingsView: View {
                     }
                 })
                 FreezeSection()
+                FieldLogSection()
                 Section {
                     Toggle(isOn: $trip.autoStart) { label("Start trips by itself", "Notices when you leave your stop or station on a bus or train, and starts the alarm. Needs location set to Always.") }
                     if trip.autoStart && !trip.always {
