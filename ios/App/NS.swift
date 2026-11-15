@@ -119,7 +119,8 @@ final class NSStore: ObservableObject {
                         actualTrack: Transit.text(x["actualTrack"]).isEmpty ? Transit.text(x["plannedTrack"]) : Transit.text(x["actualTrack"]),
                         cancelled: (x["cancelled"] as? Bool) ?? false, actual: Self.time(x["actualDateTime"]))
         }
-        boards[code] = (Date(), list); available = true
+        boards[code] = (Date(), list)
+        if Date() >= offUntil { available = true }
         return list
     }
 
@@ -147,7 +148,7 @@ final class NSStore: ObservableObject {
                 if !n.isEmpty, let lv = ["LOW": 1, "MEDIUM": 2, "HIGH": 3][((l["crowdForecast"] as? String) ?? "").uppercased()] { crowd[n] = lv }
             }
         }
-        available = true
+        if Date() >= offUntil { available = true }
     }
 
     /// Carriages, seats and the layout along the platform (kept 15 min).
@@ -227,6 +228,23 @@ final class NSStore: ObservableObject {
         let codes = Array(Set(rail.compactMap { Self.code($0.from) }))
         let boardJobs: [@Sendable () async -> Void] = codes.map { c in { @Sendable in _ = await self.board(c) } }
         _ = await Progressive.all(boardJobs)
+        var got: [String: TrainSize?] = [:]
+        // Platform and cancellations first: they're in once the boards are. Crowding and size follow.
+        func fill() {
+            for r in rail {
+                let f = r.trip.first, code = Self.code(r.from)!
+                var i = info[f.id] ?? RailInfo(track: f.platform, plannedTrack: f.plannedPlatform ?? f.platform, cancelled: f.cancelled)
+                if let m = match(code, num: f.num, planned: f.scheduledDeparture) {
+                    if !m.plannedTrack.isEmpty { i.plannedTrack = m.plannedTrack }
+                    if !m.actualTrack.isEmpty { i.track = m.actualTrack }
+                    if m.cancelled { i.cancelled = true }
+                }
+                i.crowd = r.trip.rides.filter(\.isTrain).map { crowd[$0.num] ?? 0 }.max() ?? 0
+                if let s = got[f.id] { i.size = s }
+                info[f.id] = i
+            }
+        }
+        fill()
         var groups: [String: Date] = [:]
         for r in rail {
             guard let a = Self.code(r.from), let b = Self.code(r.to) else { continue }
@@ -245,23 +263,19 @@ final class NSStore: ObservableObject {
             let f = r.trip.first
             return !f.num.isEmpty && f.scheduledDeparture > Date().addingTimeInterval(-600) && f.scheduledDeparture.timeIntervalSinceNow < 6 * 3600
         }
-        let sizeJobs: [@Sendable () async -> (String, TrainSize?)] = sized.map { r in
-            let f = r.trip.first, code = Self.code(r.from)!
-            return { @Sendable in (f.id, await self.trainSize(num: f.num, code: code)) }
+        // One request per ride, however many rows share it.
+        var unique: [String: (num: String, code: String)] = [:]
+        for r in sized { let c = Self.code(r.from)!; unique["\(r.trip.first.num)@\(c)"] = (r.trip.first.num, c) }
+        let keys = Array(unique.keys)
+        let sizeJobs: [@Sendable () async -> (String, TrainSize?)] = keys.map { k in
+            let u = unique[k]!
+            return { @Sendable in (k, await self.trainSize(num: u.num, code: u.code)) }
         }
-        var got: [String: TrainSize?] = [:]
-        for (id, s) in await Progressive.all(sizeJobs) { got[id] = s }
-        for r in rail {
-            let f = r.trip.first, code = Self.code(r.from)!
-            var i = info[f.id] ?? RailInfo(track: f.platform, plannedTrack: f.plannedPlatform ?? f.platform, cancelled: f.cancelled)
-            if let m = match(code, num: f.num, planned: f.scheduledDeparture) {
-                if !m.plannedTrack.isEmpty { i.plannedTrack = m.plannedTrack }
-                if !m.actualTrack.isEmpty { i.track = m.actualTrack }
-                if m.cancelled { i.cancelled = true }
-            }
-            i.crowd = r.trip.rides.filter(\.isTrain).map { crowd[$0.num] ?? 0 }.max() ?? 0
-            if let s = got[f.id] { i.size = s }
-            info[f.id] = i
+        var byKey: [String: TrainSize?] = [:]
+        for (k, s) in await Progressive.all(sizeJobs) { byKey[k] = s }
+        for r in sized {
+            if let v = byKey["\(r.trip.first.num)@\(Self.code(r.from)!)"] { got[r.trip.first.id] = .some(v) }
         }
+        fill()
     }
 }

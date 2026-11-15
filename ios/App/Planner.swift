@@ -56,7 +56,9 @@ final class Planner: ObservableObject {
     @Published private(set) var error: String?
     @Published private(set) var updated: Date?
     @Published private(set) var busy = false
-    @Published var pick = 0 { didSet { watchChosen() } }
+    @Published var pick = 0 { didSet { if !holdWatch { watchChosen() } } }
+    /// While a refresh waits for NS: the watch is set up after it, so it starts from NS's platform.
+    private var holdWatch = false
 
     // MARK: be there by a time
 
@@ -235,13 +237,18 @@ final class Planner: ObservableObject {
         for o in opts { Ratings.shared.learn(o.from, o.to, [o.train]) }
         options = opts
         inexact = exact.isEmpty
+        holdWatch = true
         if pick >= opts.count { pick = 0 }
+        holdWatch = false
         error = nil
         updated = Date()
-        watchChosen()
-        // The platform, crowding and size come in after the options are on screen.
+        // The platform, crowding and size come in after the options are on screen; the watch starts from NS's answer.
         let rows = opts.map { ($0.train, $0.from, $0.to) }
-        Task { await NSStore.shared.enrich(rows) }
+        Task {
+            await NSStore.shared.enrich(rows)
+            guard self.trip == t else { return }
+            self.watchChosen()
+        }
     }
 
     /// The latest bus that still makes the train (2 min spare), and the first one after it.

@@ -78,7 +78,7 @@ final class WatchStore: ObservableObject {
         let dest = r.headsign.isEmpty ? to.short : r.headsign
         watches.append(TrainWatch(key: k, code: c, num: r.num, target: r.scheduledDeparture,
                                   label: "\(Fmt.hhmm(r.scheduledDeparture)) \(r.name.isEmpty ? "train" : r.name) to \(dest)", from: from.short,
-                                  track: info?.track ?? r.platform ?? "", cancelled: info?.cancelled ?? r.cancelled, auto: auto))
+                                  track: info?.track ?? "", cancelled: info?.cancelled ?? false, auto: auto))   // no NS answer yet: the first check fills it silently
         persist()
         if auto == false { UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in } }
         return true
