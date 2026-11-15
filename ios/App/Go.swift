@@ -191,7 +191,7 @@ final class GoStore: ObservableObject {
             if !Task.isCancelled, let self, self.best == nil { self.slow = true }
         }
         let answer = await Transit.$urgent.withValue(true) {
-            await Transit.within(25) { await Transit.tripsFrom(c, to: d, count: 6, keep: 8) }
+            await Net.within(25) { await Transit.tripsFrom(c, to: d, count: 6, keep: 8) }
         }
         let found = answer ?? []
         why = answer == nil ? "No answer within 25 seconds: a slow connection."
@@ -205,7 +205,7 @@ final class GoStore: ObservableObject {
         // the earlier 306 that leaves room to change), and for a planned trip the latest that still get you there in time.
         var more: [DoorTrip] = []
         async let late: [DoorTrip] = latestInTime(from: c, to: d, now: now)
-        if let top = best { more += await Transit.$urgent.withValue(true) { await Transit.within(8) { await self.earlierWays(onto: top) } } ?? [] }
+        if let top = best { more += await Transit.$urgent.withValue(true) { await Net.within(8) { await self.earlierWays(onto: top) } } ?? [] }
         more += await late
         var ids = Set(found.map(\.id))
         more = more.filter { ids.insert($0.id).inserted }
@@ -216,7 +216,7 @@ final class GoStore: ObservableObject {
     /// A planned trip: the latest ways that still get you there in time (within 6 seconds).
     private func latestInTime(from c: CLLocationCoordinate2D, to d: Place, now: Date) async -> [DoorTrip] {
         guard let dl = deadline else { return [] }
-        return await Transit.$urgent.withValue(true) { await Transit.within(8) {
+        return await Transit.$urgent.withValue(true) { await Net.within(8) {
             var out: [DoorTrip] = []
             for b in d.ids {
                 out += await Transit.plan(from: "\(c.latitude),\(c.longitude)", to: b, modes: nil, at: dl, count: 5, maxTransfers: 4, arriveBy: true)
@@ -455,7 +455,7 @@ final class GoStore: ObservableObject {
         defer { lookingOnBoard = false }
         let d = dest
         let moving = trip.movedRecently
-        guard var ob = await Transit.$urgent.withValue(true, operation: { await Transit.within(10, { await LiveStore.onBoardTrips(f, to: d, wasMoving: moving) }) }) ?? nil,
+        guard var ob = await Transit.$urgent.withValue(true, operation: { await Net.within(10, { await LiveStore.onBoardTrips(f, to: d, wasMoving: moving) }) }) ?? nil,
               watching, dest == d, trip.phase == .idle, !ob.1.isEmpty else { return }
         movingUnknown = false
         onBoard = ob.0.vehicle

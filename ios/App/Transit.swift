@@ -153,30 +153,10 @@ enum Transit {
         return iso.date(from: s) ?? isoFrac.date(from: s)
     }
 
-    /// Whatever `work` gives within `seconds`, or nil (and it's stopped): so a slow answer never holds a screen.
-    static func within<T: Sendable>(_ seconds: Double, _ work: @escaping @Sendable () async -> T) async -> T? {
-        await withTaskGroup(of: T?.self) { g in
-            g.addTask { await work() }
-            g.addTask { try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000)); return nil }
-            let first = await g.next() ?? nil
-            g.cancelAll()
-            return first
-        }
-    }
-
     /// Questions someone is waiting for on screen (Fastest trip, what you're on). They go on their own connections: a
     /// phone keeps only a few open to one server, and the boards, the school alarm planning the week and the rest would
     /// otherwise have them queue.
     @TaskLocal static var urgent = false
-    /// How many of those are on their way.
-    static let flight = Flight()
-    final class Flight: @unchecked Sendable {
-        private let lock = NSLock()
-        private var n = 0
-        func begin() { lock.lock(); n += 1; lock.unlock() }
-        func end() { lock.lock(); n = max(0, n - 1); lock.unlock() }
-        var busy: Bool { lock.lock(); defer { lock.unlock() }; return n > 0 }
-    }
 
     /// The last thing that went wrong with one of those, and when (so the screen can say why it found nothing).
     static let trouble = Trouble()
@@ -191,56 +171,32 @@ enum Transit {
             return l.text
         }
     }
-    private static let urgentSession: URLSession = {
-        let c = URLSessionConfiguration.default
-        c.httpMaximumConnectionsPerHost = 6
-        c.waitsForConnectivity = false
-        return URLSession(configuration: c)
-    }()
-
-    /// One question to Transitous. A slow connection or a busy server (a timeout, a dropped connection, "too many
-    /// requests", a server error) gets one more try a moment later: otherwise one bad moment on the train leaves a board
-    /// empty until the next refresh.
-    static func get(_ path: String, _ items: [URLQueryItem]) async throws -> Any {
+    /// One question to Transitous, within the lane's time limits (see `Net`). A slow connection or a busy server gets at
+    /// most one more try a moment later, and never after a timeout.
+    static func raw(_ path: String, _ items: [URLQueryItem]) async throws -> Data {
         var c = URLComponents(string: base + path)!
         c.queryItems = items
-        var last: Error = URLError(.unknown)
+        var req = URLRequest(url: c.url!)
+        req.setValue(userAgent, forHTTPHeaderField: "User-Agent")
         let isUrgent = urgent
-        let session = isUrgent ? urgentSession : URLSession.shared
-        // On a thin connection (2 bars inside a building) what you're waiting for goes first: the rest holds back while
-        // one of those is on its way (12 seconds at most).
-        if isUrgent {
-            flight.begin()
-        } else {
-            var waited = 0.0
-            while flight.busy && waited < 12 { try await Task.sleep(nanoseconds: 250_000_000); waited += 0.25 }
+        let answer: NetAnswer
+        do {
+            answer = try await Net.response(req, lane: isUrgent ? .urgent : .background)
+        } catch let e as URLError {
+            if isUrgent, e.code != .cancelled { trouble.note(e.code == .timedOut ? "Transitous didn’t answer in time" : e.localizedDescription) }
+            throw e
         }
-        defer { if isUrgent { flight.end() } }
-        for attempt in 0..<2 {
-            if attempt > 0 {
-                try await Task.sleep(nanoseconds: 600_000_000)
-            }
-            var req = URLRequest(url: c.url!, timeoutInterval: attempt == 0 ? 9 : 7)
-            req.setValue(userAgent, forHTTPHeaderField: "User-Agent")
-            do {
-                let (data, resp) = try await session.data(for: req)
-                let code = (resp as? HTTPURLResponse)?.statusCode ?? 200
-                if code == 429 || code >= 500 {
-                    last = URLError(.badServerResponse)
-                    if urgent { trouble.note(code == 429 ? "Transitous asked to slow down (HTTP 429)" : "Transitous had a problem (HTTP \(code))") }
-                    continue
-                }
-                if code >= 400, urgent { trouble.note("Transitous said no (HTTP \(code))") }
-                return try JSONSerialization.jsonObject(with: data)
-            } catch let e as URLError where [.timedOut, .networkConnectionLost, .cannotConnectToHost, .cannotFindHost,
-                                             .dnsLookupFailed, .notConnectedToInternet, .secureConnectionFailed].contains(e.code) {
-                last = e
-                if urgent { trouble.note(e.code == .timedOut ? "Transitous didn’t answer in time" : e.localizedDescription) }
-            } catch is CancellationError {
-                throw CancellationError()
-            }
+        let code = answer.status
+        if code == 429 || code >= 500 {
+            if isUrgent { trouble.note(code == 429 ? "Transitous asked to slow down (HTTP 429)" : "Transitous had a problem (HTTP \(code))") }
+            throw URLError(.badServerResponse)
         }
-        throw last
+        if code >= 400, isUrgent { trouble.note("Transitous said no (HTTP \(code))") }
+        return answer.data
+    }
+
+    static func get(_ path: String, _ items: [URLQueryItem]) async throws -> Any {
+        try JSONSerialization.jsonObject(with: try await raw(path, items))
     }
 
     static func text(_ a: Any?) -> String {

@@ -84,13 +84,13 @@ final class NSStore: ObservableObject {
 
     // MARK: talking to the relay
 
-    private func fetch(_ path: String, timeout: Double = 12) async -> (json: Any?, status: Int) {
+    private func fetch(_ path: String) async -> (json: Any?, status: Int) {
         guard let url = URL(string: Self.relay + path) else { return (nil, 0) }
-        var r = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: timeout)
+        var r = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData)
         r.setValue(Transit.userAgent, forHTTPHeaderField: "User-Agent")
-        guard let res = try? await URLSession.shared.data(for: r), let http = res.1 as? HTTPURLResponse else { return (nil, -1) }
-        let json = (http.value(forHTTPHeaderField: "Content-Type") ?? "").contains("json")
-        return (http.statusCode == 200 && json ? try? JSONSerialization.jsonObject(with: res.0) : nil, http.statusCode)
+        guard let a = try? await Net.response(r, lane: .background) else { return (nil, -1) }
+        let json = (a.contentType ?? "").contains("json")
+        return (a.status == 200 && json ? try? JSONSerialization.jsonObject(with: a.data) : nil, a.status)
     }
 
     private static let nsTime: DateFormatter = {
@@ -136,7 +136,7 @@ final class NSStore: ObservableObject {
         guard Date() >= offUntil else { return }
         tripsAsked[k] = Date()
         let when = ISO8601DateFormatter().string(from: max(at, Date()).addingTimeInterval(-300))
-        let (j, st) = await fetch("/ns/trips?from=\(from)&to=\(to)&dateTime=\(when.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? when)", timeout: 15)
+        let (j, st) = await fetch("/ns/trips?from=\(from)&to=\(to)&dateTime=\(when.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? when)")
         guard let d = j as? [String: Any] else {
             if st != 400 && st != -1 { offUntil = Date().addingTimeInterval(600); available = false }
             return
