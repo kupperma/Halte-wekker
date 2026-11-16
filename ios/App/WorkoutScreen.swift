@@ -46,7 +46,11 @@ struct WorkoutsSheet: View {
         }
         .preferredColorScheme(.light)                   // ink on paper, the title too
         .sensoryFeedback(.impact, trigger: taps)
-        .onAppear { store.refresh() }
+        .onAppear {
+            store.refresh()
+            WorkoutNav.shared.screenAppeared()
+        }
+        .onDisappear { WorkoutNav.shared.screenDisappeared() }
     }
 
     /// Before the first unlock after a restart the files can't be read: nothing starts until they can.
@@ -529,5 +533,7 @@ struct WorkoutSessionView: View {
         .onChange(of: store.active == nil, initial: true) { _, gone in
             if gone { WorkoutNav.shared.session = false }
         }
+        .onAppear { WorkoutNav.shared.screenAppeared() }
+        .onDisappear { WorkoutNav.shared.screenDisappeared() }
     }
 }

@@ -594,8 +594,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         if id.hasPrefix(RecompKcalNotice.idPrefix) { done([.banner, .list, .sound]); return }
         let platform = id.hasPrefix("platform-")
         Task { @MainActor in
-            // the Workouts sheet or a running workout hides the app's own banner and alerts: a system banner, over them
-            if WorkoutNav.shared.sheet || WorkoutNav.shared.session { done([.banner, .list, .sound]); return }
+            // the Workouts sheet or a running workout on screen hides the app's own banner and alerts: a system banner, over them
+            if WorkoutNav.shared.showing { done([.banner, .list, .sound]); return }
             if platform { done([]); return }
             // in the app as a banner, with its sound; kept in the app's list instead of the notification centre
             Notices.shared.show(title: title, body: body, kind: kind)

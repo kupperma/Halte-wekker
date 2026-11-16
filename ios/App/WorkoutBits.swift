@@ -21,6 +21,22 @@ final class WorkoutNav: ObservableObject {
     @Published var session = false
     /// A start or Resume from the sheet: the cover comes when the sheet has gone.
     private var sessionAfterSheet = false
+    /// The Workouts screens (the sheet, the running workout) on screen now, counted, so a handoff from one to the
+    /// other never reads as none while one is still up.
+    private var onScreen = 0
+
+    /// A Workouts screen is on screen, over the app's own banners and alerts: notices then come as system banners.
+    var showing: Bool { onScreen > 0 }
+
+    /// The sheet's and the running workout's onAppear.
+    func screenAppeared() {
+        onScreen += 1
+    }
+
+    /// Their onDisappear.
+    func screenDisappeared() {
+        onScreen = max(0, onScreen - 1)
+    }
 
     func openWorkouts() {
         sheet = true
