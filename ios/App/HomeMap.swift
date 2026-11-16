@@ -100,7 +100,7 @@ final class MapStopsModel: ObservableObject {
 }
 
 /// A station (a rounded square with a train) or a bus stop (a small dot), with its name when zoomed in.
-struct StopMark: View {
+struct MapStopMark: View {
     let stop: Transit.NearStop
     let names: Bool
     var body: some View {
@@ -216,7 +216,7 @@ struct NewHome: View {
                 UserAnnotation()
                 ForEach(drawn.stops) { s in
                     Annotation(Fmt.place(s.name), coordinate: CLLocationCoordinate2D(latitude: s.lat, longitude: s.lon), anchor: s.rail ? .top : .leading) {
-                        StopMark(stop: s, names: drawn.names)
+                        MapStopMark(stop: s, names: drawn.names)
                     }
                     .annotationTitles(.hidden)
                 }
