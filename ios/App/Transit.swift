@@ -122,6 +122,8 @@ struct VehicleSegment {
     var realTime = false                // its times are live (else timetable only)
     var toLat: Double? = nil            // where the piece's next stop is
     var toLon: Double? = nil
+    var scheduledDeparture: Date? = nil // the timetable's times (`departure` and `arrival` are live when it is)
+    var scheduledArrival: Date? = nil
 
     /// Where the vehicle should be at `t`, by time along its path.
     func position(at t: Date) -> CLLocationCoordinate2D? {
@@ -626,7 +628,8 @@ enum Transit {
                 return VehicleSegment(tripId: id, line: (t["routeShortName"] as? String) ?? "?", isTrain: !(mode.contains("BUS") || mode.contains("COACH")),
                                       fromName: (from?["name"] as? String) ?? "", toName: (to?["name"] as? String) ?? "",
                                       departure: dep, arrival: arr, path: path,
-                                      realTime: live, toLat: to?["lat"] as? Double, toLon: to?["lon"] as? Double)
+                                      realTime: live, toLat: to?["lat"] as? Double, toLon: to?["lon"] as? Double,
+                                      scheduledDeparture: date(s["scheduledDeparture"]), scheduledArrival: date(s["scheduledArrival"]))
             }
         }
     }
@@ -647,7 +650,8 @@ enum Transit {
             let line = (t["routeShortName"] as? String) ?? "?"
             return VehicleSegment(tripId: id, line: train ? trainLabel(line) : line, isTrain: train,
                                   fromName: ((s["from"] as? [String: Any])?["name"] as? String) ?? "", toName: ((s["to"] as? [String: Any])?["name"] as? String) ?? "",
-                                  departure: dep, arrival: arr, path: decodePolyline(poly))
+                                  departure: dep, arrival: arr, path: decodePolyline(poly), realTime: (s["realTime"] as? Bool) ?? false,
+                                  scheduledDeparture: date(s["scheduledDeparture"]), scheduledArrival: date(s["scheduledArrival"]))
         }
     }
 
@@ -704,7 +708,8 @@ enum Transit {
             guard let o, let la = o["lat"] as? Double, let lo = o["lon"] as? Double else { return nil }
             return LiveTrip.Stop(name: (o["name"] as? String) ?? "", coordinate: .init(latitude: la, longitude: lo),
                                  arrival: date(o["arrival"]), departure: date(o["departure"]),
-                                 scheduled: date(o["scheduledArrival"]) ?? date(o["scheduledDeparture"]))
+                                 scheduled: date(o["scheduledArrival"]) ?? date(o["scheduledDeparture"]),
+                                 scheduledArrival: date(o["scheduledArrival"]), scheduledDeparture: date(o["scheduledDeparture"]))
         }
         for l in legs {
             line = (l["routeShortName"] as? String) ?? line

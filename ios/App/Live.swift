@@ -219,7 +219,8 @@ final class LiveStore: ObservableObject {
     private static func movesWithYou(_ f: CLLocation, _ segs: [VehicleSegment], history: [Fix], still: Bool, speed: Double,
                                      now: Date) -> VehicleSegment? {
         let one = Fix(f)
-        let tracks = VehicleTrack.group(segs.map { MapPiece($0) })
+        // (a late bus by its times without catching up: its live times have it make its delay up within a few stops)
+        let tracks = VehicleTrack.group(Transit.noCatchUp(segs, asOf: now).map { MapPiece($0) })
         let judged: [Judgement]
         if VehicleMatch.enough(history) {
             judged = VehicleMatch.judgeAll(history, tracks)

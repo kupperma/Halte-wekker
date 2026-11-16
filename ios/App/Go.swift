@@ -1448,18 +1448,20 @@ struct GoMap: View {
         if let t = trip, let m = mine, let r = ride {
             let w = t.position(now)
             let me = t.metres(ofStop: m)
+            // not past your stop before it has left there (two minutes after its time): a late one may still be coming
+            let at = LiveTimes.shown(w.metres, mine: me, left: LiveTimes.hasLeft(t.stops[m].times, now: now))
             // the road it still has to take to you, and on from there (fainter)
             let rest = t.road(from: me, to: t.metres(ofStop: t.stops.count - 1))
             if rest.count > 1 {
                 MapPolyline(coordinates: rest)
                     .stroke(Paper.line(r.line, train: r.isTrain).opacity(0.35), style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
             }
-            if w.metres < me - 5 {
-                MapPolyline(coordinates: t.road(from: w.metres, to: me))
+            if at < me - 5 {
+                MapPolyline(coordinates: t.road(from: at, to: me))
                     .stroke(Paper.line(r.line, train: r.isTrain), style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
             }
-            if !w.done && w.metres <= me + 30 {
-                Annotation("", coordinate: t.coordinate(atMetres: w.metres), anchor: .center) {
+            if !w.done && at <= me + 30 {
+                Annotation("", coordinate: t.coordinate(atMetres: at), anchor: .center) {
                     HStack(spacing: 4) {
                         Image(systemName: r.isTrain ? "tram.fill" : "bus.fill").font(.system(size: 12, weight: .bold))
                         Text(r.line).font(BoardInk.sans(13))
@@ -1498,7 +1500,7 @@ struct GoMap: View {
             if let r = ride, now.timeIntervalSince(lastTrip) >= 30 {
                 lastTrip = now
                 if let t = await Transit.liveTrip(r.tripId), !Task.isCancelled {
-                    trip = t
+                    trip = t.noCatchUp(asOf: Date(), isTrain: r.isTrain)        // a late bus without catching up
                     if mine == nil { mine = Self.findMine(t, r) }
                 }
             }
@@ -1536,9 +1538,11 @@ struct GoMap: View {
         if let s = stop {
             pts.append(s)
             if let t = trip, let m = mine {
-                let w = t.position(now), bus = t.coordinate(atMetres: w.metres)
+                let w = t.position(now)
+                let at = LiveTimes.shown(w.metres, mine: t.metres(ofStop: m), left: LiveTimes.hasLeft(t.stops[m].times, now: now))
+                let bus = t.coordinate(atMetres: at)
                 let far = CLLocation(latitude: bus.latitude, longitude: bus.longitude).distance(from: CLLocation(latitude: s.latitude, longitude: s.longitude))
-                if !w.done && w.metres <= t.metres(ofStop: m) + 30 && far < 6000 { pts.append(bus) }
+                if !w.done && at <= t.metres(ofStop: m) + 30 && far < 6000 { pts.append(bus) }
             }
         }
         guard let p0 = pts.first else { return }

@@ -10,6 +10,8 @@ struct LiveTrip {
         let arrival: Date?
         let departure: Date?
         let scheduled: Date?
+        var scheduledArrival: Date? = nil       // the timetable's own two times (`scheduled`: either)
+        var scheduledDeparture: Date? = nil
     }
     let line: String
     let headsign: String
@@ -95,10 +97,13 @@ struct LiveTrackTarget: Identifiable, Hashable {
 
 /// A live map of one bus or train: where it is now, moving along its route every second, how many stops and how far
 /// it is from your stop, and when it's there. Its live times are fetched again every 30 seconds.
+/// A late bus is drawn by its times without catching up (`LiveTimes.noCatchUp`), and not past your stop until two
+/// minutes after it should have left there; the times it prints are the answer's own (as on the board).
 struct LiveBusSheet: View {
     let target: LiveTrackTarget
     @Environment(\.dismiss) private var dismiss
-    @State private var trip: LiveTrip?
+    @State private var trip: LiveTrip?          // drawn by: without catching up
+    @State private var given: LiveTrip?         // as the answer gives it: the times it prints
     @State private var mine: Int?
     @State private var failed = false
     @State private var updated: Date?
@@ -134,7 +139,7 @@ struct LiveBusSheet: View {
                         .overlay(Circle().stroke(BoardInk.navy, lineWidth: 1.5))
                 }
             }
-            Annotation(target.line, coordinate: trip.coordinate(atMetres: trip.position(now).metres), anchor: .center) {
+            Annotation(target.line, coordinate: trip.coordinate(atMetres: shownMetres(trip, now)), anchor: .center) {
                 HStack(spacing: 4) {
                     Image(systemName: target.rail ? "tram.fill" : "bus.fill").font(.system(size: 12, weight: .bold))
                     Text(target.line).font(BoardInk.sans(13))
@@ -161,16 +166,17 @@ struct LiveBusSheet: View {
                 Text("to \(Fmt.place(target.headsign))").font(BoardInk.sans(17)).foregroundStyle(Paper.ink).lineLimit(1).minimumScaleFactor(0.7)
             }
             if let trip {
-                let w = trip.position(now)
+                let w = trip.position(now), printed = given ?? trip
                 Text(status(trip, w, now)).font(BoardInk.sans(15)).foregroundStyle(Paper.ink).fixedSize(horizontal: false, vertical: true)
-                if let m = mine, let a = trip.arrival(m), w.metres <= trip.metres(ofStop: m) + 20, !w.done {
+                if let m = mine, m < printed.stops.count, let a = printed.arrival(m), shownMetres(trip, now) <= trip.metres(ofStop: m) + 20,
+                   !w.done || !LiveTimes.hasLeft(trip.stops[m].times, now: now) {
                     let mins = Int((a.timeIntervalSince(now) / 60).rounded())
-                    let late = trip.stops[m].scheduled.map { Int((a.timeIntervalSince($0) / 60).rounded()) } ?? 0
+                    let late = printed.stops[m].scheduled.map { Int((a.timeIntervalSince($0) / 60).rounded()) } ?? 0
                     Text("At \(Fmt.place(trip.stops[m].name)) \(Fmt.hhmm(a))\(mins > 0 ? " · in \(mins) min" : "")\(late >= 1 ? " · \(late) min late" : late <= -1 ? " · \(-late) min early" : " · on time")")
                         .font(BoardInk.sans(13)).foregroundStyle(late >= 1 ? Paper.late : Paper.ok)
                 }
                 if w.started, !w.done, !w.atStop {
-                    Text("Next stop: \(Fmt.place(trip.stops[w.next].name))\(trip.arrival(w.next).map { " · \(Fmt.hhmm($0))" } ?? "")")
+                    Text("Next stop: \(Fmt.place(trip.stops[w.next].name))\((w.next < printed.stops.count ? printed.arrival(w.next) : nil).map { " · \(Fmt.hhmm($0))" } ?? "")")
                         .font(BoardInk.sans(12, .regular)).foregroundStyle(Paper.ink.opacity(0.85))
                 }
                 Text(trip.live ? "Live times\(updated.map { ", updated \(Fmt.hhmm($0))" } ?? ""). Its position is worked out from them." : "No live times for this one: its position follows the timetable.")
@@ -203,8 +209,19 @@ struct LiveBusSheet: View {
         .padding(14)
     }
 
-    /// "3 stops away · 1.4 km", "At your stop now", "It has passed your stop"
+    /// Where to draw it at `now` (metres along): by its times, but not past your stop before it has left there.
+    private func shownMetres(_ t: LiveTrip, _ now: Date) -> Double {
+        let w = t.position(now)
+        guard let m = mine, m < t.stops.count else { return w.metres }
+        return LiveTimes.shown(w.metres, mine: t.metres(ofStop: m), left: LiveTimes.hasLeft(t.stops[m].times, now: now))
+    }
+
+    /// "3 stops away · 1.4 km", "At your stop now", "Due at your stop now", "It has passed your stop"
     private func status(_ t: LiveTrip, _ w: (metres: Double, next: Int, atStop: Bool, started: Bool, done: Bool), _ now: Date) -> String {
+        // past your stop by its times, but it left there less than two minutes ago: it may well still be coming
+        if let m = mine, m < t.stops.count, w.done || t.metres(ofStop: m) - w.metres < -20, !LiveTimes.hasLeft(t.stops[m].times, now: now) {
+            return "Due at your stop now."
+        }
         if w.done { return "This trip has ended." }
         if !w.started { return "Hasn’t left \(Fmt.place(t.stops[0].name)) yet\(t.departure(0).map { ": it leaves at \(Fmt.hhmm($0))" } ?? "")." }
         guard let m = mine else { return w.atStop ? "At \(Fmt.place(t.stops[w.next].name)) now." : "On its way to \(Fmt.place(t.stops[w.next].name))." }
@@ -224,7 +241,7 @@ struct LiveBusSheet: View {
 
     /// Show it and your stop together.
     private func fit(_ t: LiveTrip, _ now: Date) {
-        var pts = [MKMapPoint(t.coordinate(atMetres: t.position(now).metres))]
+        var pts = [MKMapPoint(t.coordinate(atMetres: shownMetres(t, now)))]
         if let m = mine { pts.append(MKMapPoint(t.stops[m].coordinate)) }
         var r = MKMapRect(origin: pts[0], size: MKMapSize(width: 0, height: 0))
         for p in pts.dropFirst() { r = r.union(MKMapRect(origin: p, size: MKMapSize(width: 0, height: 0))) }
@@ -235,21 +252,23 @@ struct LiveBusSheet: View {
     private func run() async {
         var last = Date.distantPast
         if trip == nil, let c = await Transit.cachedLiveTrip(target.tripId) {
-            trip = c.trip; updated = c.at; mine = findMine(c.trip); fit(c.trip, Date())
+            given = c.trip; trip = c.trip.noCatchUp(asOf: c.at, isTrain: target.rail)
+            updated = c.at; mine = findMine(c.trip); fit(c.trip, Date())
         }
         while !Task.isCancelled {
             if Date().timeIntervalSince(last) >= 30 {
                 last = Date()
                 if let t = await Transit.liveTrip(target.tripId) {
                     let first = trip == nil
-                    trip = t; updated = Date(); failed = false; refreshFailed = false
+                    given = t; trip = t.noCatchUp(asOf: Date(), isTrain: target.rail)
+                    updated = Date(); failed = false; refreshFailed = false
                     if mine == nil { mine = findMine(t) }
                     if first { fit(t, Date()) }
                 } else if trip == nil { failed = true } else { refreshFailed = true }
             }
             if follow, let t = trip {
                 withAnimation(.linear(duration: 1)) {
-                    camera = .camera(MapCamera(centerCoordinate: t.coordinate(atMetres: t.position(Date()).metres), distance: 1800))
+                    camera = .camera(MapCamera(centerCoordinate: t.coordinate(atMetres: shownMetres(t, Date())), distance: 1800))
                 }
             }
             try? await Task.sleep(nanoseconds: 1_000_000_000)

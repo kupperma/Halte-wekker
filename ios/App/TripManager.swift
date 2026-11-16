@@ -924,7 +924,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         let segs = await Transit.$urgent.withValue(urgentAsk) {
             await Transit.vehicles(near: last.coordinate, radiusDeg: speed > 15 ? 0.04 : 0.02, allTrips: true)
         }
-        let tracks = VehicleTrack.group(segs.map { MapPiece($0) }).filter { v in
+        // (a late bus by its times without catching up: its live times have it make its delay up within a few stops)
+        let tracks = VehicleTrack.group(Transit.noCatchUp(segs, asOf: Date()).map { MapPiece($0) }).filter { v in
             !excluding.contains(v.tripId) && (mode.map { ($0 == .train) == v.isTrain } ?? true)
         }
         let judged = VehicleMatch.judgeAll(recentFixes, tracks)        // with the fixes that came in while it asked
@@ -1070,7 +1071,10 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         guard let road = roadOf, vehicle == v, cands.isEmpty else { return }
         let t = road.trip
         let limit: Double = v.isTrain ? 700 : 300
-        if !MatchSettings.classic() { await sameBusByJudging(v, trip: t, leg: leg, last: last, limit: limit, now: now); return }
+        if !MatchSettings.classic() {
+            await sameBusByJudging(v, trip: t.noCatchUp(asOf: road.at, isTrain: v.isTrain), leg: leg, last: last, limit: limit, now: now)
+            return
+        }
         if Self.metres(from: last.coordinate, to: t.path) < limit {
             offRoad = 0
             if !v.isTrain, !t.line.isEmpty, t.line != v.line {
@@ -1233,7 +1237,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     private func chooseByJudging(_ list: [Candidate], last: CLLocation, now: Date) async {
         let shown = vehicle?.tripId
         let tracks: [VehicleTrack] = list.compactMap { c in
-            c.trip.flatMap { VehicleTrack(tripId: c.vehicle.tripId, line: c.vehicle.line, isTrain: c.vehicle.isTrain, trip: $0) }
+            c.trip.flatMap { VehicleTrack(tripId: c.vehicle.tripId, line: c.vehicle.line, isTrain: c.vehicle.isTrain,
+                                          trip: $0.noCatchUp(asOf: c.fetched, isTrain: c.vehicle.isTrain)) }
         }
         let judged = VehicleMatch.judgeAll(recentFixes, tracks, strictTimes: false)
         // the one it shows, by today's road check: your last fix from its road
@@ -1311,7 +1316,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         let mode = leg?.mode
         var anyKind = false
         if route?.custom != nil, let road = roadOf, road.tripId == v.tripId,
-           let mine = VehicleTrack(tripId: v.tripId, line: v.line, isTrain: v.isTrain, trip: road.trip),
+           let mine = VehicleTrack(tripId: v.tripId, line: v.line, isTrain: v.isTrain, trip: road.trip.noCatchUp(asOf: road.at, isTrain: v.isTrain)),
            case .failure(let why)? = VehicleMatch.judgeAll(recentFixes, [mine], strictTimes: false).first?.result {
             anyKind = VehicleMatch.otherKindPossible(why)
         }
@@ -1335,7 +1340,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         for (c, t) in zip(picked, trips) {
             guard let t else { continue }
             let line = t.line.isEmpty ? c.line : (c.train ? Transit.trainLabel(t.line) : t.line)
-            guard let track = VehicleTrack(tripId: c.id, line: line, isTrain: c.train, trip: t) else { continue }
+            guard let track = VehicleTrack(tripId: c.id, line: line, isTrain: c.train, trip: t.noCatchUp(asOf: Date(), isTrain: c.train)) else { continue }
             tracks.append(track)
             found[c.id] = Vehicle(tripId: c.id, line: line, isTrain: c.train)
         }

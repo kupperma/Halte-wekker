@@ -663,6 +663,32 @@ final class VehicleMatchTests: XCTestCase {
         XCTAssertFalse(VehicleMatch.otherKindPossible(.offItsPath))
         XCTAssertFalse(VehicleMatch.otherKindPossible(nil))
     }
+
+    /// The bus you're on, 3 minutes late, whose live times have it catch up a minute a stop (+3 where it left, then
+    /// +2, +1, +0): by those times it is half a kilometre ahead of you and fails; with the delay carried on (no catch-up)
+    /// it passes, near its times. The matcher's rules are the same; only what it is given changes.
+    func test_lateBusPassesWithCarriedDelay() throws {
+        // stops every 1200 m on the road 50 m north, 2 minutes apart by the timetable (10 m/s)
+        func piece(_ k: Int, dep: Double, arr: Double) -> PieceTimes {
+            PieceTimes(departure: t0 + dep, arrival: t0 + arr, scheduledDeparture: t0 + Double(k) * 120, scheduledArrival: t0 + Double(k + 1) * 120)
+        }
+        let given = [piece(0, dep: 180, arr: 240), piece(1, dep: 240, arr: 300), piece(2, dep: 300, arr: 360), piece(3, dep: 360, arr: 480)]
+        func track(_ ps: [PieceTimes]) -> VehicleTrack {
+            VehicleTrack(tripId: "L", line: "306", isTrain: false, realTime: true, pieces: ps.enumerated().map { k, p in
+                TimedPiece(departure: p.departure, arrival: p.arrival,
+                           path: [Fx.east(Double(k) * 1200, north: 50), Fx.east(Double(k) * 1200 + 600, north: 50), Fx.east(Double(k + 1) * 1200, north: 50)])
+            })
+        }
+        // you: on it, really 3 minutes late (at 200 m at t0 + 200 s)
+        let you = Fx.fixes(from: 200, speed: 10, count: 16, north: 50, start: t0 + 200)
+        let raw = VehicleMatch.judgeAll(you, [track(given)])
+        XCTAssertNil(Fx.ok(raw, "L"))
+        XCTAssertTrue(VehicleMatch.timesOnly(try XCTUnwrap(raw.first)), "\(raw)")           // failed by its times only
+        let carried = LiveTimes.noCatchUp(pieces: given, asOf: t0 + 230)
+        XCTAssertEqual(carried.map { $0.arrival.timeIntervalSince(t0) }, [300, 420, 540, 660])
+        let fixed = VehicleMatch.judgeAll(you, [track(carried)])
+        XCTAssertLessThanOrEqual(try XCTUnwrap(Fx.ok(fixed, "L"), "\(fixed)"), 15)
+    }
 }
 
 /// A small deterministic random source (SplitMix64), so random-looking tests are the same on every run.
