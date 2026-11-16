@@ -368,6 +368,38 @@ struct OneShotVideo: UIViewRepresentable {
     func updateUIView(_ v: OneShotVideoView, context: Context) { v.show(name, token: token) }
 }
 
+/// The full-screen stills (the map on the wall, the station), read and decoded once and then kept. Each screen redraw
+/// used to read the JPEG from disk and decode it again on the main thread (`UIImage(named:)` without the extension finds
+/// only PNGs), many times in the first seconds after launch. `warm` decodes them off the main thread before they show.
+final class StillCache: @unchecked Sendable {
+    static let shared = StillCache()
+    private let lock = NSLock()
+    private var images: [String: UIImage] = [:]
+
+    /// The still `name` (a JPEG in the app), decoded: kept from before, else read and decoded now (once).
+    func image(_ name: String) -> UIImage? {
+        lock.lock()
+        if let i = images[name] { lock.unlock(); return i }
+        lock.unlock()
+        guard let img = Self.load(name) else { return nil }
+        lock.lock()
+        defer { lock.unlock() }
+        if let i = images[name] { return i }
+        images[name] = img
+        return img
+    }
+
+    /// Read and decode these off the main thread, so the first screen finds them ready.
+    func warm(_ names: [String]) {
+        DispatchQueue.global(qos: .userInitiated).async { for n in names { _ = self.image(n) } }
+    }
+
+    private static func load(_ name: String) -> UIImage? {
+        guard let raw = Bundle.main.path(forResource: name, ofType: "jpg").flatMap(UIImage.init(contentsOfFile:)) ?? UIImage(named: name) else { return nil }
+        return raw.preparingForDisplay() ?? raw
+    }
+}
+
 struct StationBackdrop: View {
     let home: Bool
     let moving: Bool
@@ -380,7 +412,7 @@ struct StationBackdrop: View {
             ForEach([false, true], id: \.self) { h in
                 Group {
                     if moving { StationVideo(name: h ? "station-home" : "station-out", playing: h == home, restart: restart) }
-                    else if let img = UIImage(named: h ? "still-home" : "still-out") ?? Bundle.main.path(forResource: h ? "still-home" : "still-out", ofType: "jpg").flatMap(UIImage.init(contentsOfFile:)) {
+                    else if let img = StillCache.shared.image(h ? "still-home" : "still-out") {
                         Image(uiImage: img).resizable().scaledToFill()
                     }
                 }

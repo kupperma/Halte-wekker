@@ -92,7 +92,9 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     @Published private(set) var matchMeters: Int?            // how far its live position was from yours
     @Published private(set) var pickedByHand = false
     @Published private(set) var byTimetable = false         // no live position matched: it took the planned one once you'd clearly left
-    @Published private(set) var speed: Double?               // m/s, from GPS
+    @Published private(set) var speed: Double?               // m/s, from GPS, for the screens: only when it's worth drawing again
+    /// The GPS speed of the newest fix (m/s), for the trip's own decisions; `speed` follows it on screen.
+    private(set) var currentSpeed: Double?
     @Published private(set) var startDistance: Double?       // how far you are from where this leg starts
     @Published private(set) var always = false
     /// A pretend ride (the demo): it moves along by itself, without your GPS.
@@ -437,7 +439,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         location.allowsBackgroundLocationUpdates = false
         phase = .idle
         route = nil; legs = []; distance = nil; arrival = nil; next = nil; vehicle = nil; legArrival = nil; arrivedAt = nil
-        upcoming = []; upcomingAt = nil; upcomingError = nil; upcomingKey = ""; upcomingBoard = []; upcomingAsOf = nil; vehicleStops = []; matchMeters = nil; speed = nil; startDistance = nil
+        upcoming = []; upcomingAt = nil; upcomingError = nil; upcomingKey = ""; upcomingBoard = []; upcomingAsOf = nil; vehicleStops = []; matchMeters = nil; speed = nil; currentSpeed = nil; startDistance = nil
         roadOf = nil; offRoad = 0; farLooks = 0; boardAlternatives = []
         cands = []; choosing = []; candSince = nil; candLead = nil; candSwitch = SwitchState(); candMisses = [:]; candTimedOut = nil
         legFrom = nil; legTo = nil; maxDistance = nil
@@ -515,7 +517,11 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     private func handle(_ loc: CLLocation) {
         samples.append(loc)
         samples.removeAll { $0.timestamp < Date().addingTimeInterval(-240) }
-        if loc.speed >= 0 { speed = loc.speed }
+        if loc.speed >= 0 {
+            currentSpeed = loc.speed
+            // (each new value redraws every screen that shows the trip: the home screen too, on every fix while idle)
+            if SpeedPublish.worth(old: speed, new: loc.speed) { speed = loc.speed }
+        }
         if phase == .transfer { Task { await loadUpcoming() } }
         if phase == .idle, !LineWatchStore.shared.watches.isEmpty, Date().timeIntervalSince(lastIdleMatch) > 20 {
             lastIdleMatch = Date()
@@ -1124,7 +1130,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         guard let v = vehicle, let leg, !demo, !pickedByHand, !checkingSame, cands.isEmpty, phase == .sleeping || phase == .awake else { return }
         let now = Date()
         let recent = samples.filter { $0.timestamp > now.addingTimeInterval(-45) && $0.horizontalAccuracy >= 0 && $0.horizontalAccuracy < 80 }
-        guard let last = recent.last, max(last.speed, speed ?? 0) >= 4 else { return }      // a clear fix, moving with it
+        guard let last = recent.last, max(last.speed, currentSpeed ?? 0) >= 4 else { return }      // a clear fix, moving with it
         checkingSame = true
         defer { checkingSame = false }
         if roadOf?.tripId != v.tripId || now.timeIntervalSince(roadOf!.at) > 60 {
@@ -1724,24 +1730,38 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     // MARK: starting by itself
 
     /// Watches your stations with region monitoring (cheap): full GPS only switches on once you leave one.
+    /// The regions iOS already watches (it keeps them across launches) stay when they're the ones wanted: no stopping and
+    /// starting all of them at every launch and every authorization callback.
     private func updateWatching() {
-        for r in location.monitoredRegions { location.stopMonitoring(for: r) }
+        var wanted: [RegionSpec] = []
+        if (autoStart || autoHome) && location.authorizationStatus == .authorizedAlways {
+            if autoHome {
+                wanted.append(RegionSpec(id: "school", lat: Place.buas.coordinate.latitude, lon: Place.buas.coordinate.longitude,
+                                         radius: NearMe.schoolRadius, entry: true, exit: false))
+            }
+            if autoStart {
+                for p in Place.all where p != .buas {
+                    wanted.append(RegionSpec(id: p.key, lat: p.coordinate.latitude, lon: p.coordinate.longitude,
+                                             radius: p == .veghel ? 350 : 300, entry: false, exit: true))
+                }
+            }
+        }
+        let current: [RegionSpec] = location.monitoredRegions.map { r in
+            let c = r as? CLCircularRegion
+            return RegionSpec(id: r.identifier, lat: c?.center.latitude ?? .nan, lon: c?.center.longitude ?? .nan,
+                              radius: c?.radius ?? -1, entry: r.notifyOnEntry, exit: r.notifyOnExit)
+        }
+        if !RegionPlan.same(wanted: wanted, current: current) {
+            for r in location.monitoredRegions { location.stopMonitoring(for: r) }
+            for w in wanted {
+                let r = CLCircularRegion(center: CLLocationCoordinate2D(latitude: w.lat, longitude: w.lon), radius: w.radius, identifier: w.id)
+                r.notifyOnEntry = w.entry; r.notifyOnExit = w.exit
+                location.startMonitoring(for: r)
+            }
+        }
         guard autoStart || autoHome else { return }
-        if location.authorizationStatus != .authorizedAlways {
-            if autoStart && location.authorizationStatus == .authorizedWhenInUse { location.requestAlwaysAuthorization() }
-            return
-        }
-        if autoHome {
-            let r = CLCircularRegion(center: Place.buas.coordinate, radius: NearMe.schoolRadius, identifier: "school")
-            r.notifyOnEntry = true; r.notifyOnExit = false
-            location.startMonitoring(for: r)
-        }
-        guard autoStart else { return }
-        for p in Place.all where p != .buas {
-            let r = CLCircularRegion(center: p.coordinate, radius: p == .veghel ? 350 : 300, identifier: p.key)
-            r.notifyOnExit = true; r.notifyOnEntry = false
-            location.startMonitoring(for: r)
-        }
+        if location.authorizationStatus != .authorizedAlways,
+           autoStart && location.authorizationStatus == .authorizedWhenInUse { location.requestAlwaysAuthorization() }
     }
 
     func askForAlways() { location.requestAlwaysAuthorization() }

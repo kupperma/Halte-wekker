@@ -20,6 +20,34 @@ final class FieldLogTests: XCTestCase {
         XCTAssertTrue(FieldLog(defaults: d).entries.isEmpty)
     }
 
+    /// The app's log lives in a file: an older log in the settings moves into it once (and goes from there), what was
+    /// flushed comes back, and nothing is written before its time without a flush.
+    func test_fileStore() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let f = dir.appendingPathComponent("fieldlog.json")
+        let d = suite()
+        let old = FieldLog(defaults: d)
+        old.add(.ride, "old ride"); old.flush()
+        let log = FieldLog(file: f, migrating: (defaults: d, key: "fieldLog.v1"))
+        XCTAssertEqual(log.entries.map(\.text), ["old ride"])
+        XCTAssertNil(d.data(forKey: "fieldLog.v1"))
+        XCTAssertEqual(FieldLog(file: f).entries.map(\.text), ["old ride"])
+        log.add(.net, "n1"); log.flush()
+        XCTAssertEqual(FieldLog(file: f).entries.map(\.text), ["n1", "old ride"])
+        let slow = FieldLog(file: f, every: 3600)
+        slow.add(.match, "m1")
+        XCTAssertEqual(FieldLog(file: f).entries.map(\.text), ["n1", "old ride"])
+        slow.flush()
+        XCTAssertEqual(FieldLog(file: f).entries.map(\.text), ["m1", "n1", "old ride"])
+        // the same caps per kind as before
+        let capped = FieldLog(file: dir.appendingPathComponent("capped.json"), caps: [.net: 2, .match: 2, .ride: 1])
+        for i in 0..<4 { capped.add(.net, "n\(i)") }
+        capped.add(.ride, "r0"); capped.add(.ride, "r1")
+        XCTAssertEqual(capped.entries.map(\.text), ["r1", "n3", "n2"])
+    }
+
     func test_netFormat() {
         XCTAssertEqual(FieldFormat.net("/v5/plan", lane: .urgent, status: 200, error: nil, bytes: 31_950, seconds: 2.43, attempts: 1),
                        "/v5/plan · 200 · 31.2 KB · 2.4 s · 1 try · urgent")

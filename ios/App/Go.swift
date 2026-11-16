@@ -402,7 +402,7 @@ final class GoStore: ObservableObject {
         if let cur = best, !cur.first.cancelled, !ok.contains(where: { $0.first.tripId == cur.first.tripId }),
            cur.first.departure < now.addingTimeInterval(60), now < cur.first.departure.addingTimeInterval(6 * 60),
            let la = cur.first.fromLat, let lo = cur.first.fromLon,
-           loc.distance(from: CLLocation(latitude: la, longitude: lo)) < 200, (trip?.speed ?? 0) < 2.5 {
+           loc.distance(from: CLLocation(latitude: la, longitude: lo)) < 200, (trip?.currentSpeed ?? 0) < 2.5 {
             overdue = true
             others = Array(ok.filter { $0.first.tripId != cur.first.tripId }.sorted(by: Self.sooner).prefix(5))
             error = nil
@@ -663,7 +663,7 @@ final class GoStore: ObservableObject {
         guard var m = ranked.first else { seen = nil; return nil }
         guard watching, trip.phase == .idle else { return nil }
         // at bus speed, not running for it while it passes you
-        guard (trip.speed ?? 0) >= 3.5 else { return last }
+        guard (trip.currentSpeed ?? 0) >= 3.5 else { return last }
         // (the saved answer on screen isn't one it's watching: only a live answer can start your trip)
         let live = asOf == nil
         let all: [DoorTrip] = live ? [best].compactMap { $0 } + others : []

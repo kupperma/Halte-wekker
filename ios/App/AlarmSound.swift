@@ -52,6 +52,12 @@ final class AlarmSound: NSObject, AVSpeechSynthesizerDelegate {
         try? AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
     }
 
+    /// No trip: the sound of the station video (silent, it never stops your music). Not over a trip's keep-alive.
+    func idleCategory() {
+        guard silent == nil else { return }
+        try? AVAudioSession.sharedInstance().setCategory(.ambient, options: [.mixWithOthers])
+    }
+
     /// The jingle, the announcement (if any), then the alarm on repeat.
     func ring(announcement: String?) {
         stop()

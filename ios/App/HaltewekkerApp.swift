@@ -10,9 +10,8 @@ struct HaltewekkerApp: App {
     init() {
         Watchdog.shared.start()
         Net.startWatchingConnection()
-        Watchdog.shared.mark("setting up sound")
-        // The station video is silent and must never stop your music.
-        try? AVAudioSession.sharedInstance().setCategory(.ambient, options: [.mixWithOthers])
+        // the map on the wall, read and decoded off the main thread while the rest starts
+        StillCache.shared.warm(["map-home", "map-out"])
     }
     var body: some Scene {
         WindowGroup {
@@ -26,6 +25,13 @@ struct HaltewekkerApp: App {
                 .onAppear {
                     Watchdog.shared.mark("drawing the first screen")
                     let t = trip
+                    // The station video is silent and must never stop your music: after the first frame (a call to the
+                    // audio daemon that can take a while), and not over a trip's own sound that started meanwhile.
+                    DispatchQueue.main.async {
+                        Watchdog.shared.mark("setting up sound")
+                        if t.phase == .idle { t.sound.idleCategory() }
+                        Watchdog.shared.mark("drawing the first screen")
+                    }
                     near.onPosition = { t.guessFromPlace($0); t.maybeAutoHome($0) }
                     Task { await NoticeLog.shared.collectDelivered() }
                     Morning.shared.checkAfterAlarm()

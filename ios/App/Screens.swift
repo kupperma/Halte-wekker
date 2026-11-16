@@ -201,7 +201,8 @@ struct HomeView: View {
         .sheet(isPresented: $liveSettings, onDismiss: { Task { await live.refresh(trip.direction, force: true) } }) { LiveSettingsSheet() }
         .sheet(item: $startReq) { r in StartSheet(req: r).presentationDetents([.medium, .large]) }
         .sheet(item: $stopEdit) { r in StopSheet(req: r) }
-        // Every 30 s while the app is in front: one loop per refresher, so a slow one never holds up the others.
+        // Every 30 s while the app is in front: one loop per refresher, so a slow one never holds up the others. Their
+        // first steps 1.5 s apart (the live times first), so the first seconds after launch aren't all of them at once.
         .task(id: trip.direction) {
             await everyHalfMinute {
                 Watchdog.shared.mark("finding where you are")
@@ -213,7 +214,7 @@ struct HomeView: View {
             }
         }
         .task(id: trip.direction) {
-            await everyHalfMinute {
+            await everyHalfMinute(after: 1.5) {
                 Watchdog.shared.mark("planning your planned trips")
                 await planner.refresh()
                 autoGo()
@@ -221,7 +222,7 @@ struct HomeView: View {
             }
         }
         .task(id: trip.direction) {
-            await everyHalfMinute {
+            await everyHalfMinute(after: 3) {
                 Watchdog.shared.mark("planning the school alarms")
                 await SchoolAlarm.shared.refresh()
                 Watchdog.shared.mark("checking watched trains")
@@ -230,7 +231,7 @@ struct HomeView: View {
             }
         }
         .task(id: trip.direction) {
-            await everyHalfMinute {
+            await everyHalfMinute(after: 4.5) {
                 Watchdog.shared.mark("getting the weather")
                 updateOutfit()                                   // the weather for where you are and where you're going
                 await OutfitStore.shared.refresh()
@@ -238,7 +239,7 @@ struct HomeView: View {
             }
         }
         .onChange(of: scene) { _, s in
-            if s == .background { FieldLog.shared.flush() }
+            if s == .background { FieldLog.shared.flush(); DelayBook.shared.save() }
             if s == .active {
                 trip.appBecameActive()
                 autoGo()
@@ -255,8 +256,12 @@ struct HomeView: View {
 
     /// `step` now and every 30 s after, while the app is in front, until the task is cancelled. Not while Fastest trip
     /// is open: then the home screen is on its way out (a direction picked for the planned trip right before restarts
-    /// these loops), and what it asked would only be cancelled.
-    private func everyHalfMinute(_ step: () async -> Void) async {
+    /// these loops), and what it asked would only be cancelled. `after`: seconds before the first step.
+    private func everyHalfMinute(after delay: Double = 0, _ step: () async -> Void) async {
+        if delay > 0 {
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            if Task.isCancelled { return }
+        }
         while !Task.isCancelled {
             if scene == .active && !goStore.isOpen { await step() }
             try? await Task.sleep(nanoseconds: 30_000_000_000)

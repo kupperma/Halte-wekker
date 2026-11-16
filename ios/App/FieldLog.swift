@@ -12,35 +12,58 @@ struct FieldEntry: Codable, Equatable, Sendable {
 /// sizes, seconds, attempts, lines, metres rounded to 10 and the last 4 characters of trip ids: never coordinates, place
 /// names or query strings.
 final class FieldLog: @unchecked Sendable {
-    static let shared = FieldLog(defaults: .standard)
+    /// In a small file in Caches (written at most every 30 s, and when the app goes to the background), not in the
+    /// app's settings: those are read whole at every launch and were written whole every 5 s.
+    static let shared = FieldLog(file: FieldLog.appFile, migrating: (defaults: UserDefaults.standard, key: "fieldLog.v1"))
     /// The newest this many of each kind are kept, so a burst of requests can't push a ride out of the log.
     static let caps: [FieldEntry.Kind: Int] = [.net: 300, .match: 200, .ride: 100]
 
-    private let defaults: UserDefaults
-    private let key: String
+    static var appFile: URL {
+        let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first ?? FileManager.default.temporaryDirectory
+        return dir.appendingPathComponent("fieldlog.json")
+    }
+
+    private let load: () -> Data?
+    private let store: (Data) -> Void
+    private let every: TimeInterval                  // written at most this often (and by `flush`)
     private let limit: Int?                          // one cap for all kinds together (else `caps` per kind)
     private let kindCaps: [FieldEntry.Kind: Int]
     private let lock = NSLock()
+    private let writing = NSLock()                   // one write at a time, in order (without holding up `add`)
     private var list: [FieldEntry]
     private var dirty = false
     private var pending = false
 
     /// The newest `limit` entries, whatever their kind.
     convenience init(defaults: UserDefaults, key: String = "fieldLog.v1", limit: Int) {
-        self.init(defaults: defaults, key: key, limit: limit, caps: [:])
+        self.init(load: { defaults.data(forKey: key) }, store: { defaults.set($0, forKey: key) }, every: 5, limit: limit, caps: [:])
     }
 
     /// The newest of each kind, up to its cap.
     convenience init(defaults: UserDefaults, key: String = "fieldLog.v1", caps: [FieldEntry.Kind: Int] = FieldLog.caps) {
-        self.init(defaults: defaults, key: key, limit: nil, caps: caps)
+        self.init(load: { defaults.data(forKey: key) }, store: { defaults.set($0, forKey: key) }, every: 5, limit: nil, caps: caps)
     }
 
-    private init(defaults: UserDefaults, key: String, limit: Int?, caps: [FieldEntry.Kind: Int]) {
-        self.defaults = defaults
-        self.key = key
+    /// In a file, written at most every `every` seconds. `migrating`: where an older version kept it (read once when
+    /// there's no file yet, then removed there).
+    convenience init(file: URL, every: TimeInterval = 30, caps: [FieldEntry.Kind: Int] = FieldLog.caps,
+                     migrating old: (defaults: UserDefaults, key: String)? = nil) {
+        self.init(load: {
+            if let d = try? Data(contentsOf: file) { return d }
+            guard let old, let d = old.defaults.data(forKey: old.key) else { return nil }
+            old.defaults.removeObject(forKey: old.key)
+            try? d.write(to: file, options: .atomic)
+            return d
+        }, store: { try? $0.write(to: file, options: .atomic) }, every: every, limit: nil, caps: caps)
+    }
+
+    private init(load: @escaping () -> Data?, store: @escaping (Data) -> Void, every: TimeInterval, limit: Int?, caps: [FieldEntry.Kind: Int]) {
+        self.load = load
+        self.store = store
+        self.every = every
         self.limit = limit
         self.kindCaps = caps
-        if let data = defaults.data(forKey: key), let saved = try? JSONDecoder().decode([FieldEntry].self, from: data) {
+        if let data = load(), let saved = try? JSONDecoder().decode([FieldEntry].self, from: data) {
             list = FieldLog.pruned(saved, limit: limit, caps: caps)
         } else {
             list = []
@@ -57,7 +80,7 @@ final class FieldLog: @unchecked Sendable {
         }
     }
 
-    /// Newest first. Written to disk at most every 5 s (and by `flush`).
+    /// Newest first. Written to disk at most every `every` seconds (and by `flush`).
     func add(_ kind: FieldEntry.Kind, _ text: String, at: Date = Date()) {
         lock.lock()
         list.insert(FieldEntry(at: at, kind: kind, text: text), at: 0)
@@ -71,18 +94,22 @@ final class FieldLog: @unchecked Sendable {
         pending = true
         lock.unlock()
         if schedule {
-            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 5) { [weak self] in self?.flush() }
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + every) { [weak self] in self?.flush() }
         }
     }
 
-    /// Written while holding the lock, so an older copy can never land after a newer one.
+    /// Writes are one at a time, each taking the list as it is once it's its turn, so an older copy can never land
+    /// after a newer one. (`add` meanwhile only waits for the copy, not for the write.)
     func flush() {
+        writing.lock()
+        defer { writing.unlock() }
         lock.lock()
-        defer { lock.unlock() }
         pending = false
-        guard dirty else { return }
+        guard dirty else { lock.unlock(); return }
         dirty = false
-        if let data = try? JSONEncoder().encode(list) { defaults.set(data, forKey: key) }
+        let snapshot = list
+        lock.unlock()
+        if let data = try? JSONEncoder().encode(snapshot) { store(data) }
     }
 
     var entries: [FieldEntry] {
