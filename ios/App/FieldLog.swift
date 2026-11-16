@@ -80,9 +80,13 @@ final class FieldLog: @unchecked Sendable {
 
 /// The wording of the log's lines. Nothing here takes a coordinate or a query.
 enum FieldFormat {
-    static func net(_ path: String, lane: Lane, status: Int?, error: URLError.Code?, bytes: Int, seconds: Double, attempts: Int) -> String {
+    /// `note`: what else to say, at the end ("shared": another caller's request answered it). A request that was never
+    /// sent has only the note as its result ("cooling down").
+    static func net(_ path: String, lane: Lane, status: Int?, error: URLError.Code?, bytes: Int, seconds: Double, attempts: Int,
+                    note: String? = nil) -> String {
         let bare = path.split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? path
         let result: String
+        var tail = note.map { " · \($0)" } ?? ""
         if let error {
             switch error {
             case .timedOut: result = "timed out"
@@ -91,11 +95,15 @@ enum FieldFormat {
             case .cancelled: result = "cancelled"
             default: result = "error \(error.rawValue)"
             }
+        } else if let status {
+            result = String(status)
+        } else if let note {
+            result = note; tail = ""
         } else {
-            result = status.map(String.init) ?? "no answer"
+            result = "no answer"
         }
         let size = bytes < 1024 ? "\(max(0, bytes)) B" : String(format: "%.1f KB", Double(bytes) / 1024)
-        return "\(bare) · \(result) · \(size) · \(String(format: "%.1f", seconds)) s · \(attempts) \(attempts == 1 ? "try" : "tries") · \(lane.rawValue)"
+        return "\(bare) · \(result) · \(size) · \(String(format: "%.1f", seconds)) s · \(attempts) \(attempts == 1 ? "try" : "tries") · \(lane.rawValue)\(tail)"
     }
 
     /// "306·a1b2": the line, "·", the last 4 characters of the trip id.

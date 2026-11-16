@@ -64,10 +64,12 @@ final class GoStore: ObservableObject {
 
     /// Open the screen and start watching the way to `d`.
     /// `seed`: trips from where you are that the home screen just found: on screen at once, then looked up again.
-    func open(to d: Place, from loc: CLLocation?, deadline dl: Date? = nil, label: String? = nil, autoKey: String? = nil, seed: [DoorTrip] = []) {
+    /// `planKey`: it's for a trip you planned (`schoolKey`, `arriveKey`), opened by hand or by itself: once it's closed,
+    /// it doesn't open by itself for that trip again.
+    func open(to d: Place, from loc: CLLocation?, deadline dl: Date? = nil, label: String? = nil, planKey: String? = nil, seed: [DoorTrip] = []) {
         fallback = loc
         self.seed = dl == nil ? seed : []
-        deadline = dl; deadlineLabel = label; self.autoKey = autoKey
+        deadline = dl; deadlineLabel = label; self.planKey = planKey
         isOpen = true
         begin(d)
     }
@@ -75,13 +77,17 @@ final class GoStore: ObservableObject {
     /// A trip you planned (a class, a Be there by time): be there by this, leaving as late as possible.
     @Published private(set) var deadline: Date?
     @Published private(set) var deadlineLabel: String?     // "your 09:00 class"
-    private var autoKey: String?                             // opened by itself for this trip: closing it means not again
+    private var planKey: String?                             // opened for this planned trip: closing it means not by itself again
+
+    /// The planned trips' keys: your first class that day, and a Be there by (or Leave at) plan.
+    static func schoolKey(_ classStart: Date) -> String { "school-\(Fmt.ymd.string(from: classStart))" }
+    static func arriveKey(_ a: PlannedTrip) -> String { "arrive-\(a.date)-\(a.time)\(a.leaving ? "-leave" : "")" }
 
     /// The app opened around the time to leave for a trip you planned: open this screen for it (once; not again after you
     /// close it).
     func openForPlan(to d: Place, from loc: CLLocation?, deadline dl: Date?, label: String?, key: String) {
         guard !isOpen, UserDefaults.standard.string(forKey: "go.closedPlan") != key else { return }
-        open(to: d, from: loc, deadline: dl, label: label, autoKey: key)
+        open(to: d, from: loc, deadline: dl, label: label, planKey: key)
     }
 
     /// Somewhere else to go (from the menu at the top).
@@ -94,8 +100,8 @@ final class GoStore: ObservableObject {
     /// Out of the screen: everything stops, and its notifications go.
     func close() {
         stopWatching()
-        if let k = autoKey { UserDefaults.standard.set(k, forKey: "go.closedPlan") }
-        autoKey = nil; deadline = nil; deadlineLabel = nil
+        if let k = planKey { UserDefaults.standard.set(k, forKey: "go.closedPlan") }
+        planKey = nil; deadline = nil; deadlineLabel = nil
         isOpen = false
         clearPosted()
         demoTask?.cancel(); demoTask = nil

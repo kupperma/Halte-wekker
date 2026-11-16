@@ -44,6 +44,7 @@ final class LiveStore: ObservableObject {
     private var loadedFor: String?             // the direction, where you're going and where from
     private var loadedKey: PlanKey?            // the same, in parts
     private var busy = false
+    private var refreshes = 0                  // refreshes begun: only the newest one, when it ends, says it's not busy
     private var lastPanels = Date.distantPast
     private var nextAt: Date?                  // when the trips shown came in
     private var panelsFor: Direction?          // the direction the lists per leg are for
@@ -436,7 +437,10 @@ final class LiveStore: ObservableObject {
         let moved = from.flatMap { f in plannedFrom.map { f.distance(from: $0) > 300 } } ?? false
         if !force, !moved, loadedFor == key, let u = updated, Date().timeIntervalSince(u) < 60 { return }
         busy = true; loadedFor = key; loadedKey = plan; here = from
-        defer { busy = false }
+        // (an older one, for a key it switched away from, ending first mustn't let the same refresh start twice)
+        refreshes += 1
+        let mine = refreshes
+        defer { if refreshes == mine { busy = false } }
         // the boards around you load at the same time as your trip (they used to wait for it), and so do the lists per
         // leg, each shown as soon as it's in (stopped when you've switched to somewhere else before your trip is in)
         async let boards: Void = loadNearIfAny(from)

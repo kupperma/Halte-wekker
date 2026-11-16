@@ -27,6 +27,11 @@ final class FieldLogTests: XCTestCase {
                        "/v5/trip · timed out · 0 B · 15.0 s · 1 try · background")
         XCTAssertEqual(FieldFormat.net("/ns/departures", lane: .background, status: 503, error: nil, bytes: 512, seconds: 0.4, attempts: 2),
                        "/ns/departures · 503 · 512 B · 0.4 s · 2 tries · background")
+        // a request a pause turned away (never sent), and one that shared another's answer
+        XCTAssertEqual(FieldFormat.net("/v6/stoptimes", lane: .background, status: nil, error: nil, bytes: 0, seconds: 0, attempts: 0, note: "cooling down"),
+                       "/v6/stoptimes · cooling down · 0 B · 0.0 s · 0 tries · background")
+        XCTAssertEqual(FieldFormat.net("/v6/stoptimes", lane: .background, status: 200, error: nil, bytes: 2048, seconds: 0.1, attempts: 1, note: "shared"),
+                       "/v6/stoptimes · 200 · 2.0 KB · 0.1 s · 1 try · background · shared")
         func text(_ c: URLError.Code) -> String {
             FieldFormat.net("/x", lane: .urgent, status: nil, error: c, bytes: 0, seconds: 1, attempts: 1)
         }

@@ -38,7 +38,8 @@ struct RootView: View {
                     withAnimation(.easeInOut(duration: 0.35)) { morning.showing = false }
                     if trip.phase == .idle {
                         if trip.direction != .toSchool { trip.pick(.toSchool) }
-                        go.open(to: .buas, from: trip.lastFix, deadline: p.beThere, label: "your \(Fmt.hhmm(p.classStart)) class")
+                        go.open(to: .buas, from: trip.lastFix, deadline: p.beThere, label: "your \(Fmt.hhmm(p.classStart)) class",
+                                planKey: GoStore.schoolKey(p.classStart))
                     }
                 })
                 .transition(.opacity)
@@ -161,7 +162,10 @@ struct HomeView: View {
         }
         .animation(.easeInOut(duration: 0.3), value: trip.toast)
         .onChange(of: stage) { _, s in Handoff.fromBoards = s == .station }
-        .onChange(of: near.position?.coordinate.latitude) { _, _ in Task { await live.refresh(trip.direction, at: near.position) } }
+        .onChange(of: near.position?.coordinate.latitude) { _, _ in
+            guard !goStore.isOpen else { return }            // (on its way out: Fastest trip has the screen)
+            Task { await live.refresh(trip.direction, at: near.position) }
+        }
         .sheet(item: $walkTo) { WalkMapSheet(target: $0).presentationDetents([.large]) }
         .sheet(item: $liveTrack) { LiveBusSheet(target: $0).presentationDetents([.large]) }
         .sheet(isPresented: $showMoving) { LiveAllSheet(center: near.position?.coordinate ?? Place.breda.coordinate).presentationDetents([.large]) }
@@ -238,17 +242,23 @@ struct HomeView: View {
             if s == .active {
                 trip.appBecameActive()
                 autoGo()
-                Task { await live.refresh(trip.direction) }
+                // Fastest trip just opened by itself: the home screen is on its way out and asks nothing now. Else the
+                // same questions the loops ask (from where you are now), so a loop that's asking right now (it just
+                // appeared) and this are one question, not two.
+                guard !goStore.isOpen else { return }
+                Task { await live.refresh(trip.direction, at: near.position) }
                 Task { await planner.refresh() }
                 Task { await watch.check(force: true) }
             }
         }
     }
 
-    /// `step` now and every 30 s after, while the app is in front, until the task is cancelled.
+    /// `step` now and every 30 s after, while the app is in front, until the task is cancelled. Not while Fastest trip
+    /// is open: then the home screen is on its way out (a direction picked for the planned trip right before restarts
+    /// these loops), and what it asked would only be cancelled.
     private func everyHalfMinute(_ step: () async -> Void) async {
         while !Task.isCancelled {
-            if scene == .active { await step() }
+            if scene == .active && !goStore.isOpen { await step() }
             try? await Task.sleep(nanoseconds: 30_000_000_000)
         }
     }
@@ -299,7 +309,7 @@ struct HomeView: View {
             if trip.direction != .toSchool { trip.pick(.toSchool) }
             withAnimation(.easeInOut(duration: 0.35)) {
                 goStore.openForPlan(to: .buas, from: near.position, deadline: n.beThere, label: "your \(Fmt.hhmm(n.classStart)) class",
-                                    key: "school-\(Fmt.ymd.string(from: n.classStart))")
+                                    key: GoStore.schoolKey(n.classStart))
             }
             return
         }
@@ -310,20 +320,25 @@ struct HomeView: View {
             withAnimation(.easeInOut(duration: 0.35)) {
                 goStore.openForPlan(to: a.out ? .buas : .veghel, from: near.position, deadline: a.leaving ? nil : T,
                                     label: a.leaving ? nil : "\(a.out ? "BUas" : "home") by \(a.time)",
-                                    key: "arrive-\(a.date)-\(a.time)\(a.leaving ? "-leave" : "")")
+                                    key: GoStore.arriveKey(a))
             }
         }
     }
 
-    /// Hands-free now, for the school alarm's trip or the Be there by plan.
+    /// Hands-free now, for the school alarm's trip or the Be there by plan. (With the plan's key, as `autoGo` opens it:
+    /// once you close it, it doesn't open again by itself for that trip.)
     private func openPlanGo(school: Bool) {
         if school, let n = SchoolAlarm.shared.next {
             if trip.direction != .toSchool { trip.pick(.toSchool) }
-            withAnimation(.easeInOut(duration: 0.35)) { goStore.open(to: .buas, from: near.position, deadline: n.beThere, label: "your \(Fmt.hhmm(n.classStart)) class") }
+            withAnimation(.easeInOut(duration: 0.35)) {
+                goStore.open(to: .buas, from: near.position, deadline: n.beThere, label: "your \(Fmt.hhmm(n.classStart)) class",
+                             planKey: GoStore.schoolKey(n.classStart))
+            }
         } else if let a = planner.arrive, let T = a.when {
             if trip.direction != (a.out ? .toSchool : .home) { trip.pick(a.out ? .toSchool : .home) }
             withAnimation(.easeInOut(duration: 0.35)) {
-                goStore.open(to: a.out ? .buas : .veghel, from: near.position, deadline: a.leaving ? nil : T, label: a.leaving ? nil : "\(a.out ? "BUas" : "home") by \(a.time)")
+                goStore.open(to: a.out ? .buas : .veghel, from: near.position, deadline: a.leaving ? nil : T,
+                             label: a.leaving ? nil : "\(a.out ? "BUas" : "home") by \(a.time)", planKey: GoStore.arriveKey(a))
             }
         }
     }
