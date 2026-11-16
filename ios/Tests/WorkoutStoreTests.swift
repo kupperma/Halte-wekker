@@ -5,6 +5,24 @@ private final class Clock {
     init(_ d: Date) { date = d }
 }
 
+/// Set inside a history rewrite off the main actor, read by the test.
+private final class Gate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var flag = false
+
+    var open: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return flag
+    }
+
+    func set() {
+        lock.lock()
+        flag = true
+        lock.unlock()
+    }
+}
+
 /// Every test has its own temporary folder and a clock it moves itself: never Application Support or the real time.
 /// XCTest makes a new object for every test, so both are new for each.
 @MainActor
@@ -93,6 +111,17 @@ final class WorkoutStoreTests: XCTestCase {
 
     private func index(_ a: ActiveWorkout, _ id: String) throws -> Int {
         try XCTUnwrap(a.workout.exercises.firstIndex { $0.exerciseId == id }, id)
+    }
+
+    private func setMode(_ path: String, _ mode: Int) throws {
+        try FileManager.default.setAttributes([.posixPermissions: mode], ofItemAtPath: url(path).path)
+    }
+
+    /// Root reads and writes any file, so those tests can't run as root.
+    private func skipUnlessDenied(_ path: String, write: Bool = false) throws {
+        let p = url(path).path
+        let allowed = write ? FileManager.default.isWritableFile(atPath: p) : FileManager.default.isReadableFile(atPath: p)
+        if allowed { throw XCTSkip("This user can \(write ? "write" : "read") any file.") }
     }
 
     // MARK: - Loading
@@ -228,6 +257,7 @@ final class WorkoutStoreTests: XCTestCase {
         if FileManager.default.isReadableFile(atPath: path) { throw XCTSkip("This user can read any file.") }
 
         let s = makeStore()
+        XCTAssertFalse(s.available)
         XCTAssertNil(s.exercise("custom-x"))
         XCTAssertFalse(names().contains { $0.contains("corrupt") })
         XCTAssertFalse(exists("state.json"))
@@ -239,8 +269,10 @@ final class WorkoutStoreTests: XCTestCase {
         XCTAssertFalse(exists("state.json"))
 
         try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: path)
-        s.moveUp("pull-up-ladder")
+        s.refresh()
+        XCTAssertTrue(s.available)
         XCTAssertEqual(s.exercise("custom-x"), own)
+        s.moveUp("pull-up-ladder")
         XCTAssertEqual(s.state.ladderSteps["pull-up-ladder"], 2)
         XCTAssertTrue(exists("state.json"))
         XCTAssertEqual(try Data(contentsOf: url("library.json")), before)
@@ -464,7 +496,8 @@ final class WorkoutStoreTests: XCTestCase {
         let second = try finishIncline(s, 26, 10, at: at(2026, 11, 12, 18))
         XCTAssertEqual(s.index.exercises["incline-db-press"]?.records.heaviest, 30)
 
-        await s.delete(first.id)
+        let deleted = await s.delete(first.id)
+        XCTAssertTrue(deleted)
         let x = try XCTUnwrap(s.index.exercises["incline-db-press"])
         XCTAssertEqual(x.records.heaviest, 26)
         XCTAssertEqual(x.last?.workoutId, second.id)
@@ -482,7 +515,8 @@ final class WorkoutStoreTests: XCTestCase {
         moved.start = at(2026, 12, 2, 10)
         moved.end = at(2026, 12, 2, 11)
         moved.note = "Verschoven"
-        await s.update(moved)
+        let updated = await s.update(moved)
+        XCTAssertTrue(updated)
         XCTAssertFalse(try month("2026-11").contains { $0.id == w.id })
         XCTAssertEqual(try month("2026-12"), [moved])
         XCTAssertEqual(s.index.workouts.map(\.start), [moved.start])
@@ -753,5 +787,295 @@ final class WorkoutStoreTests: XCTestCase {
         XCTAssertEqual(all.map(\.id), want.map(\.id) + [own.id])
         XCTAssertEqual(phone.index.workouts.count, 3)
         XCTAssertEqual(phone.active, running)
+    }
+
+    // MARK: - Saving safely
+
+    /// Ruling W-21: a month that can't be read or written saves nothing, and nothing else changes.
+    func test_finishNothingWhenMonthFails() throws {
+        let s = makeStore()
+        let first = try finishOne(s, ["push"], at: at(2026, 11, 12, 18))
+        clock.date = at(2026, 11, 15, 18)
+        s.start(["pull", "legs"])
+        XCTAssertTrue(s.completeNext())
+        let active = s.active, built = s.index, state = s.state, recent = s.recent
+        let current = try Data(contentsOf: url("current.json"))
+        func unchanged(line: UInt = #line) throws {
+            XCTAssertEqual(s.active, active, line: line)
+            XCTAssertEqual(s.index, built, line: line)
+            XCTAssertEqual(s.state, state, line: line)
+            XCTAssertEqual(s.recent, recent, line: line)
+            XCTAssertEqual(try Data(contentsOf: url("current.json")), current, line: line)
+            XCTAssertEqual(try month("2026-11").map(\.id), [first.id], line: line)
+        }
+
+        try setMode("history/2026-11.json", 0)
+        defer { try? setMode("history/2026-11.json", 0o644) }
+        try skipUnlessDenied("history/2026-11.json")
+        XCTAssertNil(s.finish(note: ""))
+        try setMode("history/2026-11.json", 0o644)
+        try unchanged()
+
+        try setMode("history", 0o555)
+        defer { try? setMode("history", 0o755) }
+        try skipUnlessDenied("history", write: true)
+        XCTAssertNil(s.finish(note: ""))
+        try setMode("history", 0o755)
+        try unchanged()
+
+        let w = try XCTUnwrap(s.finish(note: ""))
+        XCTAssertEqual(try month("2026-11").map(\.id), [first.id, w.id])
+        XCTAssertEqual(s.index.workouts.map(\.id), [first.id, w.id])
+        XCTAssertEqual(s.state.firstLegsDay, "2026-11-15")
+        XCTAssertNil(s.active)
+    }
+
+    /// A running workout that can't be read yet is neither finished nor lost; `refresh()` brings it back.
+    func test_finishUnreadableCurrent() throws {
+        let s = makeStore()
+        s.start(["push"])
+        XCTAssertTrue(s.completeNext())
+        let running = try XCTUnwrap(s.active)
+        let bytes = try Data(contentsOf: url("current.json"))
+        try setMode("current.json", 0)
+        defer { try? setMode("current.json", 0o644) }
+        try skipUnlessDenied("current.json")
+
+        let t = makeStore()
+        XCTAssertFalse(t.available)
+        XCTAssertNil(t.active)
+        XCTAssertNil(t.finish(note: ""))
+        XCTAssertFalse(t.completeNext())
+        XCTAssertFalse(exists("history/2026-11.json"))
+        try setMode("current.json", 0o644)
+        XCTAssertEqual(try Data(contentsOf: url("current.json")), bytes)
+        XCTAssertFalse(names().contains { $0.contains("corrupt") })
+
+        t.refresh()
+        XCTAssertTrue(t.available)
+        XCTAssertEqual(t.active, running)
+        let w = try XCTUnwrap(t.finish(note: ""))
+        XCTAssertEqual(try month("2026-11"), [w])
+        XCTAssertEqual(t.index.workouts.map(\.id), [w.id])
+    }
+
+    /// After a crash before current.json was gone, finishing again keeps one copy, in the month and in the index.
+    func test_finishAgainAfterCrash() throws {
+        let s = makeStore()
+        s.start(["push"])
+        XCTAssertTrue(s.completeNext())
+        let current = try Data(contentsOf: url("current.json"))
+        let emptyIndex = try Data(contentsOf: url("index.json"))
+        let w = try XCTUnwrap(s.finish(note: ""))
+
+        try current.write(to: url("current.json"))
+        let again = makeStore()
+        XCTAssertEqual(again.active?.workout.id, w.id)
+        XCTAssertEqual(again.finish(note: "")?.id, w.id)
+        XCTAssertEqual(try month("2026-11").map(\.id), [w.id])
+        XCTAssertEqual(again.index.workouts.map(\.id), [w.id])
+
+        // And before index.json was written too.
+        try current.write(to: url("current.json"))
+        try emptyIndex.write(to: url("index.json"))
+        let third = makeStore()
+        XCTAssertTrue(third.index.workouts.isEmpty)
+        XCTAssertEqual(third.finish(note: "")?.id, w.id)
+        XCTAssertEqual(try month("2026-11").map(\.id), [w.id])
+        XCTAssertEqual(third.index.workouts.map(\.id), [w.id])
+        XCTAssertEqual(makeStore().index, third.index)
+    }
+
+    /// Ruling W-22: rewrites run one after the other.
+    func test_concurrentDeletes() async throws {
+        let s = makeStore()
+        let a = try finishOne(s, ["push"], at: at(2026, 11, 10, 18))
+        let b = try finishOne(s, ["pull"], at: at(2026, 11, 11, 18))
+        let c = try finishOne(s, ["push"], at: at(2026, 11, 13, 18))
+        async let first = s.delete(a.id)
+        async let second = s.delete(b.id)
+        let done = await (first, second)
+        XCTAssertTrue(done.0)
+        XCTAssertTrue(done.1)
+        XCTAssertEqual(try month("2026-11").map(\.id), [c.id])
+        XCTAssertEqual(s.index.workouts.map(\.id), [c.id])
+        XCTAssertEqual(s.recent.map(\.id), [c.id])
+        XCTAssertEqual(makeStore().index, s.index)
+    }
+
+    /// Ruling W-22: a finish while a rewrite has read the months waits for its writes, and the rewrite then reads the
+    /// files again instead of publishing its older snapshot.
+    func test_finishDuringSlowRewrite() async throws {
+        let s = makeStore()
+        let a = try finishOne(s, ["push"], at: at(2026, 11, 12, 18))
+        let b = try finishOne(s, ["pull"], at: at(2026, 11, 13, 18))
+        clock.date = at(2026, 11, 15, 18)
+        s.start(["push"])
+        XCTAssertTrue(s.completeNext())
+
+        let reading = Gate()
+        s.rewritePause = {
+            reading.set()
+            Thread.sleep(forTimeInterval: 0.3)
+        }
+        let deleting = Task { await s.delete(a.id) }
+        while !reading.open { try await Task.sleep(nanoseconds: 5_000_000) }
+        let c = try XCTUnwrap(s.finish(note: ""))
+        let deleted = await deleting.value
+        s.rewritePause = nil
+        XCTAssertTrue(deleted)
+        XCTAssertEqual(try month("2026-11").map(\.id), [b.id, c.id])
+        XCTAssertEqual(s.index.workouts.map(\.id), [b.id, c.id])
+        XCTAssertEqual(s.recent.map(\.id), [b.id, c.id])
+        XCTAssertEqual(makeStore().index, s.index)
+    }
+
+    /// Ruling W-21: update, delete and restore say so when the history can't be read or written.
+    func test_rewriteFailsLoudly() async throws {
+        let s = makeStore()
+        let a = try finishOne(s, ["push"], at: at(2026, 11, 12, 18))
+        let b = try finishOne(s, ["pull"], at: at(2026, 11, 13, 18))
+        let data = await s.backup()
+        var other = try JSONDecoder().decode(WorkoutBackup.self, from: data)
+        other.state.settings.restSound = false
+        let backup = try XCTUnwrap(WorkoutFiles.encode(other))
+        let built = s.index, recent = s.recent, library = s.library, state = s.state
+        var edited = a
+        edited.note = "Bewerkt"
+
+        try setMode("history/2026-11.json", 0)
+        defer { try? setMode("history/2026-11.json", 0o644) }
+        try skipUnlessDenied("history/2026-11.json")
+        let updated = await s.update(edited)
+        XCTAssertFalse(updated)
+        let deleted = await s.delete(b.id)
+        XCTAssertFalse(deleted)
+        do {
+            try await s.restore(backup)
+            XCTFail("restored")
+        } catch {
+            XCTAssertEqual(error as? WorkoutStoreError, .notSaved)
+        }
+        try setMode("history/2026-11.json", 0o644)
+        XCTAssertEqual(s.index, built)
+        XCTAssertEqual(s.recent, recent)
+        XCTAssertEqual(s.library, library)
+        XCTAssertEqual(s.state, state)
+        XCTAssertEqual(try month("2026-11").map(\.note), ["", ""])
+
+        try setMode("history", 0o555)
+        defer { try? setMode("history", 0o755) }
+        try skipUnlessDenied("history", write: true)
+        let stillThere = await s.delete(b.id)
+        XCTAssertFalse(stillThere)
+        try setMode("history", 0o755)
+        XCTAssertEqual(s.index, built)
+        XCTAssertEqual(try month("2026-11").map(\.id), [a.id, b.id])
+
+        let gone = await s.delete(b.id)
+        XCTAssertTrue(gone)
+        XCTAssertEqual(s.index.workouts.map(\.id), [a.id])
+    }
+
+    /// Ruling W-23: values built from the defaults shown before the first unlock are never saved.
+    func test_lockedSettersRefused() throws {
+        var saved = WorkoutState()
+        saved.settings.restSound = false
+        try put(saved, "state.json")
+        let own = Exercise(id: "custom-band-pull-apart", name: "Band pull-apart", custom: true)
+        try put(LibraryFile(exercises: WorkoutProgram.exercises + [own], ladders: WorkoutProgram.ladders), "library.json")
+        try put(RoutinesFile(routines: Array(WorkoutProgram.routines.prefix(2))), "routines.json")
+        let stateBytes = try Data(contentsOf: url("state.json"))
+        let routineBytes = try Data(contentsOf: url("routines.json"))
+        try setMode("library.json", 0)
+        try setMode("state.json", 0)
+        defer {
+            try? setMode("library.json", 0o644)
+            try? setMode("state.json", 0o644)
+        }
+        try skipUnlessDenied("library.json")
+
+        let s = makeStore()
+        XCTAssertFalse(s.available)
+        XCTAssertTrue(s.state.settings.restSound)
+        var seeded = s.state.settings
+        seeded.keepScreenOn = true
+        s.updateSettings(seeded)
+        s.saveRoutines(s.routines)
+        s.saveExercise(Exercise(id: "pull-up", name: "Pull-up"))
+        try setMode("state.json", 0o644)
+        XCTAssertEqual(try Data(contentsOf: url("state.json")), stateBytes)
+        XCTAssertEqual(try Data(contentsOf: url("routines.json")), routineBytes)
+
+        // Readable again, but this value was built from the defaults: still refused, and the store loads.
+        try setMode("library.json", 0o644)
+        s.updateSettings(seeded)
+        XCTAssertTrue(s.available)
+        XCTAssertFalse(s.state.settings.restSound)
+        XCTAssertFalse(s.state.settings.keepScreenOn)
+        XCTAssertEqual(try Data(contentsOf: url("state.json")), stateBytes)
+        XCTAssertEqual(s.routines.count, 2)
+        XCTAssertEqual(s.exercise("pull-up")?.primary, [.lats])
+
+        var real = s.state.settings
+        real.keepScreenOn = true
+        s.updateSettings(real)
+        XCTAssertEqual(makeStore().state.settings, real)
+
+        // A new exercise made just as the files become readable gets an id that is free in the real library.
+        try setMode("library.json", 0)
+        let t = makeStore()
+        XCTAssertFalse(t.available)
+        try setMode("library.json", 0o644)
+        let made = t.newExercise(name: "Band pull-apart", kind: .bodyweight, equipment: .other)
+        XCTAssertEqual(made.id, "custom-band-pull-apart-2")
+        XCTAssertEqual(makeStore().exercise(made.id), made)
+        XCTAssertEqual(makeStore().exercise(own.id), own)
+    }
+
+    /// Ruling W-24: records depend on the kind, so a new kind rebuilds the index.
+    func test_saveExerciseKindRebuilds() async throws {
+        let s = makeStore()
+        s.bodyWeight = { _ in 80 }
+        try finishIncline(s, 26, 10, at: at(2026, 11, 12, 18))
+        XCTAssertEqual(s.index.exercises["incline-db-press"]?.records.heaviest, 26)
+        var e = try XCTUnwrap(s.exercise("incline-db-press"))
+        e.kind = .weighted
+        s.saveExercise(e)
+        await s.waitForHistory()
+        XCTAssertEqual(s.index.exercises["incline-db-press"]?.records.heaviest, 106)
+        XCTAssertEqual(makeStore().index, s.index)
+    }
+
+    /// Ruling W-24: a workout that isn't the newest any more (a restore or an import while it ran) rebuilds the index.
+    func test_finishOlderThanLastRebuilds() async throws {
+        let s = makeStore()
+        clock.date = at(2026, 11, 10, 18)
+        s.start(["push"])
+        let a = try XCTUnwrap(s.active)
+        let i = try index(a, "incline-db-press")
+        let j = try XCTUnwrap(a.workout.exercises[i].sets.firstIndex { $0.kind != .warmup })
+        s.complete(SessionCursor(exercise: i, set: j), kg: 26, reps: 8, seconds: nil)
+        let newer = inclinePush(30, 8, at: at(2026, 11, 12, 18))
+        let added = await s.update(newer)
+        XCTAssertTrue(added)
+
+        clock.date = at(2026, 11, 10, 19)
+        let w = try XCTUnwrap(s.finish(note: ""))
+        XCTAssertEqual(s.index.workouts.map(\.id), [w.id, newer.id])
+        XCTAssertEqual(s.index.exercises["incline-db-press"]?.recent.map(\.day), ["2026-11-10", "2026-11-12"])
+        XCTAssertEqual(s.index, WorkoutIndex.build([w, newer], library: s.library))
+    }
+
+    /// Ruling W-24: an exercise added during a deload has a third fewer sets too.
+    func test_addExerciseDuringDeload() throws {
+        let s = makeStore()
+        s.startDeload()
+        s.start(["push"])
+        s.addExercise("lat-pulldown")
+        let e = try XCTUnwrap(s.active?.workout.exercises.last)
+        XCTAssertEqual(e.exerciseId, "lat-pulldown")
+        XCTAssertEqual(e.target?.sets, 2)
+        XCTAssertEqual(e.sets.filter { $0.kind != .warmup }.count, 2)
     }
 }

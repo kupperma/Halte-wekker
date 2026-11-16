@@ -12,7 +12,8 @@ struct WorkoutBackup: Codable {
     var workouts: [Workout]
 }
 
-enum WorkoutStoreError: Error, Equatable { case notABackup }
+/// `notSaved`: the history couldn't be read or written (a restore), so the backup is not on the phone.
+enum WorkoutStoreError: Error, Equatable { case notABackup, notSaved }
 
 // MARK: - The files
 
@@ -92,8 +93,54 @@ struct WorkoutFiles {
         }
     }
 
-    func writeMonth(_ m: String, _ workouts: [Workout]) {
+    @discardableResult
+    func writeMonth(_ m: String, _ workouts: [Workout]) -> Bool {
         write(MonthFile(month: m, workouts: WorkoutFiles.ordered(workouts)), to: month(m))
+    }
+
+    /// index.json, or no index at all when it can't be written: a missing one is rebuilt at the next start, a stale
+    /// one would stay.
+    func writeIndex(_ value: WorkoutIndex) {
+        if !write(value, to: index) { remove(index) }
+    }
+
+    /// The index from every month file, written; nil when a month can't be read.
+    func rebuildIndex(stamp: Date, library: [Exercise]) -> WorkoutIndex? {
+        let all = readAllMonths(stamp: stamp)
+        guard all.complete else { return nil }
+        let built = WorkoutIndex.build(all.months.values.flatMap { $0 }, library: library)
+        writeIndex(built)
+        return built
+    }
+
+    /// Every month file, changed by `change`: the changed months written, then the index rebuilt from all of them and
+    /// written. A month that gains a workout is written before one that only loses some, so a workout that moves is
+    /// never in neither. nil, and nothing more written, as soon as a month can't be read or written; after a month
+    /// was written, index.json then goes, so the next start rebuilds it from the months.
+    func rewrite(stamp: Date, library: [Exercise], pause: (() -> Void)?,
+                 _ change: (inout [String: [Workout]]) -> Void) -> WorkoutIndex? {
+        let read = readAllMonths(stamp: stamp)
+        guard read.complete else { return nil }
+        pause?()
+        var changed = read.months
+        change(&changed)
+        for k in Array(changed.keys) { changed[k] = WorkoutFiles.ordered(changed[k] ?? []) }
+        let months = changed
+        func onlyLoses(_ k: String) -> Bool {
+            Set((months[k] ?? []).map(\.id)).isStrictSubset(of: Set((read.months[k] ?? []).map(\.id)))
+        }
+        let touched = months.keys.filter { read.months[$0] != months[$0] }.sorted()
+        var wrote = false
+        for k in touched.filter({ !onlyLoses($0) }) + touched.filter(onlyLoses) {
+            guard writeMonth(k, months[k] ?? []) else {
+                if wrote { remove(index) }
+                return nil
+            }
+            wrote = true
+        }
+        let built = WorkoutIndex.build(months.values.flatMap { $0 }, library: library)
+        writeIndex(built)
+        return built
     }
 
     /// Every month file. A corrupt one is renamed and skipped; `complete` is false when one couldn't be read.
@@ -140,13 +187,28 @@ struct WorkoutFiles {
     }
 }
 
+/// One history write at a time: a finish on the main actor, or a rewrite off it.
+final class HistoryLock: @unchecked Sendable {
+    private let lock = NSLock()
+
+    func run<T>(_ body: () throws -> T) rethrows -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return try body()
+    }
+}
+
 // MARK: - The store
 
 /// The library, the routines, the state, the index and the running workout, in JSON files: one per month for the
 /// history. Every action writes only the files it changed.
 ///
 /// A file that exists but can't be read (before the first unlock after a restart) is never renamed or written over:
-/// the store then changes nothing until a later action finds every file readable and loads them.
+/// `available` is false and the store saves nothing until `refresh()` (or any action) finds every file readable.
+///
+/// History rewrites (update, delete, restore, import) run one after the other, off the main actor. A finish takes the
+/// same lock for its month, and a rewrite that sees a finish happened while it ran reads the files again rather than
+/// publishing its older snapshot.
 @MainActor
 final class WorkoutStore: ObservableObject {
     static let shared = WorkoutStore()
@@ -168,13 +230,24 @@ final class WorkoutStore: ObservableObject {
     @Published private(set) var active: ActiveWorkout?
     /// The workouts of the months that hold today − 20 … today, oldest first.
     @Published private(set) var recent: [Workout]
+    /// False while a file can't be read (a start before the first unlock): what was in that file shows the program's
+    /// defaults, and nothing is saved.
+    @Published private(set) var available: Bool
+
+    /// Tests only: runs inside a history rewrite, right after the months are read.
+    var rewritePause: (@Sendable () -> Void)?
 
     private let files: WorkoutFiles
     private let now: () -> Date
     /// The month files read so far: the recent ones.
     private var months: [String: [Workout]]
-    /// A file couldn't be read: nothing is written until every file can be.
-    private var locked: Bool
+    private let historyLock = HistoryLock()
+    /// The last history rewrite asked for; each one waits for the one before.
+    private var historyTask: Task<Bool, Never>?
+    private var pendingRewrites = 0
+    /// Bumped by every month write outside a rewrite (a finish), so a rewrite knows its snapshot is older.
+    private var generation = 0
+    private var locked: Bool { !available }
 
     init(directory: URL = WorkoutStore.defaultDirectory, now: @escaping () -> Date = Date.init) {
         let files = WorkoutFiles(root: directory)
@@ -189,7 +262,12 @@ final class WorkoutStore: ObservableObject {
         self.active = l.active
         self.recent = l.recent
         self.months = l.months
-        self.locked = l.locked
+        self.available = !l.locked
+    }
+
+    /// Reads every file again when one couldn't be read. The app calls it when it becomes active.
+    func refresh() {
+        if locked { reload() }
     }
 
     // MARK: - Reading
@@ -321,10 +399,13 @@ final class WorkoutStore: ObservableObject {
 
     /// At the end, with the target (and warm-ups) of its first place in the routines, else a ladder step's, else
     /// 3 × 8–12 (3 × 20–40 s for a hold, 1 for cardio).
+    /// During a deload it has a third fewer sets, as the planned ones.
     func addExercise(_ id: String) {
         let planned = plannedTarget(id)
+        var target = planned.target
+        if state.deload.active { target.sets = Deload.sets(target.sets) }
         change { a in
-            let made = Session.makeExercise(exerciseId: id, ladderId: nil, routineId: nil, target: planned.target,
+            let made = Session.makeExercise(exerciseId: id, ladderId: nil, routineId: nil, target: target,
                                             warmup: planned.warmup, planInput())
             a.workout.exercises.append(made.exercise)
             a.previous[made.exercise.id.uuidString] = made.previous
@@ -422,33 +503,41 @@ final class WorkoutStore: ObservableObject {
     }
 
     /// Saves the done sets: the month file, the index and the state, and current.json goes. nil when no hard set is
-    /// done (Ruling W-19): then nothing is written and the workout keeps running.
+    /// done (Ruling W-19), or when the month can't be read or written: then nothing else is touched and the workout
+    /// keeps running, current.json as it was.
     @discardableResult
     func finish(note: String, end: Date? = nil) -> Workout? {
         guard writable(), let a = active, let w = Session.finished(a, end: end ?? now(), note: note) else { return nil }
-        let m = w.month
-        var list: [Workout]
-        if let cached = months[m] {
-            list = cached
-        } else {
-            switch files.readMonth(m, stamp: now()) {
+        let m = w.month, stamp = now(), files = self.files, library = self.library
+        // Built again from the files when the workout can't simply go at the end: saved already (a crash before
+        // current.json went), not the newest (an import or restore while it ran), or a rewrite still running.
+        let rebuild = pendingRewrites > 0 || index.workouts.contains { $0.id == w.id }
+            || index.workouts.last.map { w.start <= $0.start } == true
+        var next = index
+        // The month is read again rather than taken from memory: a rewrite may just have changed it.
+        let saved: [Workout]? = historyLock.run {
+            var list: [Workout]
+            switch files.readMonth(m, stamp: stamp) {
             case .ok(let l): list = l
             case .missing, .corrupt: list = []
             case .unreadable: return nil
             }
+            // The same id again only after a crash before current.json was gone: it replaces the first.
+            list.removeAll { $0.id == w.id }
+            list.append(w)
+            guard files.writeMonth(m, list) else { return nil }
+            if rebuild, let built = files.rebuildIndex(stamp: stamp, library: library) {
+                next = built
+            } else {
+                next.add(w, library: library)
+                files.writeIndex(next)
+            }
+            return WorkoutFiles.ordered(list)
         }
-        // The same id again only after a crash before current.json was gone: it replaces the first.
-        list.removeAll { $0.id == w.id }
-        list.append(w)
-        files.writeMonth(m, list)
-        months[m] = WorkoutFiles.ordered(list)
-
-        if index.workouts.contains(where: { $0.id == w.id }) {
-            index = WorkoutIndex.build(files.readAllMonths(stamp: now()).months.values.flatMap { $0 }, library: library)
-        } else {
-            index.add(w, library: library)
-        }
-        saveIndex()
+        guard let saved else { return nil }
+        generation += 1
+        index = next
+        months[m] = saved
 
         if w.routineIds.contains("legs"), state.firstLegsDay == nil { state.firstLegsDay = w.day }
         if state.deload.active { Deload.finished(&state.deload, routineIds: w.routineIds, day: w.day) }
@@ -484,17 +573,20 @@ final class WorkoutStore: ObservableObject {
         }.value
     }
 
-    /// Replaces the workout with the same id (it may move to another month), then rebuilds the index.
-    func update(_ w: Workout) async {
+    /// Replaces the workout with the same id (it may move to another month), then rebuilds the index. False when the
+    /// history couldn't be read or written: the index and the screens stay as they were.
+    @discardableResult
+    func update(_ w: Workout) async -> Bool {
         let m = w.month
-        await rewriteHistory { months in
+        return await rewriteHistory { months in
             for k in Array(months.keys) { months[k]?.removeAll { $0.id == w.id } }
             months[m, default: []].append(w)
         }
     }
 
-    /// Then rebuilds the index, so no record or "last time" points at it any more.
-    func delete(_ id: UUID) async {
+    /// Then rebuilds the index, so no record or "last time" points at it any more. False as for `update`.
+    @discardableResult
+    func delete(_ id: UUID) async -> Bool {
         await rewriteHistory { months in
             for k in Array(months.keys) { months[k]?.removeAll { $0.id == id } }
         }
@@ -550,38 +642,45 @@ final class WorkoutStore: ObservableObject {
         saveState()
     }
 
+    /// Refused while the store shows defaults: the routines handed in were built from them.
     func saveRoutines(_ r: [Routine]) {
-        guard writable() else { return }
+        guard writableWithRealData() else { return }
         routines = r
         saveRoutineFile()
     }
 
-    /// Replaces the exercise with its id, or adds it.
+    /// Replaces the exercise with its id, or adds it. Records and session bests depend on its kind, so a new kind
+    /// rebuilds the index. Refused while the store shows defaults.
     func saveExercise(_ e: Exercise) {
-        guard writable() else { return }
+        guard writableWithRealData() else { return }
+        let kindChanged = exercise(e.id).map { $0.kind != e.kind } ?? false
         if let i = library.firstIndex(where: { $0.id == e.id }) {
             library[i] = e
         } else {
             library.append(e)
         }
         saveLibrary()
+        if kindChanged { scheduleRewrite { _ in } }
     }
 
     /// A custom exercise with id "custom-" + slug(name), "-2", "-3" … when that is taken.
     func newExercise(name: String, kind: ExerciseKind, equipment: Equipment) -> Exercise {
+        // First, so the id is unique in the real library.
+        let ok = writable()
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let slug = WorkoutProgram.slug(trimmed)
         let id = Self.unique("custom-" + (slug.isEmpty ? "exercise" : slug), taken: Set(library.map(\.id)))
         let e = Exercise(id: id, name: trimmed.isEmpty ? "Exercise" : trimmed, equipment: equipment, kind: kind,
                          custom: true)
-        guard writable() else { return e }
+        guard ok else { return e }
         library.append(e)
         saveLibrary()
         return e
     }
 
+    /// Refused while the store shows defaults: the settings handed in were built from them.
     func updateSettings(_ s: WorkoutSettings) {
-        guard writable() else { return }
+        guard writableWithRealData() else { return }
         state.settings = s
         saveState()
     }
@@ -599,7 +698,8 @@ final class WorkoutStore: ObservableObject {
     }
 
     /// Adds the backup's workouts (one with the same id is replaced; nothing is deleted) and takes its exercises,
-    /// ladders, routines and state. The running workout stays as it is.
+    /// ladders, routines and state. The running workout stays as it is. Throws `.notSaved` when the history can't be
+    /// read or written; then the library, routines and state stay as they were.
     func restore(_ data: Data) async throws {
         let b = try await Task.detached(priority: .userInitiated) { () throws -> WorkoutBackup in
             do {
@@ -608,22 +708,32 @@ final class WorkoutStore: ObservableObject {
                 throw WorkoutStoreError.notABackup
             }
         }.value
-        guard writable() else { return }
+        guard writable() else { throw WorkoutStoreError.notSaved }
         // Exercises and ladders only on this phone stay, because workouts here may use them.
         let exerciseIds = Set(b.exercises.map(\.id))
-        library = b.exercises + library.filter { !exerciseIds.contains($0.id) }
+        let newLibrary = b.exercises + library.filter { !exerciseIds.contains($0.id) }
         let ladderIds = Set(b.ladders.map(\.id))
-        ladders = b.ladders + ladders.filter { !ladderIds.contains($0.id) }
-        routines = b.routines
-        state = b.state
-        saveLibrary()
-        saveRoutineFile()
-        saveState()
+        let newLadders = b.ladders + ladders.filter { !ladderIds.contains($0.id) }
         let incoming = b.workouts
-        await rewriteHistory { months in
+        let merged = await rewriteHistory(library: newLibrary) { months in
             let ids = Set(incoming.map(\.id))
             for k in Array(months.keys) { months[k]?.removeAll { ids.contains($0.id) } }
             for w in incoming { months[w.month, default: []].append(w) }
+        }
+        guard merged else { throw WorkoutStoreError.notSaved }
+        library = newLibrary
+        ladders = newLadders
+        routines = b.routines
+        state = b.state
+        let saved = [saveLibrary(), saveRoutineFile(), saveState()]
+        guard !saved.contains(false) else { throw WorkoutStoreError.notSaved }
+    }
+
+    /// Waits until the history rewrites asked for so far are done.
+    func waitForHistory() async {
+        while let t = historyTask {
+            _ = await t.value
+            if historyTask == t { return }
         }
     }
 
@@ -639,27 +749,52 @@ final class WorkoutStore: ObservableObject {
         saveCurrent()
     }
 
-    /// Off the main actor: every month file, changed by `change`, the changed ones written, and the index rebuilt from
-    /// all of them and written. Nothing is written when a month can't be read.
-    private func rewriteHistory(_ change: @escaping @Sendable (inout [String: [Workout]]) -> Void) async {
-        guard writable() else { return }
-        let files = self.files, stamp = now(), library = self.library
-        let wanted = WorkoutFiles.window(today: today)
-        let done = await Task.detached(priority: .userInitiated) { () -> (index: WorkoutIndex, recent: [String: [Workout]])? in
-            let read = files.readAllMonths(stamp: stamp)
-            guard read.complete else { return nil }
-            var months = read.months
-            change(&months)
-            for k in Array(months.keys) { months[k] = WorkoutFiles.ordered(months[k] ?? []) }
-            for (k, list) in months where read.months[k] != list { files.writeMonth(k, list) }
-            let index = WorkoutIndex.build(months.values.flatMap { $0 }, library: library)
-            files.write(index, to: files.index)
-            return (index, months.filter { wanted.contains($0.key) })
+    /// A history rewrite (`WorkoutFiles.rewrite`), after the ones asked for before it. False when the history couldn't
+    /// be read or written: then the index and `recent` stay as they were.
+    @discardableResult
+    private func rewriteHistory(library lib: [Exercise]? = nil,
+                                _ change: @escaping @Sendable (inout [String: [Workout]]) -> Void) async -> Bool {
+        await scheduleRewrite(library: lib, change).value
+    }
+
+    @discardableResult
+    private func scheduleRewrite(library lib: [Exercise]? = nil,
+                                 _ change: @escaping @Sendable (inout [String: [Workout]]) -> Void) -> Task<Bool, Never> {
+        let previous = historyTask
+        pendingRewrites += 1
+        let task = Task { () -> Bool in
+            _ = await previous?.value
+            let ok = await self.performRewrite(library: lib, change)
+            self.pendingRewrites -= 1
+            return ok
+        }
+        historyTask = task
+        return task
+    }
+
+    private func performRewrite(library lib: [Exercise]?,
+                                _ change: @escaping @Sendable (inout [String: [Workout]]) -> Void) async -> Bool {
+        guard writable() else { return false }
+        let files = self.files, stamp = now(), library = lib ?? self.library
+        let lock = historyLock, pause = rewritePause
+        var seen = generation
+        let written = await Task.detached(priority: .userInitiated) { () -> WorkoutIndex? in
+            lock.run { files.rewrite(stamp: stamp, library: library, pause: pause, change) }
         }.value
-        guard let done else { return }
-        index = done.index
-        months = done.recent
+        guard written != nil else { return false }
+        // A finish wrote a month meanwhile, so this snapshot is older than the files: they are read again. If that
+        // fails, the index the finish made stays.
+        var newest = written
+        while generation != seen, newest != nil {
+            seen = generation
+            newest = await Task.detached(priority: .userInitiated) { () -> WorkoutIndex? in
+                lock.run { files.rebuildIndex(stamp: stamp, library: library) }
+            }.value
+        }
+        if let newest { index = newest }
+        months = [:]
         publishRecent()
+        return true
     }
 
     /// Reads the months of the window that aren't read yet, and forgets the others.
@@ -678,8 +813,15 @@ final class WorkoutStore: ObservableObject {
 
     /// After a start before the first unlock, the files are read again as soon as they can be.
     private func writable() -> Bool {
-        if locked { reload() }
+        refresh()
         return !locked
+    }
+
+    /// For a setter handed a whole value built from what the store showed: refused when the store showed defaults as
+    /// the call came, even if the files can be read now.
+    private func writableWithRealData() -> Bool {
+        let wasLocked = locked
+        return writable() && !wasLocked
     }
 
     private func reload() {
@@ -692,13 +834,15 @@ final class WorkoutStore: ObservableObject {
         active = l.active
         recent = l.recent
         months = l.months
-        locked = l.locked
+        available = !l.locked
     }
 
-    private func saveLibrary() { files.write(LibraryFile(exercises: library, ladders: ladders), to: files.library) }
-    private func saveRoutineFile() { files.write(RoutinesFile(routines: routines), to: files.routines) }
-    private func saveState() { files.write(state, to: files.state) }
-    private func saveIndex() { files.write(index, to: files.index) }
+    @discardableResult
+    private func saveLibrary() -> Bool { files.write(LibraryFile(exercises: library, ladders: ladders), to: files.library) }
+    @discardableResult
+    private func saveRoutineFile() -> Bool { files.write(RoutinesFile(routines: routines), to: files.routines) }
+    @discardableResult
+    private func saveState() -> Bool { files.write(state, to: files.state) }
 
     private func saveCurrent() {
         if let a = active {
@@ -845,7 +989,7 @@ final class WorkoutStore: ObservableObject {
             if writeLibrary { files.write(LibraryFile(exercises: exercises, ladders: ladders), to: files.library) }
             if writeRoutines { files.write(RoutinesFile(routines: routines), to: files.routines) }
             if writeState { files.write(state, to: files.state) }
-            if all != nil { files.write(index, to: files.index) }
+            if all != nil { files.writeIndex(index) }
         }
         return Loaded(library: exercises, ladders: ladders, routines: routines, state: state, index: index,
                       active: active, recent: WorkoutFiles.ordered(wanted.flatMap { months[$0] ?? [] }),
