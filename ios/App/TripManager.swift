@@ -156,6 +156,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     /// The ride you said you're on for this leg ("I'm on it" before it knew which one): it holds against another one it
     /// sees that doesn't go where the leg goes, while you're on its road (`RideGuards.onOtherVehicle`).
     private var heldPick: String?
+    private var heldFromPlan = false                      // …made at a change from the planned one's road, not by you
     private var rideLogged: [String: Date] = [:]          // the field log's last ride line per thing, so a look doesn't repeat it
 
     var leg: Leg? { index < legs.count ? legs[index] : nil }
@@ -309,7 +310,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         default: tracked = true
         }
         phase = .sleeping
-        distance = nil; forceArrival = false; maxDistance = legSpan; legStartMetres = nil; heldPick = nil
+        distance = nil; forceArrival = false; maxDistance = legSpan; legStartMetres = nil; heldPick = nil; heldFromPlan = false
         legStart = Date()
         arrival = nil; next = nil; legArrival = nil; legFrom = nil; legTo = nil
         vehicle = v
@@ -413,14 +414,16 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { WatchStore.shared.showNext() }
     }
 
-    /// `held`: the ride you picked for it, which keeps holding on its road (see `heldPick`).
-    func nextLeg(vehicle v: Vehicle? = nil, backup: Int? = nil, stops: [TripStop]? = nil, how: String = "next leg by hand", held: String? = nil) {
+    /// `held`: the ride it holds on its road (see `heldPick`): one you picked, or (`fromPlan`) the planned one you're on
+    /// the road of at a change.
+    func nextLeg(vehicle v: Vehicle? = nil, backup: Int? = nil, stops: [TripStop]? = nil, how: String = "next leg by hand", held: String? = nil,
+                 fromPlan: Bool = false) {
         guard index + 1 < legs.count else { return }
         index += 1
         sound.startTrip()
         setBackup(backup ?? backupMinutes)
         beginLeg(vehicle: v, stops: stops, how: how)
-        if v == nil { heldPick = held }
+        if v == nil { heldPick = held; heldFromPlan = held != nil && fromPlan }
         pushActivity(force: true)
     }
 
@@ -714,9 +717,11 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     /// One look is enough when it's one of the departures it expected; otherwise it wants the same one twice.
     /// At a change (`forNextLeg`) it takes none until you're going and away from the stop you got off at, and never
     /// plans again from `gotOff`, the one you just got off (one that goes on to the next leg's stop it still takes).
-    /// One that doesn't go where the leg goes replaces the ride you said you're on (`heldPick`) only once you're
-    /// clearly off that one's road; otherwise the rest is planned again from it. A plan again it refused (its stop where
-    /// you are) is tried again after a minute. A look that comes back after you picked one by hand does nothing.
+    /// At a change, once you're going, on the road of the ride the next leg was planned with: that's its line, and the
+    /// next leg starts (no vehicle, its alarm armed), holding on that road. One that doesn't go where the leg goes
+    /// replaces the ride held (`heldPick`) only once you're clearly off that one's road; otherwise the rest is planned
+    /// again from it. A plan again refused (its stop where you are), or not to be had at a change, is tried again after
+    /// a minute while you're going. A look that comes back after you picked one by hand does nothing.
     private func startDetecting(forNextLeg: Bool = false, excluding gotOff: String? = nil) {
         detectTask?.cancel()
         detectTask = Task { [weak self] in
@@ -740,7 +745,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
                 // you came in on may still be moving: none until you're going and away from where you got off. (The
                 // planned one by its timetable still can, once you've clearly left: below.)
                 var ranked: [Match] = []
-                if !forNextLeg || self.goingFromChange() {
+                let gateOpen = !forNextLeg || self.goingFromChange()
+                if gateOpen {
                     // every kind: you can be on a train where it planned a bus (it'll plan again from it); the kind it
                     // planned comes first
                     ranked = await self.matchVehicles(mode: nil, excluding: rejected, planned: planned?.tripId, place: "detect")
@@ -749,6 +755,12 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
                 let kind = ranked.filter { mode == nil || $0.vehicle.isTrain == (mode == .train) }
                 guard var m = kind.first ?? ranked.first else {
                     lastBest = nil
+                    // At a change, going and away, none matched: on the planned one's road, that's its line (late, missed
+                    // and a later one, or none of them showing): the next leg, held on that road.
+                    if forNextLeg, gateOpen, let p = planned {
+                        if await self.startOnPlannedRoad(p) { return }
+                        guard !Task.isCancelled, !self.pickedByHand else { return }
+                    }
                     // No live match (some have no live position): the one it planned, once you've clearly left on it.
                     // (The matcher before your fixes span 20 s isn't "no match" but not sure yet: it waits, but a minute
                     // at most once you've clearly left: sparse GPS, on a train, may never give it enough fixes.)
@@ -793,6 +805,12 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
                         if m.vehicle.tripId == lastBest {
                             guard self.route?.isFixed == false else { rejected.insert(m.vehicle.tripId); lastBest = nil; continue }
                             if let t = retryAt[m.vehicle.tripId], t > Date() { lastBest = nil; continue }
+                            // At a change, on the planned one's road: that's its line (the next Intercity to Breda, where
+                            // the Den Bosch one on the track they share is what it sees): the next leg, held on that road.
+                            if forNextLeg, let p = planned, p.tripId != m.vehicle.tripId {
+                                if await self.startOnPlannedRoad(p) { return }
+                                guard !Task.isCancelled, !self.pickedByHand else { return }
+                            }
                             // The ride you said you're on holds while you're on its road: on a track two trains share
                             // (the Intercity to Breda and the one to Den Bosch, out of Eindhoven to Boxtel) until their
                             // roads part.
@@ -801,7 +819,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
                             if let p = held {
                                 if let look = await self.roadLook(of: p.tripId) { pickLooks.append(look) }
                                 guard !Task.isCancelled, !self.pickedByHand else { return }
-                                ruledOut = RideGuards.pickRuledOut(pickLooks, isTrain: p.isTrain)
+                                ruledOut = RideGuards.pickRuledOut(pickLooks, isTrain: p.isTrain, fromPlan: self.heldFromPlan)
                             }
                             switch RideGuards.onOtherVehicle(atChange: forNextLeg, picked: held != nil, ruledOut: ruledOut) {
                             case .keepPick:
@@ -815,15 +833,15 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
                                 if self.phase == .transfer { self.nextLeg(how: "next leg, on the picked one's road", held: held?.tripId) }
                                 return
                             case .replan:
-                                switch await self.replanOnto(m.vehicle, stops: stops) {
-                                case .done: return
-                                case .refused where !forNextLeg:
-                                    // its stop where you are just now: maybe in a minute (you may well be on it)
+                                let result = await self.replanOnto(m.vehicle, stops: stops)
+                                if result == .done { return }
+                                guard !Task.isCancelled, !self.pickedByHand else { return }
+                                // refused (its stop where you are just now), or not to be had at a change: again in a minute
+                                // while you're going (you may well be on it); standing (a bus at the bus station), not again
+                                if result == .refused || forNextLeg, RideGuards.movingNow(self.recentFixes, now: Date()) {
                                     retryAt[m.vehicle.tripId] = Date().addingTimeInterval(60); lastBest = nil
                                     continue
-                                case .refused, .failed: break
                                 }
-                                guard !Task.isCancelled, !self.pickedByHand else { return }
                             }
                             rejected.insert(m.vehicle.tripId); lastBest = nil
                         } else {
@@ -854,6 +872,16 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         if RideGuards.mayTakeAtChange(moving: RideGuards.movingNow(fixes, now: now), fromChangeStop: from) { return true }
         rideLog(FieldFormat.rideWait(moved: RideGuards.movedMetres(fixes, now: now), fromStop: from), once: "wait", every: 60)
         return false
+    }
+
+    /// At a change, going: one look at the planned one's road (`RideGuards.atChange`). On it, the next leg starts with
+    /// no vehicle, its alarm armed, the planned one held on that road (from the plan: it gives way off its road, or
+    /// after a minute of its road not to be had). True then.
+    private func startOnPlannedRoad(_ p: PlannedRide) async -> Bool {
+        guard let look = await roadLook(of: p.tripId), !Task.isCancelled, !pickedByHand, phase == .transfer,
+              RideGuards.atChange(plannedRoadMetres: look.metres, isTrain: p.isTrain) == .startNextLeg else { return false }
+        nextLeg(how: "next leg, on the planned one's road", held: p.tripId, fromPlan: true)
+        return true
     }
 
     /// One look at how far you are from a trip's road: your newest fix within 150 m of the last 30 s (none: no look),
@@ -1515,7 +1543,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         index = 0
         distance = nil; arrival = nil; next = nil; legArrival = nil; legFrom = nil; legTo = nil
         maxDistance = legSpan
-        legClosest = nil; awayLooked = false; legStartMetres = nil; heldPick = nil
+        legClosest = nil; awayLooked = false; legStartMetres = nil; heldPick = nil; heldFromPlan = false
         if phase == .awake { phase = .sleeping }
         Task { await loadUpcoming(force: true) }
     }

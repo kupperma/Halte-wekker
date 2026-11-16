@@ -12,6 +12,7 @@ enum RideGuards {
     static let awayFromChange = arriveM + startMargin   // and this far from the stop you got off at (past its arrival radius)
     static let pickOffRoadBus = 300.0, pickOffRoadTrain = 700.0
     static let pickLooksApart: TimeInterval = 20
+    static let planUnknownFor: TimeInterval = 60    // a hold from the plan: its road not to be had this long, it gives way
 
     /// A ride started without you whose (first) stop is where you are already: it would ring and say "You're at …" at
     /// once. `d`: metres from your fix to that stop; nil or not a number: nothing to go by (not refused).
@@ -55,11 +56,17 @@ enum RideGuards {
     /// The one you picked gives way to another that doesn't go where the leg goes only once you're clearly off its
     /// road: the newest two looks at least 20 s apart each further than 300 m (a train: 700 m) from it, and no look
     /// between them on it. (On a track two trains share, the Intercity to Breda and the one to Den Bosch out of
-    /// Eindhoven, it holds until their roads part.) A look without its road (nil) says nothing: the pick holds only on
-    /// a leg, where the alarm for its stop is armed (`onOtherVehicle`).
-    static func pickRuledOut(_ looks: [(at: Date, metres: Double?)], isTrain: Bool) -> Bool {
+    /// Eindhoven, it holds until their roads part.) A look whose road couldn't be had (nil) says nothing: the pick
+    /// holds only on a leg, where the alarm for its stop is armed (`onOtherVehicle`). `fromPlan`: a hold the change made
+    /// from the planned one's road (`atChange`), not a pick of yours: it also gives way once the newest looks over a
+    /// minute couldn't have its road.
+    static func pickRuledOut(_ looks: [(at: Date, metres: Double?)], isTrain: Bool, fromPlan: Bool = false) -> Bool {
         let limit = isTrain ? pickOffRoadTrain : pickOffRoadBus
         let sorted = looks.sorted { $0.at < $1.at }
+        if fromPlan {
+            let failed = Array(sorted.reversed().prefix { l in l.metres.map { !$0.isFinite } ?? true }.reversed())
+            if let a = failed.first, let b = failed.last, b.at.timeIntervalSince(a.at) >= planUnknownFor { return true }
+        }
         let known = sorted.compactMap { l in l.metres.flatMap { $0.isFinite ? (at: l.at, m: $0) : nil } }
         guard let last = known.last, last.m > limit,
               let prev = known.last(where: { last.at.timeIntervalSince($0.at) >= pickLooksApart }) else { return false }
@@ -76,5 +83,17 @@ enum RideGuards {
     static func onOtherVehicle(atChange: Bool, picked: Bool, ruledOut: Bool) -> OtherVehicle {
         guard picked, !ruledOut else { return .replan }
         return atChange ? .startNextLeg : .keepPick
+    }
+
+    enum AtChange: Equatable { case startNextLeg, replan }
+
+    /// At a change, going and away from the stop, with another vehicle that doesn't go where the next leg goes, or with
+    /// none at all: on the road of the ride the next leg was planned with (`plannedRoadMetres` from it, 700 m for a
+    /// train, 300 m for a bus), that's its line whatever the matcher sees (the next Intercity to Breda on the track the
+    /// Den Bosch one shares, the planned one late or missed): start the next leg, its alarm armed, holding on that road.
+    /// Its road not known, or off it: plan again from what it sees, as before.
+    static func atChange(plannedRoadMetres d: Double?, isTrain: Bool) -> AtChange {
+        guard let d, d.isFinite, d >= 0 else { return .replan }
+        return d <= (isTrain ? pickOffRoadTrain : pickOffRoadBus) ? .startNextLeg : .replan
     }
 }

@@ -134,4 +134,79 @@ final class RideGuardsTests: XCTestCase {
         XCTAssertEqual(RideGuards.onOtherVehicle(atChange: false, picked: true, ruledOut: RideGuards.pickRuledOut(shared, isTrain: true)), .keepPick)
         XCTAssertEqual(RideGuards.onOtherVehicle(atChange: false, picked: true, ruledOut: RideGuards.pickRuledOut(parted, isTrain: true)), .replan)
     }
+
+    // MARK: - At a change, the planned one's line when you're on its road
+
+    /// Metres east and north of Eindhoven on a flat map.
+    private func pt(_ x: Double, _ y: Double) -> GeoPoint {
+        GeoPoint(lat: 51.44 + y / 110_540, lon: 5.48 + x / (111_320 * cos(51.44 * .pi / 180)))
+    }
+    /// Eindhoven to Boxtel 20 km along the shared track; from Boxtel the Breda line 45° to one side, the Den Bosch line
+    /// (11 km) 45° to the other.
+    private var boxtel: Double { 20_000 }
+    private var bredaRoad: [GeoPoint] { [pt(0, 0), pt(boxtel, 0), pt(boxtel + 30_000 * cos(.pi / 4), -30_000 * sin(.pi / 4))] }
+    private func onDenBoschLine(_ along: Double) -> GeoPoint {
+        along <= boxtel ? pt(along, 0) : pt(boxtel + (along - boxtel) * cos(.pi / 4), (along - boxtel) * sin(.pi / 4))
+    }
+    private func onBredaLine(_ along: Double) -> GeoPoint {
+        along <= boxtel ? pt(along, 0) : pt(boxtel + (along - boxtel) * cos(.pi / 4), -(along - boxtel) * sin(.pi / 4))
+    }
+    private func fromBredaRoad(_ p: GeoPoint) -> Double { Geo.project(p, on: bredaRoad)!.crossTrack }
+
+    func test_atChangeDecision() {
+        XCTAssertEqual(RideGuards.atChange(plannedRoadMetres: 40, isTrain: true), .startNextLeg)
+        XCTAssertEqual(RideGuards.atChange(plannedRoadMetres: 700, isTrain: true), .startNextLeg)
+        XCTAssertEqual(RideGuards.atChange(plannedRoadMetres: 701, isTrain: true), .replan)
+        XCTAssertEqual(RideGuards.atChange(plannedRoadMetres: 250, isTrain: false), .startNextLeg)
+        XCTAssertEqual(RideGuards.atChange(plannedRoadMetres: 350, isTrain: false), .replan)
+        // its road unknown (it couldn't be had): plan again from what it sees, as before
+        XCTAssertEqual(RideGuards.atChange(plannedRoadMetres: nil, isTrain: true), .replan)
+        XCTAssertEqual(RideGuards.atChange(plannedRoadMetres: .nan, isTrain: true), .replan)
+        XCTAssertEqual(RideGuards.atChange(plannedRoadMetres: .infinity, isTrain: true), .replan)
+    }
+
+    /// On the next Intercity to Breda (the planned one missed), the Den Bosch one 7632 seen at the change: you're on the
+    /// planned one's road, so the Breda leg starts (its alarm armed), and the hold never gives way on the Breda line.
+    func test_onTheBredaIntercity() {
+        XCTAssertEqual(RideGuards.atChange(plannedRoadMetres: fromBredaRoad(onBredaLine(1200)), isTrain: true), .startNextLeg)
+        var looks: [(at: Date, metres: Double?)] = []
+        for k in 0..<220 {                                           // a look every 7 s at 30 m/s, 1.2 km to 47 km (its road: 50)
+            let along = 1200 + Double(k) * 210
+            looks.append((at: t0 + Double(k) * 7, metres: fromBredaRoad(onBredaLine(along))))
+            XCTAssertEqual(RideGuards.onOtherVehicle(atChange: false, picked: true,
+                                                     ruledOut: RideGuards.pickRuledOut(looks, isTrain: true, fromPlan: true)), .keepPick, "\(along)")
+        }
+    }
+
+    /// Really on 7632 to Den Bosch: the change takes it as the Breda line (the shared track), and the hold gives way
+    /// 1–2 km past Boxtel, where the lines part: planned again from 7632, Den Bosch armed with 9 km or more to go.
+    func test_reallyOnTheDenBoschIntercity() throws {
+        XCTAssertEqual(RideGuards.atChange(plannedRoadMetres: fromBredaRoad(onDenBoschLine(1200)), isTrain: true), .startNextLeg)
+        var looks: [(at: Date, metres: Double?)] = []
+        var gaveWay: Double?
+        for k in 0..<200 {
+            let along = 1200 + Double(k) * 210
+            looks.append((at: t0 + Double(k) * 7, metres: fromBredaRoad(onDenBoschLine(along))))
+            if RideGuards.onOtherVehicle(atChange: false, picked: true,
+                                         ruledOut: RideGuards.pickRuledOut(looks, isTrain: true, fromPlan: true)) == .replan {
+                gaveWay = along; break
+            }
+        }
+        let past = try XCTUnwrap(gaveWay) - boxtel
+        XCTAssertGreaterThanOrEqual(past, 1000); XCTAssertLessThanOrEqual(past, 2000)
+        XCTAssertGreaterThanOrEqual(11_000 - past, 9000)
+    }
+
+    /// A hold from the plan whose road can't be had (its fetch failing) gives way after a minute; a pick of yours holds.
+    func test_planHoldWithoutItsRoad() {
+        let failing: [(at: Date, metres: Double?)] = (0...9).map { (at: t0 + Double($0) * 7, metres: nil) }      // 63 s
+        XCTAssertTrue(RideGuards.pickRuledOut(failing, isTrain: true, fromPlan: true))
+        XCTAssertFalse(RideGuards.pickRuledOut(failing, isTrain: true))
+        XCTAssertFalse(RideGuards.pickRuledOut(Array(failing.prefix(8)), isTrain: true, fromPlan: true))                 // 49 s
+        // a look that had it in between starts the minute again
+        var mixed = failing; mixed[5] = (at: mixed[5].at, metres: 40)
+        XCTAssertFalse(RideGuards.pickRuledOut(mixed, isTrain: true, fromPlan: true))
+        // off its road twice, 20 s apart, still gives way too
+        XCTAssertTrue(RideGuards.pickRuledOut([(at: t0, metres: 900), (at: t0 + 25, metres: 1200)], isTrain: true, fromPlan: true))
+    }
 }
