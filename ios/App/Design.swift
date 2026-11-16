@@ -82,6 +82,18 @@ enum DS {
     static let move = Animation.spring(response: 0.38, dampingFraction: 0.86)
 }
 
+/// The window's light or dark: the new home follows the phone, the screens still in the old look stay dark. (Set on
+/// the window as well as by `preferredColorScheme`, which doesn't always let go of a forced dark when given nil.)
+@MainActor
+enum WindowStyle {
+    static func apply(dark: Bool) {
+        for scene in UIApplication.shared.connectedScenes {
+            guard let ws = scene as? UIWindowScene else { continue }
+            for w in ws.windows { w.overrideUserInterfaceStyle = dark ? .dark : .unspecified }
+        }
+    }
+}
+
 private extension UIColor {
     convenience init(rgb: UInt32) {
         self.init(red: CGFloat((rgb >> 16) & 0xff) / 255, green: CGFloat((rgb >> 8) & 0xff) / 255, blue: CGFloat(rgb & 0xff) / 255, alpha: 1)

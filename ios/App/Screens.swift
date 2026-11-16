@@ -8,14 +8,19 @@ struct RootView: View {
     @ObservedObject private var notices = Notices.shared
     @ObservedObject private var morning = Morning.shared
     @State private var browsing = false         // at a change: looking at the map and the boards for a bit
+    @AppStorage(NewLook.key) private var newLook = true      // the map-first home (0.19); off: the station home
+    /// The new home is on screen: it follows the phone's light or dark setting. Everything else (still the old look)
+    /// stays dark, as before.
+    private var newHomeShown: Bool { newLook && ((trip.phase == .idle && !go.isOpen) || (trip.phase == .transfer && browsing)) }
     var body: some View {
         Group {
             switch trip.phase {
             case .idle where go.isOpen: GoView().transition(.opacity)
-            case .idle: HomeView()
+            case .idle: if newLook { NewHome() } else { HomeView() }
             case .alarm: AlarmView()
             case .transfer where browsing:
-                HomeView().safeAreaInset(edge: .bottom) { ChangeBar { withAnimation(.easeInOut(duration: 0.3)) { browsing = false } } }
+                Group { if newLook { NewHome() } else { HomeView() } }
+                    .safeAreaInset(edge: .bottom) { ChangeBar { withAnimation(.easeInOut(duration: 0.3)) { browsing = false } } }
             case .transfer, .finished: ArrivalView(browse: { withAnimation(.easeInOut(duration: 0.3)) { browsing = true } })
             default: RideView()
             }
@@ -28,6 +33,7 @@ struct RootView: View {
         .overlay {
             if let a = watch.alert {
                 PlatformAlertView(alert: a, pal: .of(home: trip.direction == .home)) { watch.dismiss() }.transition(.opacity)
+                    .environment(\.colorScheme, .dark)
             }
         }
         .animation(.easeInOut(duration: 0.25), value: watch.alert)
@@ -43,6 +49,7 @@ struct RootView: View {
                     }
                 })
                 .transition(.opacity)
+                .environment(\.colorScheme, .dark)
                 .zIndex(5)
             }
         }
@@ -51,13 +58,17 @@ struct RootView: View {
         .overlay(alignment: .top) {
             if let n = notices.current {
                 NoticeBanner(notice: n) { notices.dismiss() }
+                    .environment(\.colorScheme, .dark)
                     .padding(.horizontal, 10).padding(.top, 6)
                     .transition(.move(edge: .top).combined(with: .opacity))
                     .id(n.id)
                     .zIndex(10)
             }
         }
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(newHomeShown ? nil : .dark)
+        .onChange(of: newHomeShown, initial: true) { _, new in
+            DispatchQueue.main.async { WindowStyle.apply(dark: !new) }
+        }
     }
 }
 
