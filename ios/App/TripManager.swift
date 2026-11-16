@@ -122,6 +122,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     private var changeSince: Date?                        // at a change: when you got off
     private var finishedAt: Date?                         // after the last stop: when you got there
     private var finishTask: Task<Void, Never>?
+    private var tightTold: String?                        // the leg (and bus) it told you had a tight change after it
     private var maxDistance: Double?                      // furthest from the stop on this leg, for progress without times
     private var tripStart: Date?
     private var startedAtLeg = 0
@@ -1706,6 +1707,40 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         }
         // Only the stops from where you got on up to yours.
         if let end = stops.firstIndex(where: { $0.name == s.name && $0.arrival == s.arrival }), end >= start { vehicleStops = Array(stops[start...end]) } else { vehicleStops = stops }
+        checkTightChange()
+    }
+
+    /// On a slow bus (C-rank: much slower than the fastest seen on its stretch) with a change ahead: once the room left
+    /// for the next one drops under the 6 minutes a change after such a bus needs, it tells you, once for this leg, so
+    /// you're at the doors and go straight across. (Only a notification: the alarm is as it was.)
+    private func checkTightChange() {
+        guard !demo, phase == .sleeping || phase == .awake, let v = vehicle, !v.isTrain, let r = route, index + 1 < legs.count,
+              let arr = legTo ?? legArrival else { return }
+        let key = "\(r.id)|\(index)|\(v.tripId)"
+        guard tightTold != key else { return }
+        let planned = r.planned?[safe: index + 1]
+        guard let dep = planned?.departure ?? next?.departure else { return }
+        let walk = (planned == nil || next?.tripId == planned?.tripId) ? Double(next?.walkBefore ?? 0) : 0
+        let room = dep.timeIntervalSince(arr) / 60 - walk
+        guard let g = rideGrade(v), ChangeRoom.warnOnRide(grade: g, roomMinutes: room) else { return }
+        tightTold = key
+        rideLog(FieldFormat.rideTight(Self.logLabel(v), grade: g, minutes: room))
+        let then: String
+        if let p = planned { then = p.isTrain ? (p.line == "IC" ? "Intercity" : p.line) : "bus \(p.line)" }
+        else if let n = next { then = n.isTrain ? n.name : "bus \(n.line)" }
+        else { then = "next one" }
+        tellBus("Tight change at \(leg?.to.short ?? "your stop")",
+                "This \(v.title) is slow (\(g)-rank): \(max(0, Int(room.rounded()))) min to the \(then) at \(Fmt.hhmm(dep)). Be at the doors and go straight across.")
+    }
+
+    /// The speed rank of the bus you're on, only read: its ride as planned (the stretch the planner ranks), with its own
+    /// times on this leg once it's known. Nil: not in the list it was chosen from.
+    private func rideGrade(_ v: Vehicle) -> String? {
+        let rides = upcoming.map(\.trip.first) + boardAlternatives.flatMap(\.rides)
+        guard let r = rides.first(where: { $0.tripId == v.tripId }) else { return nil }
+        let dep = legFrom ?? r.departure, arr = legTo ?? r.arrival
+        return Ratings.shared.peekGrade(key: "\(r.fromId)>\(r.toStop)", minutes: arr.timeIntervalSince(dep) / 60,
+                                        scheduled: r.scheduledArrival.timeIntervalSince(r.scheduledDeparture) / 60, cancelled: r.cancelled)
     }
 
     /// The next stop the bus or train reaches, and when.
@@ -1956,6 +1991,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
                 self.arrival = t; self.next = firstNext
                 if let window, self.legArrival == nil { self.legFrom = window.0; self.legTo = window.1 }
                 self.pushActivity(force: true)
+                self.checkTightChange()
             }
         }
     }

@@ -264,7 +264,8 @@ struct BoardingPass: View {
         out.append(PassLine(text: "\(ride.rideMinutes) min ride\(i == 0 && ride.walkBefore > 0 ? " · walk \(ride.walkBefore) min first" : "")"))
         if let n = trip.rides[safe: i + 1] {
             let ch = Fmt.mins(n.departure.timeIntervalSince(ride.arrival))
-            out.append(PassLine(text: "\(ch) min to change\(n.walkBefore > 0 ? ", \(n.walkBefore) min walk" : "")", warn: ch - n.walkBefore < 2))
+            out.append(PassLine(text: "\(ch) min to change\(n.walkBefore > 0 ? ", \(n.walkBefore) min walk" : "")",
+                                warn: Double(ch - n.walkBefore) < Risk.roomNeeded(after: ride)))     // (after a slow bus: 4 or 6)
         }
         return out
     }

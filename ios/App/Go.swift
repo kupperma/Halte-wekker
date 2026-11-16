@@ -1135,7 +1135,10 @@ struct GoView: View {
             let a = t.rides[w.index - 1], n = t.rides[w.index]
             let story = DelayBook.shared.story(line: a.line, stop: a.toStop, at: a.scheduledArrival, slack: w.slack)
             let safer = go.others.filter { Risk.penalty($0) < Risk.penalty(t) - 2 }.min { $0.end < $1.end }
-            let why = story.map { "the \(a.line) here was \($0)" } ?? (a.isTrain ? "trains are sometimes a few minutes late" : "buses are often a few minutes late")
+            // a slow bus (its speed rank B or C) wants more room: say so first
+            let slow = Risk.feederGrade(a).flatMap { g in ChangeRoom.extra(afterGrade: g) > 0 ? g : nil }
+            let why = slow.map { "this \(a.line) is \($0)-rank, slow on this stretch, so a change after it wants \(Int(ChangeRoom.needed(afterGrade: $0))) min" }
+                ?? story.map { "the \(a.line) here was \($0)" } ?? (a.isTrain ? "trains are sometimes a few minutes late" : "buses are often a few minutes late")
             let then = safer.map { o in
                 let same = Int(o.end.timeIntervalSince1970 / 60) == Int(t.end.timeIntervalSince1970 / 60)
                 return " Safer: \(GoStore.what(o.first)) at \(Fmt.hhmm(o.first.departure))" + (same ? ", there at the same time." : ", there \(Fmt.hhmm(o.end)).")
@@ -1251,7 +1254,7 @@ struct GoView: View {
                 let prev = t.rides[i - 1]
                 let ch = Fmt.mins(ride.departure.timeIntervalSince(prev.arrival))
                 Label("\(ch) min to change at \(Fmt.place(prev.toStop))\(ride.walkBefore > 0 ? ", \(ride.walkBefore) min walk" : "")", systemImage: "arrow.triangle.swap")
-                    .font(BoardInk.sans(10.5, .semibold)).foregroundStyle(ch - ride.walkBefore < 2 ? Paper.late : Paper.ink.opacity(0.8))
+                    .font(BoardInk.sans(10.5, .semibold)).foregroundStyle(Double(ch - ride.walkBefore) < Risk.roomNeeded(after: prev) ? Paper.late : Paper.ink.opacity(0.8))
                     .padding(.top, 4)
                 PlannerRideRow(ride: ride, info: ns.rail(ride), picked: false, saved: go.asOf != nil) {
                     liveTrack = LiveTrackTarget(tripId: ride.tripId, line: ride.line, headsign: ride.headsign.isEmpty ? Fmt.place(ride.toStop) : ride.headsign,

@@ -264,17 +264,19 @@ enum Risk {
         // How late that line gets at that time of day (rush hour is worse), from what's been seen and how it runs now;
         // one about to arrive hardly changes any more. (The planner's walk across already has a minute or so of room.)
         let typical = soon ? 0.8 : Steady.scale(line: r.line, train: r.isTrain, stop: r.toStop, at: r.scheduledArrival)
-        var p = min(0.95, exp(-(slack + 1) / typical))
         // your own rides to that stop, once there are a few
         let learned = DelayBook.shared.delays(line: r.line, stop: r.toStop, at: r.scheduledArrival)
-        if learned.count >= 4 && !soon {
-            let late = learned.filter { $0 > already + slack + 0.5 }.count
-            let seen = min(0.95, (Double(late) + 0.5) / (Double(learned.count) + 1))
-            let w = Double(learned.count) / Double(learned.count + 4)
-            p = w * seen + (1 - w) * p
-        }
-        return p
+        // a slow bus before it (its speed rank B or C) needs more room: that much less of the slack counts
+        return ChangeRoom.missChance(slack: slack, typical: typical, already: already, soon: soon, learned: learned,
+                                     extra: ChangeRoom.extra(afterGrade: feederGrade(r)))
     }
+
+    /// The speed rank of a bus you'd change from (only read): a slow one needs more room. Trains: none (a Sprinter is
+    /// slower than an Intercity by its timetable, not late).
+    static func feederGrade(_ r: Ride) -> String? { r.isTrain ? nil : r.speedGrade }
+
+    /// The minutes of room a change after `r` needs (2, after a slow bus 4 or 6).
+    static func roomNeeded(after r: Ride) -> Double { ChangeRoom.needed(afterGrade: feederGrade(r)) }
 
     /// Minutes it's likely to cost: each change's chance of missing it times the wait for the next one after it.
     static func penalty(_ t: DoorTrip, now: Date = Date()) -> Double {

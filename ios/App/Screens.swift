@@ -716,7 +716,7 @@ struct HomeView: View {
                         let prev = t.rides[i - 1]
                         let ch = Fmt.mins(ride.departure.timeIntervalSince(prev.arrival))
                         Label("\(ch) min to change at \(Fmt.place(prev.toStop))\(ride.walkBefore > 0 ? ", \(ride.walkBefore) min walk" : "")", systemImage: "arrow.triangle.swap")
-                            .font(BoardInk.sans(10.5, .semibold)).foregroundStyle(ch - ride.walkBefore < 2 ? Paper.late : Paper.ink.opacity(0.8))
+                            .font(BoardInk.sans(10.5, .semibold)).foregroundStyle(Double(ch - ride.walkBefore) < Risk.roomNeeded(after: prev) ? Paper.late : Paper.ink.opacity(0.8))
                     }
                     PlannerRideRow(ride: ride, info: ns.rail(ride), picked: picked == .ride(ride), saved: live.nextAsOf != nil) { tapRide(ride) }
                 }

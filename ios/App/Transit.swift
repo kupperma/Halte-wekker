@@ -31,6 +31,9 @@ struct Ride: Identifiable, Hashable, Codable {
     var badge: String { isTrain ? line : "BUS \(line)" }
     var grade: String? { Ratings.shared.grade(key: "\(fromId)>\(toStop)", minutes: arrival.timeIntervalSince(departure) / 60,
                                               scheduled: scheduledArrival.timeIntervalSince(scheduledDeparture) / 60, cancelled: cancelled) }
+    /// The same speed rank, only read (`grade` also remembers a new fastest time): for the room a change after it needs.
+    var speedGrade: String? { Ratings.shared.peekGrade(key: "\(fromId)>\(toStop)", minutes: arrival.timeIntervalSince(departure) / 60,
+                                                       scheduled: scheduledArrival.timeIntervalSince(scheduledDeparture) / 60, cancelled: cancelled) }
 }
 
 extension Ride {
@@ -807,5 +810,10 @@ final class Ratings {
         if e <= 3 || r <= 1.18 { return "A" }
         if r <= 1.3 { return "B" }
         return "C"
+    }
+
+    /// `grade` without remembering a new fastest time (it doesn't write anything).
+    func peekGrade(key k: String, minutes: Double, scheduled: Double, cancelled: Bool) -> String? {
+        ChangeRoom.speedGrade(minutes: minutes, scheduled: scheduled, best: best[k], cancelled: cancelled)
     }
 }
