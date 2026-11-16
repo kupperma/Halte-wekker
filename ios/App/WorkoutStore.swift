@@ -268,6 +268,8 @@ final class WorkoutStore: ObservableObject {
     private var pendingRewrites = 0
     /// Bumped by every month write outside a rewrite (a finish), so a rewrite knows its snapshot is older.
     private var generation = 0
+    /// The 04:00 day the screens last saw: `refresh()` tells them when it has turned.
+    private var seenDay: DayKey
     private var locked: Bool { !available }
 
     init(directory: URL = WorkoutStore.defaultDirectory, now: @escaping () -> Date = Date.init) {
@@ -284,11 +286,18 @@ final class WorkoutStore: ObservableObject {
         self.recent = l.recent
         self.months = l.months
         self.available = !l.locked
+        self.seenDay = RecompCalendar.day(for: now())
     }
 
-    /// Reads every file again when one couldn't be read. The app calls it when it becomes active.
+    /// Reads every file again when one couldn't be read, and tells the screens when the 04:00 day has turned (what's
+    /// next, and whether today is a training day, depend on it). The app calls it when it becomes active.
     func refresh() {
         if locked { reload() }
+        let day = today
+        if day != seenDay {
+            seenDay = day
+            objectWillChange.send()
+        }
     }
 
     // MARK: - Reading

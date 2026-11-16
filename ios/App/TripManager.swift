@@ -589,12 +589,18 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         let title = c.title, body = c.body, kind = Notices.kind(of: c.title, c.userInfo)
         let at = notification.date
         Task { @MainActor in NoticeLog.shared.add(key: id, title: title, body: body, kind: kind, at: at) }
-        if id == "alarm" || id.hasPrefix("platform-") { done([]); return }
+        if id == "alarm" { done([]); return }
         // the calorie limit: from the Recomp sheets, so a system banner, over them
         if id.hasPrefix(RecompKcalNotice.idPrefix) { done([.banner, .list, .sound]); return }
-        // in the app as a banner, with its sound; kept in the app's list instead of the notification centre
-        Task { @MainActor in Notices.shared.show(title: title, body: body, kind: kind) }
-        done([.sound])
+        let platform = id.hasPrefix("platform-")
+        Task { @MainActor in
+            // the Workouts sheet or a running workout hides the app's own banner and alerts: a system banner, over them
+            if WorkoutNav.shared.sheet || WorkoutNav.shared.session { done([.banner, .list, .sound]); return }
+            if platform { done([]); return }
+            // in the app as a banner, with its sound; kept in the app's list instead of the notification centre
+            Notices.shared.show(title: title, body: body, kind: kind)
+            done([.sound])
+        }
     }
 
     func testAlarm() {

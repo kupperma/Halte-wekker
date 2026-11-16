@@ -7,7 +7,6 @@ struct WorkoutsSheet: View {
     @ObservedObject private var store = WorkoutStore.shared
     @ObservedObject private var recomp = RecompStore.shared
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.scenePhase) private var scenePhase
     /// The routines that start once the body weight has been asked.
     @State private var pending: [String]?
     @State private var askingWeight = false
@@ -48,9 +47,6 @@ struct WorkoutsSheet: View {
         .preferredColorScheme(.light)                   // ink on paper, the title too
         .sensoryFeedback(.impact, trigger: taps)
         .onAppear { store.refresh() }
-        .onChange(of: scenePhase) { _, phase in
-            if phase == .active { store.refresh() }
-        }
     }
 
     /// Before the first unlock after a restart the files can't be read: nothing starts until they can.
@@ -88,7 +84,7 @@ struct WorkoutsSheet: View {
         let title = Rotation.title(next)
         let ids = Rotation.routineIds(next)
         let plan = store.preview(ids)
-        let other = Self.other(next)
+        let other = Self.other(next, days: Rotation.days(store.index.workouts))
         return VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .center, spacing: 8) {
                 Text(verbatim: next == .restThenPush ? "Rest day. Next: Push" : title)
@@ -136,12 +132,14 @@ struct WorkoutsSheet: View {
         .paperCard()
     }
 
-    /// The other routine: Pull when Push is next, else Push.
-    private static func other(_ n: NextUp) -> (title: String, ids: [String]) {
+    /// The other routine: a Pull (with legs when it's their turn) when Push is next, else Push.
+    private static func other(_ n: NextUp, days: [RotationDay]) -> (title: String, ids: [String]) {
+        let o: NextUp
         switch n {
-        case .push, .restThenPush: return ("Pull", ["pull"])
-        case .pull: return ("Push", ["push"])
+        case .push, .restThenPush: o = Rotation.pullNow(days)
+        case .pull: o = .push
         }
+        return (Rotation.title(o), Rotation.routineIds(o))
     }
 
     private var optionsMenu: some View {
@@ -331,14 +329,17 @@ private struct WorkoutSetRow: View {
         let indirect = Int((count?.indirect ?? 0).rounded())
         let goal = max(0, target ?? 0)
         let least = WeeklySets.priorityFloor
-        let tick: Double? = WeeklySets.priority.contains(row) && goal >= least ? Double(least) / Double(goal) : nil
+        let priority = WeeklySets.priority.contains(row)
+        // a priority group's bar reaches at least to its floor, so the tick is always on it
+        let scale = priority ? max(goal, least) : goal
+        let tick: Double? = priority ? Double(least) / Double(scale) : nil
         return HStack(spacing: 10) {
             Text(verbatim: row.title)
                 .font(BoardInk.sans(14, .semibold)).foregroundStyle(Paper.ink)
                 .lineLimit(1).minimumScaleFactor(0.8)
                 .frame(width: 96, alignment: .leading)
-            if goal > 0 {
-                WorkoutBar(fill: min(exact / Double(goal), 1), tick: tick)
+            if scale > 0 {
+                WorkoutBar(fill: min(exact / Double(scale), 1), tick: tick)
             } else {
                 Spacer(minLength: 0)                    // nothing planned: no bar to fill
             }
@@ -367,7 +368,8 @@ private struct WorkoutSetRow: View {
     }
 }
 
-/// The accent fills it towards the target. A priority group has a thin tick at its floor of 12.
+/// The accent fills it towards the target (a priority group's: towards its floor of 12 at least), and a priority
+/// group has a thin tick at that floor.
 private struct WorkoutBar: View {
     let fill: Double
     let tick: Double?
@@ -418,7 +420,8 @@ private struct WorkoutLinkBody: View {
     }
 }
 
-/// Asked once, before the first workout with pull-ups or dips, when Recomp has no weight either.
+/// Asked once, before the first workout with pull-ups or dips, when Recomp has no weight either. Save or Skip, the
+/// workout starts when it has gone.
 private struct WorkoutBodyWeightSheet: View {
     let save: (Double) -> Void
     @Environment(\.dismiss) private var dismiss
@@ -442,6 +445,8 @@ private struct WorkoutBodyWeightSheet: View {
                 }
                 .buttonStyle(RecompButtonStyle())
                 .disabled(kg == nil)
+                Button("Skip") { dismiss() }                // starts without it
+                    .buttonStyle(RecompButtonStyle(filled: false))
             }
         }
         .padding(.horizontal, 20).padding(.top, 28).padding(.bottom, 12)
@@ -521,7 +526,7 @@ struct WorkoutSessionView: View {
         } message: {
             Text("Its sets won’t be saved.")
         }
-        .onChange(of: store.active == nil) { _, gone in
+        .onChange(of: store.active == nil, initial: true) { _, gone in
             if gone { WorkoutNav.shared.session = false }
         }
     }

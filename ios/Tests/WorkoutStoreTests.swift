@@ -1,3 +1,4 @@
+import Combine
 import XCTest
 
 private final class Clock {
@@ -276,6 +277,27 @@ final class WorkoutStoreTests: XCTestCase {
         XCTAssertEqual(s.state.ladderSteps["pull-up-ladder"], 2)
         XCTAssertTrue(exists("state.json"))
         XCTAssertEqual(try Data(contentsOf: url("library.json")), before)
+    }
+
+    /// The tag and the card read the day but have nothing else to watch: refresh() tells them when it turns at 04:00.
+    func test_refreshPublishesNewDay() {
+        clock.date = at(2026, 11, 15, 23)
+        let s = makeStore()
+        var sent = 0
+        let watching = s.objectWillChange.sink { _ in sent += 1 }
+        defer { watching.cancel() }
+
+        s.refresh()
+        XCTAssertEqual(sent, 0)
+        clock.date = at(2026, 11, 16, 3, 59)        // still the 15th's 04:00 day
+        s.refresh()
+        XCTAssertEqual(sent, 0)
+        clock.date = at(2026, 11, 16, 4, 1)
+        s.refresh()
+        XCTAssertEqual(sent, 1)
+        XCTAssertEqual(s.today, "2026-11-16")
+        s.refresh()
+        XCTAssertEqual(sent, 1)
     }
 
     // MARK: - Month files and a restart

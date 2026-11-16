@@ -14,6 +14,7 @@ struct HaltewekkerApp: App {
         Watchdog.shared.mark("setting up sound")
         // The station video is silent and must never stop your music.
         try? AVAudioSession.sharedInstance().setCategory(.ambient, options: [.mixWithOthers])
+        Watchdog.shared.mark("reading workouts")
         WorkoutStore.shared.bodyWeight = { WorkoutBody.kg(on: $0) }        // pull-ups and dips count with Recomp's weight
     }
     var body: some Scene {

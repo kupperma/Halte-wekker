@@ -66,6 +66,12 @@ enum Rotation {
         }
     }
 
+    /// A Pull now, instead of the Push that is next: with legs when the last Pull had none (none before the first Pull).
+    static func pullNow(_ days: [RotationDay]) -> NextUp {
+        guard case .pull(let legs)? = days.last(where: { $0.kind.isPull })?.kind else { return .pull(legs: false) }
+        return .pull(legs: !legs)
+    }
+
     static func routineIds(_ n: NextUp) -> [String] {
         switch n {
         case .push, .restThenPush: return ["push"]

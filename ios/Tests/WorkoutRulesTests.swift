@@ -97,6 +97,21 @@ final class WorkoutRulesTests: XCTestCase {
         XCTAssertEqual(next([late], today: "2026-11-16"), .push)
     }
 
+    func test_pullNow() {
+        XCTAssertEqual(Rotation.pullNow([]), .pull(legs: false))
+        let pull = summary("Pull", ids: ["pull"], at: "2026-11-09 18:00")
+        let pullLegs = summary("Pull + legs", ids: ["pull", "legs"], at: "2026-11-12 18:00")
+        let push = summary("Push", ids: ["push"], at: "2026-11-14 18:00")
+        XCTAssertEqual(Rotation.pullNow(Rotation.days([push])), .pull(legs: false))
+        XCTAssertEqual(Rotation.pullNow(Rotation.days([pull, push])), .pull(legs: true))
+        XCTAssertEqual(Rotation.pullNow(Rotation.days([pull, pullLegs, push])), .pull(legs: false))
+        // A Hevy "Legs" on the day of the last Pull makes it one with legs.
+        let hevyPull = summary("Pull", at: "2026-11-12 18:00", source: .hevy)
+        let hevyLegs = summary("Legs", at: "2026-11-12 19:30", source: .hevy)
+        XCTAssertEqual(Rotation.pullNow(Rotation.days([hevyPull, hevyLegs])), .pull(legs: false))
+        XCTAssertEqual(Rotation.pullNow(Rotation.days([hevyPull])), .pull(legs: true))
+    }
+
     func test_isTrainingDay() {
         let today = "2026-11-15"
         XCTAssertTrue(Rotation.isTrainingDay(.pull(legs: false), workouts: [], today: today))

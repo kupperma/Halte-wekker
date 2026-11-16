@@ -171,6 +171,7 @@ struct HomeView: View {
         .sheet(isPresented: $showRecomp) { RecompSheet().presentationDetents([.large]) }
         .sheet(isPresented: $workoutNav.sheet, onDismiss: { workoutNav.sheetDismissed() }) { WorkoutsSheet().presentationDetents([.large]) }
         .fullScreenCover(isPresented: $workoutNav.session) { WorkoutSessionView() }
+        .onDisappear { workoutNav.homeLeft() }
         .sheet(isPresented: $choosingDestination) {
             DestinationSheet { d in
                 live.go(to: d)

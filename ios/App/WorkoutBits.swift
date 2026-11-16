@@ -42,6 +42,14 @@ final class WorkoutNav: ObservableObject {
         session = true
     }
 
+    /// HomeView left the screen (a trip started, the alarm rang): the sheet goes, and the cover stays asked for only
+    /// while a workout runs, so nothing pops up by itself when HomeView comes back.
+    func homeLeft() {
+        sheet = false
+        sessionAfterSheet = false
+        if WorkoutStore.shared.active == nil { session = false }
+    }
+
     /// haltewekker://workout: the running workout, else the sheet.
     func openFromURL() {
         if WorkoutStore.shared.active != nil {
