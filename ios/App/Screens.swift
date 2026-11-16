@@ -39,7 +39,7 @@ struct RootView: View {
                     if trip.phase == .idle {
                         if trip.direction != .toSchool { trip.pick(.toSchool) }
                         go.open(to: .buas, from: trip.lastFix, deadline: p.beThere, label: "your \(Fmt.hhmm(p.classStart)) class",
-                                planKey: GoStore.schoolKey(p.classStart))
+                                planKey: GoStore.schoolKeyIfDue(p.classStart, now: Date()))
                     }
                 })
                 .transition(.opacity)
@@ -242,13 +242,13 @@ struct HomeView: View {
             if s == .active {
                 trip.appBecameActive()
                 autoGo()
-                // Fastest trip just opened by itself: the home screen is on its way out and asks nothing now. Else the
-                // same questions the loops ask (from where you are now), so a loop that's asking right now (it just
-                // appeared) and this are one question, not two.
+                Task { await watch.check(force: true) }            // (the NS relay: watched trains' platform and delay alerts)
+                // Fastest trip just opened by itself: the home screen is on its way out and asks Transitous nothing now.
+                // Else the same questions the loops ask (from where you are now), so a loop that's asking right now (it
+                // just appeared) and this are one question, not two.
                 guard !goStore.isOpen else { return }
                 Task { await live.refresh(trip.direction, at: near.position) }
                 Task { await planner.refresh() }
-                Task { await watch.check(force: true) }
             }
         }
     }
@@ -302,10 +302,8 @@ struct HomeView: View {
     private func autoGo() {
         guard trip.phase == .idle, !goStore.isOpen else { return }
         let now = Date()
-        let school = SchoolAlarm.shared
         // from when the alarm rings (or 45 minutes before you leave) until just after the first bus has left
-        if school.on, let n = school.next, let l = n.leave, let t = n.trip,
-           now > min(l.addingTimeInterval(-45 * 60), n.alarm ?? l), now < t.first.departure.addingTimeInterval(5 * 60) {
+        if let n = SchoolAlarm.shared.next, GoStore.schoolWindowOpen(n, now: now) {
             if trip.direction != .toSchool { trip.pick(.toSchool) }
             withAnimation(.easeInOut(duration: 0.35)) {
                 goStore.openForPlan(to: .buas, from: near.position, deadline: n.beThere, label: "your \(Fmt.hhmm(n.classStart)) class",
@@ -314,8 +312,7 @@ struct HomeView: View {
             return
         }
         // (leaving at a time: from a quarter of an hour before, the fastest way from then, no deadline to race)
-        if let a = planner.arrive, let T = a.when, let t = planner.arriveChosen,
-           now > t.start.addingTimeInterval(a.leaving ? -15 * 60 : -45 * 60), now < t.first.departure.addingTimeInterval(5 * 60) {
+        if let a = planner.arrive, let T = a.when, GoStore.arriveWindowOpen(a, chosen: planner.arriveChosen, now: now) {
             if trip.direction != (a.out ? .toSchool : .home) { trip.pick(a.out ? .toSchool : .home) }
             withAnimation(.easeInOut(duration: 0.35)) {
                 goStore.openForPlan(to: a.out ? .buas : .veghel, from: near.position, deadline: a.leaving ? nil : T,
@@ -325,20 +322,25 @@ struct HomeView: View {
         }
     }
 
-    /// Hands-free now, for the school alarm's trip or the Be there by plan. (With the plan's key, as `autoGo` opens it:
-    /// once you close it, it doesn't open again by itself for that trip.)
+    /// Hands-free now, for the school alarm's trip or the Be there by plan. Inside the time `autoGo` would open it by
+    /// itself, with the plan's key as `autoGo` gives it: once you close it, it doesn't open again by itself for that
+    /// plan. (Outside that time it can't open by itself anyway, and closing it mustn't stop it later: tapping it tonight
+    /// for tomorrow's class still has it open by itself tomorrow.)
     private func openPlanGo(school: Bool) {
+        guard trip.phase == .idle else { return }
+        let now = Date()
         if school, let n = SchoolAlarm.shared.next {
             if trip.direction != .toSchool { trip.pick(.toSchool) }
             withAnimation(.easeInOut(duration: 0.35)) {
                 goStore.open(to: .buas, from: near.position, deadline: n.beThere, label: "your \(Fmt.hhmm(n.classStart)) class",
-                             planKey: GoStore.schoolKey(n.classStart))
+                             planKey: GoStore.schoolWindowOpen(n, now: now) ? GoStore.schoolKey(n.classStart) : nil)
             }
         } else if let a = planner.arrive, let T = a.when {
             if trip.direction != (a.out ? .toSchool : .home) { trip.pick(a.out ? .toSchool : .home) }
             withAnimation(.easeInOut(duration: 0.35)) {
                 goStore.open(to: a.out ? .buas : .veghel, from: near.position, deadline: a.leaving ? nil : T,
-                             label: a.leaving ? nil : "\(a.out ? "BUas" : "home") by \(a.time)", planKey: GoStore.arriveKey(a))
+                             label: a.leaving ? nil : "\(a.out ? "BUas" : "home") by \(a.time)",
+                             planKey: GoStore.arriveWindowOpen(a, chosen: planner.arriveChosen, now: now) ? GoStore.arriveKey(a) : nil)
             }
         }
     }

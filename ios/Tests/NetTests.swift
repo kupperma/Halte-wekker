@@ -455,6 +455,61 @@ final class NetTests: XCTestCase {
         XCTAssertEqual(left(q), 20, accuracy: 0.001)
     }
 
+    /// A 429 to a request that was already on its way when the pause began doesn't double it: it only makes it last as
+    /// long as its Retry-After asks (never shorter), and the next 429 during the pause doubles the first pause.
+    func test_pauseExtendedByOneSentBefore() async throws {
+        let clock = FakeClock()
+        let p = Net.Polite(host: "api.transitous.org", clock: { clock.now })
+        let budget = roomy
+        func held(_ q: String, _ lane: Lane, after s: Double, _ retryAfter: String?) -> Task<NetAnswer, Error> {
+            Task {
+                try await Net.response(tr(q), lane: lane, budget: budget, gate: 0, send: { _ in
+                    try await Task.sleep(nanoseconds: UInt64(s * 1_000_000_000))
+                    return http(429, headers: retryAfter.map { ["Retry-After": $0] } ?? [:])
+                }, polite: p)
+            }
+        }
+        // three on their way at once: the 429s come back after 0.1, 0.3 and 0.5 s
+        let a = held("a", .background, after: 0.1, nil)
+        let b = held("b", .background, after: 0.3, "60")
+        let c = held("c", .urgent, after: 0.5, "10")
+        _ = try await a.value
+        XCTAssertEqual(p.coolingLeft ?? -1, 20, accuracy: 0.001)
+        _ = try await b.value
+        XCTAssertEqual(p.coolingLeft ?? -1, 60, accuracy: 0.001)       // as long as it asks
+        _ = try await c.value
+        XCTAssertEqual(p.coolingLeft ?? -1, 60, accuracy: 0.001)       // never shorter
+        // sent during the pause: twice the first pause (40 s), which the 60 s left already covers
+        let d = try await Net.response(tr("d"), lane: .urgent, budget: quick, send: { _ in http(429) }, polite: p)
+        XCTAssertEqual(d.attempts, 1)
+        XCTAssertEqual(p.coolingLeft ?? -1, 60, accuracy: 0.001)
+        clock.advance(61)
+        _ = try await Net.response(tr("e"), lane: .background, budget: quick, gate: 0, send: { _ in http(429) }, polite: p)
+        XCTAssertEqual(p.coolingLeft ?? -1, 80, accuracy: 0.001)       // (no answer since: 40 doubled)
+    }
+
+    /// The doubling wears off: a 429 more than 120 s after the last pause ended starts from 20 s again.
+    func test_pauseDoublingWearsOff() async throws {
+        func ask(_ p: Net.Polite) async throws {
+            _ = try await Net.response(tr(UUID().uuidString), lane: .background, budget: quick, gate: 0, send: { _ in http(429) }, polite: p)
+        }
+        let clock = FakeClock()
+        let p = Net.Polite(host: "api.transitous.org", clock: { clock.now })
+        try await ask(p)
+        clock.advance(21)
+        try await ask(p)
+        XCTAssertEqual(p.coolingLeft ?? -1, 40, accuracy: 0.001)       // soon after: doubled
+        clock.advance(40 + 100)
+        try await ask(p)
+        XCTAssertEqual(p.coolingLeft ?? -1, 80, accuracy: 0.001)       // 100 s after it ended: still doubled
+        clock.advance(80 + 121)
+        try await ask(p)
+        XCTAssertEqual(p.coolingLeft ?? -1, 20, accuracy: 0.001)       // over 120 s after: from the start
+        clock.advance(3 * 3600)
+        try await ask(p)
+        XCTAssertEqual(p.coolingLeft ?? -1, 20, accuracy: 0.001)       // hours later: 20 s, not 120
+    }
+
     /// At most 4 requests on their way at once, of which at most 2 background ones.
     func test_placesCapped() async throws {
         let p = Net.Polite(host: "api.transitous.org")

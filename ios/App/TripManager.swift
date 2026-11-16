@@ -682,7 +682,10 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
                 let sameLine = (planned.map { $0.line == m.vehicle.line } ?? true) && !otherKind
                 if expected || (m.cost < R.oneLook && sameLine) || m.vehicle.tripId == lastBest {
                     // Its own timetable must still have your stop ahead: not one going the other way, not an earlier run.
-                    let stops = await Transit.tripStops(m.vehicle.tripId)
+                    // (on its way like the matching itself: during a pause after a 429 a background ask gets nothing,
+                    // and with no stops it would trust the match)
+                    let urgentAsk = self.isRiding || self.going
+                    let stops = await Transit.$urgent.withValue(urgentAsk) { await Transit.tripStops(m.vehicle.tripId) }
                     let dests: [Place] = forNextLeg ? [self.legs[safe: self.index + 1]?.to].compactMap { $0 } : self.legDestinations
                     guard dests.contains(where: { self.goesAhead(stops, to: $0) }) else {
                         // Not where this leg goes. Seen twice: you're on another one than it planned (the Sprinter to Den

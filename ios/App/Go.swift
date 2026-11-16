@@ -83,6 +83,25 @@ final class GoStore: ObservableObject {
     static func schoolKey(_ classStart: Date) -> String { "school-\(Fmt.ymd.string(from: classStart))" }
     static func arriveKey(_ a: PlannedTrip) -> String { "arrive-\(a.date)-\(a.time)\(a.leaving ? "-leave" : "")" }
 
+    /// When it opens by itself for your next class: from when the alarm rings (or 45 minutes before you leave) until
+    /// just after the first bus has left.
+    static func schoolWindowOpen(_ n: SchoolAlarm.Day, now: Date) -> Bool {
+        guard SchoolAlarm.shared.on, let l = n.leave, let t = n.trip else { return false }
+        return now > min(l.addingTimeInterval(-45 * 60), n.alarm ?? l) && now < t.first.departure.addingTimeInterval(5 * 60)
+    }
+    /// …and for a Be there by plan: from 45 minutes before you leave (a Leave at plan: a quarter of an hour) until just
+    /// after its first bus has left.
+    static func arriveWindowOpen(_ a: PlannedTrip, chosen: DoorTrip?, now: Date) -> Bool {
+        guard a.when != nil, let t = chosen else { return false }
+        return now > t.start.addingTimeInterval(a.leaving ? -15 * 60 : -45 * 60) && now < t.first.departure.addingTimeInterval(5 * 60)
+    }
+    /// The key for one opened by hand for your class: only while it would open by itself for it (outside that, closing
+    /// it tonight mustn't stop it opening by itself for tomorrow's class).
+    static func schoolKeyIfDue(_ classStart: Date, now: Date) -> String? {
+        guard let n = SchoolAlarm.shared.next, n.classStart == classStart, schoolWindowOpen(n, now: now) else { return nil }
+        return schoolKey(classStart)
+    }
+
     /// The app opened around the time to leave for a trip you planned: open this screen for it (once; not again after you
     /// close it).
     func openForPlan(to d: Place, from loc: CLLocation?, deadline dl: Date?, label: String?, key: String) {

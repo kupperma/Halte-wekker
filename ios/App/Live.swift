@@ -344,6 +344,12 @@ final class LiveStore: ObservableObject {
 
     private func loadNearIfAny(_ h: CLLocation?) async { if let h { await loadNear(h) } }
 
+    /// The stops near you to ask: the nearest stop of the two nearest bus-stop names, and the nearest station (each
+    /// one's board has every platform of its name: see `NearPick`).
+    nonisolated static func onePerName(_ s: [Transit.NearStop]) -> [Transit.NearStop] {
+        NearPick.onePerName(s, name: \.name, rail: \.rail)
+    }
+
     /// The stops near you (the two nearest bus stops, both sides, and the nearest station) and what leaves from them.
     private func loadNear(_ h: CLLocation) async {
         let round = nearRound            // (a planning-key change that replaces the boards near you ends this load)
@@ -351,8 +357,7 @@ final class LiveStore: ObservableObject {
             let s = await Transit.nearStops(h.coordinate)
             guard round == nearRound else { return }
             if !s.isEmpty {
-                let names = s.filter { !$0.rail }.map(\.name).reduce(into: [String]()) { if !$0.contains($1) && $0.count < 2 { $0.append($1) } }
-                nearStops = s.filter { !$0.rail && names.contains($0.name) } + (s.first(where: { $0.rail }).map { [$0] } ?? [])
+                nearStops = Self.onePerName(s)
                 nearAt = (h, Date())
             }
         }
@@ -525,8 +530,11 @@ final class LiveStore: ObservableObject {
             } else if let s = store.load(SavedNear.self, key: "near"),
                       Snapshots.closeEnough(saved: (lat: s.value.lat, lon: s.value.lon), here: you, metres: 300) {
                 nearRound += 1
-                nearStops = s.value.stops
-                nearBoard = Snapshots.upcoming(s.value.board, now: now) { $0.cancelled ? $0.scheduled : $0.time }
+                // (saved before one stop per name: its rows go with the kept stop of their name)
+                let kept = Self.onePerName(s.value.stops)
+                let to = NearPick.keptStop(s.value.stops.map { (id: $0.id, name: $0.name) }, kept: kept.map { (id: $0.id, name: $0.name) })
+                nearStops = kept
+                nearBoard = Snapshots.upcoming(s.value.board.map { $0.at(to[$0.stopId] ?? $0.stopId) }, now: now) { $0.cancelled ? $0.scheduled : $0.time }
                 nearAt = (CLLocation(latitude: s.value.lat, longitude: s.value.lon), s.at)
                 nearBoardAt = nearBoard.isEmpty ? nil : s.at
                 nearAsOf = nearBoardAt

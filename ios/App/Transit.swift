@@ -77,6 +77,11 @@ struct BoardDeparture: Identifiable, Hashable, Codable {
     var heading: Heading? = nil         // which way it goes from here
     var train = false
     var delay: Int { live ? Int((time.timeIntervalSince(scheduled) / 60).rounded()) : 0 }
+    /// The same departure, under another stop of the board.
+    func at(_ stop: String) -> BoardDeparture {
+        stop == stopId ? self : BoardDeparture(tripId: tripId, stopId: stop, stopName: stopName, line: line, headsign: headsign, time: time,
+                                               scheduled: scheduled, live: live, cancelled: cancelled, platform: platform, heading: heading, train: train)
+    }
 }
 
 /// Which way a bus or train goes from a stop: the compass direction (0 is north, 90 east), and the next places it passes.
@@ -214,7 +219,9 @@ enum Transit {
     static func findStops(_ q: String) async -> [StopHit] {
         let items: [URLQueryItem] = [.init(name: "text", value: q), .init(name: "type", value: "STOP"), .init(name: "numResults", value: "12"),
                                      .init(name: "place", value: "\(Place.veghel.coordinate.latitude),\(Place.veghel.coordinate.longitude)")]
-        guard let list = try? await get("/v1/geocode", items) as? [[String: Any]] else { return [] }
+        // (someone is typing and waiting for it)
+        let answer = try? await Transit.$urgent.withValue(true) { try await get("/v1/geocode", items) }
+        guard let list = answer as? [[String: Any]] else { return [] }
         return list.compactMap { m in
             guard let id = m["id"] as? String, let name = m["name"] as? String, let la = m["lat"] as? Double, let lo = m["lon"] as? Double else { return nil }
             let areas = (m["areas"] as? [[String: Any]]) ?? []

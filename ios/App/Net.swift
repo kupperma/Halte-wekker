@@ -289,8 +289,8 @@ extension Net {
     ///   always goes before any waiting background one.
     /// - A 429 is never tried again. It starts a pause of its `Retry-After` seconds (kept within `shortest`…`longest`),
     ///   else `firstPause`. Each further one doubles it (`longest` at most): a 429 to a request sent during the pause, or
-    ///   after it with no answer in between (one already on its way when the pause began doesn't count). An answer
-    ///   (under 400) starts that over. During a pause background requests aren't sent (they're turned away at once, the
+    ///   after it with no answer in between (one already on its way when the pause began only makes the pause last as
+    ///   long as it asks). An answer (under 400) starts that over, and so does a pause that ended over `longest` ago. During a pause background requests aren't sent (they're turned away at once, the
     ///   ones waiting for a place too), and urgent ones go one at a time.
     /// - Identical requests (one key: the lane and the address) on their way at the same time share one request and
     ///   its answer. A caller that's cancelled stops waiting at once; the request stops when nobody waits for it.
@@ -355,6 +355,8 @@ extension Net {
             let want = asked(retryAfter)
             lock.lock()
             let now = clock()
+            // (the last pause ended long ago: it has worn off, this one starts from the first pause again)
+            if let u = until, now.timeIntervalSince(u) > longest { pause = 0 }
             if cooling, !(sent.cooling && sent.pauses == pauses) {
                 // already on its way when this pause began: the same "slow down" again, it only makes sure the pause
                 // lasts as long as this one asks
