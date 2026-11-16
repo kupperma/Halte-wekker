@@ -7,6 +7,9 @@ final class DelayBook {
     static let shared = DelayBook()
     private var book: [String: [Double]]
     private let storeKey = "delayBook"
+    private var saveDue = false
+    /// Written off the main thread, one at a time, in order.
+    private let io = DispatchQueue(label: "nl.haltewekker.delaybook", qos: .utility)
 
     private init() {
         book = (UserDefaults.standard.data(forKey: storeKey).flatMap { try? JSONDecoder().decode([String: [Double]].self, from: $0) }) ?? [:]
@@ -27,7 +30,26 @@ final class DelayBook {
         list.append((delay * 10).rounded() / 10)
         book[k] = Array(list.suffix(30))
         if book.count > 400 { book = Dictionary(uniqueKeysWithValues: book.sorted { $0.value.count > $1.value.count }.prefix(300).map { ($0.key, $0.value) }) }
-        UserDefaults.standard.set(try? JSONEncoder().encode(book), forKey: storeKey)
+        saveSoon()
+    }
+
+    /// Saved at most every 30 s (a burst of boards books many trips at once), and when the app goes to the background.
+    /// (A crash loses at most the last half minute of delays.)
+    private func saveSoon() {
+        guard !saveDue else { return }
+        saveDue = true
+        Task {
+            try? await Task.sleep(nanoseconds: 30_000_000_000)
+            self.save()
+        }
+    }
+
+    /// Now, if anything is waiting to be saved.
+    func save() {
+        guard saveDue else { return }
+        saveDue = false
+        let snapshot = book, key = storeKey
+        io.async { UserDefaults.standard.set(try? JSONEncoder().encode(snapshot), forKey: key) }
     }
 
     /// What it's been like around that time: that hour, else the hours either side, else any time.
@@ -75,7 +97,11 @@ final class DelayBook {
     /// How many times it has seen this line around this hour.
     func count(line: String, at: Date) -> Int { lineDelays(line: line, stop: nil, at: at).count }
 
-    func clear() { book = [:]; UserDefaults.standard.removeObject(forKey: storeKey) }
+    func clear() {
+        book = [:]; saveDue = false
+        let key = storeKey
+        io.async { UserDefaults.standard.removeObject(forKey: key) }       // (after any save already on its way)
+    }
 }
 
 /// How late each line is running right now: every live time the app sees (the boards, the plans), the latest per trip,
@@ -91,32 +117,49 @@ final class LiveDelays: ObservableObject {
 
     nonisolated static func name(_ line: String, train: Bool) -> String { train ? Transit.trainLabel(line) : line }
 
+    private struct Sighting { let trip: String; let line: String; let train: Bool; let time: Date; let scheduled: Date }
+
     func note(trip: String, line: String, train: Bool, time: Date, scheduled: Date) {
-        guard !trip.isEmpty, !line.isEmpty, line != "?" else { return }
-        let now = Date()
-        let name = Self.name(line, train: train)
-        let delay = time.timeIntervalSince(scheduled) / 60
-        guard delay > -10, delay < 90 else { return }
-        seen[trip] = Seen(line: name, train: train, delay: delay, at: now)
-        if seen.count > 600 { seen = seen.filter { now.timeIntervalSince($0.value.at) < 1800 } }
-        // into the book once per trip a day, when it's leaving about now
-        let day = Fmt.ymd.string(from: now)
-        if day != bookedDay { bookedDay = day; booked = [] }
-        if abs(time.timeIntervalSince(now)) < 150, booked.insert(trip).inserted {
-            DelayBook.shared.recordLine(line: name, scheduled: scheduled, delay: delay)
-        }
+        noteAll([Sighting(trip: trip, line: line, train: train, time: time, scheduled: scheduled)])
     }
 
     func note(_ list: [BoardDeparture]) {
-        for d in list where d.live && !d.cancelled { note(trip: d.tripId, line: d.line, train: d.train, time: d.time, scheduled: d.scheduled) }
+        noteAll(list.filter { $0.live && !$0.cancelled }.map { Sighting(trip: $0.tripId, line: $0.line, train: $0.train, time: $0.time, scheduled: $0.scheduled) })
     }
 
     func note(_ trips: [DoorTrip]) {
+        var all: [Sighting] = []
         for t in trips {
             for r in t.rides where r.live && !r.cancelled && r.fromId != "onboard" {
-                note(trip: r.tripId, line: r.line, train: r.isTrain, time: r.departure, scheduled: r.scheduledDeparture)
+                all.append(Sighting(trip: r.tripId, line: r.line, train: r.isTrain, time: r.departure, scheduled: r.scheduledDeparture))
             }
         }
+        noteAll(all)
+    }
+
+    /// A whole board (or plan) at once: the list changes once, not once per departure (each change copied the whole
+    /// list and redrew what shows it), and the day's name is worked out once.
+    private func noteAll(_ items: [Sighting]) {
+        guard !items.isEmpty else { return }
+        let now = Date()
+        // into the book once per trip a day, when it's leaving about now
+        let day = Fmt.ymd.string(from: now)
+        if day != bookedDay { bookedDay = day; booked = [] }
+        var s = seen
+        var changed = false
+        for i in items {
+            guard !i.trip.isEmpty, !i.line.isEmpty, i.line != "?" else { continue }
+            let name = Self.name(i.line, train: i.train)
+            let delay = i.time.timeIntervalSince(i.scheduled) / 60
+            guard delay > -10, delay < 90 else { continue }
+            s[i.trip] = Seen(line: name, train: i.train, delay: delay, at: now)
+            changed = true
+            if s.count > 600 { s = s.filter { now.timeIntervalSince($0.value.at) < 1800 } }
+            if abs(i.time.timeIntervalSince(now)) < 150, booked.insert(i.trip).inserted {
+                DelayBook.shared.recordLine(line: name, scheduled: i.scheduled, delay: delay)
+            }
+        }
+        if changed { seen = s }
     }
 
     /// How late `line` is running now: each live trip seen in the last half hour.
@@ -221,16 +264,20 @@ enum Risk {
         // How late that line gets at that time of day (rush hour is worse), from what's been seen and how it runs now;
         // one about to arrive hardly changes any more. (The planner's walk across already has a minute or so of room.)
         let typical = soon ? 0.8 : Steady.scale(line: r.line, train: r.isTrain, stop: r.toStop, at: r.scheduledArrival)
-        var p = min(0.95, exp(-(slack + 1) / typical))
         // your own rides to that stop, once there are a few
         let learned = DelayBook.shared.delays(line: r.line, stop: r.toStop, at: r.scheduledArrival)
-        if learned.count >= 4 && !soon {
-            let late = learned.filter { $0 > already + slack + 0.5 }.count
-            let seen = min(0.95, (Double(late) + 0.5) / (Double(learned.count) + 1))
-            let w = Double(learned.count) / Double(learned.count + 4)
-            p = w * seen + (1 - w) * p
-        }
-        return p
+        // a slow bus before it (its speed rank B or C) needs more room: that much less of the slack counts
+        return ChangeRoom.missChance(slack: slack, typical: typical, already: already, soon: soon, learned: learned,
+                                     extra: ChangeRoom.feederExtra(isTrain: r.isTrain, grade: feederGrade(r)))
+    }
+
+    /// The speed rank of a bus you'd change from (only read): a slow one needs more room. Trains: none (a Sprinter is
+    /// slower than an Intercity by its timetable, not late).
+    static func feederGrade(_ r: Ride) -> String? { r.isTrain ? nil : r.speedGrade }
+
+    /// "N min to change" after `r`: red under the room it needs, and why when it's the slow bus (`ChangeRoom.changeNote`).
+    static func changeNote(after r: Ride, minutes: Int, walk: Int) -> (red: Bool, why: String?) {
+        ChangeRoom.changeNote(minutes: minutes, walk: walk, isTrain: r.isTrain, grade: feederGrade(r))
     }
 
     /// Minutes it's likely to cost: each change's chance of missing it times the wait for the next one after it.

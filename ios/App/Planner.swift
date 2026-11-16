@@ -252,7 +252,7 @@ final class Planner: ObservableObject {
         }
     }
 
-    /// The latest bus that still makes the train (2 min spare), and the first one after it.
+    /// The latest bus that still makes the train (2 min spare; after a slow bus, a B 4 and a C 6), and the first one after it.
     private func buses(for train: DoorTrip, station: Place, out: Bool) async -> (DoorTrip?, DoorTrip?, DoorTrip?, DoorTrip?) {
         let dep = train.first.departure, arr = train.last.arrival
         let before: [DoorTrip], after: [DoorTrip]
@@ -274,7 +274,8 @@ final class Planner: ObservableObject {
             var seen = Set<String>()
             return l.sorted { $0.first.walkBefore < $1.first.walkBefore }.filter { seen.insert($0.first.tripId).inserted }
         }
-        let inn = once(before).filter { $0.end <= dep.addingTimeInterval(-120) }.sorted { $0.first.departure > $1.first.departure }
+        let inn = ChangeRoom.inTime(once(before), trainLeaves: dep, end: { $0.end }, departure: { $0.first.departure },
+                                    grade: { Risk.feederGrade($0.first) })
         let nxt = once(after).filter { $0.start >= arr.addingTimeInterval(-60) }.sorted { a, b in
             let x = out ? a.end : a.last.arrival, y = out ? b.end : b.last.arrival
             return x != y ? x < y : a.first.departure < b.first.departure

@@ -44,6 +44,7 @@ final class LiveStore: ObservableObject {
     private var loadedFor: String?             // the direction, where you're going and where from
     private var loadedKey: PlanKey?            // the same, in parts
     private var busy = false
+    private var refreshes = 0                  // refreshes begun: only the newest one, when it ends, says it's not busy
     private var lastPanels = Date.distantPast
     private var nextAt: Date?                  // when the trips shown came in
     private var panelsFor: Direction?          // the direction the lists per leg are for
@@ -218,7 +219,8 @@ final class LiveStore: ObservableObject {
     private static func movesWithYou(_ f: CLLocation, _ segs: [VehicleSegment], history: [Fix], still: Bool, speed: Double,
                                      now: Date) -> VehicleSegment? {
         let one = Fix(f)
-        let tracks = VehicleTrack.group(segs.map { MapPiece($0) })
+        // (a late bus by its times without catching up: its live times have it make its delay up within a few stops)
+        let tracks = VehicleTrack.group(Transit.noCatchUp(segs, asOf: now).map { MapPiece($0) })
         let judged: [Judgement]
         if VehicleMatch.enough(history) {
             judged = VehicleMatch.judgeAll(history, tracks)
@@ -230,7 +232,7 @@ final class LiveStore: ObservableObject {
         let ranked = VehicleMatch.rank(judged, planned: nil)
         let lines = Dictionary(tracks.map { ($0.tripId, $0.line) }, uniquingKeysWith: { a, _ in a })
         let outcome = ranked.first.map { "best " + FieldFormat.label($0.id, lines) } ?? "none"
-        FieldLog.shared.add(.match, FieldFormat.match("on board", judged, outcome: outcome))
+        FieldLog.shared.add(.match, FieldFormat.match("on board", judged, outcome: outcome, count: judged.count))
         guard let id = ranked.first?.id else { return nil }
         let pieces = segs.filter { $0.tripId == id }
         return pieces.filter { $0.departure <= now }.max { $0.departure < $1.departure } ?? pieces.min { $0.departure < $1.departure }
@@ -343,6 +345,12 @@ final class LiveStore: ObservableObject {
 
     private func loadNearIfAny(_ h: CLLocation?) async { if let h { await loadNear(h) } }
 
+    /// The stops near you to ask: the nearest stop of the two nearest bus-stop names, and the nearest station (each
+    /// one's board has every platform of its name: see `NearPick`).
+    nonisolated static func onePerName(_ s: [Transit.NearStop]) -> [Transit.NearStop] {
+        NearPick.onePerName(s, name: \.name, rail: \.rail)
+    }
+
     /// The stops near you (the two nearest bus stops, both sides, and the nearest station) and what leaves from them.
     private func loadNear(_ h: CLLocation) async {
         let round = nearRound            // (a planning-key change that replaces the boards near you ends this load)
@@ -350,8 +358,7 @@ final class LiveStore: ObservableObject {
             let s = await Transit.nearStops(h.coordinate)
             guard round == nearRound else { return }
             if !s.isEmpty {
-                let names = s.filter { !$0.rail }.map(\.name).reduce(into: [String]()) { if !$0.contains($1) && $0.count < 2 { $0.append($1) } }
-                nearStops = s.filter { !$0.rail && names.contains($0.name) } + (s.first(where: { $0.rail }).map { [$0] } ?? [])
+                nearStops = Self.onePerName(s)
                 nearAt = (h, Date())
             }
         }
@@ -436,7 +443,10 @@ final class LiveStore: ObservableObject {
         let moved = from.flatMap { f in plannedFrom.map { f.distance(from: $0) > 300 } } ?? false
         if !force, !moved, loadedFor == key, let u = updated, Date().timeIntervalSince(u) < 60 { return }
         busy = true; loadedFor = key; loadedKey = plan; here = from
-        defer { busy = false }
+        // (an older one, for a key it switched away from, ending first mustn't let the same refresh start twice)
+        refreshes += 1
+        let mine = refreshes
+        defer { if refreshes == mine { busy = false } }
         // the boards around you load at the same time as your trip (they used to wait for it), and so do the lists per
         // leg, each shown as soon as it's in (stopped when you've switched to somewhere else before your trip is in)
         async let boards: Void = loadNearIfAny(from)
@@ -521,8 +531,11 @@ final class LiveStore: ObservableObject {
             } else if let s = store.load(SavedNear.self, key: "near"),
                       Snapshots.closeEnough(saved: (lat: s.value.lat, lon: s.value.lon), here: you, metres: 300) {
                 nearRound += 1
-                nearStops = s.value.stops
-                nearBoard = Snapshots.upcoming(s.value.board, now: now) { $0.cancelled ? $0.scheduled : $0.time }
+                // (saved before one stop per name: its rows go with the kept stop of their name)
+                let kept = Self.onePerName(s.value.stops)
+                let to = NearPick.keptStop(s.value.stops.map { (id: $0.id, name: $0.name) }, kept: kept.map { (id: $0.id, name: $0.name) })
+                nearStops = kept
+                nearBoard = Snapshots.upcoming(s.value.board.map { $0.at(to[$0.stopId] ?? $0.stopId) }, now: now) { $0.cancelled ? $0.scheduled : $0.time }
                 nearAt = (CLLocation(latitude: s.value.lat, longitude: s.value.lon), s.at)
                 nearBoardAt = nearBoard.isEmpty ? nil : s.at
                 nearAsOf = nearBoardAt

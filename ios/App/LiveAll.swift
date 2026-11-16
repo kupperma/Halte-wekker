@@ -82,7 +82,8 @@ struct LiveAllSheet: View {
         let la = min(max(region.span.latitudeDelta / 2, 0.01), 0.08), lo = min(max(region.span.longitudeDelta / 2, 0.015), 0.12)
         let s = await Transit.liveVehicles(min: .init(latitude: c.latitude - la, longitude: c.longitude - lo),
                                            max: .init(latitude: c.latitude + la, longitude: c.longitude + lo))
-        if !s.isEmpty || segs.isEmpty { segs = s }
+        // a late bus where it is, not where its live times (that let it make its delay up) would put it
+        if !s.isEmpty || segs.isEmpty { segs = Transit.noCatchUp(s, asOf: Date()) }
         loading = false
     }
 

@@ -14,6 +14,7 @@ enum Paper {
     static let oxblood = Color(hex: 0x7A2A1E)
     static let ok = Color(hex: 0x3F7F2A)
     static let late = Color(hex: 0xB5481F)
+    static let lateInk = Color(hex: 0xA84219)      // `late` for small text on the paper and the cards (AA: 5:1 on EEE9DC)
     static let green = Color(hex: 0x5E9A36)        // buttons (white text on it)
     static let yellow = Color(hex: 0xF0D722)
     static let tape = Color(red: 236 / 255, green: 226 / 255, blue: 196 / 255)

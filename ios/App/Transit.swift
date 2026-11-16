@@ -31,6 +31,9 @@ struct Ride: Identifiable, Hashable, Codable {
     var badge: String { isTrain ? line : "BUS \(line)" }
     var grade: String? { Ratings.shared.grade(key: "\(fromId)>\(toStop)", minutes: arrival.timeIntervalSince(departure) / 60,
                                               scheduled: scheduledArrival.timeIntervalSince(scheduledDeparture) / 60, cancelled: cancelled) }
+    /// The same speed rank, only read (`grade` also remembers a new fastest time): for the room a change after it needs.
+    var speedGrade: String? { Ratings.shared.peekGrade(key: "\(fromId)>\(toStop)", minutes: arrival.timeIntervalSince(departure) / 60,
+                                                       scheduled: scheduledArrival.timeIntervalSince(scheduledDeparture) / 60, cancelled: cancelled) }
 }
 
 extension Ride {
@@ -77,6 +80,11 @@ struct BoardDeparture: Identifiable, Hashable, Codable {
     var heading: Heading? = nil         // which way it goes from here
     var train = false
     var delay: Int { live ? Int((time.timeIntervalSince(scheduled) / 60).rounded()) : 0 }
+    /// The same departure, under another stop of the board.
+    func at(_ stop: String) -> BoardDeparture {
+        stop == stopId ? self : BoardDeparture(tripId: tripId, stopId: stop, stopName: stopName, line: line, headsign: headsign, time: time,
+                                               scheduled: scheduled, live: live, cancelled: cancelled, platform: platform, heading: heading, train: train)
+    }
 }
 
 /// Which way a bus or train goes from a stop: the compass direction (0 is north, 90 east), and the next places it passes.
@@ -117,6 +125,9 @@ struct VehicleSegment {
     var realTime = false                // its times are live (else timetable only)
     var toLat: Double? = nil            // where the piece's next stop is
     var toLon: Double? = nil
+    var scheduledDeparture: Date? = nil // the timetable's times (`departure` and `arrival` are live when it is)
+    var scheduledArrival: Date? = nil
+    var mode = ""                       // as the live data names it: "BUS", "TRAM", "REGIONAL_RAIL"…
 
     /// Where the vehicle should be at `t`, by time along its path.
     func position(at t: Date) -> CLLocationCoordinate2D? {
@@ -214,7 +225,9 @@ enum Transit {
     static func findStops(_ q: String) async -> [StopHit] {
         let items: [URLQueryItem] = [.init(name: "text", value: q), .init(name: "type", value: "STOP"), .init(name: "numResults", value: "12"),
                                      .init(name: "place", value: "\(Place.veghel.coordinate.latitude),\(Place.veghel.coordinate.longitude)")]
-        guard let list = try? await get("/v1/geocode", items) as? [[String: Any]] else { return [] }
+        // (someone is typing and waiting for it)
+        let answer = try? await Transit.$urgent.withValue(true) { () async throws -> Any in try await get("/v1/geocode", items) }
+        guard let list = answer as? [[String: Any]] else { return [] }
         return list.compactMap { m in
             guard let id = m["id"] as? String, let name = m["name"] as? String, let la = m["lat"] as? Double, let lo = m["lon"] as? Double else { return nil }
             let areas = (m["areas"] as? [[String: Any]]) ?? []
@@ -595,19 +608,45 @@ enum Transit {
         return Heading(degrees: Heading.bearing(here.coordinate, ahead.c), via: labels.isEmpty ? nil : labels.joined(separator: " → "))
     }
 
+    /// The last `/v1/map/trips` answer per kind of question (the size of the box, the time around now, every trip or the
+    /// first), with where and when it was asked: for `reuse`.
+    private final class MapAnswers: @unchecked Sendable {
+        private let lock = NSLock()
+        private var last: [String: (at: Date, centre: GeoPoint, segs: [VehicleSegment])] = [:]
+        func get(_ k: String, near c: GeoPoint, now: Date) -> [VehicleSegment]? {
+            lock.lock(); defer { lock.unlock() }
+            guard let a = last[k], MapReuse.usable(age: now.timeIntervalSince(a.at), movedMetres: Geo.metres(a.centre, c), allowed: true) else { return nil }
+            return a.segs
+        }
+        func put(_ k: String, centre: GeoPoint, segs: [VehicleSegment], at: Date) {
+            lock.lock(); last[k] = (at, centre, segs); lock.unlock()
+        }
+    }
+    private static let mapAnswers = MapAnswers()
+
     /// Vehicles running near a point right now.
     /// `back`/`ahead`: the stretch of time (by their timetables) to look at, around now.
     /// `allTrips`: a piece several trips share (coupled and through trains) gives one segment per trip, not just the first.
+    /// `reuse`: the same question's answer of the last 10 s does, when it was asked within 50 m of here (`MapReuse`):
+    /// standing about with Fastest trip open, a look every 6 s needn't download it all again.
     static func vehicles(near c: CLLocationCoordinate2D, radiusDeg: Double = 0.02, back: TimeInterval = 150, ahead: TimeInterval = 90,
-                         allTrips: Bool = false) async -> [VehicleSegment] {
+                         allTrips: Bool = false, reuse: Bool = false) async -> [VehicleSegment] {
         let now = Date()
+        let key = "\(radiusDeg)|\(back)|\(ahead)|\(allTrips)", here = GeoPoint(c)
+        if reuse, let kept = mapAnswers.get(key, near: here, now: now) { return kept }
         let q: [URLQueryItem] = [.init(name: "min", value: "\(c.latitude - radiusDeg),\(c.longitude - radiusDeg * 1.6)"),
                                  .init(name: "max", value: "\(c.latitude + radiusDeg),\(c.longitude + radiusDeg * 1.6)"),
                                  .init(name: "startTime", value: iso.string(from: now.addingTimeInterval(-back))),
                                  .init(name: "endTime", value: iso.string(from: now.addingTimeInterval(ahead))),
                                  .init(name: "zoom", value: "15")]
         guard let list = try? await get("/v1/map/trips", q) as? [[String: Any]] else { return [] }
-        return list.flatMap { s -> [VehicleSegment] in
+        let segs = vehicleSegments(list, allTrips: allTrips)
+        mapAnswers.put(key, centre: here, segs: segs, at: now)
+        return segs
+    }
+
+    private static func vehicleSegments(_ list: [[String: Any]], allTrips: Bool) -> [VehicleSegment] {
+        list.flatMap { s -> [VehicleSegment] in
             guard let trips = s["trips"] as? [[String: Any]], let dep = date(s["departure"]), let arr = date(s["arrival"]),
                   let poly = s["polyline"] as? String else { return [] }
             let mode = (s["mode"] as? String) ?? ""
@@ -619,7 +658,8 @@ enum Transit {
                 return VehicleSegment(tripId: id, line: (t["routeShortName"] as? String) ?? "?", isTrain: !(mode.contains("BUS") || mode.contains("COACH")),
                                       fromName: (from?["name"] as? String) ?? "", toName: (to?["name"] as? String) ?? "",
                                       departure: dep, arrival: arr, path: path,
-                                      realTime: live, toLat: to?["lat"] as? Double, toLon: to?["lon"] as? Double)
+                                      realTime: live, toLat: to?["lat"] as? Double, toLon: to?["lon"] as? Double,
+                                      scheduledDeparture: date(s["scheduledDeparture"]), scheduledArrival: date(s["scheduledArrival"]), mode: mode)
             }
         }
     }
@@ -640,7 +680,8 @@ enum Transit {
             let line = (t["routeShortName"] as? String) ?? "?"
             return VehicleSegment(tripId: id, line: train ? trainLabel(line) : line, isTrain: train,
                                   fromName: ((s["from"] as? [String: Any])?["name"] as? String) ?? "", toName: ((s["to"] as? [String: Any])?["name"] as? String) ?? "",
-                                  departure: dep, arrival: arr, path: decodePolyline(poly))
+                                  departure: dep, arrival: arr, path: decodePolyline(poly), realTime: (s["realTime"] as? Bool) ?? false,
+                                  scheduledDeparture: date(s["scheduledDeparture"]), scheduledArrival: date(s["scheduledArrival"]), mode: mode)
         }
     }
 
@@ -692,16 +733,18 @@ enum Transit {
 
     private static func parseLiveTrip(_ json: [String: Any]) -> LiveTrip? {
         guard let legs = json["legs"] as? [[String: Any]], !legs.isEmpty else { return nil }
-        var stops: [LiveTrip.Stop] = [], path: [CLLocationCoordinate2D] = [], live = false, line = "", head = ""
+        var stops: [LiveTrip.Stop] = [], path: [CLLocationCoordinate2D] = [], live = false, line = "", head = "", mode = ""
         func stop(_ o: [String: Any]?) -> LiveTrip.Stop? {
             guard let o, let la = o["lat"] as? Double, let lo = o["lon"] as? Double else { return nil }
             return LiveTrip.Stop(name: (o["name"] as? String) ?? "", coordinate: .init(latitude: la, longitude: lo),
                                  arrival: date(o["arrival"]), departure: date(o["departure"]),
-                                 scheduled: date(o["scheduledArrival"]) ?? date(o["scheduledDeparture"]))
+                                 scheduled: date(o["scheduledArrival"]) ?? date(o["scheduledDeparture"]),
+                                 scheduledArrival: date(o["scheduledArrival"]), scheduledDeparture: date(o["scheduledDeparture"]))
         }
         for l in legs {
             line = (l["routeShortName"] as? String) ?? line
             head = (l["headsign"] as? String) ?? head
+            mode = (l["mode"] as? String) ?? mode
             live = live || ((l["realTime"] as? Bool) ?? false)
             if stops.isEmpty, let x = stop(l["from"] as? [String: Any]) { stops.append(x) }
             for o in (l["intermediateStops"] as? [[String: Any]]) ?? [] { if let x = stop(o) { stops.append(x) } }
@@ -711,7 +754,7 @@ enum Transit {
             }
         }
         guard stops.count >= 2 else { return nil }
-        return LiveTrip(line: line, headsign: head, live: live, stops: stops, path: path)
+        return LiveTrip(line: line, headsign: head, live: live, stops: stops, path: path, mode: mode)
     }
 
     static func decodePolyline(_ s: String, precision: Int = 5) -> [CLLocationCoordinate2D] {
@@ -767,5 +810,10 @@ final class Ratings {
         if e <= 3 || r <= 1.18 { return "A" }
         if r <= 1.3 { return "B" }
         return "C"
+    }
+
+    /// `grade` without remembering a new fastest time (it doesn't write anything).
+    func peekGrade(key k: String, minutes: Double, scheduled: Double, cancelled: Bool) -> String? {
+        ChangeRoom.speedGrade(minutes: minutes, scheduled: scheduled, best: best[k], cancelled: cancelled)
     }
 }

@@ -64,10 +64,12 @@ final class GoStore: ObservableObject {
 
     /// Open the screen and start watching the way to `d`.
     /// `seed`: trips from where you are that the home screen just found: on screen at once, then looked up again.
-    func open(to d: Place, from loc: CLLocation?, deadline dl: Date? = nil, label: String? = nil, autoKey: String? = nil, seed: [DoorTrip] = []) {
+    /// `planKey`: it's for a trip you planned (`schoolKey`, `arriveKey`), opened by hand or by itself: once it's closed,
+    /// it doesn't open by itself for that trip again.
+    func open(to d: Place, from loc: CLLocation?, deadline dl: Date? = nil, label: String? = nil, planKey: String? = nil, seed: [DoorTrip] = []) {
         fallback = loc
         self.seed = dl == nil ? seed : []
-        deadline = dl; deadlineLabel = label; self.autoKey = autoKey
+        deadline = dl; deadlineLabel = label; self.planKey = planKey
         isOpen = true
         begin(d)
     }
@@ -75,13 +77,36 @@ final class GoStore: ObservableObject {
     /// A trip you planned (a class, a Be there by time): be there by this, leaving as late as possible.
     @Published private(set) var deadline: Date?
     @Published private(set) var deadlineLabel: String?     // "your 09:00 class"
-    private var autoKey: String?                             // opened by itself for this trip: closing it means not again
+    private var planKey: String?                             // opened for this planned trip: closing it means not by itself again
+
+    /// The planned trips' keys: your first class that day, and a Be there by (or Leave at) plan.
+    static func schoolKey(_ classStart: Date) -> String { "school-\(Fmt.ymd.string(from: classStart))" }
+    static func arriveKey(_ a: PlannedTrip) -> String { "arrive-\(a.date)-\(a.time)\(a.leaving ? "-leave" : "")" }
+
+    /// When it opens by itself for your next class: from when the alarm rings (or 45 minutes before you leave) until
+    /// just after the first bus has left.
+    static func schoolWindowOpen(_ n: SchoolAlarm.Day, now: Date) -> Bool {
+        guard SchoolAlarm.shared.on, let l = n.leave, let t = n.trip else { return false }
+        return now > min(l.addingTimeInterval(-45 * 60), n.alarm ?? l) && now < t.first.departure.addingTimeInterval(5 * 60)
+    }
+    /// …and for a Be there by plan: from 45 minutes before you leave (a Leave at plan: a quarter of an hour) until just
+    /// after its first bus has left.
+    static func arriveWindowOpen(_ a: PlannedTrip, chosen: DoorTrip?, now: Date) -> Bool {
+        guard a.when != nil, let t = chosen else { return false }
+        return now > t.start.addingTimeInterval(a.leaving ? -15 * 60 : -45 * 60) && now < t.first.departure.addingTimeInterval(5 * 60)
+    }
+    /// The key for one opened by hand for your class: only while it would open by itself for it (outside that, closing
+    /// it tonight mustn't stop it opening by itself for tomorrow's class).
+    static func schoolKeyIfDue(_ classStart: Date, now: Date) -> String? {
+        guard let n = SchoolAlarm.shared.next, n.classStart == classStart, schoolWindowOpen(n, now: now) else { return nil }
+        return schoolKey(classStart)
+    }
 
     /// The app opened around the time to leave for a trip you planned: open this screen for it (once; not again after you
     /// close it).
     func openForPlan(to d: Place, from loc: CLLocation?, deadline dl: Date?, label: String?, key: String) {
         guard !isOpen, UserDefaults.standard.string(forKey: "go.closedPlan") != key else { return }
-        open(to: d, from: loc, deadline: dl, label: label, autoKey: key)
+        open(to: d, from: loc, deadline: dl, label: label, planKey: key)
     }
 
     /// Somewhere else to go (from the menu at the top).
@@ -94,8 +119,8 @@ final class GoStore: ObservableObject {
     /// Out of the screen: everything stops, and its notifications go.
     func close() {
         stopWatching()
-        if let k = autoKey { UserDefaults.standard.set(k, forKey: "go.closedPlan") }
-        autoKey = nil; deadline = nil; deadlineLabel = nil
+        if let k = planKey { UserDefaults.standard.set(k, forKey: "go.closedPlan") }
+        planKey = nil; deadline = nil; deadlineLabel = nil
         isOpen = false
         clearPosted()
         demoTask?.cancel(); demoTask = nil
@@ -377,7 +402,7 @@ final class GoStore: ObservableObject {
         if let cur = best, !cur.first.cancelled, !ok.contains(where: { $0.first.tripId == cur.first.tripId }),
            cur.first.departure < now.addingTimeInterval(60), now < cur.first.departure.addingTimeInterval(6 * 60),
            let la = cur.first.fromLat, let lo = cur.first.fromLon,
-           loc.distance(from: CLLocation(latitude: la, longitude: lo)) < 200, (trip?.speed ?? 0) < 2.5 {
+           loc.distance(from: CLLocation(latitude: la, longitude: lo)) < 200, (trip?.currentSpeed ?? 0) < 2.5 {
             overdue = true
             others = Array(ok.filter { $0.first.tripId != cur.first.tripId }.sorted(by: Self.sooner).prefix(5))
             error = nil
@@ -607,8 +632,8 @@ final class GoStore: ObservableObject {
             guard watching, dest == d, trip.phase == .idle else { return }
             if let me = ranked.first(where: { $0.vehicle.tripId == v.tripId }), let t = best {
                 let close = ranked.filter { $0.vehicle.tripId != v.tripId && $0.cost < me.cost + R.close }.map(\.vehicle)
-                board(t, v, alternatives: ob.1, couldBe: close)
-                return
+                if board(t, v, alternatives: ob.1, couldBe: close) { return }
+                break                       // its stop is where you are: not this one, plan from where you are
             }
             guard sure else { continue }
             looks += 1
@@ -638,7 +663,7 @@ final class GoStore: ObservableObject {
         guard var m = ranked.first else { seen = nil; return nil }
         guard watching, trip.phase == .idle else { return nil }
         // at bus speed, not running for it while it passes you
-        guard (trip.speed ?? 0) >= 3.5 else { return last }
+        guard (trip.currentSpeed ?? 0) >= 3.5 else { return last }
         // (the saved answer on screen isn't one it's watching: only a live answer can start your trip)
         let live = asOf == nil
         let all: [DoorTrip] = live ? [best].compactMap { $0 } + others : []
@@ -674,25 +699,44 @@ final class GoStore: ObservableObject {
     /// On board: the trip starts by itself (the ride screen takes over) and the watching stops.
     /// `alternatives`: the ways it was choosing between, so the ride can still switch if it turns out you're on another one.
     /// `couldBe`: other buses that fit about as well; the ride decides between them once they're clearly apart.
-    private func board(_ t: DoorTrip, _ v: Vehicle, alternatives: [DoorTrip] = [], couldBe: [Vehicle] = []) {
-        guard let r = RoutePlan.from(t), let trip else { return }
-        trip.start(r, vehicle: v, auto: true, alternatives: alternatives, couldBe: couldBe)
+    /// Not when its first stop is where you are already (a bus standing at the bus station you're at): it would ring and
+    /// say "You're at …" at once. False then.
+    @discardableResult private func board(_ t: DoorTrip, _ v: Vehicle, alternatives: [DoorTrip] = [], couldBe: [Vehicle] = []) -> Bool {
+        guard let r = RoutePlan.from(t), let trip, !trip.refusesAtItsStop(r, what: "Go board onto", vehicle: v) else { return false }
+        trip.start(r, vehicle: v, auto: true, alternatives: alternatives, couldBe: couldBe, how: "Go board")
         close()
         let c = UNMutableNotificationContent()
         c.title = "You’re on the \(v.title)"
-        c.body = "Your trip to \(r.station.short) started by itself. It rings before \(r.legs(trip.direction).first?.to.short ?? "your stop")."
+        let first = r.legs(trip.direction).first?.to.short ?? "your stop"
+        // (a leg that started inside its wake distance has no alarm: it tells you at the stop)
+        c.body = "Your trip to \(r.station.short) started by itself. "
+            + (trip.phase == .awake ? "It tells you when you’re at \(first)." : "It rings before \(first).")
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "goboard-\(Int(Date().timeIntervalSince1970))", content: c, trigger: nil)) { _ in }
+        return true
     }
 
-    /// "I'm on it": start the trip by hand (it still looks for which one you're on).
-    func startByHand() {
-        if demo, let f = best?.first, let a = f.fromLat, let o = f.fromLon {
-            trip?.startDemo(from: .init(latitude: a, longitude: o), line: f.line)
+    /// "I'm on it" on `t`, the card you tapped (not whatever the screen shows by the time the tap comes in): start the
+    /// trip by hand. Without one it knows you're on, it still looks for which one, and the one this card rides holds
+    /// against another it sees on its road (an Intercity to Den Bosch on the track the one to Breda shares). While it
+    /// had another one in mind (the one it saw you with), you said it's this one: the ride takes it as picked, as
+    /// "I'm on this one" in the list.
+    func startByHand(_ t: DoorTrip) {
+        if demo, let a = t.first.fromLat, let o = t.first.fromLon {
+            trip?.startDemo(from: .init(latitude: a, longitude: o), line: t.first.line)
             close()
             return
         }
-        guard let t = best, let r = RoutePlan.from(t), let trip else { return }
-        if let v = onBoard, t.first.tripId == v.tripId { trip.start(r, vehicle: v, alternatives: [t] + others) } else { trip.start(r) }
+        guard let r = RoutePlan.from(t), let trip else { return }
+        let rest = others.filter { $0.id != t.id } + (best.map { $0.id == t.id ? [] : [$0] } ?? [])
+        if let v = onBoard, t.first.tripId == v.tripId {
+            trip.start(r, vehicle: v, alternatives: [t] + rest, how: "Go hand")
+        } else if onBoard != nil {
+            let f = t.first
+            trip.start(r, vehicle: Vehicle(tripId: f.tripId, line: f.line, isTrain: f.isTrain), alternatives: [t] + rest, picked: true,
+                       how: "Go hand, picked")
+        } else {
+            trip.start(r, onIt: true, how: "Go hand")
+        }
         close()
     }
 
@@ -1091,7 +1135,10 @@ struct GoView: View {
             let a = t.rides[w.index - 1], n = t.rides[w.index]
             let story = DelayBook.shared.story(line: a.line, stop: a.toStop, at: a.scheduledArrival, slack: w.slack)
             let safer = go.others.filter { Risk.penalty($0) < Risk.penalty(t) - 2 }.min { $0.end < $1.end }
-            let why = story.map { "the \(a.line) here was \($0)" } ?? (a.isTrain ? "trains are sometimes a few minutes late" : "buses are often a few minutes late")
+            // a slow bus (its speed rank B or C) wants more room: say so first
+            let slow = Risk.feederGrade(a).flatMap { g in ChangeRoom.extra(afterGrade: g) > 0 ? g : nil }
+            let why = slow.map { "this \(a.line) is \($0)-rank, slow on this stretch, so a change after it wants \(Int(ChangeRoom.needed(afterGrade: $0))) min" }
+                ?? story.map { "the \(a.line) here was \($0)" } ?? (a.isTrain ? "trains are sometimes a few minutes late" : "buses are often a few minutes late")
             let then = safer.map { o in
                 let same = Int(o.end.timeIntervalSince1970 / 60) == Int(t.end.timeIntervalSince1970 / 60)
                 return " Safer: \(GoStore.what(o.first)) at \(Fmt.hhmm(o.first.departure))" + (same ? ", there at the same time." : ", there \(Fmt.hhmm(o.end)).")
@@ -1206,8 +1253,10 @@ struct GoView: View {
             ForEach(Array(t.rides.enumerated()).dropFirst(), id: \.offset) { i, ride in
                 let prev = t.rides[i - 1]
                 let ch = Fmt.mins(ride.departure.timeIntervalSince(prev.arrival))
-                Label("\(ch) min to change at \(Fmt.place(prev.toStop))\(ride.walkBefore > 0 ? ", \(ride.walkBefore) min walk" : "")", systemImage: "arrow.triangle.swap")
-                    .font(BoardInk.sans(10.5, .semibold)).foregroundStyle(ch - ride.walkBefore < 2 ? Paper.late : Paper.ink.opacity(0.8))
+                let note = Risk.changeNote(after: prev, minutes: ch, walk: ride.walkBefore)     // (after a slow bus: why it's red)
+                let why = note.why.map { " · \($0)" } ?? ""
+                Label("\(ch) min to change at \(Fmt.place(prev.toStop))\(ride.walkBefore > 0 ? ", \(ride.walkBefore) min walk" : "")\(why)", systemImage: "arrow.triangle.swap")
+                    .font(BoardInk.sans(10.5, .semibold)).foregroundStyle(note.red ? Paper.lateInk : Paper.ink.opacity(0.8))
                     .padding(.top, 4)
                 PlannerRideRow(ride: ride, info: ns.rail(ride), picked: false, saved: go.asOf != nil) {
                     liveTrack = LiveTrackTarget(tripId: ride.tripId, line: ride.line, headsign: ride.headsign.isEmpty ? Fmt.place(ride.toStop) : ride.headsign,
@@ -1331,7 +1380,7 @@ struct GoView: View {
             BandButton(title: "Back to the map", pal: pal) { withAnimation(.easeInOut(duration: 0.35)) { go.close() } }
                 .padding(.horizontal, 12).padding(.bottom, 6)
         } else if let t = go.best, RoutePlan.from(t) != nil {
-            Button { go.startByHand() } label: {
+            Button { go.startByHand(t) } label: {
                 HStack(spacing: 8) {
                     Image(systemName: t.first.isTrain ? "tram.fill" : "bus.fill")
                     Text("I’M ON IT · START NOW").font(HWFont.display(14)).tracking(0.8)
@@ -1411,18 +1460,20 @@ struct GoMap: View {
         if let t = trip, let m = mine, let r = ride {
             let w = t.position(now)
             let me = t.metres(ofStop: m)
+            // not past your stop before it has left there (two minutes after its time): a late one may still be coming
+            let at = LiveTimes.shown(w.metres, mine: me, left: LiveTimes.hasLeft(t.stops[m].times, now: now))
             // the road it still has to take to you, and on from there (fainter)
             let rest = t.road(from: me, to: t.metres(ofStop: t.stops.count - 1))
             if rest.count > 1 {
                 MapPolyline(coordinates: rest)
                     .stroke(Paper.line(r.line, train: r.isTrain).opacity(0.35), style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
             }
-            if w.metres < me - 5 {
-                MapPolyline(coordinates: t.road(from: w.metres, to: me))
+            if at < me - 5 {
+                MapPolyline(coordinates: t.road(from: at, to: me))
                     .stroke(Paper.line(r.line, train: r.isTrain), style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
             }
-            if !w.done && w.metres <= me + 30 {
-                Annotation("", coordinate: t.coordinate(atMetres: w.metres), anchor: .center) {
+            if !w.done && at <= me + 30 {
+                Annotation("", coordinate: t.coordinate(atMetres: at), anchor: .center) {
                     HStack(spacing: 4) {
                         Image(systemName: r.isTrain ? "tram.fill" : "bus.fill").font(.system(size: 12, weight: .bold))
                         Text(r.line).font(BoardInk.sans(13))
@@ -1461,7 +1512,7 @@ struct GoMap: View {
             if let r = ride, now.timeIntervalSince(lastTrip) >= 30 {
                 lastTrip = now
                 if let t = await Transit.liveTrip(r.tripId), !Task.isCancelled {
-                    trip = t
+                    trip = t.noCatchUp(asOf: Date(), isTrain: r.isTrain)        // a late bus without catching up
                     if mine == nil { mine = Self.findMine(t, r) }
                 }
             }
@@ -1499,9 +1550,11 @@ struct GoMap: View {
         if let s = stop {
             pts.append(s)
             if let t = trip, let m = mine {
-                let w = t.position(now), bus = t.coordinate(atMetres: w.metres)
+                let w = t.position(now)
+                let at = LiveTimes.shown(w.metres, mine: t.metres(ofStop: m), left: LiveTimes.hasLeft(t.stops[m].times, now: now))
+                let bus = t.coordinate(atMetres: at)
                 let far = CLLocation(latitude: bus.latitude, longitude: bus.longitude).distance(from: CLLocation(latitude: s.latitude, longitude: s.longitude))
-                if !w.done && w.metres <= t.metres(ofStop: m) + 30 && far < 6000 { pts.append(bus) }
+                if !w.done && at <= t.metres(ofStop: m) + 30 && far < 6000 { pts.append(bus) }
             }
         }
         guard let p0 = pts.first else { return }

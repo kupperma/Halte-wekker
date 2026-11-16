@@ -85,12 +85,19 @@ final class NSStore: ObservableObject {
     // MARK: talking to the relay
 
     private func fetch(_ path: String) async -> (json: Any?, status: Int) {
-        guard let url = URL(string: Self.relay + path) else { return (nil, 0) }
+        let a = await Self.fetchParsed(path)
+        return (a.json, a.status)
+    }
+
+    /// The relay's answer, parsed off the main thread (/ns/trips alone is some 60 KB).
+    private struct Parsed: @unchecked Sendable { let json: Any?; let status: Int }
+    private nonisolated static func fetchParsed(_ path: String) async -> Parsed {
+        guard let url = URL(string: relay + path) else { return Parsed(json: nil, status: 0) }
         var r = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData)
         r.setValue(Transit.userAgent, forHTTPHeaderField: "User-Agent")
-        guard let a = try? await Net.response(r, lane: .background, label: String(path.prefix { $0 != "?" })) else { return (nil, -1) }
+        guard let a = try? await Net.response(r, lane: .background, label: String(path.prefix { $0 != "?" })) else { return Parsed(json: nil, status: -1) }
         let json = (a.contentType ?? "").contains("json")
-        return (a.status == 200 && json ? try? JSONSerialization.jsonObject(with: a.data) : nil, a.status)
+        return Parsed(json: a.status == 200 && json ? try? JSONSerialization.jsonObject(with: a.data) : nil, status: a.status)
     }
 
     private static let nsTime: DateFormatter = {

@@ -154,12 +154,11 @@ final class NoticeLog: ObservableObject {
     func markRead() { unread = 0; persist() }
     func clear() { items = []; unread = 0; persist() }
 
-    /// You opened the app: what came in while it was closed goes into the list (not the end of a workout rest), and off
-    /// the lock screen.
+    /// You opened the app: what came in while it was closed goes into the list, and off the lock screen.
     func collectDelivered() async {
         let c = UNUserNotificationCenter.current()
         let delivered = await c.deliveredNotifications()
-        for n in delivered where n.request.identifier != RestAlert.id {
+        for n in delivered {
             let content = n.request.content
             add(key: n.request.identifier, title: content.title, body: content.body, kind: Notices.kind(of: content.title, content.userInfo), at: n.date)
         }

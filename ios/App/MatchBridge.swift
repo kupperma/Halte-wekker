@@ -40,3 +40,46 @@ extension VehicleTrack {
         self.init(tripId: tripId, line: line, isTrain: isTrain, realTime: trip.live, pieces: pieces)
     }
 }
+
+extension LiveTrip.Stop {
+    /// Its times as the no-catch-up rules take them.
+    var times: StopTimes {
+        StopTimes(arrival: arrival, departure: departure, scheduled: scheduled, scheduledArrival: scheduledArrival, scheduledDeparture: scheduledDeparture)
+    }
+}
+
+extension LiveTrip {
+    /// A late bus, coach or tram without catching up (`LiveTimes.noCatchUp`): what to draw it by, and what the matcher
+    /// judges it by. As it is for a train (`isTrain` when its mode isn't known), or without live times.
+    func noCatchUp(asOf: Date, isTrain: Bool) -> LiveTrip {
+        guard live, LiveTimes.carriesDelay(mode: mode, isTrain: isTrain) else { return self }
+        let given = stops.map(\.times)
+        let fixed = LiveTimes.noCatchUp(given, asOf: asOf)
+        guard fixed != given else { return self }
+        let moved = zip(stops, fixed).map { s, t in
+            LiveTrip.Stop(name: s.name, coordinate: s.coordinate, arrival: t.arrival, departure: t.departure, scheduled: s.scheduled,
+                          scheduledArrival: s.scheduledArrival, scheduledDeparture: s.scheduledDeparture)
+        }
+        return LiveTrip(line: line, headsign: headsign, live: live, stops: moved, path: path, mode: mode)
+    }
+}
+
+extension Transit {
+    /// The live map's pieces with late buses, coaches and trams not catching up (`LiveTimes.noCatchUp(trips:)`), in
+    /// the order given.
+    static func noCatchUp(_ segs: [VehicleSegment], asOf: Date) -> [VehicleSegment] {
+        let given = segs.map { s in
+            TripPiece(trip: s.tripId, carries: LiveTimes.carriesDelay(mode: s.mode, isTrain: s.isTrain), live: s.realTime,
+                      times: PieceTimes(departure: s.departure, arrival: s.arrival, scheduledDeparture: s.scheduledDeparture, scheduledArrival: s.scheduledArrival),
+                      stops: "\(s.fromName)|\(s.toName)")
+        }
+        let fixed = LiveTimes.noCatchUp(trips: given, asOf: asOf)
+        return zip(segs, zip(given, fixed)).map { s, gf in
+            guard gf.1 != gf.0.times else { return s }
+            return VehicleSegment(tripId: s.tripId, line: s.line, isTrain: s.isTrain, fromName: s.fromName, toName: s.toName,
+                                  departure: gf.1.departure, arrival: gf.1.arrival, path: s.path, realTime: s.realTime,
+                                  toLat: s.toLat, toLon: s.toLon, scheduledDeparture: s.scheduledDeparture, scheduledArrival: s.scheduledArrival,
+                                  mode: s.mode)
+        }
+    }
+}

@@ -38,7 +38,8 @@ struct RootView: View {
                     withAnimation(.easeInOut(duration: 0.35)) { morning.showing = false }
                     if trip.phase == .idle {
                         if trip.direction != .toSchool { trip.pick(.toSchool) }
-                        go.open(to: .buas, from: trip.lastFix, deadline: p.beThere, label: "your \(Fmt.hhmm(p.classStart)) class")
+                        go.open(to: .buas, from: trip.lastFix, deadline: p.beThere, label: "your \(Fmt.hhmm(p.classStart)) class",
+                                planKey: GoStore.schoolKeyIfDue(p.classStart, now: Date()))
                     }
                 })
                 .transition(.opacity)
@@ -124,7 +125,6 @@ struct HomeView: View {
     @State private var showSteady = false                  // how steady the lines are right now
     @State private var showOutfit = false                  // what to wear today
     @State private var showRecomp = false                  // protein, habits and the weekly weight
-    @ObservedObject private var workoutNav = WorkoutNav.shared  // the Workouts sheet and the running workout
     @State private var showDemo = false                    // try it at home
     @State private var showNotices = false                 // the notifications you had, and what's watched
     @State private var planByArrival = true                // the plan sheet opens on "be there by"
@@ -162,19 +162,16 @@ struct HomeView: View {
         }
         .animation(.easeInOut(duration: 0.3), value: trip.toast)
         .onChange(of: stage) { _, s in Handoff.fromBoards = s == .station }
-        .onChange(of: near.position?.coordinate.latitude) { _, _ in Task { await live.refresh(trip.direction, at: near.position) } }
+        .onChange(of: near.position?.coordinate.latitude) { _, _ in
+            guard !goStore.isOpen else { return }            // (on its way out: Fastest trip has the screen)
+            Task { await live.refresh(trip.direction, at: near.position) }
+        }
         .sheet(item: $walkTo) { WalkMapSheet(target: $0).presentationDetents([.large]) }
         .sheet(item: $liveTrack) { LiveBusSheet(target: $0).presentationDetents([.large]) }
         .sheet(isPresented: $showMoving) { LiveAllSheet(center: near.position?.coordinate ?? Place.breda.coordinate).presentationDetents([.large]) }
         .sheet(isPresented: $showSteady) { SteadySheet().presentationDetents([.large]) }
         .sheet(isPresented: $showOutfit) { OutfitSheet().presentationDetents([.large]) }
         .sheet(isPresented: $showRecomp) { RecompSheet().presentationDetents([.large]) }
-        .sheet(isPresented: $workoutNav.sheet, onDismiss: { workoutNav.sheetDismissed() }) { WorkoutsSheet().presentationDetents([.large]) }
-        // a sheet, not a full-screen cover: a cover takes HomeView off the screen and stops its 30 s trip loops
-        .sheet(isPresented: $workoutNav.session) {
-            WorkoutSessionView().presentationDetents([.large]).interactiveDismissDisabled()
-        }
-        .onDisappear { workoutNav.homeLeft() }
         .sheet(isPresented: $choosingDestination) {
             DestinationSheet { d in
                 live.go(to: d)
@@ -189,23 +186,23 @@ struct HomeView: View {
         }
         .sheet(isPresented: $showDemo) { DemoSheet().presentationDetents([.large]) }
         .sheet(isPresented: $showNotices) { NotificationsSheet().presentationDetents([.medium, .large]) }
-        // on the map: the bell, what to wear, today's protein and today's workout, top left, clear of the map's own buttons
+        // on the map: the bell, what to wear and today's protein, top left, clear of the map's own buttons
         .overlay(alignment: .topLeading) {
             if stage == .map {
                 HStack(spacing: 8) {
                     NoticeBell { showNotices = true }
                     OutfitTag { showOutfit = true }
                     RecompTag { showRecomp = true }
-                    WorkoutTag()
                 }
-                .padding(.horizontal, 18).padding(.top, 4).transition(.opacity)   // too wide: the workout tag shows only its icon
+                .padding(.leading, 18).padding(.top, 4).transition(.opacity)
             }
         }
         .sheet(isPresented: $planning) { PlanSheet(byArrival: planByArrival) }
         .sheet(isPresented: $liveSettings, onDismiss: { Task { await live.refresh(trip.direction, force: true) } }) { LiveSettingsSheet() }
         .sheet(item: $startReq) { r in StartSheet(req: r).presentationDetents([.medium, .large]) }
         .sheet(item: $stopEdit) { r in StopSheet(req: r) }
-        // Every 30 s while the app is in front: one loop per refresher, so a slow one never holds up the others.
+        // Every 30 s while the app is in front: one loop per refresher, so a slow one never holds up the others. Their
+        // first steps 1.5 s apart (the live times first), so the first seconds after launch aren't all of them at once.
         .task(id: trip.direction) {
             await everyHalfMinute {
                 Watchdog.shared.mark("finding where you are")
@@ -217,7 +214,7 @@ struct HomeView: View {
             }
         }
         .task(id: trip.direction) {
-            await everyHalfMinute {
+            await everyHalfMinute(after: 1.5) {
                 Watchdog.shared.mark("planning your planned trips")
                 await planner.refresh()
                 autoGo()
@@ -225,7 +222,7 @@ struct HomeView: View {
             }
         }
         .task(id: trip.direction) {
-            await everyHalfMinute {
+            await everyHalfMinute(after: 3) {
                 Watchdog.shared.mark("planning the school alarms")
                 await SchoolAlarm.shared.refresh()
                 Watchdog.shared.mark("checking watched trains")
@@ -234,7 +231,7 @@ struct HomeView: View {
             }
         }
         .task(id: trip.direction) {
-            await everyHalfMinute {
+            await everyHalfMinute(after: 4.5) {
                 Watchdog.shared.mark("getting the weather")
                 updateOutfit()                                   // the weather for where you are and where you're going
                 await OutfitStore.shared.refresh()
@@ -242,21 +239,30 @@ struct HomeView: View {
             }
         }
         .onChange(of: scene) { _, s in
-            if s == .background { FieldLog.shared.flush() }
             if s == .active {
                 trip.appBecameActive()
                 autoGo()
-                Task { await live.refresh(trip.direction) }
+                Task { await watch.check(force: true) }            // (the NS relay: watched trains' platform and delay alerts)
+                // Fastest trip just opened by itself: the home screen is on its way out and asks Transitous nothing now.
+                // Else the same questions the loops ask (from where you are now), so a loop that's asking right now (it
+                // just appeared) and this are one question, not two.
+                guard !goStore.isOpen else { return }
+                Task { await live.refresh(trip.direction, at: near.position) }
                 Task { await planner.refresh() }
-                Task { await watch.check(force: true) }
             }
         }
     }
 
-    /// `step` now and every 30 s after, while the app is in front, until the task is cancelled.
-    private func everyHalfMinute(_ step: () async -> Void) async {
+    /// `step` now and every 30 s after, while the app is in front, until the task is cancelled. Not while Fastest trip
+    /// is open: then the home screen is on its way out (a direction picked for the planned trip right before restarts
+    /// these loops), and what it asked would only be cancelled. `after`: seconds before the first step.
+    private func everyHalfMinute(after delay: Double = 0, _ step: () async -> Void) async {
+        if delay > 0 {
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            if Task.isCancelled { return }
+        }
         while !Task.isCancelled {
-            if scene == .active { await step() }
+            if scene == .active && !goStore.isOpen { await step() }
             try? await Task.sleep(nanoseconds: 30_000_000_000)
         }
     }
@@ -300,38 +306,45 @@ struct HomeView: View {
     private func autoGo() {
         guard trip.phase == .idle, !goStore.isOpen else { return }
         let now = Date()
-        let school = SchoolAlarm.shared
         // from when the alarm rings (or 45 minutes before you leave) until just after the first bus has left
-        if school.on, let n = school.next, let l = n.leave, let t = n.trip,
-           now > min(l.addingTimeInterval(-45 * 60), n.alarm ?? l), now < t.first.departure.addingTimeInterval(5 * 60) {
+        if let n = SchoolAlarm.shared.next, GoStore.schoolWindowOpen(n, now: now) {
             if trip.direction != .toSchool { trip.pick(.toSchool) }
             withAnimation(.easeInOut(duration: 0.35)) {
                 goStore.openForPlan(to: .buas, from: near.position, deadline: n.beThere, label: "your \(Fmt.hhmm(n.classStart)) class",
-                                    key: "school-\(Fmt.ymd.string(from: n.classStart))")
+                                    key: GoStore.schoolKey(n.classStart))
             }
             return
         }
         // (leaving at a time: from a quarter of an hour before, the fastest way from then, no deadline to race)
-        if let a = planner.arrive, let T = a.when, let t = planner.arriveChosen,
-           now > t.start.addingTimeInterval(a.leaving ? -15 * 60 : -45 * 60), now < t.first.departure.addingTimeInterval(5 * 60) {
+        if let a = planner.arrive, let T = a.when, GoStore.arriveWindowOpen(a, chosen: planner.arriveChosen, now: now) {
             if trip.direction != (a.out ? .toSchool : .home) { trip.pick(a.out ? .toSchool : .home) }
             withAnimation(.easeInOut(duration: 0.35)) {
                 goStore.openForPlan(to: a.out ? .buas : .veghel, from: near.position, deadline: a.leaving ? nil : T,
                                     label: a.leaving ? nil : "\(a.out ? "BUas" : "home") by \(a.time)",
-                                    key: "arrive-\(a.date)-\(a.time)\(a.leaving ? "-leave" : "")")
+                                    key: GoStore.arriveKey(a))
             }
         }
     }
 
-    /// Hands-free now, for the school alarm's trip or the Be there by plan.
+    /// Hands-free now, for the school alarm's trip or the Be there by plan. Inside the time `autoGo` would open it by
+    /// itself, with the plan's key as `autoGo` gives it: once you close it, it doesn't open again by itself for that
+    /// plan. (Outside that time it can't open by itself anyway, and closing it mustn't stop it later: tapping it tonight
+    /// for tomorrow's class still has it open by itself tomorrow.)
     private func openPlanGo(school: Bool) {
+        guard trip.phase == .idle else { return }
+        let now = Date()
         if school, let n = SchoolAlarm.shared.next {
             if trip.direction != .toSchool { trip.pick(.toSchool) }
-            withAnimation(.easeInOut(duration: 0.35)) { goStore.open(to: .buas, from: near.position, deadline: n.beThere, label: "your \(Fmt.hhmm(n.classStart)) class") }
+            withAnimation(.easeInOut(duration: 0.35)) {
+                goStore.open(to: .buas, from: near.position, deadline: n.beThere, label: "your \(Fmt.hhmm(n.classStart)) class",
+                             planKey: GoStore.schoolWindowOpen(n, now: now) ? GoStore.schoolKey(n.classStart) : nil)
+            }
         } else if let a = planner.arrive, let T = a.when {
             if trip.direction != (a.out ? .toSchool : .home) { trip.pick(a.out ? .toSchool : .home) }
             withAnimation(.easeInOut(duration: 0.35)) {
-                goStore.open(to: a.out ? .buas : .veghel, from: near.position, deadline: a.leaving ? nil : T, label: a.leaving ? nil : "\(a.out ? "BUas" : "home") by \(a.time)")
+                goStore.open(to: a.out ? .buas : .veghel, from: near.position, deadline: a.leaving ? nil : T,
+                             label: a.leaving ? nil : "\(a.out ? "BUas" : "home") by \(a.time)",
+                             planKey: GoStore.arriveWindowOpen(a, chosen: planner.arriveChosen, now: now) ? GoStore.arriveKey(a) : nil)
             }
         }
     }
@@ -554,7 +567,7 @@ struct HomeView: View {
     private func tapBus(_ d: BoardDeparture) {
         pickedAsOf = live.nearBoard.contains(d) ? live.nearAsOf : live.board.contains(d) ? live.panelsAsOf : nil
         withAnimation(.easeInOut(duration: 0.2)) { picked = .bus(d) }
-        if !lines.isWatched(stopId: d.stopId, line: d.line, headsign: d.headsign) {
+        if !lines.isWatched(stopId: d.stopId, stopName: d.stopName, line: d.line, headsign: d.headsign) {
             lines.toggle(stopId: d.stopId, stopName: d.stopName, line: d.line, headsign: d.headsign, tripId: d.tripId, delay: d.live ? d.delay : nil)
         }
     }
@@ -562,7 +575,7 @@ struct HomeView: View {
         pickedAsOf = live.panelsAsOf
         withAnimation(.easeInOut(duration: 0.2)) { picked = .busTrip(p) }
         let f = p.trip.first
-        if !lines.isWatched(stopId: f.fromId, line: f.line, headsign: f.headsign) {
+        if !lines.isWatched(stopId: f.fromId, stopName: f.fromStop, line: f.line, headsign: f.headsign) {
             lines.toggle(stopId: f.fromId, stopName: f.fromStop, line: f.line, headsign: f.headsign, tripId: f.tripId, delay: f.live ? f.delay : nil)
         }
     }
@@ -600,7 +613,7 @@ struct HomeView: View {
                         leaves: pickedAsOf != nil ? nil : d.time) } },
                     liveMap: { liveTrack = LiveTrackTarget(tripId: d.tripId, line: isTrain ? Transit.trainLabel(d.line) : d.line, headsign: d.headsign,
                                                            stopName: d.stopName, time: d.cancelled ? d.scheduled : d.time, rail: isTrain) },
-                    tracked: lines.isWatched(stopId: d.stopId, line: d.line, headsign: d.headsign),
+                    tracked: lines.isWatched(stopId: d.stopId, stopName: d.stopName, line: d.line, headsign: d.headsign),
                     back: { withAnimation(.easeInOut(duration: 0.2)) { picked = nil } },
                     track: { lines.toggle(stopId: d.stopId, stopName: d.stopName, line: d.line, headsign: d.headsign, tripId: d.tripId, delay: d.live ? d.delay : nil) },
                     asOf: pickedAsOf)
@@ -611,7 +624,7 @@ struct HomeView: View {
                     ride: "\(t.trip.rideLabel) · arrives \(Fmt.place(t.trip.last.toStop)) \(Fmt.hhmm(t.trip.last.arrival))",
                     rank: RankInfo.of(t.trip),
                     walk: walkAction(f), liveMap: liveAction(f),
-                    tracked: lines.isWatched(stopId: f.fromId, line: f.line, headsign: f.headsign),
+                    tracked: lines.isWatched(stopId: f.fromId, stopName: f.fromStop, line: f.line, headsign: f.headsign),
                     back: { withAnimation(.easeInOut(duration: 0.2)) { picked = nil } },
                     track: { lines.toggle(stopId: f.fromId, stopName: f.fromStop, line: f.line, headsign: f.headsign, tripId: f.tripId, delay: f.live ? f.delay : nil) },
                     asOf: pickedAsOf)
@@ -626,7 +639,7 @@ struct HomeView: View {
                         ride: "\(r.rideMinutes) min ride · arrives \(Fmt.place(r.toStop)) \(Fmt.hhmm(r.arrival))",
                         rank: RankInfo.of(r),
                         walk: walkAction(r), liveMap: liveAction(r),
-                        tracked: lines.isWatched(stopId: r.fromId, line: r.line, headsign: r.headsign),
+                        tracked: lines.isWatched(stopId: r.fromId, stopName: r.fromStop, line: r.line, headsign: r.headsign),
                         back: { withAnimation(.easeInOut(duration: 0.2)) { picked = nil } },
                         track: { lines.toggle(stopId: r.fromId, stopName: r.fromStop, line: r.line, headsign: r.headsign, tripId: r.tripId, delay: r.live ? r.delay : nil) },
                         asOf: pickedAsOf)
@@ -646,7 +659,7 @@ struct HomeView: View {
         withAnimation(.easeInOut(duration: 0.2)) { picked = .ride(r) }
         if r.isTrain {
             if let pt = trainTrip(r), !watch.isWatched(r, from: pt.from) { _ = watch.toggle(pt.trip, from: pt.from, to: pt.to) }
-        } else if !lines.isWatched(stopId: r.fromId, line: r.line, headsign: r.headsign) {
+        } else if !lines.isWatched(stopId: r.fromId, stopName: r.fromStop, line: r.line, headsign: r.headsign) {
             lines.toggle(stopId: r.fromId, stopName: r.fromStop, line: r.line, headsign: r.headsign, tripId: r.tripId, delay: r.live ? r.delay : nil)
         }
     }
@@ -701,8 +714,10 @@ struct HomeView: View {
                     if i > 0 {
                         let prev = t.rides[i - 1]
                         let ch = Fmt.mins(ride.departure.timeIntervalSince(prev.arrival))
-                        Label("\(ch) min to change at \(Fmt.place(prev.toStop))\(ride.walkBefore > 0 ? ", \(ride.walkBefore) min walk" : "")", systemImage: "arrow.triangle.swap")
-                            .font(BoardInk.sans(10.5, .semibold)).foregroundStyle(ch - ride.walkBefore < 2 ? Paper.late : Paper.ink.opacity(0.8))
+                        let note = Risk.changeNote(after: prev, minutes: ch, walk: ride.walkBefore)     // (after a slow bus: why it's red)
+                        let why = note.why.map { " · \($0)" } ?? ""
+                        Label("\(ch) min to change at \(Fmt.place(prev.toStop))\(ride.walkBefore > 0 ? ", \(ride.walkBefore) min walk" : "")\(why)", systemImage: "arrow.triangle.swap")
+                            .font(BoardInk.sans(10.5, .semibold)).foregroundStyle(note.red ? Paper.lateInk : Paper.ink.opacity(0.8))
                     }
                     PlannerRideRow(ride: ride, info: ns.rail(ride), picked: picked == .ride(ride), saved: live.nextAsOf != nil) { tapRide(ride) }
                 }
@@ -834,7 +849,7 @@ struct HomeView: View {
                                   scheduled: d.scheduled, live: d.live, cancelled: d.cancelled, train: isRail,
                                   note: fromTrip.map { $0 + tripAsOf } ?? d.platform.map { "platform \($0)" },
                                   heading: d.heading,
-                                  watched: lines.isWatched(stopId: d.stopId, line: d.line, headsign: d.headsign), picked: picked == .bus(d),
+                                  watched: lines.isWatched(stopId: d.stopId, stopName: d.stopName, line: d.line, headsign: d.headsign), picked: picked == .bus(d),
                                   saved: live.nearAsOf != nil) { tapBus(d) }
                 }
             }
@@ -931,7 +946,7 @@ struct HomeView: View {
                 let ride = live.boardRides["\(d.stopId)|\(d.tripId)"]
                 PlannerBusRow(line: d.line, to: d.headsign, time: d.cancelled ? d.scheduled : d.time, scheduled: d.scheduled, live: d.live, cancelled: d.cancelled,
                               grade: d.cancelled ? nil : ride?.grade, note: ride.map { "\(Fmt.rideText($0.minutes)) to \($0.station) station, arrives \(Fmt.hhmm($0.arrival))" },
-                              heading: d.heading, watched: lines.isWatched(stopId: d.stopId, line: d.line, headsign: d.headsign), picked: picked == .bus(d),
+                              heading: d.heading, watched: lines.isWatched(stopId: d.stopId, stopName: d.stopName, line: d.line, headsign: d.headsign), picked: picked == .bus(d),
                               saved: live.panelsAsOf != nil) { tapBus(d) }
             }
         }
@@ -955,7 +970,7 @@ struct HomeView: View {
             ForEach(fallback) { r in
                 PlannerBusRow(line: r.line, to: r.headsign.isEmpty ? Fmt.place(r.toStop) : r.headsign, time: r.departure, scheduled: r.scheduledDeparture,
                               live: r.live, cancelled: r.cancelled, grade: r.grade, note: "\(r.rideMinutes) min ride · arrives \(Fmt.hhmm(r.arrival))",
-                              heading: Heading.of(r), watched: lines.isWatched(stopId: r.fromId, line: r.line, headsign: r.headsign), picked: picked == .ride(r),
+                              heading: Heading.of(r), watched: lines.isWatched(stopId: r.fromId, stopName: r.fromStop, line: r.line, headsign: r.headsign), picked: picked == .ride(r),
                               saved: live.nextAsOf != nil) { tapRide(r) }
             }
             Text("From your next trips; the full list comes in on the next refresh.").font(BoardInk.sans(9.5, .regular)).foregroundStyle(Paper.ink.opacity(0.65))
@@ -968,7 +983,7 @@ struct HomeView: View {
                 let f = p.trip.first
                 PlannerBusRow(line: f.line, to: f.headsign.isEmpty ? Fmt.place(p.trip.last.toStop) : f.headsign, time: f.departure, scheduled: f.scheduledDeparture,
                               live: f.live, cancelled: f.cancelled, grade: p.trip.rides.count == 1 ? f.grade : p.trip.last.grade, note: "\(p.trip.rideLabel) · arrives \(Fmt.hhmm(p.trip.last.arrival))",
-                              heading: Heading.of(f), watched: lines.isWatched(stopId: f.fromId, line: f.line, headsign: f.headsign), picked: picked == .busTrip(p),
+                              heading: Heading.of(f), watched: lines.isWatched(stopId: f.fromId, stopName: f.fromStop, line: f.line, headsign: f.headsign), picked: picked == .busTrip(p),
                               saved: live.panelsAsOf != nil) { tapBusTrip(p) }
             }
         }
@@ -1051,7 +1066,6 @@ struct HomeView: View {
     }
 
     @ViewBuilder private var moreContent: some View {
-        WorkoutCard(pal: pal)
         Button { showOutfit = true } label: {
             HStack(spacing: 10) {
                 Image(systemName: "tshirt.fill").font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
@@ -1335,7 +1349,7 @@ struct HomeView: View {
             }
             ForEach(list) { p in
                 let t = p.trip, f = t.first, rail = f.isTrain
-                let lineOn = !rail && lines.isWatched(stopId: f.fromId, line: f.line, headsign: f.headsign)
+                let lineOn = !rail && lines.isWatched(stopId: f.fromId, stopName: f.fromStop, line: f.line, headsign: f.headsign)
                 Button {
                     if rail { watch.toggle(t, from: p.from, to: p.to) }
                     else { lines.toggle(stopId: f.fromId, stopName: f.fromStop, line: f.line, headsign: f.headsign, tripId: f.tripId, delay: f.live ? f.delay : nil) }
@@ -1404,7 +1418,7 @@ struct HomeView: View {
                 let stopName = mine?.name ?? d.stopName
                 let label: String? = many && live.stopFilter == "all" ? (mine?.short ?? Fmt.place(d.stopName)) : nil
                 BoardRow(d: d, ride: live.boardRides["\(d.stopId)|\(d.tripId)"], stopLabel: label,
-                         watched: lines.isWatched(stopId: d.stopId, line: d.line, headsign: d.headsign), pal: pal, saved: live.panelsAsOf != nil) {
+                         watched: lines.isWatched(stopId: d.stopId, stopName: stopName, line: d.line, headsign: d.headsign), pal: pal, saved: live.panelsAsOf != nil) {
                     lines.toggle(stopId: d.stopId, stopName: stopName, line: d.line, headsign: d.headsign, tripId: d.tripId, delay: d.live ? d.delay : nil)
                 }
                 divider
@@ -1600,7 +1614,7 @@ struct RideView: View {
                         let p = trip.upcoming.first(where: { $0.trip.first.tripId == d.tripId })
                         let ride: BoardRide? = p.map { BoardRide(minutes: $0.trip.rideMinutes, station: $0.to.short, arrival: $0.trip.last.arrival, grade: $0.trip.first.grade) }
                         BoardRow(d: d, ride: ride, stopLabel: Fmt.place(d.stopName),
-                                 watched: lines.isWatched(stopId: d.stopId, line: d.line, headsign: d.headsign), pal: pal, saved: trip.upcomingAsOf != nil) {
+                                 watched: lines.isWatched(stopId: d.stopId, stopName: d.stopName, line: d.line, headsign: d.headsign), pal: pal, saved: trip.upcomingAsOf != nil) {
                             lines.toggle(stopId: d.stopId, stopName: d.stopName, line: d.line, headsign: d.headsign, tripId: d.tripId, delay: d.live ? d.delay : nil)
                         }
                         .onTapGesture { if !d.cancelled { trip.choose(board: d) } }

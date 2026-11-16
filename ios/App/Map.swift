@@ -151,7 +151,7 @@ struct HomeStage<Menu: View, Boards: View>: View {
 
     private func still(_ name: String) -> some View {
         Group {
-            if let img = UIImage(named: name) ?? Bundle.main.path(forResource: name, ofType: "jpg").flatMap(UIImage.init(contentsOfFile:)) {
+            if let img = StillCache.shared.image(name) {         // (read and decoded once, not on every redraw)
                 Image(uiImage: img).resizable()
             }
         }

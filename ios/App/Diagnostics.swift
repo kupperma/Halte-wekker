@@ -254,7 +254,7 @@ struct FieldLogScreen: View {
                 .foregroundStyle(Paper.navy)
                 Button("Clear") { FieldLog.shared.clear(); FieldLog.shared.flush(); list = [] }.foregroundStyle(Paper.navy)
             } footer: {
-                Text("The last 400 requests and vehicle choices, kept on this phone only. No places or coordinates.")
+                Text("The last 300 requests, 200 vehicle choices and 100 ride events (how a ride started, what it refused, when it woke you, rang and arrived), kept on this phone only. No places or coordinates.")
             }
         }
         .navigationTitle("Connection and matching log")
