@@ -582,7 +582,7 @@ final class NetTests: XCTestCase {
         await first.open()
         _ = try await urgent.value
         var seen = await order.list
-        XCTAssertEqual(seen, ["urgent"])
+        XCTAssertEqual(seen.first, "urgent")          // (the background one may already have gone in the place it left)
         _ = try await bg.value
         seen = await order.list
         XCTAssertEqual(seen, ["urgent", "background"])
