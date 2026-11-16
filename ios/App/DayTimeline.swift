@@ -92,13 +92,28 @@ enum DayTimeline {
 enum SchoolSkip {
     static let key = "school.skip"
 
-    /// The alarm to set for a day: none on a skipped day.
-    static func alarm(_ at: Date, day: String, skipped: Set<String>) -> Date? { skipped.contains(day) ? nil : at }
+    /// What planning does with a day's alarm.
+    enum Action: Equatable {
+        case keep                           // as it is
+        case clear                          // turned off for this day: take its alarm away
+        case set(Date, schedule: Bool)      // (re)set it to this time; `schedule`: still more than a minute ahead
+    }
 
-    /// The next school day to plan the morning for (Fastest trip opening by itself reads it): the first whose class is
-    /// still ahead, skipping the days you turned off.
-    static func next<T>(_ days: [T], classStart: (T) -> Date, day: (T) -> String, skipped: Set<String>, now: Date) -> T? {
-        days.filter { classStart($0) > now && !skipped.contains(day($0)) }.min { classStart($0) < classStart($1) }
+    /// The day's alarm, planned for `at`: none on a skipped day; kept when it's set for that same minute already;
+    /// else set again (and scheduled only when it's more than a minute ahead).
+    static func decide(_ at: Date, day: String, skipped: Set<String>, current: Date?, hasId: Bool, now: Date) -> Action {
+        if skipped.contains(day) { return current != nil || hasId ? .clear : .keep }
+        let same = current.map { Int($0.timeIntervalSince1970 / 60) == Int(at.timeIntervalSince1970 / 60) } ?? false
+        if same && hasId { return .keep }
+        return .set(at, schedule: at > now.addingTimeInterval(60))
+    }
+
+    /// A day turned back on: its alarm right away from the trip already planned for it (no planning needed), when
+    /// that's still more than a minute ahead.
+    static func restore(leave: Date?, wakeMinutes: Int, now: Date) -> Date? {
+        guard let l = leave else { return nil }
+        let at = l.addingTimeInterval(-Double(wakeMinutes) * 60)
+        return at > now.addingTimeInterval(60) ? at : nil
     }
 
     /// The skipped days still to come (`today` as yyyy-MM-dd; the strings sort as dates).
@@ -145,16 +160,29 @@ enum ComingUp {
         let classDays = Set(events.filter { !$0.allDay && !$0.cancelled }.map { cal.startOfDay(for: $0.start) })
         var items: [Item] = []
         // free weekdays, a weekend in between doesn't end a run
-        var runStart: Date?, runLast: Date?
-        func close() {
-            if let a = runStart, let b = runLast { items.append(Item(kind: .free, start: a, last: b, title: "No classes", when: range(a, b, cal))) }
-            runStart = nil; runLast = nil
-        }
+        // which weekdays normally have classes: on most of the known weeks (a single free day counts only on those)
+        var seenDays: [Int: Int] = [:], classOn: [Int: Int] = [:]
         var d = today
+        while d <= lastDay {
+            let wd = cal.component(.weekday, from: d)
+            seenDays[wd, default: 0] += 1
+            if classDays.contains(d) { classOn[wd, default: 0] += 1 }
+            guard let n = cal.date(byAdding: .day, value: 1, to: d) else { break }
+            d = n
+        }
+        func usual(_ wd: Int) -> Bool { let c = classOn[wd] ?? 0; return c > 0 && c * 2 >= (seenDays[wd] ?? 0) }
+        var runStart: Date?, runLast: Date?, runDays = 0
+        func close() {
+            if let a = runStart, let b = runLast, runDays >= 2 || usual(cal.component(.weekday, from: a)) {
+                items.append(Item(kind: .free, start: a, last: b, title: "No classes", when: range(a, b, cal)))
+            }
+            runStart = nil; runLast = nil; runDays = 0
+        }
+        d = today
         while d <= lastDay {
             let wd = cal.component(.weekday, from: d)            // 1 Sunday … 7 Saturday
             if wd != 1 && wd != 7 {
-                if classDays.contains(d) { close() } else { if runStart == nil { runStart = d }; runLast = d }
+                if classDays.contains(d) { close() } else { if runStart == nil { runStart = d }; runLast = d; runDays += 1 }
             }
             guard let n = cal.date(byAdding: .day, value: 1, to: d) else { break }
             d = n

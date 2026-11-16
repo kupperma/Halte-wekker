@@ -54,23 +54,32 @@ final class DayTimelineTests: XCTestCase {
 
     // MARK: skipping a day's alarm
 
-    private struct Day { let day: String; let start: Date }
-
     func test_skippedDateHasNoAlarmTheNextDayStillDoes() {
         let skipped: Set<String> = ["2026-11-17"]
-        XCTAssertNil(SchoolSkip.alarm(at(17, 7), day: "2026-11-17", skipped: skipped))
-        XCTAssertEqual(SchoolSkip.alarm(at(18, 7), day: "2026-11-18", skipped: skipped), at(18, 7))
-        let days = [Day(day: "2026-11-17", start: at(17, 9)), Day(day: "2026-11-18", start: at(18, 9))]
-        XCTAssertEqual(SchoolSkip.next(days, classStart: \.start, day: \.day, skipped: skipped, now: at(16, 20))?.day, "2026-11-18")
+        let now = at(16, 20)
+        // the skipped day's alarm goes; one never set stays unset
+        XCTAssertEqual(SchoolSkip.decide(at(17, 7), day: "2026-11-17", skipped: skipped, current: at(17, 7), hasId: true, now: now), .clear)
+        XCTAssertEqual(SchoolSkip.decide(at(17, 7), day: "2026-11-17", skipped: skipped, current: nil, hasId: false, now: now), .keep)
+        // the next day: set as usual, or kept when it's that minute already
+        XCTAssertEqual(SchoolSkip.decide(at(18, 7), day: "2026-11-18", skipped: skipped, current: nil, hasId: false, now: now),
+                       .set(at(18, 7), schedule: true))
+        XCTAssertEqual(SchoolSkip.decide(at(18, 7), day: "2026-11-18", skipped: skipped, current: at(18, 7, 0), hasId: true, now: now), .keep)
+        XCTAssertEqual(SchoolSkip.decide(at(18, 7, 5), day: "2026-11-18", skipped: skipped, current: at(18, 7), hasId: true, now: now),
+                       .set(at(18, 7, 5), schedule: true))
     }
 
     func test_unskipRestores() {
         var skipped: Set<String> = ["2026-11-17"]
         skipped.remove("2026-11-17")
-        XCTAssertEqual(SchoolSkip.alarm(at(17, 7), day: "2026-11-17", skipped: skipped), at(17, 7))
-        let days = [Day(day: "2026-11-18", start: at(18, 9)), Day(day: "2026-11-17", start: at(17, 9))]
-        XCTAssertEqual(SchoolSkip.next(days, classStart: \.start, day: \.day, skipped: skipped, now: at(16, 20))?.day, "2026-11-17")
-        XCTAssertNil(SchoolSkip.next(days, classStart: \.start, day: \.day, skipped: [], now: at(19)))
+        XCTAssertEqual(SchoolSkip.decide(at(17, 7), day: "2026-11-17", skipped: skipped, current: nil, hasId: false, now: at(16, 20)),
+                       .set(at(17, 7), schedule: true))
+        // at once, from the trip it has: leave 07:40, wake 60 min before
+        XCTAssertEqual(SchoolSkip.restore(leave: at(17, 7, 40), wakeMinutes: 60, now: at(16, 20)), at(17, 6, 40))
+        // too late for it: none (and planning sets no alarm to ring either)
+        XCTAssertNil(SchoolSkip.restore(leave: at(17, 7, 40), wakeMinutes: 60, now: at(17, 6, 40)))
+        XCTAssertNil(SchoolSkip.restore(leave: nil, wakeMinutes: 60, now: at(16, 20)))
+        XCTAssertEqual(SchoolSkip.decide(at(17, 7), day: "2026-11-17", skipped: [], current: nil, hasId: false, now: at(17, 7)),
+                       .set(at(17, 7), schedule: false))
     }
 
     func test_pruneKeepsTodayAndLater() {
@@ -91,8 +100,23 @@ final class DayTimelineTests: XCTestCase {
         events.append(ev("Class", at(1, 9, month: 12), at(1, 12, month: 12)))
         let r = ComingUp.build(events, now: at(16, 8), cal: cal)
         XCTAssertEqual(r.knownUntil, at(1, month: 12))
-        XCTAssertEqual(r.items.map(\.when), ["Wed 18 Nov", "Mon 23 – Fri 27 Nov"])
-        XCTAssertEqual(r.items.map(\.title), ["No classes", "No classes"])
+        // (Wednesday never has classes in the weeks known: a free Wednesday isn't news)
+        XCTAssertEqual(r.items.map(\.when), ["Mon 23 – Fri 27 Nov"])
+        XCTAssertEqual(r.items.map(\.title), ["No classes"])
+    }
+
+    /// Classes Mon to Thu for three weeks, Fridays never: a free Wednesday in week two shows, the Fridays don't.
+    func test_singleFreeDayOnlyOnAUsualClassDay() {
+        var events: [ComingUp.Event] = []
+        for week in 0..<3 {
+            for wd in 0..<4 where !(week == 1 && wd == 2) {
+                let d = 16 + week * 7 + wd
+                let (day, month) = d > 30 ? (d - 30, 12) : (d, 11)
+                events.append(ev("Class", at(day, 9, month: month), at(day, 12, month: month)))
+            }
+        }
+        let r = ComingUp.build(events, now: at(16, 8), cal: cal)
+        XCTAssertEqual(r.items.map(\.when), ["Wed 25 Nov"])
     }
 
     func test_cancelledClassesMakeAFreeDayAndWeekendsJoinARun() {

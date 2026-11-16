@@ -121,8 +121,7 @@ final class SchoolAlarm: ObservableObject {
     /// The next school day (whose class is still ahead), for the screens.
     @Published private(set) var next: Day?
     private func updateNext() {
-        // (a day whose alarm you turned off isn't the morning to open Fastest trip by itself for)
-        guard let p = SchoolSkip.next(week, classStart: \.classStart, day: \.day, skipped: skipped, now: Date()) else { next = nil; return }
+        guard let p = week.filter({ $0.classStart > Date() }).min(by: { $0.classStart < $1.classStart }) else { next = nil; return }
         next = Day(title: p.title, room: p.room, classStart: p.classStart, beThere: p.beThere, trip: trips[p.day], leave: p.leave, alarm: p.alarm)
     }
 
@@ -209,22 +208,34 @@ final class SchoolAlarm: ObservableObject {
     private var debounce: Task<Void, Never>?
     private var running = false
     private var again = false
+    private var againForce = false              // a coalesced one wanted every day planned again (sticky until it runs)
+    /// Days turned back on (Your day): their alarm is set from the trip they have, at the start of the next plan.
+    private var restoreDays = Set<String>()
 
     /// One plan at a time: a change that comes in while it's planning runs again right after, so none is lost.
-    func refresh(force: Bool = false, now immediate: Bool = false) async {
+    /// `staleOnly`: right away, but only the days that are due (a day turned back on), not every day again.
+    func refresh(force: Bool = false, now immediate: Bool = false, staleOnly: Bool = false) async {
         guard on else { return }
-        if running { if force || immediate { again = true }; return }
+        if running {
+            if force || immediate { again = true }
+            if force || (immediate && !staleOnly) { againForce = true }
+            return
+        }
         guard immediate || Date().timeIntervalSince(lastPlan) > (force ? 30 : 5 * 60) else { return }
         running = true
+        var f = force || (immediate && !staleOnly)
         repeat {
             again = false
             lastPlan = Date()
-            await plan(force: force || immediate)
+            await plan(force: f)
+            f = f || againForce
+            againForce = false
         } while again && on
         running = false
     }
 
     private func plan(force: Bool) async {
+        await restoreTurnedOn()
         allowed = EKEventStore.authorizationStatus(for: .event) == .fullAccess
         guard allowed else { note = "Allow calendar access to read your timetable."; return }
         let classes = await firstClasses()
@@ -276,25 +287,30 @@ final class SchoolAlarm: ObservableObject {
             p.title = e.title ?? "Class"; p.room = e.location; p.classStart = e.startDate; p.beThere = beThere
             p.leave = best.start; p.arrive = best.end; p.checked = now
             p.lines = best.rides.map { $0.isTrain ? $0.line : $0.line }.joined(separator: " · ")
-            // move the alarm only if its minute changed; set none if it's already too late for one
-            let sameMinute = p.alarm.map { Int($0.timeIntervalSince1970 / 60) == Int(alarmAt.timeIntervalSince1970 / 60) } ?? false
-            if SchoolSkip.alarm(alarmAt, day: k, skipped: skipped) == nil {
+            // move the alarm only if its minute changed; set none if it's already too late for one, or the day is off
+            switch SchoolSkip.decide(alarmAt, day: k, skipped: skipped, current: p.alarm, hasId: p.alarmId != nil, now: now) {
+            case .keep:
+                break
+            case .clear:
                 // turned off for this day: no alarm (the trip is still planned, to show)
-                if p.alarmId != nil || p.alarm != nil {
-                    await WakeAlarm.cancelInBackground(p.alarmId, day: k)
-                    p.alarmId = nil; p.alarm = nil
-                    changed = true
-                }
-            } else if !(sameMinute && p.alarmId != nil) {
+                await WakeAlarm.cancelInBackground(p.alarmId, day: k)
+                p.alarmId = nil; p.alarm = nil
+                changed = true
+            case .set(let at, let schedule):
                 await WakeAlarm.cancelInBackground(p.alarmId, day: k)
                 p.alarmId = nil
-                p.alarm = alarmAt
-                if alarmAt > now.addingTimeInterval(60) {
-                    p.alarmId = await WakeAlarm.schedule(at: alarmAt, day: k, title: "Time to get up",
+                p.alarm = at
+                if schedule {
+                    p.alarmId = await WakeAlarm.schedule(at: at, day: k, title: "Time to get up",
                                                          body: "Leave \(Fmt.hhmm(best.start)) for your \(Fmt.hhmm(e.startDate)) class")
                 }
                 changed = true
                 if old == nil || old?.alarmId == nil { added.append(p) }
+            }
+            // turned off while this was planning: its alarm goes after all
+            if skipped.contains(k), p.alarmId != nil || p.alarm != nil {
+                await WakeAlarm.cancelInBackground(p.alarmId, day: k)
+                p.alarmId = nil; p.alarm = nil
             }
             if let i = week.firstIndex(where: { $0.day == k }) { week[i] = p } else { week.append(p) }
         }
@@ -766,7 +782,7 @@ extension SchoolAlarm {
     /// The wake-up alarm of one day off (or on again). Off: that day's alarm goes now (if it hasn't rung) and nothing
     /// opens by itself that morning; every other day stays as it is. On again: that day is planned again.
     func setSkipped(_ day: String, _ skip: Bool) {
-        if skip { skipped.insert(day) } else { skipped.remove(day) }
+        if skip { skipped.insert(day); restoreDays.remove(day) } else { skipped.remove(day) }
         d.set(Array(skipped).sorted(), forKey: SchoolSkip.key)
         if skip, let i = week.firstIndex(where: { $0.day == day }), !week[i].rang {
             let id = week[i].alarmId
@@ -774,8 +790,41 @@ extension SchoolAlarm {
             save()
             Task { await WakeAlarm.cancelInBackground(id, day: day) }
         }
+        if !skip, let i = week.firstIndex(where: { $0.day == day }) {
+            // on again: its alarm at once from the trip it has, then that day (only) planned again with live times
+            week[i].checked = .distantPast
+            save()
+            restoreDays.insert(day)
+            Task { await refresh(now: true, staleOnly: true) }
+        }
         updateNext()
-        if !skip { Task { await refresh(force: true, now: true) } }
+    }
+
+    /// Back on: the alarm from the trip already planned for the day, with no network (inside a plan, so never at the
+    /// same time as one).
+    fileprivate func restoreTurnedOn() async {
+        let days = restoreDays
+        restoreDays = []
+        for day in days {
+            guard !skipped.contains(day), let i = week.firstIndex(where: { $0.day == day }), week[i].alarmId == nil,
+                  let at = SchoolSkip.restore(leave: week[i].leave, wakeMinutes: wakeMinutes, now: Date()) else { continue }
+            let p = week[i]
+            let id = await WakeAlarm.schedule(at: at, day: day, title: "Time to get up",
+                                              body: "Leave \(Fmt.hhmm(p.leave ?? at)) for your \(Fmt.hhmm(p.classStart)) class")
+            if let j = week.firstIndex(where: { $0.day == day }), !skipped.contains(day), week[j].alarmId == nil {
+                week[j].alarm = at; week[j].alarmId = id
+                save()
+            } else {
+                await WakeAlarm.cancelInBackground(id, day: day)
+            }
+        }
+        updateNext()
+    }
+
+    /// Reset everything: no day is off any more.
+    func clearSkipped() {
+        skipped = []; restoreDays = []
+        d.removeObject(forKey: SchoolSkip.key)
     }
 
     /// The trip planned for a day this session (with its rides), if any.

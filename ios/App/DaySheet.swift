@@ -4,25 +4,34 @@ import SwiftUI
 /// after a day's classes (one plan per day shown, on the background lane, kept for the session).
 @MainActor
 final class DayModel: ObservableObject {
+    /// One for the app: the calendar is read once (again only after ten minutes), the ways home kept per day.
+    static let shared = DayModel()
     @Published private(set) var events: [ComingUp.Event] = []
     @Published private(set) var loaded = false
     @Published private(set) var wayHome: [String: DoorTrip] = [:]
     private var askedHome = Set<String>()
+    private var asking = Set<String>()
     private var loadedAt: Date?
+    private var loading = false
 
     func load() async {
-        if let l = loadedAt, Date().timeIntervalSince(l) < 300 { return }
+        guard !loading else { return }
+        if let l = loadedAt, Date().timeIntervalSince(l) < 600 { return }
+        loading = true
         events = await SchoolAlarm.shared.schoolEvents(days: 90)
-        loadedAt = Date(); loaded = true
+        loadedAt = Date(); loaded = true; loading = false
     }
 
-    /// The trip home after `end` on `day` (once per day, whatever the answer).
+    /// The trip home after `end` on `day`: one question per day, counted once it has an answer.
     func askWayHome(day: String, after end: Date) async {
-        guard askedHome.insert(day).inserted else { return }
+        guard !askedHome.contains(day), asking.insert(day).inserted else { return }
+        defer { asking.remove(day) }
         let places = PlacesStore.shared
         guard let s = places.school, let h = places.home else { return }
         let at = max(end.addingTimeInterval(5 * 60), Date())
         let trips = await Transit.plan(from: places.place(s), to: places.place(h), modes: nil, at: at, count: 3, maxTransfers: 4)
+        guard !trips.isEmpty else { return }            // (no answer: it may ask again when the day is shown again)
+        askedHome.insert(day)
         if let t = trips.filter({ $0.start >= at.addingTimeInterval(-60) }).min(by: { $0.end < $1.end }) { wayHome[day] = t }
     }
 }
@@ -35,14 +44,15 @@ struct DaySheet: View {
     @ObservedObject private var log = NoticeLog.shared
     @EnvironmentObject var lines: LineWatchStore
     @EnvironmentObject var trains: WatchStore
-    @StateObject private var model = DayModel()
+    @ObservedObject private var model = DayModel.shared
     @State private var day: Date?
     @State private var showNotices = false
     private let cal = Calendar.current
 
     private var today: Date { cal.startOfDay(for: Date()) }
     private var shownDay: Date { day ?? defaultDay }
-    private var key: String { Fmt.ymd.string(from: shownDay) }
+    /// The day as the school alarm keys it (noon of the day, so a time zone apart from Amsterdam's can't shift it).
+    private var key: String { Fmt.ymd.string(from: cal.date(bySettingHour: 12, minute: 0, second: 0, of: shownDay) ?? shownDay) }
 
     private var defaultDay: Date {
         let k = Fmt.ymd.string(from: Date())
@@ -64,10 +74,12 @@ struct DaySheet: View {
             .padding(.horizontal, DS.s20).padding(.top, 8).padding(.bottom, 32)
         }
         .background(DS.surface.ignoresSafeArea())
-        .task { await model.load() }
         .task(id: key) {
             await model.load()
-            if let end = SchoolAlarm.classesEnd(model.events, on: shownDay), school.on || !model.events.isEmpty {
+            // (stepping through the days: only the one you stop on asks for its way home)
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard !Task.isCancelled else { return }
+            if let end = SchoolAlarm.classesEnd(model.events, on: shownDay) {
                 await model.askWayHome(day: key, after: end)
             }
         }
@@ -222,9 +234,9 @@ struct DaySheet: View {
                         Text(item.title).font(DS.bodyStrong).foregroundStyle(DS.text)
                     }
                     .tint(DS.accent)
-                    .disabled(p.rang || !school.on)
+                    .disabled(p.rang || tooLate(p) || !school.on)
                     .accessibilityHint("This day only")
-                    Text(p.rang ? "It has rung" : item.detail ?? "This day only").font(DS.footnote).foregroundStyle(DS.secondary)
+                    Text(wakeNote(p, item)).font(DS.footnote).foregroundStyle(DS.secondary)
                 }
             }
         case .leave:
@@ -254,6 +266,18 @@ struct DaySheet: View {
                 if let d = item.detail, !d.isEmpty { Text(d).font(DS.sub).monospacedDigit().foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true) }
             }
         }
+    }
+
+    /// Its time has passed without an alarm set (a day turned back on too late): it can't ring any more.
+    private func tooLate(_ p: SchoolAlarm.Planned) -> Bool {
+        p.alarmId == nil && (p.leave.map { $0.addingTimeInterval(-Double(school.wakeMinutes) * 60) <= Date().addingTimeInterval(60) } ?? false)
+    }
+
+    private func wakeNote(_ p: SchoolAlarm.Planned, _ item: DayTimeline.Item) -> String {
+        if p.rang && p.alarmId != nil { return "It has rung" }
+        if school.isSkipped(p.day) { return "Off for this day" }
+        if tooLate(p) { return "Too late for an alarm on this day" }
+        return item.detail ?? "This day only"
     }
 
     // MARK: coming up
