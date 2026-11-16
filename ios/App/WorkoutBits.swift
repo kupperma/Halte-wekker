@@ -11,15 +11,16 @@ enum WorkoutStyle {
     static let quiet = Paper.ink.opacity(0.7)
 }
 
-/// Which Workouts screen is up: the sheet, or the running workout as a full-screen cover. The cover can't come up
-/// over the sheet, so a start from the sheet closes it first and shows the cover once it has gone.
+/// Which Workouts screen is up: the sheet, or the running workout as a second sheet that can't be swiped away (not a
+/// full-screen cover, which would take HomeView and its trip loops off the screen). One can't come up over the other,
+/// so a start from the Workouts sheet closes it first and shows the running workout once it has gone.
 @MainActor
 final class WorkoutNav: ObservableObject {
     static let shared = WorkoutNav()
 
     @Published var sheet = false
     @Published var session = false
-    /// A start or Resume from the sheet: the cover comes when the sheet has gone.
+    /// A start or Resume from the sheet: the running workout comes when the sheet has gone.
     private var sessionAfterSheet = false
     /// The Workouts screens (the sheet, the running workout) on screen now, counted, so a handoff from one to the
     /// other never reads as none while one is still up.
@@ -58,8 +59,8 @@ final class WorkoutNav: ObservableObject {
         session = true
     }
 
-    /// HomeView left the screen (a trip started, the alarm rang): the sheet goes, and the cover stays asked for only
-    /// while a workout runs, so nothing pops up by itself when HomeView comes back.
+    /// HomeView left the screen (a trip started, the alarm rang): the sheet goes, and the running workout stays asked
+    /// for only while a workout runs, so nothing pops up by itself when HomeView comes back.
     func homeLeft() {
         sheet = false
         sessionAfterSheet = false

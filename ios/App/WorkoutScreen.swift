@@ -497,8 +497,8 @@ private struct WorkoutPlaceholder: View {
 
 // MARK: - The running workout
 
-/// The running workout, full screen. For now its title, the time since it started, Minimize and Discard; the
-/// workout itself comes next.
+/// The running workout, as a large sheet that can't be swiped away. For now its title, the time since it started,
+/// Minimize and Discard; the workout itself comes next.
 struct WorkoutSessionView: View {
     @ObservedObject private var store = WorkoutStore.shared
     @State private var confirmDiscard = false

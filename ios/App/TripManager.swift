@@ -581,8 +581,9 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         }
     }
 
-    /// With the app open: the alarm and platform alerts are already on screen; the rest pop up inside the app (with their
-    /// sound), and stay in the notification list.
+    /// With the app open: the alarm and platform alerts are already on screen, unless a Workouts screen covers them (then
+    /// a platform alert also comes as a system banner, without a sound: WatchStore already chimes); the rest pop up inside
+    /// the app (with their sound), or as a system banner over a Workouts screen, and stay in the notification list.
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler done: @escaping (UNNotificationPresentationOptions) -> Void) {
         let id = notification.request.identifier
         let c = notification.request.content
@@ -595,7 +596,12 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         let platform = id.hasPrefix("platform-")
         Task { @MainActor in
             // the Workouts sheet or a running workout on screen hides the app's own banner and alerts: a system banner, over them
-            if WorkoutNav.shared.showing { done([.banner, .list, .sound]); return }
+            if WorkoutNav.shared.showing {
+                // a platform alert without the sound: WatchStore already chimes and vibrates
+                let options: UNNotificationPresentationOptions = platform ? [.banner, .list] : [.banner, .list, .sound]
+                done(options)
+                return
+            }
             if platform { done([]); return }
             // in the app as a banner, with its sound; kept in the app's list instead of the notification centre
             Notices.shared.show(title: title, body: body, kind: kind)

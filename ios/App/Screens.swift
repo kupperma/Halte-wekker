@@ -170,7 +170,10 @@ struct HomeView: View {
         .sheet(isPresented: $showOutfit) { OutfitSheet().presentationDetents([.large]) }
         .sheet(isPresented: $showRecomp) { RecompSheet().presentationDetents([.large]) }
         .sheet(isPresented: $workoutNav.sheet, onDismiss: { workoutNav.sheetDismissed() }) { WorkoutsSheet().presentationDetents([.large]) }
-        .fullScreenCover(isPresented: $workoutNav.session) { WorkoutSessionView() }
+        // a sheet, not a full-screen cover: a cover takes HomeView off the screen and stops its 30 s trip loops
+        .sheet(isPresented: $workoutNav.session) {
+            WorkoutSessionView().presentationDetents([.large]).interactiveDismissDisabled()
+        }
         .onDisappear { workoutNav.homeLeft() }
         .sheet(isPresented: $choosingDestination) {
             DestinationSheet { d in
