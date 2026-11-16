@@ -116,8 +116,9 @@ struct WorkoutFiles {
     /// Every month file, changed by `change`: the changed months written, then the index rebuilt from all of them and
     /// written. A month that gains a workout is written before one that only loses some, so a workout that moves is
     /// never in neither. nil, and nothing more written, as soon as a month can't be read or written; after a month
-    /// was written, index.json then goes, so the next start rebuilds it from the months.
-    func rewrite(stamp: Date, library: [Exercise], pause: (() -> Void)?,
+    /// was written, index.json then goes, so the next start rebuilds it from the months. `progress` gets the share of
+    /// the changed months written so far, after each one.
+    func rewrite(stamp: Date, library: [Exercise], pause: (() -> Void)?, progress: ((Double) -> Void)? = nil,
                  _ change: (inout [String: [Workout]]) -> Void) -> WorkoutIndex? {
         let read = readAllMonths(stamp: stamp)
         guard read.complete else { return nil }
@@ -130,13 +131,15 @@ struct WorkoutFiles {
             Set((months[k] ?? []).map(\.id)).isStrictSubset(of: Set((read.months[k] ?? []).map(\.id)))
         }
         let touched = months.keys.filter { read.months[$0] != months[$0] }.sorted()
-        var wrote = false
-        for k in touched.filter({ !onlyLoses($0) }) + touched.filter(onlyLoses) {
+        var wrote = 0
+        let order = touched.filter({ !onlyLoses($0) }) + touched.filter(onlyLoses)
+        for k in order {
             guard writeMonth(k, months[k] ?? []) else {
-                if wrote { remove(index) }
+                if wrote > 0 { remove(index) }
                 return nil
             }
-            wrote = true
+            wrote += 1
+            progress?(Double(wrote) / Double(order.count))
         }
         let built = WorkoutIndex.build(months.values.flatMap { $0 }, library: library)
         writeIndex(built)
@@ -195,6 +198,24 @@ final class HistoryLock: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return try body()
+    }
+}
+
+/// A count made inside a history rewrite, off the main actor, and read after it.
+private final class Tally: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+
+    var value: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return count
+    }
+
+    func set(_ n: Int) {
+        lock.lock()
+        count = n
+        lock.unlock()
     }
 }
 
@@ -300,9 +321,12 @@ final class WorkoutStore: ObservableObject {
 
     var targets: [SetRow: Int] { WeeklySets.targets(routines, ladders: ladders, state: state, library: library) }
 
-    var bodyWeightNow: Double? {
+    var bodyWeightNow: Double? { weight(at: now()) }
+
+    /// From Recomp (else the fixed one) or the fixed one, as the settings say.
+    private func weight(at date: Date) -> Double? {
         let s = state.settings
-        return s.bodyWeightFromRecomp ? bodyWeight(now()) ?? s.fixedBodyWeight : s.fixedBodyWeight
+        return s.bodyWeightFromRecomp ? bodyWeight(date) ?? s.fixedBodyWeight : s.fixedBodyWeight
     }
 
     var lastWorkout: WorkoutSummary? { index.workouts.last }
@@ -729,6 +753,49 @@ final class WorkoutStore: ObservableObject {
         guard !saved.contains(false) else { throw WorkoutStoreError.notSaved }
     }
 
+    /// Builds the file's new workouts (`HevyCSV.workouts`, against the index), each with the body weight on its start
+    /// (Recomp's, else the fixed one, as for `bodyWeightNow`), and first adds the exercises kept as is to the library. Then one history rewrite, after the ones asked for
+    /// before it: it checks again against the months as they are then (a Hevy key or id already there, or a start
+    /// during an app workout there), so a file imported twice at once still adds each workout once, writes the months
+    /// that gain workouts with `progress` after each (on the main actor), and rebuilds the index. The state, and so
+    /// `firstAppDay`, is never touched. Returns how many workouts were added. Throws `.notSaved` when the library or
+    /// the history can't be read or written: then the index and `recent` stay as they were, and importing the file
+    /// again adds only what isn't in the months yet.
+    func importHevy(_ f: HevyFile, choices: HevyChoices,
+                    progress: @escaping (Double) -> Void = { _ in }) async throws -> Int {
+        guard writable() else { throw WorkoutStoreError.notSaved }
+        let made = HevyCSV.workouts(f, library: library, existing: index.workouts, choices: choices)
+        guard !made.workouts.isEmpty else { return 0 }
+        var incoming = made.workouts
+        for i in incoming.indices { incoming[i].bodyWeight = weight(at: incoming[i].start) }
+        let have = Set(library.map(\.id))
+        let extra = made.newExercises.filter { !have.contains($0.id) }
+        if !extra.isEmpty {
+            let before = library
+            library = before + extra
+            guard saveLibrary() else {
+                library = before
+                throw WorkoutStoreError.notSaved
+            }
+        }
+        let built = incoming, added = Tally()
+        let (stream, sink) = AsyncStream.makeStream(of: Double.self)
+        let task = scheduleRewrite(library: library, progress: { sink.yield($0) }) { months in
+            let present = months.values.flatMap { $0 }.map { WorkoutSummary($0) }
+            let fresh = HevyCSV.unseen(built, existing: present)
+            for w in fresh { months[w.month, default: []].append(w) }
+            added.set(fresh.count)
+        }
+        Task {
+            _ = await task.value
+            sink.finish()
+        }
+        // On the main actor, as the rewrite writes each month.
+        for await share in stream { progress(share) }
+        guard await task.value else { throw WorkoutStoreError.notSaved }
+        return added.value
+    }
+
     /// Waits until the history rewrites asked for so far are done.
     func waitForHistory() async {
         while let t = historyTask {
@@ -757,14 +824,15 @@ final class WorkoutStore: ObservableObject {
         await scheduleRewrite(library: lib, change).value
     }
 
+    /// `progress` runs off the main actor, after each month written.
     @discardableResult
-    private func scheduleRewrite(library lib: [Exercise]? = nil,
+    private func scheduleRewrite(library lib: [Exercise]? = nil, progress: (@Sendable (Double) -> Void)? = nil,
                                  _ change: @escaping @Sendable (inout [String: [Workout]]) -> Void) -> Task<Bool, Never> {
         let previous = historyTask
         pendingRewrites += 1
         let task = Task { () -> Bool in
             _ = await previous?.value
-            let ok = await self.performRewrite(library: lib, change)
+            let ok = await self.performRewrite(library: lib, progress: progress, change)
             self.pendingRewrites -= 1
             return ok
         }
@@ -772,14 +840,14 @@ final class WorkoutStore: ObservableObject {
         return task
     }
 
-    private func performRewrite(library lib: [Exercise]?,
+    private func performRewrite(library lib: [Exercise]?, progress: (@Sendable (Double) -> Void)?,
                                 _ change: @escaping @Sendable (inout [String: [Workout]]) -> Void) async -> Bool {
         guard writable() else { return false }
         let files = self.files, stamp = now(), library = lib ?? self.library
         let lock = historyLock, pause = rewritePause
         var seen = generation
         let written = await Task.detached(priority: .userInitiated) { () -> WorkoutIndex? in
-            lock.run { files.rewrite(stamp: stamp, library: library, pause: pause, change) }
+            lock.run { files.rewrite(stamp: stamp, library: library, pause: pause, progress: progress, change) }
         }.value
         guard written != nil else { return false }
         // A finish wrote a month meanwhile, so this snapshot is older than the files: they are read again. If that
