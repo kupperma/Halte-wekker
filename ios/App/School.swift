@@ -288,6 +288,10 @@ final class SchoolAlarm: ObservableObject {
             p.leave = best.start; p.arrive = best.end; p.checked = now
             p.lines = best.rides.map { $0.isTrain ? $0.line : $0.line }.joined(separator: " · ")
             // move the alarm only if its minute changed; set none if it's already too late for one, or the day is off
+            // (on the day as it is now: it may have been turned off and on while this waited for the network)
+            let cur = SchoolSkip.current(snapshot: (p.alarm, p.alarmId),
+                                         live: week.first(where: { $0.day == k }).map { (alarm: $0.alarm, id: $0.alarmId) })
+            p.alarm = cur.alarm; p.alarmId = cur.id
             switch SchoolSkip.decide(alarmAt, day: k, skipped: skipped, current: p.alarm, hasId: p.alarmId != nil, now: now) {
             case .keep:
                 break
@@ -779,8 +783,9 @@ struct PlanButtons: View {
 extension SchoolAlarm {
     func isSkipped(_ day: String) -> Bool { skipped.contains(day) }
 
-    /// The wake-up alarm of one day off (or on again). Off: that day's alarm goes now (if it hasn't rung) and nothing
-    /// opens by itself that morning; every other day stays as it is. On again: that day is planned again.
+    /// The wake-up alarm of one day off (or on again). Off: only that day's alarm goes now (if it hasn't rung); the
+    /// rest of the morning (Fastest trip opening by itself, the nudge) and every other day stay as they are. On again:
+    /// its alarm is set at once from the trip it has, and that day is planned again.
     func setSkipped(_ day: String, _ skip: Bool) {
         if skip { skipped.insert(day); restoreDays.remove(day) } else { skipped.remove(day) }
         d.set(Array(skipped).sorted(), forKey: SchoolSkip.key)

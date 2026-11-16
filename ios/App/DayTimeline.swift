@@ -108,6 +108,12 @@ enum SchoolSkip {
         return .set(at, schedule: at > now.addingTimeInterval(60))
     }
 
+    /// The alarm to decide on: the day's entry as it is now (`live`), not the copy read before planning waited for the
+    /// network (the day may have been turned off and on meanwhile, its alarm cancelled and set again).
+    static func current(snapshot: (alarm: Date?, id: String?), live: (alarm: Date?, id: String?)?) -> (alarm: Date?, id: String?) {
+        live ?? snapshot
+    }
+
     /// A day turned back on: its alarm right away from the trip already planned for it (no planning needed), when
     /// that's still more than a minute ahead.
     static func restore(leave: Date?, wakeMinutes: Int, now: Date) -> Date? {

@@ -484,10 +484,12 @@ struct NewHome: View {
         let now = Date()
         switch cardSource {
         case .near:
+            // (loading only until the boards near you have answered once for this question, even with nothing:
+            // `panelsUpdated` is set when they're done, from anywhere)
             let stops = live.nearStops.map { DepartureGroups.Stop(id: $0.id, name: $0.name, rail: $0.rail, metres: metres($0.lat, $0.lon, fallback: $0.meters), lat: $0.lat, lon: $0.lon) }
             let rail = Set(live.nearStops.filter(\.rail).map(\.id))
             let deps = live.nearBoard.map { departure($0, rail: rail.contains($0.stopId)) }
-            return (DepartureGroups.cards(stops: stops, departures: deps, now: now), live.nearBoard.isEmpty && live.updated == nil, live.nearAsOf, nil)
+            return (DepartureGroups.cards(stops: stops, departures: deps, now: now), live.nearBoard.isEmpty && live.panelsUpdated == nil, live.nearAsOf, nil)
         case .homeBoard:
             let stops = stopsStore.boardStops.map { DepartureGroups.Stop(id: $0.id, name: $0.name, rail: false, metres: nil) }
             let deps = live.board.map { departure($0, rail: false) }

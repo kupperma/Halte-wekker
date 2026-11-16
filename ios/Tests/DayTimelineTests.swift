@@ -82,6 +82,21 @@ final class DayTimelineTests: XCTestCase {
                        .set(at(17, 7), schedule: false))
     }
 
+    /// Planning read the day before waiting for the network (alarm X, set); meanwhile it was turned off and on, X
+    /// cancelled and none set yet. It decides on the day as it is now: set it, not keep the cancelled X.
+    func test_decidesOnTheCurrentEntryNotTheSnapshot() {
+        let snapshot: (alarm: Date?, id: String?) = (at(17, 7), "X")
+        let cur = SchoolSkip.current(snapshot: snapshot, live: (alarm: nil, id: nil))
+        XCTAssertNil(cur.alarm)
+        XCTAssertNil(cur.id)
+        XCTAssertEqual(SchoolSkip.decide(at(17, 7), day: "2026-11-17", skipped: [], current: cur.alarm, hasId: cur.id != nil, now: at(16, 20)),
+                       .set(at(17, 7), schedule: true))
+        // (on the snapshot it would have kept X)
+        XCTAssertEqual(SchoolSkip.decide(at(17, 7), day: "2026-11-17", skipped: [], current: snapshot.alarm, hasId: snapshot.id != nil, now: at(16, 20)), .keep)
+        // a new day, not in the week yet: the snapshot
+        XCTAssertEqual(SchoolSkip.current(snapshot: snapshot, live: nil).id, "X")
+    }
+
     func test_pruneKeepsTodayAndLater() {
         XCTAssertEqual(SchoolSkip.prune(["2026-11-15", "2026-11-16", "2026-12-01"], today: "2026-11-16"), ["2026-11-16", "2026-12-01"])
     }
