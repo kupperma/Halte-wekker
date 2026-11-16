@@ -375,18 +375,13 @@ struct OneShotVideo: UIViewRepresentable {
 /// screen can show them. Each screen redraw used to read the JPEG from disk and decode it again on the main thread
 /// (`UIImage(named:)` without the extension finds only PNGs), many times in the first seconds after launch. `warm`
 /// decodes them off the main thread before they show. Decoded they're some 25 MB: kept in an NSCache (iOS takes them
-/// back when memory is short), and let go in the background and while a trip runs (`purge`), so the app that has to
-/// ring isn't the one iOS ends for its memory; warmed again on the way back.
+/// back when memory is short), and let go when a trip starts and in the background while one runs (`purge`, from
+/// TripManager), so the app that has to ring isn't the one iOS ends for its memory; warmed again on the way back. (With
+/// no trip the home screen holds them anyway: decoding them again on every return would only stall it.)
 final class StillCache: @unchecked Sendable {
     static let shared = StillCache()
     static let all = ["map-home", "map-out", "still-home", "still-out"]
     private let images = NSCache<NSString, UIImage>()
-
-    private init() {
-        NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: nil) { [weak self] _ in
-            self?.purge()
-        }
-    }
 
     /// The still `name` (a JPEG in the app), decoded: kept from before, else read and decoded now.
     func image(_ name: String) -> UIImage? {

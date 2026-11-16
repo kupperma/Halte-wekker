@@ -273,6 +273,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
                 self?.awaySince = Date()
                 // (whatever screen is up, a ride's too: what's waiting to be written goes now)
                 FieldLog.shared.flush(); DelayBook.shared.save()
+                if self?.phase != .idle { StillCache.shared.purge() }     // (a trip runs: the home screen's stills go)
                 self?.endFinishedIfDue()
             }
         }
@@ -280,7 +281,11 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             Task { @MainActor in
                 guard let self else { return }
                 self.endFinishedIfDue(back: true)
-                if self.phase == .idle { StillCache.shared.warm() }
+                if self.phase == .idle {
+                    StillCache.shared.warm()
+                    // (a trip that ended in the background may have asked for GPS for a line watch from there)
+                    if self.gpsApplied?.on == true { self.applyGPS(restart: true) }
+                }
             }
         }
         AlarmControl.stop = { [weak self] in self?.stopAlarm() }
@@ -565,11 +570,19 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
 
     /// The next leg's departures as listed just now, live: the first after you got there is latched, and it and the
     /// planned one follow their live times while they're listed (`TransferPolicy.firstListed`).
-    private func noteChangeList() {
-        guard phase == .transfer, upcomingAsOf == nil, let n = legs[safe: index + 1], let since = changeSince else { return }
-        let list = upcoming.filter { $0.from.key == n.from.key }.map { TransferPolicy.Listed(id: $0.trip.first.tripId, departure: $0.trip.first.departure) }
-        changeFirst = TransferPolicy.firstListed(changeFirst, live: list, arrived: since)
-        if let p = changePlanned { changePlanned = TransferPolicy.firstListed(p, live: list, arrived: since) }
+    /// `listFrom`: the time the list was asked from (older ones aren't in it because they're old, not cancelled).
+    private func noteChangeList(listFrom: Date) {
+        guard phase == .transfer, upcomingAsOf == nil, let since = changeSince else { return }
+        let list = changeListed()
+        changeFirst = TransferPolicy.firstListed(changeFirst, live: list, arrived: since, listFrom: listFrom)
+        if let p = changePlanned { changePlanned = TransferPolicy.firstListed(p, live: list, arrived: since, listFrom: listFrom) }
+    }
+
+    /// The next leg's departures as listed now (not the cancelled ones).
+    private func changeListed() -> [TransferPolicy.Listed] {
+        guard let n = legs[safe: index + 1] else { return [] }
+        return upcoming.filter { $0.from.key == n.from.key && !$0.trip.first.cancelled }
+            .map { TransferPolicy.Listed(id: $0.trip.first.tripId, departure: $0.trip.first.departure) }
     }
 
     /// At a change with no ride an hour after the last one you could take (the latest of: you got there, the planned
@@ -580,7 +593,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         let now = Date()
         guard phase == .transfer, let since = changeSince else { return false }
         let known = [changePlanned?.departure, changeFirst?.departure].compactMap { $0 }.max()
-        guard TransferPolicy.giveUp(since: since, firstKnown: known, standingSince: transferAnchor?.since, now: now) else { return false }
+        guard TransferPolicy.giveUp(since: since, firstKnown: known, standingSince: transferAnchor?.since,
+                                    listed: changeListed().map(\.departure), now: now) else { return false }
         let at = leg?.to.short ?? "the change"
         rideLog(FieldFormat.rideEnd("no ride an hour after the change"))
         let c = UNMutableNotificationContent()
@@ -1924,7 +1938,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         // A saved board that stayed (its own answer didn't come) goes with the rest of the saved answer: all that shows is live.
         if keptSavedBoard { upcomingBoard = [] }
         upcomingAsOf = nil
-        noteChangeList()                                  // (at a change: the departures the hour's end counts from)
+        noteChangeList(listFrom: asked.addingTimeInterval(-30 * 60))     // (at a change: what the hour's end counts from)
         let fromHere = t.from.key == "here"        // (a leg from where you were: saved with where that was)
         SnapshotStore.shared.save(SavedUpcoming(upcoming: upcoming, board: upcomingBoard,
                                                 lat: fromHere ? t.from.coordinate.latitude : nil, lon: fromHere ? t.from.coordinate.longitude : nil),

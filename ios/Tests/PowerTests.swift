@@ -95,10 +95,10 @@ final class PowerTests: XCTestCase {
         let list = [TransferPolicy.Listed(id: "late-2310", departure: at(23, 10)),
                     TransferPolicy.Listed(id: "night-0045", departure: at(24, 45)),
                     TransferPolicy.Listed(id: "night-0145", departure: at(25, 45))]
-        var first = TransferPolicy.firstListed(nil, live: list, arrived: arrived)
+        var first = TransferPolicy.firstListed(nil, live: list, arrived: arrived, listFrom: at(23, 10))
         XCTAssertEqual(first?.id, "night-0045")
-        // later lists: it has left the list (aged out), the clock doesn't slide on to the 01:45
-        first = TransferPolicy.firstListed(first, live: Array(list.suffix(1)), arrived: arrived)
+        // a later list (asked at 01:20, so from 00:50): it has left the list (aged out), the clock doesn't slide on to the 01:45
+        first = TransferPolicy.firstListed(first, live: Array(list.suffix(1)), arrived: arrived, listFrom: at(24, 50))
         XCTAssertEqual(first?.departure, at(24, 45))
         let standing = at(23, 45)
         XCTAssertFalse(TransferPolicy.giveUp(since: arrived, firstKnown: first?.departure, standingSince: standing, now: at(24, 40)))
@@ -109,7 +109,7 @@ final class PowerTests: XCTestCase {
         XCTAssertFalse(TransferPolicy.giveUp(since: arrived, firstKnown: first?.departure, standingSince: nil, now: at(27, 0)))
         // nothing listed at all: an hour from when you got there
         XCTAssertTrue(TransferPolicy.giveUp(since: arrived, firstKnown: nil, standingSince: standing, now: at(24, 40)))
-        XCTAssertNil(TransferPolicy.firstListed(nil, live: [list[0]], arrived: arrived))
+        XCTAssertNil(TransferPolicy.firstListed(nil, live: [list[0]], arrived: arrived, listFrom: at(23, 10)))
     }
 
     /// A planned train 70 minutes late: it follows its live time while it's listed, and the trip doesn't end early.
@@ -117,11 +117,13 @@ final class PowerTests: XCTestCase {
         let arrived = at(23, 50)
         var planned: TransferPolicy.Listed? = TransferPolicy.Listed(id: "ic-0000", departure: at(24, 0))
         let live = [TransferPolicy.Listed(id: "spr-0015", departure: at(24, 15)), TransferPolicy.Listed(id: "ic-0000", departure: at(25, 10))]
-        planned = TransferPolicy.firstListed(planned, live: live, arrived: arrived)
+        planned = TransferPolicy.firstListed(planned, live: live, arrived: arrived, listFrom: at(23, 20))
         XCTAssertEqual(planned?.departure, at(25, 10))
-        let first = TransferPolicy.firstListed(nil, live: live, arrived: arrived)
+        let first = TransferPolicy.firstListed(nil, live: live, arrived: arrived, listFrom: at(23, 20))
         XCTAssertEqual(first?.id, "spr-0015")
-        planned = TransferPolicy.firstListed(planned, live: [], arrived: arrived)                   // gone from the list
+        planned = TransferPolicy.firstListed(planned, live: [], arrived: arrived, listFrom: at(24, 50))    // gone from the list
+        XCTAssertEqual(planned?.departure, at(25, 10))
+        planned = TransferPolicy.firstListed(planned, live: [], arrived: arrived, listFrom: at(25, 30))    // …and aged out
         XCTAssertEqual(planned?.departure, at(25, 10))
         let known = [planned?.departure, first?.departure].compactMap { $0 }.max()
         XCTAssertFalse(TransferPolicy.giveUp(since: arrived, firstKnown: known, standingSince: arrived, now: at(25, 5)))
@@ -129,6 +131,43 @@ final class PowerTests: XCTestCase {
         XCTAssertTrue(TransferPolicy.giveUp(since: arrived, firstKnown: known, standingSince: arrived, now: at(26, 10)))
         // by the planned time alone it would have ended at 01:00
         XCTAssertTrue(TransferPolicy.giveUp(since: arrived, firstKnown: at(24, 0), standingSince: arrived, now: at(25, 0)))
+    }
+
+    /// A cancelled departure (the planner leaves it out) doesn't keep the clock at its time: the next one listed after
+    /// it counts. Off at 08:30, the 08:33 Intercity listed, then cancelled: the 09:45 is still to come.
+    func test_transferGiveUpCancelled() {
+        let arrived = at(8, 30), standing = at(8, 31)
+        let ic0833 = TransferPolicy.Listed(id: "ic-0833", departure: at(8, 33)), ic0945 = TransferPolicy.Listed(id: "ic-0945", departure: at(9, 45))
+        var first = TransferPolicy.firstListed(nil, live: [ic0833, ic0945], arrived: arrived, listFrom: at(8, 0))
+        XCTAssertEqual(first, ic0833)
+        var planned: TransferPolicy.Listed? = ic0833
+        // asked at 08:35 (from 08:05): the 08:33 isn't in it any more, and it isn't old: cancelled
+        first = TransferPolicy.firstListed(first, live: [ic0945], arrived: arrived, listFrom: at(8, 5))
+        planned = TransferPolicy.firstListed(planned, live: [ic0945], arrived: arrived, listFrom: at(8, 5))
+        XCTAssertEqual(first, ic0945)
+        XCTAssertEqual(planned, ic0945)
+        let known = [planned?.departure, first?.departure].compactMap { $0 }.max()
+        XCTAssertFalse(TransferPolicy.giveUp(since: arrived, firstKnown: known, standingSince: standing, now: at(9, 33)))
+        XCTAssertFalse(TransferPolicy.giveUp(since: arrived, firstKnown: known, standingSince: standing, now: at(10, 44)))
+        XCTAssertTrue(TransferPolicy.giveUp(since: arrived, firstKnown: known, standingSince: standing, now: at(10, 45)))
+        // nothing listed after it any more: it stays as it was
+        XCTAssertEqual(TransferPolicy.firstListed(ic0833, live: [], arrived: arrived, listFrom: at(8, 5)), ic0833)
+        // one listed now between you getting there and the cancelled one: the clock never moves back before it
+        let spr0835 = TransferPolicy.Listed(id: "spr-0835", departure: at(8, 35))
+        XCTAssertEqual(TransferPolicy.firstListed(TransferPolicy.Listed(id: "ic-0840", departure: at(8, 40)), live: [spr0835, ic0945],
+                                                  arrived: arrived, listFrom: at(8, 5)), ic0945)
+        // only ones before it: it stays too (not moved back)
+        let early = TransferPolicy.Listed(id: "spr-0820", departure: at(8, 20))
+        XCTAssertEqual(TransferPolicy.firstListed(ic0833, live: [early], arrived: arrived, listFrom: at(8, 5)), ic0833)
+    }
+
+    /// Never from a minute before to 3 minutes after one listed for the next leg leaves: you may be sitting on it.
+    func test_transferGiveUpNearDeparture() {
+        let arrived = at(8, 0), standing = at(8, 1), bus = at(9, 30)
+        XCTAssertTrue(TransferPolicy.giveUp(since: arrived, firstKnown: nil, standingSince: standing, listed: [bus], now: at(9, 28)))
+        XCTAssertFalse(TransferPolicy.giveUp(since: arrived, firstKnown: nil, standingSince: standing, listed: [bus], now: at(9, 29)))
+        XCTAssertFalse(TransferPolicy.giveUp(since: arrived, firstKnown: nil, standingSince: standing, listed: [bus], now: at(9, 33)))
+        XCTAssertTrue(TransferPolicy.giveUp(since: arrived, firstKnown: nil, standingSince: standing, listed: [bus], now: at(9, 34)))
     }
 
     func test_afterArrival() {

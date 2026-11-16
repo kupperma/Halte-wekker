@@ -32,8 +32,9 @@ enum ChangeRoom {
         return (true, room >= usual ? "slow bus, needs \(Int(need))" : nil)
     }
 
-    /// A bus's speed rank by its own timetable, when the stretch it runs isn't one the planner ranked (a ride that
-    /// started by itself): its minutes on this leg with delays against the minutes its timetable gives.
+    /// A bus's rank by its own timetable, when the stretch it runs isn't one the planner ranked (a ride that started by
+    /// itself): its minutes on this leg with delays against the minutes its timetable gives. So it ranks how late it's
+    /// getting against its own timetable, not its speed against the fastest seen on the stretch (the same S–C cut-offs).
     static func ownTimetableGrade(liveMinutes: Double, scheduledMinutes: Double) -> String? {
         speedGrade(minutes: liveMinutes, scheduled: scheduledMinutes, best: nil, cancelled: false)
     }

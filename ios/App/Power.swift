@@ -76,18 +76,30 @@ enum TransferPolicy {
     }
 
     /// The first departure listed for the next leg after you got there: taken from the first live list that has one,
-    /// then kept at its live time while it's still listed (a late one moves the clock on). Once it has left the list it
-    /// stays as it was: the clock doesn't slide on to the next one as old ones age out.
-    static func firstListed(_ latched: Listed?, live list: [Listed], arrived: Date) -> Listed? {
-        if let l = latched { return list.first { $0.id == l.id } ?? l }
-        return list.filter { $0.departure >= arrived }.min { $0.departure < $1.departure }
+    /// then kept at its live time while it's still listed (a late one moves the clock on). Gone from the list:
+    /// - older than where the list starts (`listFrom`, the time it was asked from): it aged out, it stays as it was, so
+    ///   the clock doesn't slide on to the next one;
+    /// - else it was dropped (cancelled: the planner leaves those out), and the next one listed at or after it (and
+    ///   after you got there) counts instead; none: it stays as it was.
+    static func firstListed(_ latched: Listed?, live list: [Listed], arrived: Date, listFrom: Date) -> Listed? {
+        func first(from t: Date) -> Listed? { list.filter { $0.departure >= t }.min { $0.departure < $1.departure } }
+        guard let l = latched else { return first(from: arrived) }
+        if let now = list.first(where: { $0.id == l.id }) { return now }
+        if l.departure < listFrom { return l }
+        return first(from: max(arrived, l.departure)) ?? l
     }
+
+    static let departureGrace: (before: TimeInterval, after: TimeInterval) = (60, 180)
 
     /// The trip ends an hour after the latest of: you got there (`since`), and the departures known for the next leg
     /// (`firstKnown`: the planned one, the first listed after you got there), and only while you've stood at the change
-    /// (`standingSince`, the anchor) for 10 minutes.
-    static func giveUp(since: Date, firstKnown: Date?, standingSince: Date?, now: Date) -> Bool {
+    /// (`standingSince`, the anchor) for 10 minutes; never from a minute before to 3 minutes after one listed for the
+    /// next leg leaves (`listed`: you may be sitting on it, waiting for it to go).
+    static func giveUp(since: Date, firstKnown: Date?, standingSince: Date?, listed: [Date] = [], now: Date) -> Bool {
         guard let s = standingSince, now.timeIntervalSince(s) >= standFor else { return false }
+        if listed.contains(where: { now >= $0.addingTimeInterval(-departureGrace.before) && now <= $0.addingTimeInterval(departureGrace.after) }) {
+            return false
+        }
         let from = max(since, firstKnown ?? since)
         return now.timeIntervalSince(from) >= giveUpAfter
     }
