@@ -276,7 +276,8 @@ private struct NewExerciseForm: View {
 
 // MARK: - The order
 
-/// The running workout's exercises in order, each with a handle to drag it to another place.
+/// The running workout's exercises in order, each with a handle to drag it to another place. A superset's members
+/// carry the marks the workout shows ("5a", "5b"), so they read as one group.
 struct ReorderExercisesSheet: View {
     @ObservedObject private var store = WorkoutStore.shared
     @Environment(\.dismiss) private var dismiss
@@ -285,7 +286,8 @@ struct ReorderExercisesSheet: View {
         NavigationStack {
             List {
                 if let a = store.active {
-                    ForEach(a.workout.exercises) { e in row(e) }
+                    let marks = Self.marks(a.workout)
+                    ForEach(a.workout.exercises) { e in row(e, mark: marks[e.id]) }
                         .onMove { from, to in store.moveExercise(from: from, to: to) }
                 }
             }
@@ -306,12 +308,13 @@ struct ReorderExercisesSheet: View {
         .presentationDragIndicator(.visible)
     }
 
-    /// "Lat pulldown  1/3": the work sets done of the work sets.
-    private func row(_ e: LoggedExercise) -> some View {
+    /// "Lat pulldown  1/3", "5a Lateral raise  0/3": the work sets done of the work sets.
+    private func row(_ e: LoggedExercise, mark: String?) -> some View {
         let work = e.sets.filter { $0.kind != .warmup }
-        let name = store.exercise(e.exerciseId)?.name ?? e.exerciseId
+        let name = Text(verbatim: store.exercise(e.exerciseId)?.name ?? e.exerciseId)
+        let title = mark.map { Text(verbatim: $0 + " ").foregroundStyle(WorkoutStyle.quiet) + name } ?? name
         return HStack(spacing: 8) {
-            Text(verbatim: name)
+            title
                 .workoutFont(16, .semibold)
                 .foregroundStyle(Paper.ink)
                 .fixedSize(horizontal: false, vertical: true)
@@ -324,29 +327,65 @@ struct ReorderExercisesSheet: View {
         .listRowBackground(Paper.card)
         .accessibilityElement(children: .combine)
     }
+
+    /// "5a", "5b" … for the members of a superset, numbered as the workout lists them (a superset at its first
+    /// member's place); nothing for an exercise on its own.
+    private static func marks(_ w: Workout) -> [UUID: String] {
+        let letters = Array("abcdefghijklmnopqrstuvwxyz")
+        var out: [UUID: String] = [:]
+        var number = 0
+        var placed = Set<Int>()
+        for e in w.exercises {
+            guard let g = e.superset else {
+                number += 1
+                continue
+            }
+            guard !placed.contains(g) else { continue }
+            placed.insert(g)
+            number += 1
+            let members = w.exercises.filter { $0.superset == g }
+            guard members.count > 1 else { continue }
+            for (k, m) in members.enumerated() {
+                out[m.id] = "\(number)\(letters[min(k, letters.count - 1)])"
+            }
+        }
+        return out
+    }
 }
 
 // MARK: - After Finish
 
 /// The summary, pushed inside the running workout's sheet after Finish: a heading that says what it was ("Pull + legs ·
 /// 84 min · 27 sets"), the new bests, per exercise what was done with the change since last time (a fall in the same
-/// ink, never red) and what to do next time, a note, and Done. Going back keeps the workout running.
+/// ink, never red) and what to do next time, a note, and Done. Going back keeps the workout running. `note` is the
+/// draft to start from and `noteChanged` hears every change, so the caller can keep it over Back and Finish again.
 struct FinishSummaryView: View {
     private static let moveUpWords = "Move up"
+
+    /// Where a ladder stands for one line: on this exercise's step with one above, past it, or neither.
+    private enum Rung {
+        case canMove(String)        // the ladder's id
+        case moved
+        case neither
+    }
 
     @ObservedObject private var store = WorkoutStore.shared
     private let workout: Workout
     private let summary: FinishSummary
+    private let noteChanged: (String) -> Void
     private let done: (String) -> Void
-    @State private var note = ""
-    /// The ladders moved up here.
-    @State private var moved: Set<String> = []
+    @State private var note: String
+    /// Ladders moved up here, for the haptic.
+    @State private var moves = 0
     @FocusState private var noteFocused: Bool
 
-    init(workout: Workout, summary: FinishSummary, done: @escaping (String) -> Void) {
+    init(workout: Workout, summary: FinishSummary, note: String = "",
+         noteChanged: @escaping (String) -> Void = { _ in }, done: @escaping (String) -> Void) {
         self.workout = workout
         self.summary = summary
+        self.noteChanged = noteChanged
         self.done = done
+        _note = State(initialValue: note)
     }
 
     var body: some View {
@@ -364,7 +403,8 @@ struct FinishSummaryView: View {
         .background(PaperFill().ignoresSafeArea())
         .safeAreaInset(edge: .bottom, spacing: 0) { doneBar }
         .navigationBarTitleDisplayMode(.inline)
-        .sensoryFeedback(.success, trigger: moved.count)
+        .sensoryFeedback(.success, trigger: moves)
+        .onChange(of: note) { _, text in noteChanged(text) }
     }
 
     private var heading: some View {
@@ -439,15 +479,34 @@ struct FinishSummaryView: View {
         return sets + Text(verbatim: ", " + change).fontWeight(.regular)
     }
 
-    /// "All sets at 10. Next time 28 kg", or "Ready for tuck reps?" with a Move up button in place of the words.
+    /// "All sets at 10. Next time 28 kg", or "Ready for tuck reps?" with a Move up button in place of the words. Once
+    /// the ladder stands past this exercise's step (moved up here, or before Back and Finish again) the question
+    /// carries "Moved up"; with neither, the line is left out, so a question never stands without its answer.
     @ViewBuilder
     private func nextRow(_ i: Int, _ next: String) -> some View {
         if next.hasSuffix(Self.moveUpWords) {
             let question = String(next.dropLast(Self.moveUpWords.count)).trimmingCharacters(in: .whitespaces)
-            HStack(spacing: 10) {
-                if !question.isEmpty { nextText(question) }
-                Spacer(minLength: 8)
-                moveUpControl(i)
+            switch rung(i) {
+            case .canMove(let id):
+                HStack(spacing: 10) {
+                    if !question.isEmpty { nextText(question) }
+                    Spacer(minLength: 8)
+                    Button { moveUp(id) } label: {
+                        Text("Move up").workoutFont(15)
+                    }
+                    .buttonStyle(RecompButtonStyle(filled: false))
+                    .disabled(!store.available)
+                }
+                .transition(.opacity)
+            case .moved:
+                HStack(spacing: 10) {
+                    if !question.isEmpty { nextText(question) }
+                    Spacer(minLength: 8)
+                    movedUp
+                }
+                .transition(.opacity)
+            case .neither:
+                EmptyView()
             }
         } else {
             nextText(next)
@@ -461,52 +520,40 @@ struct FinishSummaryView: View {
             .fixedSize(horizontal: false, vertical: true)
     }
 
-    /// Move up while the ladder still stands on this exercise's step; "Moved up" once it was tapped here.
-    @ViewBuilder
-    private func moveUpControl(_ i: Int) -> some View {
-        if let id = ladderId(i) {
-            if moved.contains(id) {
-                HStack(spacing: 4) {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundStyle(WorkoutStyle.accent)
-                    Text("Moved up")
-                        .workoutFont(14, .semibold)
-                        .foregroundStyle(Paper.ink)
-                }
-                .frame(minHeight: 44)
-                .accessibilityElement(children: .combine)
-                .transition(.opacity)
-            } else if canMoveUp(i, ladder: id) {
-                Button { moveUp(id) } label: {
-                    Text("Move up").workoutFont(15)
-                }
-                .buttonStyle(RecompButtonStyle(filled: false))
-                .disabled(!store.available)
-                .transition(.opacity)
-            }
+    /// "✓ Moved up": the check in the accent, the words in ink.
+    private var movedUp: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "checkmark")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(WorkoutStyle.accent)
+            Text("Moved up")
+                .workoutFont(14, .semibold)
+                .foregroundStyle(Paper.ink)
         }
+        .frame(minHeight: 44)
+        .accessibilityElement(children: .combine)
     }
 
-    /// The exercise's ladder in the workout (a line per exercise, in the workout's order).
-    private func ladderId(_ i: Int) -> String? {
-        guard workout.exercises.indices.contains(i) else { return nil }
-        return workout.exercises[i].ladderId
-    }
-
-    /// The ladder still stands on this exercise's step, and there is a step above it.
-    private func canMoveUp(_ i: Int, ladder id: String) -> Bool {
-        guard let l = store.ladder(id), !l.steps.isEmpty else { return false }
+    /// The exercise's step on its ladder in the workout (a line per exercise, in the workout's order): the current
+    /// step when it is this exercise, else the first that is.
+    private func rung(_ i: Int) -> Rung {
+        guard workout.exercises.indices.contains(i), let id = workout.exercises[i].ladderId,
+              let l = store.ladder(id), !l.steps.isEmpty else { return .neither }
+        let exerciseId = workout.exercises[i].exerciseId
         let current = Ladders.current(l, state: store.state)
-        return l.steps[current].exerciseId == workout.exercises[i].exerciseId && current < l.steps.count - 1
+        let at: Int? = l.steps[current].exerciseId == exerciseId
+            ? current : l.steps.firstIndex(where: { $0.exerciseId == exerciseId })
+        guard let at else { return .neither }
+        if current > at { return .moved }
+        if current == at, at < l.steps.count - 1 { return .canMove(id) }
+        return .neither
     }
 
     private func moveUp(_ id: String) {
         guard let l = store.ladder(id) else { return }
         let before = Ladders.current(l, state: store.state)
-        store.moveUp(id)
-        guard Ladders.current(l, state: store.state) != before else { return }     // not saved
-        withAnimation(.easeOut(duration: 0.2)) { _ = moved.insert(id) }
+        withAnimation(.easeOut(duration: 0.2)) { store.moveUp(id) }
+        if Ladders.current(l, state: store.state) != before { moves += 1 }      // else not saved: the button stays
     }
 
     // MARK: the note and Done

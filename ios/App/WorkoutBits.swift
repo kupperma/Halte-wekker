@@ -25,6 +25,9 @@ final class WorkoutNav: ObservableObject {
     /// The Workouts screens (the sheet, the running workout) on screen now, counted, so a handoff from one to the
     /// other never reads as none while one is still up.
     private var onScreen = 0
+    /// The summary's note while it is being written, by workout id, so it survives Back, Minimize and Finish again.
+    /// Kept in memory only; it goes when the workout is saved.
+    var noteDrafts: [UUID: String] = [:]
 
     /// A Workouts screen is on screen, over the app's own banners and alerts: notices then come as system banners.
     var showing: Bool { onScreen > 0 }

@@ -165,6 +165,8 @@ private struct FinishPage: Hashable {
     let workout: Workout
     let summary: FinishSummary
     let end: Date
+    /// The same moment on the uptime clock, for the double-tap guard (the wall clock can jump).
+    let tapped = ProcessInfo.processInfo.systemUptime
 
     static func == (a: FinishPage, b: FinishPage) -> Bool { a.id == b.id }
     func hash(into h: inout Hasher) { h.combine(id) }
@@ -262,9 +264,10 @@ struct WorkoutSessionView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { topBar }
             .navigationDestination(item: $finishing) { page in
-                FinishSummaryView(workout: page.workout, summary: page.summary) { note in
-                    saveWorkout(note: note, end: page.end)
-                }
+                FinishSummaryView(workout: page.workout, summary: page.summary,
+                                  note: WorkoutNav.shared.noteDrafts[page.workout.id] ?? "",
+                                  noteChanged: { WorkoutNav.shared.noteDrafts[page.workout.id] = $0 },
+                                  done: { note in saveWorkout(note: note, page: page) })
             }
             .sheet(item: $picking) { ask in
                 ExercisePicker(title: ask.title, suggested: ask.suggested) { id in picked(ask, id) }
@@ -451,7 +454,8 @@ struct WorkoutSessionView: View {
                 .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
                 .id(s.id)
                 .sessionRow(bottom: 4)
-                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                // a logged set takes a swipe and a tap; one not done yet goes with a full swipe
+                .swipeActions(edge: .trailing, allowsFullSwipe: !s.done) {
                     Button(role: .destructive) { removeSet(s.id) } label: {
                         Label("Delete", systemImage: "trash")
                     }
@@ -659,13 +663,15 @@ struct WorkoutSessionView: View {
         finishing = FinishPage(workout: w, summary: summary, end: end)
     }
 
-    /// The summary's Done. Saved: the sheet closes. A second tap finds nothing running and does nothing. When the
-    /// history can't be written the workout runs on, and the summary stays with its note.
-    private func saveWorkout(note: String, end: Date) {
-        guard store.active != nil else { return }
-        if store.finish(note: note, end: end) == nil {
+    /// The summary's Done. Saved: the sheet closes. A second tap finds nothing running and does nothing, and a tap
+    /// within 0.6 s of Finish is the Finish tap twice (Done sits where "All sets done · Finish" was). When the history
+    /// can't be written the workout runs on, and the summary stays with its note.
+    private func saveWorkout(note: String, page: FinishPage) {
+        guard ProcessInfo.processInfo.systemUptime - page.tapped >= 0.6, store.active != nil else { return }
+        if store.finish(note: note, end: page.end) == nil {
             notSaved = true
         } else {
+            WorkoutNav.shared.noteDrafts[page.workout.id] = nil
             saved += 1
             WorkoutNav.shared.session = false
         }
@@ -1071,6 +1077,7 @@ private struct SessionSetRow: View {
                 .foregroundStyle(WorkoutStyle.quiet)
                 .lineLimit(1).minimumScaleFactor(0.6)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .allowsHitTesting(false)                // the set number's hit area reaches under it
                 .accessibilityLabel(spokenLast)
             values
             if let rir {
