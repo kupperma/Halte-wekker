@@ -152,8 +152,11 @@ struct WorkoutSessionView: View {
     /// "New best: 28 kg × 8", for 3 s.
     @State private var best: String?
     @State private var bests = 0
-    /// Moved on when a rest runs out, so its bar goes.
+    /// Moved on when a rest runs out (and when the app comes back), so its bar goes.
     @State private var clock = Date()
+    /// The last Done or ✓: a second Done this soon after is the same tap twice.
+    @State private var lastDoneTap: Date?
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         NavigationStack {
@@ -170,7 +173,7 @@ struct WorkoutSessionView: View {
             Button("Discard", role: .destructive) { store.discard() }
             Button("Keep going", role: .cancel) {}
         } message: {
-            Text("No sets are logged.")
+            Text("No work sets are logged.")
         }
         .alert("Can’t save this workout right now", isPresented: $notSaved) {
             Button("OK", role: .cancel) {}
@@ -191,6 +194,10 @@ struct WorkoutSessionView: View {
             if let record { showBest(record) }
         }
         .task(id: store.active?.rest?.ends) { await followRest() }
+        // after the phone slept: a rest that ran out meanwhile goes at once
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { clock = Date() }
+        }
         .task(id: bests) { await hideBest() }
         // on the outermost view, so a screen pushed inside never reads as the workout gone
         .onAppear {
@@ -325,22 +332,27 @@ struct WorkoutSessionView: View {
                             flagged: flagged.contains(e.exerciseId))
             .id(e.id)
             .sessionRow(top: k == 0 ? 14 : 22, bottom: 6)
+        let work = e.sets.filter { $0.kind != .warmup }.count
+        // the table keeps its columns side by side; the text around it grows on
         SessionColumnHead(kind: info.kind, rir: rir != nil)
+            .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
             .sessionRow(bottom: 2)
         ForEach(Array(e.sets.enumerated()), id: \.element.id) { j, s in
-            setRow(SessionCursor(exercise: i, set: j), s, e, info, a, place: places[j], rir: rir, next: next)
+            setRow(SessionCursor(exercise: i, set: j), s, e, info, a, place: places[j], of: work, rir: rir, next: next)
+                .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
                 .id(s.id)
                 .sessionRow(bottom: 4)
         }
     }
 
     private func setRow(_ c: SessionCursor, _ s: LoggedSet, _ e: LoggedExercise, _ info: Exercise, _ a: ActiveWorkout,
-                        place: Int, rir: ClosedRange<Int>?, next: SessionCursor?) -> some View {
+                        place: Int, of work: Int, rir: ClosedRange<Int>?, next: SessionCursor?) -> some View {
         let warm = s.kind == .warmup
         let last = Previous.row(a.previous[e.id.uuidString] ?? [], warmup: warm, number: place)
         let timing = stopwatch.flatMap { $0.setId == s.id ? $0.start : nil }
         return SessionSetRow(mark: Self.mark(s, place: place),
                              spokenMark: Self.spokenMark(s, place: place),
+                             setName: Self.setName(s, place: place, of: work),
                              last: last.map { WorkoutFormat.set($0, info.kind, .short) },
                              set: s,
                              kind: info.kind,
@@ -349,7 +361,7 @@ struct WorkoutSessionView: View {
                              pressed: pressed == s.id,
                              timing: timing,
                              edit: { edit(s, info) },
-                             done: { complete(c, s) },
+                             done: { complete(s.id) },
                              setRIR: { r in withAnimation(.easeOut(duration: 0.2)) { store.setRIR(c, r) } },
                              time: { toggleStopwatch(c, s) })
     }
@@ -421,8 +433,11 @@ struct WorkoutSessionView: View {
         let hasSets = a.workout.exercises.contains { !$0.sets.isEmpty }
         let lead = label ?? (hasSets ? "All sets done" : "")
         let action = label == nil ? "Finish" : "Done"
+        // the set this button shows now: a tap logs that one, never the one after it
+        let shown = next.map { a.workout.exercises[$0.exercise].sets[$0.set].id }
         return Button {
-            if next == nil { finish() } else { completeNext() }
+            guard doneTapAllowed() else { return }
+            if let shown { completeNext(shown) } else { finish() }
         } label: {
             HStack(spacing: 12) {
                 if !lead.isEmpty {
@@ -447,35 +462,46 @@ struct WorkoutSessionView: View {
 
     // MARK: actions
 
-    /// The ✓ in a row: that set with the values it shows (a running stopwatch's time for a hold).
-    private func complete(_ c: SessionCursor, _ s: LoggedSet) {
-        guard !s.done else { return }
+    /// The ✓ in a row: that very set (found by its id) with the values it shows, a running stopwatch's time for a
+    /// hold. Nothing when it is done already.
+    private func complete(_ id: UUID) {
+        lastDoneTap = Date()
+        guard let c = cursor(of: id), let a = store.active, !a.workout.exercises[c.exercise].sets[c.set].done else {
+            return
+        }
         var timed: Int?
-        if let w = stopwatch, w.setId == s.id {
+        if let w = stopwatch, w.setId == id {
             timed = Self.seconds(since: w.start)
             stopwatch = nil
         }
-        press(s.id)
+        press(id)
         withAnimation(.easeOut(duration: 0.25)) { store.complete(c, kg: nil, reps: nil, seconds: timed) }
     }
 
-    /// Done: the next set as suggested, and only that one.
-    private func completeNext() {
-        guard let a = store.active, let c = Session.next(a) else { return }
-        let s = a.workout.exercises[c.exercise].sets[c.set]
-        if stopwatch?.setId == s.id {
-            complete(c, s)
+    /// Done: the set the button showed, as suggested, only while it is still the next one (Ruling W-20).
+    private func completeNext(_ id: UUID) {
+        if stopwatch?.setId == id {
+            complete(id)
             return
         }
-        press(s.id)
-        withAnimation(.easeOut(duration: 0.25)) { _ = store.completeNext(setId: s.id) }
+        press(id)
+        withAnimation(.easeOut(duration: 0.25)) { _ = store.completeNext(setId: id) }
+    }
+
+    /// Done and Finish at the bottom take no tap within 0.6 s of the last Done or ✓, so a double tap logs one set
+    /// (and never logs the last set and finishes too).
+    private func doneTapAllowed() -> Bool {
+        let now = Date()
+        if let last = lastDoneTap, now.timeIntervalSince(last) < 0.6 { return false }
+        lastDoneTap = now
+        return true
     }
 
     /// The row gives under the thumb: in and out again in 0.2 s.
     private func press(_ id: UUID) {
         pressed = id
         Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 100_000_000)
+            try? await Task.sleep(for: .milliseconds(100))
             if pressed == id { pressed = nil }
         }
     }
@@ -495,14 +521,17 @@ struct WorkoutSessionView: View {
     }
 
     private func save(_ id: UUID, kg: Double?, reps: Int?, seconds: Int?) {
-        guard let a = store.active else { return }
+        guard let c = cursor(of: id) else { return }
+        withAnimation(.easeOut(duration: 0.2)) { store.edit(c, kg: kg, reps: reps, seconds: seconds) }
+    }
+
+    /// Where the set with this id is now.
+    private func cursor(of id: UUID) -> SessionCursor? {
+        guard let a = store.active else { return nil }
         for (i, e) in a.workout.exercises.enumerated() {
-            guard let j = e.sets.firstIndex(where: { $0.id == id }) else { continue }
-            withAnimation(.easeOut(duration: 0.2)) {
-                store.edit(SessionCursor(exercise: i, set: j), kg: kg, reps: reps, seconds: seconds)
-            }
-            return
+            if let j = e.sets.firstIndex(where: { $0.id == id }) { return SessionCursor(exercise: i, set: j) }
         }
+        return nil
     }
 
     /// Start, then Stop fills in the seconds.
@@ -524,19 +553,18 @@ struct WorkoutSessionView: View {
 
     private func hideBest() async {
         guard best != nil else { return }
-        try? await Task.sleep(nanoseconds: 3_000_000_000)
-        guard !Task.isCancelled else { return }
+        do { try await Task.sleep(for: .seconds(3)) } catch { return }
         withAnimation(.easeOut(duration: 0.25)) { best = nil }
     }
 
-    /// Wakes when the rest runs out, so the rest bar goes.
+    /// Wakes when the rest runs out, so the rest bar goes. The continuous clock keeps counting while the phone
+    /// sleeps; a rest end that makes no sense waits an hour at most.
     private func followRest() async {
         clock = Date()
         guard let ends = store.active?.rest?.ends else { return }
-        let wait = ends.timeIntervalSince(clock)
+        let wait = min(3600, max(0, ends.timeIntervalSince(clock)))
         guard wait > 0 else { return }
-        try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000) + 50_000_000)
-        guard !Task.isCancelled else { return }
+        do { try await Task.sleep(for: .seconds(wait + 0.05)) } catch { return }
         withAnimation(.easeOut(duration: 0.25)) { clock = Date() }
     }
 
@@ -627,6 +655,11 @@ struct WorkoutSessionView: View {
         }
     }
 
+    /// "set 2 of 3", "warm-up 1": what ✓ logs, for VoiceOver.
+    private static func setName(_ s: LoggedSet, place: Int, of work: Int) -> String {
+        s.kind == .warmup ? "warm-up \(place + 1)" : "set \(place + 1) of \(work)"
+    }
+
     private static func spokenMark(_ s: LoggedSet, place: Int) -> String {
         switch s.kind {
         case .warmup: return "Warm-up \(place + 1)"
@@ -676,16 +709,18 @@ private extension View {
     }
 }
 
-/// The widths the column names and the set rows share.
-private enum SessionColumns {
+/// The widths the column names and the set rows share. They grow with Dynamic Type as a title does (about a fifth at
+/// xxxLarge, the largest the table takes), so the last-time column keeps room on a 375 pt phone. ✓ stays 56 × 56 and
+/// the stopwatch 44.
+private struct SessionColumns: DynamicProperty {
     static let gap: CGFloat = 4
-    static let set: CGFloat = 26
-    static let kg: CGFloat = 60
-    static let reps: CGFloat = 46
-    static let seconds: CGFloat = 66
     static let watch: CGFloat = 44
-    static let rir: CGFloat = 58
     static let check: CGFloat = 56
+    @ScaledMetric(relativeTo: .title) var set: CGFloat = 24
+    @ScaledMetric(relativeTo: .title) var kg: CGFloat = 56
+    @ScaledMetric(relativeTo: .title) var reps: CGFloat = 42
+    @ScaledMetric(relativeTo: .title) var seconds: CGFloat = 62
+    @ScaledMetric(relativeTo: .title) var rir: CGFloat = 54
 }
 
 /// The exercise you're on: its name, big, then the ladder step, the target, its notes, the plates and a fall in reps.
@@ -736,26 +771,26 @@ private struct SessionExerciseHead: View {
 private struct SessionColumnHead: View {
     let kind: ExerciseKind
     let rir: Bool
+    var columns = SessionColumns()
 
     var body: some View {
         HStack(spacing: SessionColumns.gap) {
-            name("SET").frame(width: SessionColumns.set, alignment: .leading)
+            name("SET").frame(width: columns.set, alignment: .leading)
             name("LAST TIME").frame(maxWidth: .infinity, alignment: .leading)
             switch kind {
             case .weight, .weighted, .assisted:
-                name(kind == .weight ? "KG" : (kind == .weighted ? "+KG" : "HELP")).frame(width: SessionColumns.kg)
-                name("REPS").frame(width: SessionColumns.reps)
+                name(kind == .weight ? "KG" : (kind == .weighted ? "+KG" : "HELP")).frame(width: columns.kg)
+                name("REPS").frame(width: columns.reps)
             case .bodyweight:
-                name("REPS").frame(width: SessionColumns.reps)
+                name("REPS").frame(width: columns.reps)
             case .time, .cardio:
-                name(kind == .time ? "SECONDS" : "TIME").frame(width: SessionColumns.seconds)
+                name(kind == .time ? "SECONDS" : "TIME").frame(width: columns.seconds)
                 Color.clear.frame(width: SessionColumns.watch, height: 1)
             }
-            if rir { Color.clear.frame(width: SessionColumns.rir, height: 1) }
+            if rir { Color.clear.frame(width: columns.rir, height: 1) }
             Color.clear.frame(width: SessionColumns.check, height: 1)
         }
         .padding(.horizontal, 8)
-        .dynamicTypeSize(...DynamicTypeSize.xLarge)     // the table keeps its columns; the text around it grows on
         .accessibilityHidden(true)
     }
 
@@ -773,6 +808,7 @@ private struct SessionColumnHead: View {
 private struct SessionSetRow: View {
     let mark: String                // "1", "W", "D", "F"
     let spokenMark: String
+    let setName: String             // "set 2 of 3", "warm-up 1"
     let last: String?               // "55 × 12"
     let set: LoggedSet
     let kind: ExerciseKind
@@ -784,6 +820,7 @@ private struct SessionSetRow: View {
     let done: () -> Void
     let setRIR: (Int?) -> Void
     let time: () -> Void
+    var columns = SessionColumns()
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: 8)
@@ -791,7 +828,7 @@ private struct SessionSetRow: View {
             Text(verbatim: mark)
                 .workoutFont(15)
                 .foregroundStyle(set.kind == .warmup ? WorkoutStyle.quiet : Paper.ink)
-                .frame(width: SessionColumns.set, alignment: .leading)
+                .frame(width: columns.set, alignment: .leading)
                 .accessibilityLabel(spokenMark)
             Text(verbatim: last ?? "—")
                 .workoutFont(14, .medium)
@@ -804,7 +841,7 @@ private struct SessionSetRow: View {
                 if set.done {
                     chip(rir)
                 } else {
-                    Color.clear.frame(width: SessionColumns.rir, height: 1)
+                    Color.clear.frame(width: columns.rir, height: 1)
                 }
             }
             check
@@ -816,17 +853,16 @@ private struct SessionSetRow: View {
         .scaleEffect(pressed ? 0.97 : 1)
         .animation(.easeOut(duration: 0.1), value: pressed)
         .animation(.easeOut(duration: 0.2), value: current)
-        .dynamicTypeSize(...DynamicTypeSize.xLarge)     // the columns stay side by side
     }
 
     @ViewBuilder private var values: some View {
         switch kind {
         case .weight, .weighted, .assisted:
-            value(kgText, width: SessionColumns.kg, spoken: "\(kgText) kilos")
-            value(set.reps.map { String($0) } ?? "—", width: SessionColumns.reps,
+            value(kgText, width: columns.kg, spoken: "\(kgText) kilos")
+            value(set.reps.map { String($0) } ?? "—", width: columns.reps,
                   spoken: set.reps.map { "\($0) reps" } ?? "No reps")
         case .bodyweight:
-            value(set.reps.map { String($0) } ?? "—", width: SessionColumns.reps,
+            value(set.reps.map { String($0) } ?? "—", width: columns.reps,
                   spoken: set.reps.map { "\($0) reps" } ?? "No reps")
         case .time, .cardio:
             if let start = timing {
@@ -834,9 +870,9 @@ private struct SessionSetRow: View {
                     .workoutFont(17, .semibold)
                     .foregroundStyle(Paper.ink)
                     .lineLimit(1).minimumScaleFactor(0.6)
-                    .frame(width: SessionColumns.seconds, height: 44)
+                    .frame(width: columns.seconds, height: 44)
             } else {
-                value(secondsText, width: SessionColumns.seconds,
+                value(secondsText, width: columns.seconds,
                       spoken: set.seconds.map { "\($0) seconds" } ?? "No time")
             }
             if set.done {
@@ -928,10 +964,10 @@ private struct SessionSetRow: View {
                 .workoutFont(12, .semibold)
                 .foregroundStyle(set.rir == nil ? WorkoutStyle.quiet : Paper.ink)
                 .lineLimit(1).minimumScaleFactor(0.7)
-                .padding(.horizontal, 6)
+                .padding(.horizontal, 5)
                 .frame(height: 26)
                 .overlay(Capsule().stroke(Paper.edge, lineWidth: 1))
-                .frame(width: SessionColumns.rir, height: 44)
+                .frame(width: columns.rir, height: 44)
                 .contentShape(Rectangle())
         }
         .menuOrder(.fixed)
@@ -952,8 +988,10 @@ private struct SessionSetRow: View {
                 .frame(width: SessionColumns.check, height: SessionColumns.check)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(set.done ? "Done" : "Log this set")
+        .buttonStyle(RecompPressStyle())                // no fading when it is done and off
+        .disabled(set.done)
+        .accessibilityLabel(set.done ? "Logged \(setName)" : "Log \(setName)")
+        .accessibilityAddTraits(set.done ? .isSelected : [])
     }
 }
 
