@@ -29,6 +29,17 @@ private actor Order {
     func add(_ s: String) { list.append(s) }
 }
 
+/// Opens once; everyone waiting goes on.
+private actor Flag {
+    private var isOpen = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    func wait() async {
+        if isOpen { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+    func open() { isOpen = true; waiters.forEach { $0.resume() }; waiters = [] }
+}
+
 /// A clock that only moves when told (the pauses after a 429 last seconds to minutes).
 private final class FakeClock: @unchecked Sendable {
     private let lock = NSLock()
@@ -538,41 +549,54 @@ final class NetTests: XCTestCase {
 
     /// A waiting urgent request goes before a background one that has waited longer.
     func test_urgentGoesFirst() async throws {
+        // Deterministic: every step waits for the state it needs (CI's simulator can be slow to start tasks).
         let p = Net.Polite(host: "api.transitous.org")
         let order = Order()
-        let budget = roomy
-        // four urgent ones take every place: the first is done after 0.15 s, the others after 1.2 s
-        let holders = [0.15, 1.2, 1.2, 1.2].enumerated().map { i, s in
+        let budget = Budget(idle: 10, total: 20, retries: 1, backoff: 0.05, fastFailure: 0.2, minLeft: 0.3)
+        let first = Flag(), rest = Flag()
+        // four urgent ones take every place; the first is done once `first` opens, the others once `rest` opens
+        let holders = (0..<4).map { i in
             Task {
                 try await Net.response(tr("h\(i)"), lane: .urgent, budget: budget, send: { _ in
-                    try await Task.sleep(nanoseconds: UInt64(s * 1_000_000_000))
+                    await (i == 0 ? first : rest).wait()
                     return http(200)
                 }, polite: p)
             }
         }
-        try await Task.sleep(nanoseconds: 50_000_000)
+        try await until { p.inFlight == (urgent: 4, background: 0) }
         let bg = Task {
             try await Net.response(tr("bg"), lane: .background, budget: budget, gate: 0, send: { _ in
                 await order.add("background")
                 return http(200)
             }, polite: p)
         }
-        try await Task.sleep(nanoseconds: 50_000_000)
+        try await until { p.waiting.background == 1 }
         let urgent = Task {
             try await Net.response(tr("u"), lane: .urgent, budget: budget, send: { _ in
                 await order.add("urgent")
-                try await Task.sleep(nanoseconds: 600_000_000)
                 return http(200)
             }, polite: p)
         }
-        try await Task.sleep(nanoseconds: 300_000_000)            // 0.4 s: the first place came free at 0.15 s
+        try await until { p.waiting.urgent == 1 }
+        // one place comes free: the urgent one, though it came later, goes first
+        await first.open()
+        _ = try await urgent.value
         var seen = await order.list
         XCTAssertEqual(seen, ["urgent"])
         _ = try await bg.value
         seen = await order.list
         XCTAssertEqual(seen, ["urgent", "background"])
-        _ = try await urgent.value
+        await rest.open()
         for h in holders { _ = try await h.value }
+    }
+
+    /// Polls `cond` every 10 ms for at most `seconds` (then fails the test).
+    private func until(_ seconds: Double = 10, _ cond: @escaping () async -> Bool, file: StaticString = #filePath, line: UInt = #line) async throws {
+        let end = Date().addingTimeInterval(seconds)
+        while !(await cond()) {
+            if Date() > end { XCTFail("timed out waiting", file: file, line: line); throw CancellationError() }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
     }
 
     /// Waiting for a place: a cancelled caller stops at once and its request is never sent.

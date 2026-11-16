@@ -384,6 +384,11 @@ extension Net {
 
         /// Requests on their way now (for tests).
         var inFlight: (urgent: Int, background: Int) { lock.lock(); defer { lock.unlock() }; return (urgentIn, backgroundIn) }
+        /// Requests waiting for a place now (for tests).
+        var waiting: (urgent: Int, background: Int) {
+            lock.lock(); defer { lock.unlock() }
+            return (queue.filter { $0.lane == .urgent }.count, queue.filter { $0.lane == .background }.count)
+        }
 
         private func fits(_ lane: Lane) -> Bool {
             guard urgentIn + backgroundIn < maxInFlight else { return false }
