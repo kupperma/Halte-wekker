@@ -220,7 +220,7 @@ enum Transit {
         let items: [URLQueryItem] = [.init(name: "text", value: q), .init(name: "type", value: "STOP"), .init(name: "numResults", value: "12"),
                                      .init(name: "place", value: "\(Place.veghel.coordinate.latitude),\(Place.veghel.coordinate.longitude)")]
         // (someone is typing and waiting for it)
-        let answer = try? await Transit.$urgent.withValue(true) { try await get("/v1/geocode", items) }
+        let answer = try? await Transit.$urgent.withValue(true) { () async throws -> Any in try await get("/v1/geocode", items) }
         guard let list = answer as? [[String: Any]] else { return [] }
         return list.compactMap { m in
             guard let id = m["id"] as? String, let name = m["name"] as? String, let la = m["lat"] as? Double, let lo = m["lon"] as? Double else { return nil }
