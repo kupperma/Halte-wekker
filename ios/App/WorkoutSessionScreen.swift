@@ -138,14 +138,56 @@ private struct SessionBlock: Identifiable {
     let number: Int                 // from 1: the "5" of "5a/5b"
 }
 
+/// What the exercise picker is open for: adding one, or replacing the exercise with this id.
+private struct PickerAsk: Identifiable {
+    let id = UUID()
+    let title: String
+    let suggested: [String]
+    let replacing: UUID?            // a LoggedExercise.id; nil: add
+}
+
+/// The note being written for an exercise of the workout.
+private struct NoteAsk {
+    let id: UUID                    // the LoggedExercise.id
+    let name: String
+}
+
+/// An exercise with logged sets, asked about before it goes.
+private struct RemoveAsk {
+    let id: UUID                    // the LoggedExercise.id
+    let name: String
+    let logged: Int
+}
+
+/// The summary pushed after Finish: the workout as it would be saved, and the end time of that tap.
+private struct FinishPage: Hashable {
+    let id = UUID()
+    let workout: Workout
+    let summary: FinishSummary
+    let end: Date
+
+    static func == (a: FinishPage, b: FinishPage) -> Bool { a.id == b.id }
+    func hash(into h: inout Hasher) { h.combine(id) }
+}
+
 /// The running workout, as a large sheet that can't be swiped away. On top the exercise you're on, big, with a row per
 /// set (last time, today's values, ✓); the other exercises folded up; at the thumb the rest and one Done for the next
-/// set. Everything is saved with every tap.
+/// set. Everything is saved with every tap. The workout changes as you go (the ⋯ by the exercise, a swipe or the set
+/// number on a set, Add set, Add exercise, Reorder), and Finish shows the summary inside the sheet.
 struct WorkoutSessionView: View {
     @ObservedObject private var store = WorkoutStore.shared
     @State private var confirmDiscard = false
     @State private var notSaved = false
     @State private var editing: SetEdit?
+    /// The summary after Finish, pushed inside the sheet. Back keeps the workout running.
+    @State private var finishing: FinishPage?
+    @State private var picking: PickerAsk?
+    @State private var reordering = false
+    @State private var noteAsk: NoteAsk?
+    @State private var noteText = ""
+    @State private var removeAsk: RemoveAsk?
+    /// Workouts saved from the summary, for the haptic.
+    @State private var saved = 0
     /// The row that presses in under a done set.
     @State private var pressed: UUID?
     @State private var stopwatch: Stopwatch?
@@ -160,25 +202,25 @@ struct WorkoutSessionView: View {
 
     var body: some View {
         NavigationStack {
-            content
-                .background(PaperFill().ignoresSafeArea())
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar { topBar }
+            root
         }
+        .tint(Paper.ink)                                // the summary's back button, the note's cursor
         .preferredColorScheme(.light)                   // ink on paper, the bars and the menus too
         .dynamicTypeSize(...DynamicTypeSize.accessibility2)
         .sensoryFeedback(.impact(weight: .medium), trigger: doneCount, condition: { old, new in new > old })
         .sensoryFeedback(.success, trigger: bests)
+        .sensoryFeedback(.success, trigger: saved)
         .confirmationDialog("Discard this workout?", isPresented: $confirmDiscard, titleVisibility: .visible) {
             Button("Discard", role: .destructive) { store.discard() }
             Button("Keep going", role: .cancel) {}
         } message: {
             Text("No work sets are logged.")
         }
+        // the summary's Done couldn't write the history: the workout runs on, the summary and its note stay
         .alert("Can’t save this workout right now", isPresented: $notSaved) {
             Button("OK", role: .cancel) {}
         } message: {
-            Text("Its sets are kept. Try Finish again in a moment.")
+            Text("Its sets are kept. Try again in a moment.")
         }
         .sheet(item: $editing) { e in
             SetValueSheet(exercise: e.exercise, set: e.set, step: e.step) { kg, reps, seconds in
@@ -212,6 +254,42 @@ struct WorkoutSessionView: View {
         }
     }
 
+    /// The list, and what changes it: the picker, the order, a note, a removal; the summary is pushed on top of it.
+    private var root: some View {
+        content
+            .background(PaperFill().ignoresSafeArea())
+            .navigationTitle(barTitle)                  // under the principal item; the summary's back button says it
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { topBar }
+            .navigationDestination(item: $finishing) { page in
+                FinishSummaryView(workout: page.workout, summary: page.summary) { note in
+                    saveWorkout(note: note, end: page.end)
+                }
+            }
+            .sheet(item: $picking) { ask in
+                ExercisePicker(title: ask.title, suggested: ask.suggested) { id in picked(ask, id) }
+                    .presentationDetents([.large])
+            }
+            .sheet(isPresented: $reordering) {
+                ReorderExercisesSheet()
+                    .presentationDetents([.medium, .large])
+            }
+            .alert("Note", isPresented: noteShown, presenting: noteAsk) { ask in
+                TextField("Note", text: $noteText)
+                Button("Save") { saveNote(ask.id) }
+                Button("Cancel", role: .cancel) {}
+            } message: { ask in
+                Text(verbatim: ask.name)
+            }
+            .confirmationDialog(removeTitle, isPresented: removeShown, titleVisibility: .visible,
+                                presenting: removeAsk) { ask in
+                Button("Remove", role: .destructive) { remove(ask.id) }
+                Button("Keep it", role: .cancel) {}
+            } message: { ask in
+                Text(verbatim: ask.logged == 1 ? "Its logged set goes too." : "Its \(ask.logged) logged sets go too.")
+            }
+    }
+
     @ViewBuilder private var content: some View {
         if let a = store.active {
             running(a)
@@ -219,6 +297,18 @@ struct WorkoutSessionView: View {
             Color.clear
         }
     }
+
+    private var barTitle: String { store.active?.workout.title ?? "" }
+
+    private var noteShown: Binding<Bool> {
+        Binding(get: { noteAsk != nil }, set: { if !$0 { noteAsk = nil } })
+    }
+
+    private var removeShown: Binding<Bool> {
+        Binding(get: { removeAsk != nil }, set: { if !$0 { removeAsk = nil } })
+    }
+
+    private var removeTitle: String { removeAsk.map { "Remove \($0.name)?" } ?? "" }
 
     // MARK: the top bar
 
@@ -241,6 +331,20 @@ struct WorkoutSessionView: View {
                     .lineLimit(1).minimumScaleFactor(0.7)
                     .dynamicTypeSize(...DynamicTypeSize.xLarge)     // the bar doesn't grow
             }
+        }
+        ToolbarItem(placement: .topBarTrailing) {
+            Menu {
+                Button { reordering = true } label: { Label("Reorder", systemImage: "arrow.up.arrow.down") }
+                    .disabled((store.active?.workout.exercises.count ?? 0) < 2)
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(Paper.ink)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .disabled(store.active == nil)
+            .accessibilityLabel("Workout options")
         }
         ToolbarItem(placement: .topBarTrailing) {
             Button(action: finish) {
@@ -287,6 +391,8 @@ struct WorkoutSessionView: View {
                     }
                     .sessionRow(top: 2, bottom: 2)
                 }
+                SessionAddRow(title: "Add exercise", spoken: "Add an exercise", action: askAdd)
+                    .sessionRow(top: 6, bottom: 16)
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
@@ -323,15 +429,18 @@ struct WorkoutSessionView: View {
         let info = exercise(e.exerciseId)
         let places = Self.places(e)
         let rir = Self.rir(e.target)
-        SessionExerciseHead(mark: b.members.count > 1 ? "\(b.number)\(Self.letter(k))" : nil,
-                            name: info.name,
-                            ladder: ladderLine(e),
-                            target: e.target.map { WorkoutFormat.target($0, info.kind) },
-                            notes: notes(e),
-                            plates: platesLine(e, info),
-                            flagged: flagged.contains(e.exerciseId))
-            .id(e.id)
-            .sessionRow(top: k == 0 ? 14 : 22, bottom: 6)
+        HStack(alignment: .top, spacing: 0) {
+            SessionExerciseHead(mark: b.members.count > 1 ? "\(b.number)\(Self.letter(k))" : nil,
+                                name: info.name,
+                                ladder: ladderLine(e),
+                                target: e.target.map { WorkoutFormat.target($0, info.kind) },
+                                notes: notes(e),
+                                plates: platesLine(e, info),
+                                flagged: flagged.contains(e.exerciseId))
+            exerciseMenu(e, name: info.name)
+        }
+        .id(e.id)
+        .sessionRow(top: k == 0 ? 14 : 22, bottom: 6)
         let work = e.sets.filter { $0.kind != .warmup }.count
         // the table keeps its columns side by side; the text around it grows on
         SessionColumnHead(kind: info.kind, rir: rir != nil)
@@ -342,7 +451,36 @@ struct WorkoutSessionView: View {
                 .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
                 .id(s.id)
                 .sessionRow(bottom: 4)
+                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                    Button(role: .destructive) { removeSet(s.id) } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                }
         }
+        SessionAddRow(title: "Add set", spoken: "Add a set to \(info.name)") { addSet(e.id) }
+            .sessionRow(bottom: 4)
+    }
+
+    /// The open exercise's ⋯: another exercise in its place, one more set, a note, or out of the workout.
+    private func exerciseMenu(_ e: LoggedExercise, name: String) -> some View {
+        Menu {
+            Button { askReplace(e) } label: { Label("Replace…", systemImage: "arrow.left.arrow.right") }
+            Button { addSet(e.id) } label: { Label("Add set", systemImage: "plus") }
+            Button { askNote(e.id, name: name) } label: { Label("Note", systemImage: "square.and.pencil") }
+            Button(role: .destructive) { askRemove(e.id, name: name) } label: {
+                Label("Remove exercise", systemImage: "trash")
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Paper.ink)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .menuOrder(.fixed)
+        .menuStyle(.button)
+        .buttonStyle(.plain)                            // only the dots take the tap, not the whole list row
+        .accessibilityLabel("Options for \(name)")
     }
 
     private func setRow(_ c: SessionCursor, _ s: LoggedSet, _ e: LoggedExercise, _ info: Exercise, _ a: ActiveWorkout,
@@ -363,7 +501,8 @@ struct WorkoutSessionView: View {
                              edit: { edit(s, info) },
                              done: { complete(s.id) },
                              setRIR: { r in withAnimation(.easeOut(duration: 0.2)) { store.setRIR(c, r) } },
-                             time: { toggleStopwatch(c, s) })
+                             time: { toggleStopwatch(c, s) },
+                             setKind: { k in setKind(s.id, k) })
     }
 
     /// "Seated cable row  0/3  last 50 × 10, 10, 9", "5a/5b Lateral raise + Rear delt fly  0/6", or a finished one
@@ -506,14 +645,114 @@ struct WorkoutSessionView: View {
         }
     }
 
-    /// Without a done work set there is nothing to save: discard it, or keep going. Task 10 puts the summary here.
+    /// Without a done work set there is nothing to save: discard it, or keep going. Otherwise the summary, pushed inside
+    /// the sheet, ending at this tap; its Done saves the workout.
     private func finish() {
-        guard let a = store.active else { return }
-        if Session.finished(a, end: Date(), note: "") == nil {
+        guard let a = store.active, finishing == nil else { return }
+        let end = Date()
+        guard let w = Session.finished(a, end: end, note: "") else {
             confirmDiscard = true
-        } else if store.finish(note: "") == nil {
-            notSaved = true                             // the history couldn't be written: the workout runs on
+            return
         }
+        let summary = Session.summary(w, before: store.index, library: store.library, ladders: store.ladders,
+                                      state: store.state)
+        finishing = FinishPage(workout: w, summary: summary, end: end)
+    }
+
+    /// The summary's Done. Saved: the sheet closes. A second tap finds nothing running and does nothing. When the
+    /// history can't be written the workout runs on, and the summary stays with its note.
+    private func saveWorkout(note: String, end: Date) {
+        guard store.active != nil else { return }
+        if store.finish(note: note, end: end) == nil {
+            notSaved = true
+        } else {
+            saved += 1
+            WorkoutNav.shared.session = false
+        }
+    }
+
+    // MARK: changing the workout
+
+    private func exerciseIndex(_ id: UUID) -> Int? {
+        store.active?.workout.exercises.firstIndex { $0.id == id }
+    }
+
+    private func addSet(_ exercise: UUID) {
+        guard let i = exerciseIndex(exercise) else { return }
+        withAnimation(.easeOut(duration: 0.2)) { store.addSet(exercise: i) }
+    }
+
+    private func removeSet(_ id: UUID) {
+        guard let c = cursor(of: id) else { return }
+        if stopwatch?.setId == id { stopwatch = nil }
+        withAnimation(.easeOut(duration: 0.25)) { store.removeSet(c) }
+    }
+
+    private func setKind(_ id: UUID, _ kind: SetKind) {
+        guard let c = cursor(of: id) else { return }
+        withAnimation(.easeOut(duration: 0.2)) { store.setKind(c, kind) }
+    }
+
+    private func askReplace(_ e: LoggedExercise) {
+        picking = PickerAsk(title: "Replace", suggested: alternatives(e), replacing: e.id)
+    }
+
+    private func askAdd() {
+        picking = PickerAsk(title: "Add exercise", suggested: [], replacing: nil)
+    }
+
+    /// Replacing it with itself changes nothing.
+    private func picked(_ ask: PickerAsk, _ id: String) {
+        if let old = ask.replacing {
+            guard let i = exerciseIndex(old), store.active?.workout.exercises[i].exerciseId != id else { return }
+            withAnimation(.easeOut(duration: 0.25)) { store.replaceExercise(i, with: id) }
+        } else {
+            withAnimation(.easeOut(duration: 0.25)) { store.addExercise(id) }
+        }
+    }
+
+    private func askNote(_ id: UUID, name: String) {
+        guard let i = exerciseIndex(id), let e = store.active?.workout.exercises[i] else { return }
+        noteText = e.note
+        noteAsk = NoteAsk(id: id, name: name)
+    }
+
+    private func saveNote(_ id: UUID) {
+        guard let i = exerciseIndex(id) else { return }
+        let text = noteText.trimmingCharacters(in: .whitespacesAndNewlines)
+        withAnimation(.easeOut(duration: 0.2)) { store.setExerciseNote(i, text) }
+    }
+
+    /// Asked first only when it holds logged sets.
+    private func askRemove(_ id: UUID, name: String) {
+        guard let i = exerciseIndex(id), let e = store.active?.workout.exercises[i] else { return }
+        let logged = e.sets.filter(\.done).count
+        if logged == 0 {
+            remove(id)
+        } else {
+            removeAsk = RemoveAsk(id: id, name: name, logged: logged)
+        }
+    }
+
+    private func remove(_ id: UUID) {
+        guard let i = exerciseIndex(id), let e = store.active?.workout.exercises[i] else { return }
+        if let w = stopwatch, e.sets.contains(where: { $0.id == w.setId }) { stopwatch = nil }
+        withAnimation(.easeOut(duration: 0.25)) { store.removeExercise(i) }
+    }
+
+    /// "From your program" when replacing: the routine item's exercise and its alternatives, or the ladder's steps,
+    /// without the exercise there now. One added during the workout finds its item in any routine.
+    private func alternatives(_ e: LoggedExercise) -> [String] {
+        var ids: [String] = []
+        if let l = e.ladderId.flatMap({ store.ladder($0) }) {
+            ids = l.steps.map(\.exerciseId)
+        } else {
+            let items = (store.routines.filter { $0.id == e.routineId } + store.routines).flatMap(\.items)
+            let item = items.first { $0.exerciseId == e.exerciseId || $0.alternatives.contains(e.exerciseId) }
+            if let item { ids = [item.exerciseId].compactMap { $0 } + item.alternatives }
+        }
+        var seen: Set<String> = [e.exerciseId]
+        return ids.filter { seen.insert($0).inserted }
     }
 
     private func edit(_ s: LoggedSet, _ info: Exercise) {
@@ -820,16 +1059,13 @@ private struct SessionSetRow: View {
     let done: () -> Void
     let setRIR: (Int?) -> Void
     let time: () -> Void
+    let setKind: (SetKind) -> Void
     var columns = SessionColumns()
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: 8)
         HStack(spacing: SessionColumns.gap) {
-            Text(verbatim: mark)
-                .workoutFont(15)
-                .foregroundStyle(set.kind == .warmup ? WorkoutStyle.quiet : Paper.ink)
-                .frame(width: columns.set, alignment: .leading)
-                .accessibilityLabel(spokenMark)
+            markMenu
             Text(verbatim: last ?? "—")
                 .workoutFont(14, .medium)
                 .foregroundStyle(WorkoutStyle.quiet)
@@ -881,6 +1117,36 @@ private struct SessionSetRow: View {
                 watch
             }
         }
+    }
+
+    /// The set's number: a tap picks its type, as in Hevy. The hit area is 44 pt wide, reaching into the row's edge and
+    /// the last-time column (text only) without moving them.
+    private var markMenu: some View {
+        Menu {
+            ForEach(SetKind.allCases, id: \.self) { k in
+                Button { setKind(k) } label: {
+                    if set.kind == k {
+                        Label(k.title, systemImage: "checkmark")
+                    } else {
+                        Text(verbatim: k.title)
+                    }
+                }
+            }
+        } label: {
+            Text(verbatim: mark)
+                .workoutFont(15)
+                .foregroundStyle(set.kind == .warmup ? WorkoutStyle.quiet : Paper.ink)
+                .frame(width: columns.set, alignment: .leading)
+                .padding(.leading, 8).padding(.trailing, 12)
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .menuOrder(.fixed)
+        .menuStyle(.button)
+        .buttonStyle(.plain)                            // only the number takes the tap, not the whole list row
+        .padding(.leading, -8).padding(.trailing, -12)
+        .accessibilityLabel(spokenMark)
+        .accessibilityHint("Change the set type")
     }
 
     private var spokenLast: String {
@@ -971,6 +1237,8 @@ private struct SessionSetRow: View {
                 .contentShape(Rectangle())
         }
         .menuOrder(.fixed)
+        .menuStyle(.button)
+        .buttonStyle(.plain)                            // the row now holds two menus: each takes only its own taps
         .accessibilityLabel(spoken)
     }
 
@@ -1074,6 +1342,30 @@ private struct SessionClosedRow: View {
     }
 }
 
+/// "+ Add set" under the open exercise's sets, "+ Add exercise" at the end: plain ink, at least 44 pt high.
+private struct SessionAddRow: View {
+    let title: String
+    let spoken: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: "plus")
+                    .font(.system(size: 14, weight: .bold))
+                Text(verbatim: title)
+                    .workoutFont(15, .semibold)
+            }
+            .foregroundStyle(Paper.ink)
+            .padding(.horizontal, 8)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(spoken)
+    }
+}
+
 /// "Rest 1:42", the bar filling as it runs, and −15, +15 and Skip.
 private struct SessionRestBar: View {
     let rest: RestState
@@ -1127,8 +1419,8 @@ private struct SessionRestBar: View {
     }
 }
 
-/// A big button that gives a little under the thumb.
-private struct SessionPressStyle: ButtonStyle {
+/// A big button that gives a little under the thumb (Done here and on the summary).
+struct SessionPressStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .scaleEffect(configuration.isPressed ? 0.97 : 1)
