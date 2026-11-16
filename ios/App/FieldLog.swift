@@ -286,6 +286,17 @@ enum FieldFormat {
         return "arrive · \(why) · \(metres(m))\(acc) · leg \(Int(max(0, legAge).rounded())) s old · started \(metres(started))"
     }
 
+    /// "end · 10 min after the last stop": the trip ended by itself.
+    static func rideEnd(_ why: String) -> String { "end · \(why)" }
+
+    /// "gps · coarse while you stand at the change"
+    static func rideGPS(_ what: String) -> String { "gps · \(what)" }
+
+    /// "tight · bus 306·a1b2 C-rank · 4 min to change": a slow bus with a change ahead that has too little room.
+    static func rideTight(_ vehicle: String, grade: String, minutes: Double) -> String {
+        "tight · \(vehicle) \(grade)-rank · \(minutes.isFinite ? Int(minutes.rounded()) : 0) min to change"
+    }
+
     /// "pick kept · train IC·a1b2: 40 m from its road", or "… its road not known": the one picked or planned holds
     /// against another that doesn't go where the leg goes.
     static func pickKept(_ vehicle: String, metres m: Double?) -> String {

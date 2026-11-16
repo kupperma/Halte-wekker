@@ -4,6 +4,135 @@ import Foundation
 // tested without CoreLocation or ActivityKit. Nothing here makes an alarm later: on a leg, riding toward the stop
 // that rings, GPS is always the best there is, and every alarm, phase or vehicle change on the lock screen goes at once.
 
+/// The GPS a trip (or what's watched without one) needs right now: one decision, from the trip's phase and what's open.
+enum GPSPolicy {
+    enum Phase: Equatable { case idle, riding, transfer, finished }
+    enum Accuracy: Equatable { case best, hundredMetres }
+
+    struct Plan: Equatable {
+        let on: Bool
+        let accuracy: Accuracy
+        let filter: Double              // metres between fixes (distanceFilter)
+        /// Also with the phone locked (and the blue location pill).
+        var background: Bool { on }
+
+        static let off = Plan(on: false, accuracy: .best, filter: 25)
+        static func best(_ filter: Double) -> Plan { Plan(on: true, accuracy: .best, filter: filter) }
+        static func coarse(_ filter: Double) -> Plan { Plan(on: true, accuracy: .hundredMetres, filter: filter) }
+    }
+
+    /// - Parameters:
+    ///   - phase: the trip's phase (on a leg: riding, however far from its stop)
+    ///   - demo: the pretend ride, which doesn't use GPS
+    ///   - going: Fastest trip is open
+    ///   - lineWatch: a bus line is watched
+    ///   - regionLook: you just left one of your stations, and it looks for what you're on
+    ///   - transferStill: at a change, standing still with the next one a while off (`TransferPolicy.still`)
+    static func plan(phase: Phase, demo: Bool, going: Bool, lineWatch: Bool, regionLook: Bool, transferStill: Bool) -> Plan {
+        if demo { return .off }
+        switch phase {
+        case .riding: return .best(25)                              // as before, the whole leg
+        case .transfer: return transferStill ? .coarse(50) : .best(25)
+        case .finished: return .off
+        case .idle:
+            if going { return .best(10) }
+            if regionLook { return .best(25) }                      // (the look's matching wants good fixes)
+            if lineWatch { return .coarse(30) }
+            return .off
+        }
+    }
+}
+
+/// At a change, waiting for the next bus or train: less GPS while you stand still with the next one a while off, and
+/// an end to a trip whose connection you didn't take.
+enum TransferPolicy {
+    static let stillSpeed = 2.0 / 3.6               // ≤ 2 km/h is standing (still)
+    static let stillFor: TimeInterval = 120          // …for 2 minutes
+    static let movedMetres = 60.0                    // further than this from where you stood (plus the fix's accuracy over 50 m)
+    static let bestBefore: TimeInterval = 180        // best GPS again from 3 minutes before the next one leaves
+    static let giveUpAfter: TimeInterval = 3600      // no ride an hour after the change: the trip ends
+
+    /// Where you've been standing since when.
+    struct Anchor: Equatable {
+        let p: GeoPoint
+        let since: Date
+    }
+
+    /// The anchor after a new fix: the same while you stand (a fix with an unknown or bad accuracy says nothing), a new
+    /// one from this fix once you move (a known speed over 2 km/h, or further than 60 m from it: more for a rough fix).
+    static func update(_ a: Anchor?, with f: Fix) -> Anchor? {
+        guard f.accuracy.isFinite, f.accuracy >= 0, f.accuracy < 150 else { return a }
+        let here = Anchor(p: f.p, since: f.t)
+        guard let a else { return here }
+        let moving = f.speed.isFinite && f.speed > stillSpeed
+        let far = Geo.metres(a.p, f.p) > movedMetres + max(0, f.accuracy - 50)
+        return moving || far ? here : a
+    }
+
+    /// The next one to take: the earliest of these that hasn't left (a minute's grace). Nil: none known.
+    static func nextDeparture(_ ds: [Date], now: Date) -> Date? {
+        ds.filter { $0 > now.addingTimeInterval(-60) }.min()
+    }
+
+    /// Standing still for 2 minutes, with the next one leaving more than 3 minutes from now (none known: not still, so
+    /// GPS stays the best: the one you board can't be missed by a coarse fix).
+    static func still(anchor: Anchor?, nextDeparture: Date?, now: Date) -> Bool {
+        guard let a = anchor, now.timeIntervalSince(a.since) >= stillFor, let d = nextDeparture else { return false }
+        return d.timeIntervalSince(now) > bestBefore
+    }
+
+    /// The trip ends: an hour after the change began, or after the next leg's planned departure when that's later, and
+    /// you're not going anywhere just now.
+    static func giveUp(since: Date, nextPlanned: Date?, moving: Bool, now: Date) -> Bool {
+        guard !moving else { return false }
+        let from = max(since, nextPlanned ?? since)
+        return now.timeIntervalSince(from) >= giveUpAfter
+    }
+}
+
+/// After the last stop ("You're there"): the keep-alive sound and the music look stop once the arrival chime has played;
+/// the finished trip ends by itself after a while.
+enum AfterArrival {
+    static let quietAfter: TimeInterval = 20         // the jingle and the announcement are done by then
+    static let endAfter: TimeInterval = 600          // 10 minutes
+
+    static func quiet(finishedAt: Date, now: Date) -> Bool { now.timeIntervalSince(finishedAt) >= quietAfter }
+    static func end(finishedAt: Date, now: Date) -> Bool { now.timeIntervalSince(finishedAt) >= endAfter }
+}
+
+/// How often the Live Activity follows the distance and progress: every 8 s near your stop, every 30 s while it's far
+/// (more than 3 km, and more than 5 minutes when the time is known). Anything forced (a phase, the alarm, the vehicle,
+/// the times, the song) and a change of what it says you should do go at once.
+enum ActivityThrottle {
+    static let near: TimeInterval = 8
+    static let far: TimeInterval = 30
+
+    static func gap(metresToStop d: Double?, secondsToStop s: TimeInterval?) -> TimeInterval {
+        guard let d, d.isFinite, d > 3000 else { return near }
+        if let s, s.isFinite, s <= 300 { return near }
+        return far
+    }
+
+    /// `changed`: what it shows changed; `phaseChanged`: what it says (the title, awake, ringing, the kicker) changed.
+    static func send(force: Bool, changed: Bool, phaseChanged: Bool, sinceLast: TimeInterval, metresToStop: Double?,
+                     secondsToStop: TimeInterval?) -> Bool {
+        if force || phaseChanged { return true }
+        return changed && sinceLast > gap(metresToStop: metresToStop, secondsToStop: secondsToStop)
+    }
+}
+
+/// One `/v1/map/trips` answer for the next look too, while you haven't really moved: within 10 s and 50 m of where it
+/// was asked. Only for looks that start nothing on their own clock (Fastest trip watching for you to get on, a watched
+/// line): never on a ride or at a change, where matching drives the alarm's trip.
+enum MapReuse {
+    static let seconds: TimeInterval = 10
+    static let metres = 50.0
+
+    static func usable(age: TimeInterval, movedMetres: Double, allowed: Bool) -> Bool {
+        allowed && age >= 0 && age <= seconds && movedMetres.isFinite && movedMetres >= 0 && movedMetres <= metres
+    }
+}
+
 /// The GPS speed the screens show: a new one only when it's worth drawing again (from or to unknown, across 1 m/s where
 /// the ride screen shows "standing still", or half a metre a second off), not on every fix.
 enum SpeedPublish {

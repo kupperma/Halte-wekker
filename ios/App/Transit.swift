@@ -605,19 +605,45 @@ enum Transit {
         return Heading(degrees: Heading.bearing(here.coordinate, ahead.c), via: labels.isEmpty ? nil : labels.joined(separator: " → "))
     }
 
+    /// The last `/v1/map/trips` answer per kind of question (the size of the box, the time around now, every trip or the
+    /// first), with where and when it was asked: for `reuse`.
+    private final class MapAnswers: @unchecked Sendable {
+        private let lock = NSLock()
+        private var last: [String: (at: Date, centre: GeoPoint, segs: [VehicleSegment])] = [:]
+        func get(_ k: String, near c: GeoPoint, now: Date) -> [VehicleSegment]? {
+            lock.lock(); defer { lock.unlock() }
+            guard let a = last[k], MapReuse.usable(age: now.timeIntervalSince(a.at), movedMetres: Geo.metres(a.centre, c), allowed: true) else { return nil }
+            return a.segs
+        }
+        func put(_ k: String, centre: GeoPoint, segs: [VehicleSegment], at: Date) {
+            lock.lock(); last[k] = (at, centre, segs); lock.unlock()
+        }
+    }
+    private static let mapAnswers = MapAnswers()
+
     /// Vehicles running near a point right now.
     /// `back`/`ahead`: the stretch of time (by their timetables) to look at, around now.
     /// `allTrips`: a piece several trips share (coupled and through trains) gives one segment per trip, not just the first.
+    /// `reuse`: the same question's answer of the last 10 s does, when it was asked within 50 m of here (`MapReuse`):
+    /// standing about with Fastest trip open, a look every 6 s needn't download it all again.
     static func vehicles(near c: CLLocationCoordinate2D, radiusDeg: Double = 0.02, back: TimeInterval = 150, ahead: TimeInterval = 90,
-                         allTrips: Bool = false) async -> [VehicleSegment] {
+                         allTrips: Bool = false, reuse: Bool = false) async -> [VehicleSegment] {
         let now = Date()
+        let key = "\(radiusDeg)|\(back)|\(ahead)|\(allTrips)", here = GeoPoint(c)
+        if reuse, let kept = mapAnswers.get(key, near: here, now: now) { return kept }
         let q: [URLQueryItem] = [.init(name: "min", value: "\(c.latitude - radiusDeg),\(c.longitude - radiusDeg * 1.6)"),
                                  .init(name: "max", value: "\(c.latitude + radiusDeg),\(c.longitude + radiusDeg * 1.6)"),
                                  .init(name: "startTime", value: iso.string(from: now.addingTimeInterval(-back))),
                                  .init(name: "endTime", value: iso.string(from: now.addingTimeInterval(ahead))),
                                  .init(name: "zoom", value: "15")]
         guard let list = try? await get("/v1/map/trips", q) as? [[String: Any]] else { return [] }
-        return list.flatMap { s -> [VehicleSegment] in
+        let segs = vehicleSegments(list, allTrips: allTrips)
+        mapAnswers.put(key, centre: here, segs: segs, at: now)
+        return segs
+    }
+
+    private static func vehicleSegments(_ list: [[String: Any]], allTrips: Bool) -> [VehicleSegment] {
+        list.flatMap { s -> [VehicleSegment] in
             guard let trips = s["trips"] as? [[String: Any]], let dep = date(s["departure"]), let arr = date(s["arrival"]),
                   let poly = s["polyline"] as? String else { return [] }
             let mode = (s["mode"] as? String) ?? ""
