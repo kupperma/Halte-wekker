@@ -581,10 +581,12 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         }
     }
 
-    /// With the app open: the alarm and platform alerts are already on screen, unless a Workouts screen covers them (then
+    /// With the app open: the end of a workout rest only sounds (the running workout shows its own timer, and it stays out
+    /// of the list); the alarm and platform alerts are already on screen, unless a Workouts screen covers them (then
     /// a platform alert also comes as a system banner, without a sound: WatchStore already chimes); the rest pop up inside
     /// the app (with their sound), or as a system banner over a Workouts screen, and stay in the notification list.
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler done: @escaping (UNNotificationPresentationOptions) -> Void) {
+        if notification.request.identifier == RestAlert.id { done([.sound]); return }
         let id = notification.request.identifier
         let c = notification.request.content
         let title = c.title, body = c.body, kind = Notices.kind(of: c.title, c.userInfo)
