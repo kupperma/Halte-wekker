@@ -24,4 +24,26 @@ final class NearPickTests: XCTestCase {
         let to = NearPick.keptStop(saved, kept: kept)
         XCTAssertEqual(to, ["p0": "p0", "p1": "p1", "p2": "p1", "p3": "p0", "rail": "rail"])
     }
+
+    /// A watch made on a platform the near boards no longer ask: the row under its name (another platform's id) shows
+    /// its bell on (isWatched), and tapping it finds that watch to stop (toggle), not a second one.
+    func test_watchByStopName() {
+        let watches = [(stopId: "p7", stopName: "Veghel, Busstation", line: "305", headsign: "Eindhoven"),
+                       (stopId: "p2", stopName: "Veghel, Busstation", line: "306", headsign: "Den Bosch"),
+                       (stopId: "q1", stopName: "Uden, Busstation", line: "305", headsign: "Eindhoven")]
+        // the same id
+        XCTAssertEqual(NearPick.watchIndex(watches, stopId: "p7", stopName: "Veghel, Busstation", line: "305", headsign: "Eindhoven"), 0)
+        // another platform of the name: the same watch
+        XCTAssertEqual(NearPick.watchIndex(watches, stopId: "p0", stopName: "Veghel, Busstation", line: "305", headsign: "Eindhoven"), 0)
+        XCTAssertEqual(NearPick.watchIndex(watches, stopId: "p0", stopName: "Veghel, Busstation", line: "306", headsign: "Den Bosch"), 1)
+        // the id first, then the name
+        XCTAssertEqual(NearPick.watchIndex(watches, stopId: "q1", stopName: "Veghel, Busstation", line: "305", headsign: "Eindhoven"), 2)
+        // another line, another direction, another name, or no name: none
+        XCTAssertNil(NearPick.watchIndex(watches, stopId: "p0", stopName: "Veghel, Busstation", line: "305", headsign: "Den Bosch"))
+        XCTAssertNil(NearPick.watchIndex(watches, stopId: "p0", stopName: "Veghel, Busstation", line: "301", headsign: "Eindhoven"))
+        XCTAssertNil(NearPick.watchIndex(watches, stopId: "p0", stopName: "Veghel, Markt", line: "305", headsign: "Eindhoven"))
+        XCTAssertNil(NearPick.watchIndex(watches, stopId: "p0", stopName: nil, line: "305", headsign: "Eindhoven"))
+        XCTAssertNil(NearPick.watchIndex(watches, stopId: "p0", stopName: "", line: "305", headsign: "Eindhoven"))
+        XCTAssertNil(NearPick.watchIndex([], stopId: "p0", stopName: "Veghel, Busstation", line: "305", headsign: "Eindhoven"))
+    }
 }

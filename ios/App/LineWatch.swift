@@ -38,13 +38,20 @@ final class LineWatchStore: ObservableObject {
     private func persist() { UserDefaults.standard.set(try? JSONEncoder().encode(watches), forKey: "lineWatches") }
 
     static func key(stopId: String, line: String, headsign: String) -> String { "\(stopId)|\(line)|\(headsign)" }
-    func isWatched(stopId: String, line: String, headsign: String) -> Bool { watches.contains { $0.id == Self.key(stopId: stopId, line: line, headsign: headsign) } }
+    /// The watch on this line here: at this stop id, or under this stop's name (`NearPick.watchIndex`).
+    private func matching(stopId: String, stopName: String?, line: String, headsign: String) -> LineWatch? {
+        let keys = watches.map { (stopId: $0.stopId, stopName: $0.stopName, line: $0.line, headsign: $0.headsign) }
+        return NearPick.watchIndex(keys, stopId: stopId, stopName: stopName, line: line, headsign: headsign).map { watches[$0] }
+    }
+    func isWatched(stopId: String, stopName: String? = nil, line: String, headsign: String) -> Bool {
+        matching(stopId: stopId, stopName: stopName, line: line, headsign: headsign) != nil
+    }
     func watch(stopId: String, line: String, headsign: String) -> LineWatch? { watches.first { $0.id == Self.key(stopId: stopId, line: line, headsign: headsign) } }
 
-    /// Tap the bell: watch this line here (starting with this bus, if you tapped one), or stop watching it.
+    /// Tap the bell: watch this line here (starting with this bus, if you tapped one), or stop watching it (also one made
+    /// on another stop of the same name).
     func toggle(stopId: String, stopName: String, line: String, headsign: String, tripId: String? = nil, delay: Int? = nil) {
-        let k = Self.key(stopId: stopId, line: line, headsign: headsign)
-        if watches.contains(where: { $0.id == k }) { stop(k); return }
+        if let w = matching(stopId: stopId, stopName: stopName, line: line, headsign: headsign) { stop(w.id); return }
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
         var w = LineWatch(stopId: stopId, stopName: stopName, line: line, headsign: headsign, since: Date())
         w.tripId = tripId; w.told = delay

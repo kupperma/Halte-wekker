@@ -24,4 +24,15 @@ enum NearPick {
         for s in stops { if let k = byName[s.name] { out[s.id] = k } }
         return out
     }
+
+    /// The watch on this line at this stop, if any (its index in `watches`): the same line and direction, at the same stop
+    /// id or under the same stop name. A watch made on a platform the near boards no longer ask (one per name now) is
+    /// still the watch for the row under its name: its bell shows on, and tapping it stops that watch, not a second one.
+    static func watchIndex(_ watches: [(stopId: String, stopName: String, line: String, headsign: String)],
+                           stopId: String, stopName: String?, line: String, headsign: String) -> Int? {
+        let sameLine = watches.indices.filter { watches[$0].line == line && watches[$0].headsign == headsign }
+        if let i = sameLine.first(where: { watches[$0].stopId == stopId }) { return i }
+        guard let name = stopName, !name.isEmpty else { return nil }
+        return sameLine.first { watches[$0].stopName == name }
+    }
 }
