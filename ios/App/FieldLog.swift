@@ -12,14 +12,16 @@ struct FieldEntry: Codable, Equatable, Sendable {
 /// sizes, seconds, attempts, lines, metres rounded to 10 and the last 4 characters of trip ids: never coordinates, place
 /// names or query strings.
 final class FieldLog: @unchecked Sendable {
-    /// In a small file in Caches (written at most every 30 s, and when the app goes to the background), not in the
-    /// app's settings: those are read whole at every launch and were written whole every 5 s.
+    /// In a small file in Application Support (written at most every 30 s, and when the app goes to the background),
+    /// not in the app's settings: those are read whole at every launch and were written whole every 5 s.
     static let shared = FieldLog(file: FieldLog.appFile, migrating: (defaults: UserDefaults.standard, key: "fieldLog.v1"))
     /// The newest this many of each kind are kept, so a burst of requests can't push a ride out of the log.
     static let caps: [FieldEntry.Kind: Int] = [.net: 300, .match: 200, .ride: 100]
 
     static var appFile: URL {
-        let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first ?? FileManager.default.temporaryDirectory
+        let fm = FileManager.default
+        let dir = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first ?? fm.temporaryDirectory
+        try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appendingPathComponent("fieldlog.json")
     }
 
@@ -45,14 +47,13 @@ final class FieldLog: @unchecked Sendable {
     }
 
     /// In a file, written at most every `every` seconds. `migrating`: where an older version kept it (read once when
-    /// there's no file yet, then removed there).
+    /// there's no file yet, written to the file, and only then removed there).
     convenience init(file: URL, every: TimeInterval = 30, caps: [FieldEntry.Kind: Int] = FieldLog.caps,
                      migrating old: (defaults: UserDefaults, key: String)? = nil) {
         self.init(load: {
             if let d = try? Data(contentsOf: file) { return d }
             guard let old, let d = old.defaults.data(forKey: old.key) else { return nil }
-            old.defaults.removeObject(forKey: old.key)
-            try? d.write(to: file, options: .atomic)
+            if (try? d.write(to: file, options: .atomic)) != nil { old.defaults.removeObject(forKey: old.key) }
             return d
         }, store: { try? $0.write(to: file, options: .atomic) }, every: every, limit: nil, caps: caps)
     }
@@ -288,9 +289,6 @@ enum FieldFormat {
 
     /// "end · 10 min after the last stop": the trip ended by itself.
     static func rideEnd(_ why: String) -> String { "end · \(why)" }
-
-    /// "gps · coarse while you stand at the change"
-    static func rideGPS(_ what: String) -> String { "gps · \(what)" }
 
     /// "tight · bus 306·a1b2 C-rank · 4 min to change": a slow bus with a change ahead that has too little room.
     static func rideTight(_ vehicle: String, grade: String, minutes: Double) -> String {

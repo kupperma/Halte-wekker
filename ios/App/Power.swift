@@ -27,12 +27,13 @@ enum GPSPolicy {
     ///   - going: Fastest trip is open
     ///   - lineWatch: a bus line is watched
     ///   - regionLook: you just left one of your stations, and it looks for what you're on
-    ///   - transferStill: at a change, standing still with the next one a while off (`TransferPolicy.still`)
-    static func plan(phase: Phase, demo: Bool, going: Bool, lineWatch: Bool, regionLook: Bool, transferStill: Bool) -> Plan {
+    /// At a change it stays the best, standing still too: a coarse fix could see the next one you get on (an earlier
+    /// one than listed, a late one without live times) more than one look later.
+    static func plan(phase: Phase, demo: Bool, going: Bool, lineWatch: Bool, regionLook: Bool) -> Plan {
         if demo { return .off }
         switch phase {
         case .riding: return .best(25)                              // as before, the whole leg
-        case .transfer: return transferStill ? .coarse(50) : .best(25)
+        case .transfer: return .best(25)
         case .finished: return .off
         case .idle:
             if going { return .best(10) }
@@ -43,14 +44,13 @@ enum GPSPolicy {
     }
 }
 
-/// At a change, waiting for the next bus or train: less GPS while you stand still with the next one a while off, and
-/// an end to a trip whose connection you didn't take.
+/// At a change, waiting for the next bus or train: an end to a trip whose connection you didn't take, an hour after the
+/// last one you could have, while you stand about at the change.
 enum TransferPolicy {
     static let stillSpeed = 2.0 / 3.6               // ≤ 2 km/h is standing (still)
-    static let stillFor: TimeInterval = 120          // …for 2 minutes
     static let movedMetres = 60.0                    // further than this from where you stood (plus the fix's accuracy over 50 m)
-    static let bestBefore: TimeInterval = 180        // best GPS again from 3 minutes before the next one leaves
-    static let giveUpAfter: TimeInterval = 3600      // no ride an hour after the change: the trip ends
+    static let giveUpAfter: TimeInterval = 3600      // an hour after the last one you could take…
+    static let standFor: TimeInterval = 600          // …while you've stood at the change for 10 minutes: the trip ends
 
     /// Where you've been standing since when.
     struct Anchor: Equatable {
@@ -69,23 +69,26 @@ enum TransferPolicy {
         return moving || far ? here : a
     }
 
-    /// The next one to take: the earliest of these that hasn't left (a minute's grace). Nil: none known.
-    static func nextDeparture(_ ds: [Date], now: Date) -> Date? {
-        ds.filter { $0 > now.addingTimeInterval(-60) }.min()
+    /// One departure listed for the next leg.
+    struct Listed: Equatable {
+        let id: String
+        let departure: Date
     }
 
-    /// Standing still for 2 minutes, with the next one leaving more than 3 minutes from now (none known: not still, so
-    /// GPS stays the best: the one you board can't be missed by a coarse fix).
-    static func still(anchor: Anchor?, nextDeparture: Date?, now: Date) -> Bool {
-        guard let a = anchor, now.timeIntervalSince(a.since) >= stillFor, let d = nextDeparture else { return false }
-        return d.timeIntervalSince(now) > bestBefore
+    /// The first departure listed for the next leg after you got there: taken from the first live list that has one,
+    /// then kept at its live time while it's still listed (a late one moves the clock on). Once it has left the list it
+    /// stays as it was: the clock doesn't slide on to the next one as old ones age out.
+    static func firstListed(_ latched: Listed?, live list: [Listed], arrived: Date) -> Listed? {
+        if let l = latched { return list.first { $0.id == l.id } ?? l }
+        return list.filter { $0.departure >= arrived }.min { $0.departure < $1.departure }
     }
 
-    /// The trip ends: an hour after the change began, or after the next leg's planned departure when that's later, and
-    /// you're not going anywhere just now.
-    static func giveUp(since: Date, nextPlanned: Date?, moving: Bool, now: Date) -> Bool {
-        guard !moving else { return false }
-        let from = max(since, nextPlanned ?? since)
+    /// The trip ends an hour after the latest of: you got there (`since`), and the departures known for the next leg
+    /// (`firstKnown`: the planned one, the first listed after you got there), and only while you've stood at the change
+    /// (`standingSince`, the anchor) for 10 minutes.
+    static func giveUp(since: Date, firstKnown: Date?, standingSince: Date?, now: Date) -> Bool {
+        guard let s = standingSince, now.timeIntervalSince(s) >= standFor else { return false }
+        let from = max(since, firstKnown ?? since)
         return now.timeIntervalSince(from) >= giveUpAfter
     }
 }

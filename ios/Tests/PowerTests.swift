@@ -34,25 +34,26 @@ final class PowerTests: XCTestCase {
     private let t0 = Fx.t0
 
     private func plan(_ phase: GPSPolicy.Phase, demo: Bool = false, going: Bool = false, lineWatch: Bool = false,
-                      regionLook: Bool = false, still: Bool = false) -> GPSPolicy.Plan {
-        GPSPolicy.plan(phase: phase, demo: demo, going: going, lineWatch: lineWatch, regionLook: regionLook, transferStill: still)
+                      regionLook: Bool = false) -> GPSPolicy.Plan {
+        GPSPolicy.plan(phase: phase, demo: demo, going: going, lineWatch: lineWatch, regionLook: regionLook)
     }
 
-    /// On a leg GPS is always the best, whatever else is open; idle it's off once nothing needs it (the look after a
-    /// station ended, Fastest trip closed, no line watch): the old `watchLeft` left it on for good.
+    /// On a leg and at a change GPS is always the best, whatever else is open (standing still at a change too: a
+    /// coarse fix could see the one you get on more than a look later); idle it's off once nothing needs it (the look
+    /// after a station ended, Fastest trip closed, no line watch): the old `watchLeft` left it on for good.
     func test_gpsPolicyMatrix() {
         for going in [false, true] {
             for lineWatch in [false, true] {
                 for regionLook in [false, true] {
-                    for still in [false, true] {
-                        XCTAssertEqual(plan(.riding, going: going, lineWatch: lineWatch, regionLook: regionLook, still: still), .best(25))
-                        XCTAssertEqual(plan(.finished, going: going, lineWatch: lineWatch, regionLook: regionLook, still: still), .off)
-                        XCTAssertEqual(plan(.riding, demo: true, going: going, lineWatch: lineWatch, regionLook: regionLook), .off)
-                    }
+                    XCTAssertEqual(plan(.riding, going: going, lineWatch: lineWatch, regionLook: regionLook), .best(25))
+                    XCTAssertEqual(plan(.transfer, going: going, lineWatch: lineWatch, regionLook: regionLook), .best(25))
+                    XCTAssertEqual(plan(.finished, going: going, lineWatch: lineWatch, regionLook: regionLook), .off)
+                    XCTAssertEqual(plan(.riding, demo: true, going: going, lineWatch: lineWatch, regionLook: regionLook), .off)
                 }
             }
         }
         XCTAssertTrue(plan(.riding).background)
+        XCTAssertTrue(plan(.transfer).background)
         XCTAssertEqual(plan(.idle), .off)
         XCTAssertFalse(plan(.idle).background)
         XCTAssertEqual(plan(.idle, regionLook: true), .best(25))
@@ -60,19 +61,14 @@ final class PowerTests: XCTestCase {
         XCTAssertEqual(plan(.idle, lineWatch: true, regionLook: true), .best(25))
         XCTAssertEqual(plan(.idle, going: true), .best(10))
         XCTAssertEqual(plan(.idle, going: true, lineWatch: true, regionLook: true), .best(10))
-        XCTAssertEqual(plan(.idle, still: true), .off)
-        XCTAssertEqual(plan(.transfer), .best(25))
-        XCTAssertEqual(plan(.transfer, still: true), .coarse(50))
-        XCTAssertTrue(plan(.transfer, still: true).background)
     }
 
     private func fix(_ dt: TimeInterval, east: Double, speed: Double = 0, accuracy: Double = 10) -> Fix {
         Fix(t: t0 + dt, p: Fx.east(east), accuracy: accuracy, speed: speed, course: 90)
     }
 
-    /// Standing at a change: the anchor holds through jitter, a walk or a ride moves it; still after 2 minutes, and only
-    /// while the next one is more than 3 minutes off.
-    func test_transferStill() {
+    /// Standing at a change: the anchor holds through jitter; a walk or a ride moves it.
+    func test_transferAnchor() {
         var a: TransferPolicy.Anchor?
         a = TransferPolicy.update(a, with: fix(0, east: 0))
         XCTAssertEqual(a?.since, t0)
@@ -82,39 +78,57 @@ final class PowerTests: XCTestCase {
         XCTAssertEqual(a?.since, t0)                                        // a rough fix 40 m off: still standing
         a = TransferPolicy.update(a, with: fix(126, east: 10, accuracy: -1))
         XCTAssertEqual(a?.since, t0)                                        // no accuracy: says nothing
-        let dep = t0 + 600
-        XCTAssertFalse(TransferPolicy.still(anchor: a, nextDeparture: dep, now: t0 + 119))
-        XCTAssertTrue(TransferPolicy.still(anchor: a, nextDeparture: dep, now: t0 + 120))
-        XCTAssertTrue(TransferPolicy.still(anchor: a, nextDeparture: dep, now: dep - 181))
-        XCTAssertFalse(TransferPolicy.still(anchor: a, nextDeparture: dep, now: dep - 180))       // the best again in time
-        XCTAssertFalse(TransferPolicy.still(anchor: a, nextDeparture: nil, now: t0 + 300))        // none known: best
-        XCTAssertFalse(TransferPolicy.still(anchor: nil, nextDeparture: dep, now: t0 + 300))
         // walking (a known speed over 2 km/h) or 70 m off: moving again, from that fix
-        let walk = TransferPolicy.update(a, with: fix(130, east: 5, speed: 1.2))
-        XCTAssertEqual(walk?.since, t0 + 130)
-        let off = TransferPolicy.update(a, with: fix(130, east: 70, speed: 0))
-        XCTAssertEqual(off?.since, t0 + 130)
-        let rough = TransferPolicy.update(a, with: fix(130, east: 100, speed: -1, accuracy: 100))
-        XCTAssertEqual(rough?.since, t0)                                    // 100 m with ±100: not enough to tell
+        XCTAssertEqual(TransferPolicy.update(a, with: fix(130, east: 5, speed: 1.2))?.since, t0 + 130)
+        XCTAssertEqual(TransferPolicy.update(a, with: fix(130, east: 70, speed: 0))?.since, t0 + 130)
+        XCTAssertEqual(TransferPolicy.update(a, with: fix(130, east: 100, speed: -1, accuracy: 100))?.since, t0)   // ±100: can't tell
         XCTAssertEqual(TransferPolicy.update(a, with: fix(130, east: 200, speed: -1, accuracy: 100))?.since, t0 + 130)
     }
 
-    /// The next one: the earliest that hasn't left (a minute's grace).
-    func test_nextDeparture() {
-        XCTAssertEqual(TransferPolicy.nextDeparture([t0 + 600, t0 - 30, t0 - 120, t0 + 300], now: t0), t0 - 30)
-        XCTAssertEqual(TransferPolicy.nextDeparture([t0 + 600, t0 - 120, t0 + 300], now: t0), t0 + 300)
-        XCTAssertNil(TransferPolicy.nextDeparture([t0 - 120], now: t0))
-        XCTAssertNil(TransferPolicy.nextDeparture([], now: t0))
+    private func at(_ hh: Int, _ mm: Int) -> Date { t0 + Double(hh * 3600 + mm * 60) }
+
+    /// The hour's end at a change counts from the latest it could still go on: on your own route (nothing planned) from
+    /// the first one listed after you got there, and only while you've stood there for 10 minutes.
+    func test_transferGiveUpOwnRoute() {
+        let arrived = at(23, 40)
+        // the first live list after you got off: the last bus left before you got there, the first after it at 00:45
+        let list = [TransferPolicy.Listed(id: "late-2310", departure: at(23, 10)),
+                    TransferPolicy.Listed(id: "night-0045", departure: at(24, 45)),
+                    TransferPolicy.Listed(id: "night-0145", departure: at(25, 45))]
+        var first = TransferPolicy.firstListed(nil, live: list, arrived: arrived)
+        XCTAssertEqual(first?.id, "night-0045")
+        // later lists: it has left the list (aged out), the clock doesn't slide on to the 01:45
+        first = TransferPolicy.firstListed(first, live: Array(list.suffix(1)), arrived: arrived)
+        XCTAssertEqual(first?.departure, at(24, 45))
+        let standing = at(23, 45)
+        XCTAssertFalse(TransferPolicy.giveUp(since: arrived, firstKnown: first?.departure, standingSince: standing, now: at(24, 40)))
+        XCTAssertFalse(TransferPolicy.giveUp(since: arrived, firstKnown: first?.departure, standingSince: standing, now: at(25, 44)))
+        XCTAssertTrue(TransferPolicy.giveUp(since: arrived, firstKnown: first?.departure, standingSince: standing, now: at(25, 45)))
+        // not standing at the change (moving in the last 10 minutes), or no fix to tell by: it doesn't end
+        XCTAssertFalse(TransferPolicy.giveUp(since: arrived, firstKnown: first?.departure, standingSince: at(25, 40), now: at(25, 46)))
+        XCTAssertFalse(TransferPolicy.giveUp(since: arrived, firstKnown: first?.departure, standingSince: nil, now: at(27, 0)))
+        // nothing listed at all: an hour from when you got there
+        XCTAssertTrue(TransferPolicy.giveUp(since: arrived, firstKnown: nil, standingSince: standing, now: at(24, 40)))
+        XCTAssertNil(TransferPolicy.firstListed(nil, live: [list[0]], arrived: arrived))
     }
 
-    /// An hour after the change (or after the next one was planned to leave, when later), standing about: the trip ends.
-    func test_transferGiveUp() {
-        XCTAssertFalse(TransferPolicy.giveUp(since: t0, nextPlanned: nil, moving: false, now: t0 + 3599))
-        XCTAssertTrue(TransferPolicy.giveUp(since: t0, nextPlanned: nil, moving: false, now: t0 + 3600))
-        XCTAssertFalse(TransferPolicy.giveUp(since: t0, nextPlanned: nil, moving: true, now: t0 + 7200))       // on the move
-        XCTAssertFalse(TransferPolicy.giveUp(since: t0, nextPlanned: t0 + 1200, moving: false, now: t0 + 4000))
-        XCTAssertTrue(TransferPolicy.giveUp(since: t0, nextPlanned: t0 + 1200, moving: false, now: t0 + 4800))
-        XCTAssertTrue(TransferPolicy.giveUp(since: t0, nextPlanned: t0 - 600, moving: false, now: t0 + 3600))   // planned before you got there
+    /// A planned train 70 minutes late: it follows its live time while it's listed, and the trip doesn't end early.
+    func test_transferGiveUpPlannedLate() {
+        let arrived = at(23, 50)
+        var planned: TransferPolicy.Listed? = TransferPolicy.Listed(id: "ic-0000", departure: at(24, 0))
+        let live = [TransferPolicy.Listed(id: "spr-0015", departure: at(24, 15)), TransferPolicy.Listed(id: "ic-0000", departure: at(25, 10))]
+        planned = TransferPolicy.firstListed(planned, live: live, arrived: arrived)
+        XCTAssertEqual(planned?.departure, at(25, 10))
+        let first = TransferPolicy.firstListed(nil, live: live, arrived: arrived)
+        XCTAssertEqual(first?.id, "spr-0015")
+        planned = TransferPolicy.firstListed(planned, live: [], arrived: arrived)                   // gone from the list
+        XCTAssertEqual(planned?.departure, at(25, 10))
+        let known = [planned?.departure, first?.departure].compactMap { $0 }.max()
+        XCTAssertFalse(TransferPolicy.giveUp(since: arrived, firstKnown: known, standingSince: arrived, now: at(25, 5)))
+        XCTAssertFalse(TransferPolicy.giveUp(since: arrived, firstKnown: known, standingSince: arrived, now: at(26, 9)))
+        XCTAssertTrue(TransferPolicy.giveUp(since: arrived, firstKnown: known, standingSince: arrived, now: at(26, 10)))
+        // by the planned time alone it would have ended at 01:00
+        XCTAssertTrue(TransferPolicy.giveUp(since: arrived, firstKnown: at(24, 0), standingSince: arrived, now: at(25, 0)))
     }
 
     func test_afterArrival() {

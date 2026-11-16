@@ -99,4 +99,37 @@ final class ChangeRoomTests: XCTestCase {
         XCTAssertFalse(ChangeRoom.warnOnRide(grade: nil, roomMinutes: 1))
         XCTAssertFalse(ChangeRoom.warnOnRide(grade: "C", roomMinutes: .nan))
     }
+
+    /// `Risk.miss`'s room: a C bus before the change gets 4 minutes more, a train none (whatever its rank).
+    func test_feederRoom() {
+        XCTAssertEqual(ChangeRoom.feederExtra(isTrain: false, grade: "C"), 4)
+        XCTAssertEqual(ChangeRoom.feederExtra(isTrain: false, grade: "B"), 2)
+        XCTAssertEqual(ChangeRoom.feederExtra(isTrain: false, grade: "S"), 0)
+        XCTAssertEqual(ChangeRoom.feederExtra(isTrain: true, grade: "C"), 0)
+        XCTAssertEqual(ChangeRoom.feederNeeded(isTrain: true, grade: "C"), 2)
+        let plain = ChangeRoom.missChance(slack: 5, typical: 2.6, already: 0, soon: false, learned: [])
+        XCTAssertEqual(ChangeRoom.missChance(slack: 5, typical: 2.6, already: 0, soon: false, learned: [],
+                                             extra: ChangeRoom.feederExtra(isTrain: true, grade: "C")), plain)
+        XCTAssertGreaterThan(ChangeRoom.missChance(slack: 5, typical: 2.6, already: 0, soon: false, learned: [],
+                                                   extra: ChangeRoom.feederExtra(isTrain: false, grade: "C")), plain)
+    }
+
+    /// "N min to change": plain red under 2; after a slow bus red under the room it needs, saying why.
+    func test_changeNote() {
+        XCTAssertTrue(ChangeRoom.changeNote(minutes: 1, walk: 0, isTrain: false, grade: "C") == (true, nil))
+        XCTAssertTrue(ChangeRoom.changeNote(minutes: 1, walk: 0, isTrain: false, grade: "S") == (true, nil))
+        XCTAssertTrue(ChangeRoom.changeNote(minutes: 5, walk: 0, isTrain: false, grade: "C") == (true, "slow bus, needs 6"))
+        XCTAssertTrue(ChangeRoom.changeNote(minutes: 5, walk: 2, isTrain: false, grade: "B") == (true, "slow bus, needs 4"))
+        XCTAssertTrue(ChangeRoom.changeNote(minutes: 6, walk: 1, isTrain: false, grade: "B") == (false, nil))
+        XCTAssertTrue(ChangeRoom.changeNote(minutes: 6, walk: 0, isTrain: false, grade: "C") == (false, nil))
+        XCTAssertTrue(ChangeRoom.changeNote(minutes: 3, walk: 0, isTrain: true, grade: "C") == (false, nil))
+        XCTAssertTrue(ChangeRoom.changeNote(minutes: 3, walk: 2, isTrain: false, grade: nil) == (true, nil))
+    }
+
+    /// A ride that started by itself (not in the planner's list): ranked by its own timetable.
+    func test_ownTimetableGrade() {
+        XCTAssertEqual(ChangeRoom.ownTimetableGrade(liveMinutes: 21, scheduledMinutes: 20), "S")
+        XCTAssertEqual(ChangeRoom.ownTimetableGrade(liveMinutes: 27, scheduledMinutes: 20), "C")
+        XCTAssertNil(ChangeRoom.ownTimetableGrade(liveMinutes: 0, scheduledMinutes: 20))
+    }
 }

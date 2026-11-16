@@ -1253,8 +1253,10 @@ struct GoView: View {
             ForEach(Array(t.rides.enumerated()).dropFirst(), id: \.offset) { i, ride in
                 let prev = t.rides[i - 1]
                 let ch = Fmt.mins(ride.departure.timeIntervalSince(prev.arrival))
-                Label("\(ch) min to change at \(Fmt.place(prev.toStop))\(ride.walkBefore > 0 ? ", \(ride.walkBefore) min walk" : "")", systemImage: "arrow.triangle.swap")
-                    .font(BoardInk.sans(10.5, .semibold)).foregroundStyle(Double(ch - ride.walkBefore) < Risk.roomNeeded(after: prev) ? Paper.late : Paper.ink.opacity(0.8))
+                let note = Risk.changeNote(after: prev, minutes: ch, walk: ride.walkBefore)     // (after a slow bus: why it's red)
+                let why = note.why.map { " · \($0)" } ?? ""
+                Label("\(ch) min to change at \(Fmt.place(prev.toStop))\(ride.walkBefore > 0 ? ", \(ride.walkBefore) min walk" : "")\(why)", systemImage: "arrow.triangle.swap")
+                    .font(BoardInk.sans(10.5, .semibold)).foregroundStyle(note.red ? Paper.lateInk : Paper.ink.opacity(0.8))
                     .padding(.top, 4)
                 PlannerRideRow(ride: ride, info: ns.rail(ride), picked: false, saved: go.asOf != nil) {
                     liveTrack = LiveTrackTarget(tripId: ride.tripId, line: ride.line, headsign: ride.headsign.isEmpty ? Fmt.place(ride.toStop) : ride.headsign,

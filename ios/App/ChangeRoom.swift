@@ -18,6 +18,26 @@ enum ChangeRoom {
     /// The minutes more than usual.
     static func extra(afterGrade g: String?) -> Double { needed(afterGrade: g) - usual }
 
+    /// The room a change needs after the ride before it, and the minutes more than usual (what `Risk.miss` takes off
+    /// the slack): by a bus's speed rank; a train none (a Sprinter is slower than an Intercity by its timetable, not
+    /// late).
+    static func feederNeeded(isTrain: Bool, grade: String?) -> Double { isTrain ? usual : needed(afterGrade: grade) }
+    static func feederExtra(isTrain: Bool, grade: String?) -> Double { feederNeeded(isTrain: isTrain, grade: grade) - usual }
+
+    /// "N min to change" (`minutes` between arriving and leaving, `walk` of it walking): red under the room it needs;
+    /// when that's only because of the bus before it (2 minutes would do otherwise), why: "slow bus, needs 6".
+    static func changeNote(minutes: Int, walk: Int, isTrain: Bool, grade: String?) -> (red: Bool, why: String?) {
+        let room = Double(minutes - walk), need = feederNeeded(isTrain: isTrain, grade: grade)
+        guard room < need else { return (false, nil) }
+        return (true, room >= usual ? "slow bus, needs \(Int(need))" : nil)
+    }
+
+    /// A bus's speed rank by its own timetable, when the stretch it runs isn't one the planner ranked (a ride that
+    /// started by itself): its minutes on this leg with delays against the minutes its timetable gives.
+    static func ownTimetableGrade(liveMinutes: Double, scheduledMinutes: Double) -> String? {
+        speedGrade(minutes: liveMinutes, scheduled: scheduledMinutes, best: nil, cancelled: false)
+    }
+
     /// A ride's speed rank, as `Ratings.grade` gives it but without remembering anything: `best` the fastest timetabled
     /// minutes seen on its stretch so far, `scheduled` its own timetabled minutes (a new fastest counts), `minutes` its
     /// own with delays. S as fast as it gets, A up to 3 min or 18% longer, B up to 30%, C more.

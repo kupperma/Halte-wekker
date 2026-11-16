@@ -268,15 +268,17 @@ enum Risk {
         let learned = DelayBook.shared.delays(line: r.line, stop: r.toStop, at: r.scheduledArrival)
         // a slow bus before it (its speed rank B or C) needs more room: that much less of the slack counts
         return ChangeRoom.missChance(slack: slack, typical: typical, already: already, soon: soon, learned: learned,
-                                     extra: ChangeRoom.extra(afterGrade: feederGrade(r)))
+                                     extra: ChangeRoom.feederExtra(isTrain: r.isTrain, grade: feederGrade(r)))
     }
 
     /// The speed rank of a bus you'd change from (only read): a slow one needs more room. Trains: none (a Sprinter is
     /// slower than an Intercity by its timetable, not late).
     static func feederGrade(_ r: Ride) -> String? { r.isTrain ? nil : r.speedGrade }
 
-    /// The minutes of room a change after `r` needs (2, after a slow bus 4 or 6).
-    static func roomNeeded(after r: Ride) -> Double { ChangeRoom.needed(afterGrade: feederGrade(r)) }
+    /// "N min to change" after `r`: red under the room it needs, and why when it's the slow bus (`ChangeRoom.changeNote`).
+    static func changeNote(after r: Ride, minutes: Int, walk: Int) -> (red: Bool, why: String?) {
+        ChangeRoom.changeNote(minutes: minutes, walk: walk, isTrain: r.isTrain, grade: feederGrade(r))
+    }
 
     /// Minutes it's likely to cost: each change's chance of missing it times the wait for the next one after it.
     static func penalty(_ t: DoorTrip, now: Date = Date()) -> Double {

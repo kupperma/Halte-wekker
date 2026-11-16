@@ -10,8 +10,8 @@ struct HaltewekkerApp: App {
     init() {
         Watchdog.shared.start()
         Net.startWatchingConnection()
-        // the map on the wall, read and decoded off the main thread while the rest starts
-        StillCache.shared.warm(["map-home", "map-out"])
+        // the map on the wall and the station, read and decoded off the main thread while the rest starts
+        StillCache.shared.warm()
     }
     var body: some Scene {
         WindowGroup {

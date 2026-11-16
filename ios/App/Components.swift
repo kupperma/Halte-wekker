@@ -162,7 +162,7 @@ struct PassSection: View {
                         Text(to).font(HWFont.display(15)).foregroundStyle(Paper.ink).lineLimit(2)
                     }
                     ForEach(lines) { l in
-                        Text(l.text).font(HWFont.body(11, bold: l.warn)).foregroundStyle(l.warn ? Paper.late : Paper.ink.opacity(0.75))
+                        Text(l.text).font(HWFont.body(11, bold: l.warn)).foregroundStyle(l.warn ? Paper.lateInk : Paper.ink.opacity(0.75))
                     }
                     if let extra { extra.padding(.top, 2) }
                 }
@@ -264,8 +264,10 @@ struct BoardingPass: View {
         out.append(PassLine(text: "\(ride.rideMinutes) min ride\(i == 0 && ride.walkBefore > 0 ? " · walk \(ride.walkBefore) min first" : "")"))
         if let n = trip.rides[safe: i + 1] {
             let ch = Fmt.mins(n.departure.timeIntervalSince(ride.arrival))
-            out.append(PassLine(text: "\(ch) min to change\(n.walkBefore > 0 ? ", \(n.walkBefore) min walk" : "")",
-                                warn: Double(ch - n.walkBefore) < Risk.roomNeeded(after: ride)))     // (after a slow bus: 4 or 6)
+            // red under 2 minutes; after a slow bus under the 4 or 6 it needs, saying so
+            let note = Risk.changeNote(after: ride, minutes: ch, walk: n.walkBefore)
+            let why = note.why.map { " · \($0)" } ?? ""
+            out.append(PassLine(text: "\(ch) min to change\(n.walkBefore > 0 ? ", \(n.walkBefore) min walk" : "")\(why)", warn: note.red))
         }
         return out
     }
@@ -369,31 +371,38 @@ struct OneShotVideo: UIViewRepresentable {
     func updateUIView(_ v: OneShotVideoView, context: Context) { v.show(name, token: token) }
 }
 
-/// The full-screen stills (the map on the wall, the station), read and decoded once and then kept. Each screen redraw
-/// used to read the JPEG from disk and decode it again on the main thread (`UIImage(named:)` without the extension finds
-/// only PNGs), many times in the first seconds after launch. `warm` decodes them off the main thread before they show.
+/// The full-screen stills (the map on the wall, the station), read and decoded once and then kept while the home
+/// screen can show them. Each screen redraw used to read the JPEG from disk and decode it again on the main thread
+/// (`UIImage(named:)` without the extension finds only PNGs), many times in the first seconds after launch. `warm`
+/// decodes them off the main thread before they show. Decoded they're some 25 MB: kept in an NSCache (iOS takes them
+/// back when memory is short), and let go in the background and while a trip runs (`purge`), so the app that has to
+/// ring isn't the one iOS ends for its memory; warmed again on the way back.
 final class StillCache: @unchecked Sendable {
     static let shared = StillCache()
-    private let lock = NSLock()
-    private var images: [String: UIImage] = [:]
+    static let all = ["map-home", "map-out", "still-home", "still-out"]
+    private let images = NSCache<NSString, UIImage>()
 
-    /// The still `name` (a JPEG in the app), decoded: kept from before, else read and decoded now (once).
+    private init() {
+        NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: nil) { [weak self] _ in
+            self?.purge()
+        }
+    }
+
+    /// The still `name` (a JPEG in the app), decoded: kept from before, else read and decoded now.
     func image(_ name: String) -> UIImage? {
-        lock.lock()
-        if let i = images[name] { lock.unlock(); return i }
-        lock.unlock()
+        if let i = images.object(forKey: name as NSString) { return i }
         guard let img = Self.load(name) else { return nil }
-        lock.lock()
-        defer { lock.unlock() }
-        if let i = images[name] { return i }
-        images[name] = img
+        images.setObject(img, forKey: name as NSString)
         return img
     }
 
-    /// Read and decode these off the main thread, so the first screen finds them ready.
-    func warm(_ names: [String]) {
+    /// Read and decode these off the main thread, so the screen finds them ready.
+    func warm(_ names: [String] = StillCache.all) {
         DispatchQueue.global(qos: .userInitiated).async { for n in names { _ = self.image(n) } }
     }
+
+    /// Let them all go (what's on screen keeps its own).
+    func purge() { images.removeAllObjects() }
 
     private static func load(_ name: String) -> UIImage? {
         guard let raw = Bundle.main.path(forResource: name, ofType: "jpg").flatMap(UIImage.init(contentsOfFile:)) ?? UIImage(named: name) else { return nil }

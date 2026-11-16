@@ -28,7 +28,13 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     /// A direction you picked yourself sticks for 3 hours, then it follows the clock again.
     @Published private(set) var direction: Direction = TripManager.savedDirection()
     @Published var toast: String?
-    @Published private(set) var phase: Phase = .idle
+    @Published private(set) var phase: Phase = .idle {
+        didSet {
+            // the home screen's stills (some 25 MB decoded) aren't kept while a trip runs; back when it's over
+            if oldValue == .idle, phase != .idle { StillCache.shared.purge() }
+            else if oldValue != .idle, phase == .idle, UIApplication.shared.applicationState != .background { StillCache.shared.warm() }
+        }
+    }
     @Published private(set) var route: RoutePlan?
     @Published private(set) var legs: [Leg] = []
     @Published private(set) var index = 0
@@ -120,6 +126,9 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     private var gpsApplied: GPSPolicy.Plan?               // what GPS was last set to (`applyGPS`)
     private var transferAnchor: TransferPolicy.Anchor?    // at a change: where you've stood, since when
     private var changeSince: Date?                        // at a change: when you got off
+    private var changeFirst: TransferPolicy.Listed?       // …the first departure listed for the next leg after that (live)
+    private var changePlanned: TransferPolicy.Listed?     // …the planned next one, at its live time while it's listed
+    private var lastRegionRetry = Date.distantPast
     private var finishedAt: Date?                         // after the last stop: when you got there
     private var finishTask: Task<Void, Never>?
     private var tightTold: String?                        // the leg (and bus) it told you had a tight change after it
@@ -260,7 +269,19 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         GoStore.shared.trip = self
         SchoolAlarm.shared.trip = self
         NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor in self?.awaySince = Date() }
+            Task { @MainActor in
+                self?.awaySince = Date()
+                // (whatever screen is up, a ride's too: what's waiting to be written goes now)
+                FieldLog.shared.flush(); DelayBook.shared.save()
+                self?.endFinishedIfDue()
+            }
+        }
+        NotificationCenter.default.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                self.endFinishedIfDue(back: true)
+                if self.phase == .idle { StillCache.shared.warm() }
+            }
         }
         AlarmControl.stop = { [weak self] in self?.stopAlarm() }
         // "Stop alarm" right on the alarm notification.
@@ -407,7 +428,9 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         arrivedAt = leg?.to.short
         if index + 1 < legs.count {
             phase = .transfer
-            changeSince = Date(); transferAnchor = nil
+            changeSince = Date(); changeFirst = nil
+            changePlanned = route?.planned?[safe: index + 1].map { TransferPolicy.Listed(id: $0.tripId, departure: $0.departure) }
+            transferAnchor = lastFix.flatMap { TransferPolicy.update(nil, with: Fix($0)) }      // standing where you got off
             // Keep looking for the next bus or train, so the next leg starts by itself once you're on board: not the one
             // you just got off (unless the next leg was planned with it too).
             let exclude = gotOff.flatMap { id in route?.planned?[safe: index + 1]?.tripId == id ? nil : id }
@@ -435,6 +458,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         finishTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(AfterArrival.quietAfter * 1_000_000_000))
             guard let self, !Task.isCancelled, self.phase == .finished, self.finishedAt == at else { return }
+            // (what the last stop wrote, its delay and the ride lines, before iOS may pause the app)
+            FieldLog.shared.flush(); DelayBook.shared.save()
             self.sound.endTrip()
             self.music.stop()
             if let a = self.activity {
@@ -444,10 +469,26 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
                 Task { await a.end(content, dismissalPolicy: .after(at.addingTimeInterval(AfterArrival.endAfter))) }
             }
             try? await Task.sleep(nanoseconds: UInt64((AfterArrival.endAfter - AfterArrival.quietAfter) * 1_000_000_000))
-            guard !Task.isCancelled, self.phase == .finished, self.finishedAt == at else { return }
-            self.rideLog(FieldFormat.rideEnd("10 min after the last stop"))
-            self.endTrip()
+            // after 10 minutes, once the app isn't on screen (with "You're there" in front of you, it waits for Done)
+            while !Task.isCancelled, self.phase == .finished, self.finishedAt == at {
+                if self.endFinishedIfDue() { return }
+                try? await Task.sleep(nanoseconds: 60_000_000_000)
+            }
         }
+    }
+
+    /// The finished trip ends 10 minutes after the last stop, in the background only: now (`back`: coming back to the
+    /// screen, if those 10 minutes went by while the app was away). True: it ended.
+    @discardableResult private func endFinishedIfDue(back: Bool = false) -> Bool {
+        guard phase == .finished, let f = finishedAt, AfterArrival.end(finishedAt: f, now: Date()) else { return false }
+        if back {
+            guard let a = awaySince, a <= f.addingTimeInterval(AfterArrival.endAfter) else { return false }
+        } else {
+            guard UIApplication.shared.applicationState == .background else { return false }
+        }
+        rideLog(FieldFormat.rideEnd("10 min after the last stop"))
+        endTrip()
+        return true
     }
 
     /// `held`: the ride it holds on its road (see `heldPick`): one you picked, or (`fromPlan`) the planned one you're on
@@ -467,7 +508,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         detectTask?.cancel(); detectTask = nil
         demoTask?.cancel(); demoTask = nil; demo = false
         finishTask?.cancel(); finishTask = nil; finishedAt = nil
-        watchLeft = nil; transferAnchor = nil; changeSince = nil
+        watchLeft = nil; transferAnchor = nil; changeSince = nil; changeFirst = nil; changePlanned = nil
         setBackup(0)
         sound.endTrip()
         music.stop()
@@ -483,6 +524,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             await e?.end(nil, dismissalPolicy: .immediate)
         }
         updateKeepAlive()                                 // GPS off, unless Fastest trip or a line watch wants it
+        FieldLog.shared.flush(); DelayBook.shared.save()
     }
 
     /// While you watch a bus line (and no trip runs), cheap location keeps the app awake to check it,
@@ -501,17 +543,12 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         }
     }
 
-    /// GPS as `GPSPolicy` has it for now: the trip's phase, Fastest trip, a line watch, the look after leaving a station,
-    /// standing at a change. `restart`: start it again even when nothing changed (a fresh fix as a leg begins).
+    /// GPS as `GPSPolicy` has it for now: the trip's phase, Fastest trip, a line watch, the look after leaving a station.
+    /// `restart`: start it again even when nothing changed (a fresh fix as a leg begins).
     private func applyGPS(restart: Bool = false) {
         let p = GPSPolicy.plan(phase: gpsPhase, demo: demo, going: going, lineWatch: !LineWatchStore.shared.watches.isEmpty,
-                               regionLook: watchLeft != nil, transferStill: transferStill(now: Date()))
+                               regionLook: watchLeft != nil)
         guard restart || p != gpsApplied else { return }
-        if phase == .transfer, let old = gpsApplied, old.accuracy != p.accuracy {
-            let coarse = p.accuracy != .best
-            rideLog(FieldFormat.rideGPS(coarse ? "coarse while you stand at the change" : "the best again at the change"),
-                    once: coarse ? "gps-coarse" : "gps-best", every: 600)
-        }
         gpsApplied = p
         if p.on {
             location.desiredAccuracy = p.accuracy == .best ? kCLLocationAccuracyBest : kCLLocationAccuracyHundredMeters
@@ -526,23 +563,24 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         }
     }
 
-    /// At a change: standing still for 2 minutes, with the next one (planned, or the first in the list that hasn't
-    /// left) more than 3 minutes off.
-    private func transferStill(now: Date) -> Bool {
-        guard phase == .transfer, let n = legs[safe: index + 1] else { return false }
-        var ds = upcoming.filter { $0.from.key == n.from.key }.map { $0.trip.first.departure }
-        if let p = route?.planned?[safe: index + 1] { ds.append(p.departure) }
-        return TransferPolicy.still(anchor: transferAnchor, nextDeparture: TransferPolicy.nextDeparture(ds, now: now), now: now)
+    /// The next leg's departures as listed just now, live: the first after you got there is latched, and it and the
+    /// planned one follow their live times while they're listed (`TransferPolicy.firstListed`).
+    private func noteChangeList() {
+        guard phase == .transfer, upcomingAsOf == nil, let n = legs[safe: index + 1], let since = changeSince else { return }
+        let list = upcoming.filter { $0.from.key == n.from.key }.map { TransferPolicy.Listed(id: $0.trip.first.tripId, departure: $0.trip.first.departure) }
+        changeFirst = TransferPolicy.firstListed(changeFirst, live: list, arrived: since)
+        if let p = changePlanned { changePlanned = TransferPolicy.firstListed(p, live: list, arrived: since) }
     }
 
-    /// At a change with no ride an hour after it began (or after the next one was planned to leave, when that's later),
-    /// and not going anywhere just now: the trip ends, and says so. (Nothing rings at a change: the next leg's alarm
-    /// comes only once you're on it.) True: it ended.
+    /// At a change with no ride an hour after the last one you could take (the latest of: you got there, the planned
+    /// next one, the first listed after you got there, at their live times), while you've stood at the change for 10
+    /// minutes: the trip ends, and says so. (Nothing rings at a change: the next leg's alarm comes only once you're on
+    /// it.) True: it ended.
     private func endIfNoRide() -> Bool {
         let now = Date()
         guard phase == .transfer, let since = changeSince else { return false }
-        let moving = RideGuards.movingNow(recentFixes, now: now) || movedRecently
-        guard TransferPolicy.giveUp(since: since, nextPlanned: route?.planned?[safe: index + 1]?.departure, moving: moving, now: now) else { return false }
+        let known = [changePlanned?.departure, changeFirst?.departure].compactMap { $0 }.max()
+        guard TransferPolicy.giveUp(since: since, firstKnown: known, standingSince: transferAnchor?.since, now: now) else { return false }
         let at = leg?.to.short ?? "the change"
         rideLog(FieldFormat.rideEnd("no ride an hour after the change"))
         let c = UNMutableNotificationContent()
@@ -571,11 +609,6 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         if let a = awaySince, Date().timeIntervalSince(a) > 30 * 60 { guessDirection = true }
         awaySince = nil
         followClock()
-        // the finished trip's 10 minutes went by while iOS had the app paused
-        if phase == .finished, let f = finishedAt, AfterArrival.end(finishedAt: f, now: Date()) {
-            rideLog(FieldFormat.rideEnd("10 min after the last stop"))
-            endTrip()
-        }
         if isRiding && activity == nil { startActivity() }
     }
 
@@ -599,6 +632,15 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         Task { @MainActor in self.leftRegion(region.identifier) }
     }
 
+    /// A region iOS couldn't watch (it says so once): register them all again, at most every 10 minutes.
+    nonisolated func locationManager(_ manager: CLLocationManager, monitoringDidFailFor region: CLRegion?, withError error: Error) {
+        Task { @MainActor in
+            guard Date().timeIntervalSince(self.lastRegionRetry) > 600 else { return }
+            self.lastRegionRetry = Date()
+            self.updateWatching(force: true)
+        }
+    }
+
     nonisolated func locationManager(_ manager: CLLocationManager, didEnterRegion region: CLRegion) {
         guard region.identifier == "school" else { return }
         Task { @MainActor in self.maybeAutoHome(CLLocation(latitude: Place.buas.coordinate.latitude, longitude: Place.buas.coordinate.longitude)) }
@@ -613,8 +655,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             if SpeedPublish.worth(old: speed, new: loc.speed) { speed = loc.speed }
         }
         if phase == .transfer {
-            transferAnchor = TransferPolicy.update(transferAnchor, with: Fix(loc))
-            applyGPS()                                    // standing a while: coarse; moving: the best again
+            transferAnchor = TransferPolicy.update(transferAnchor, with: Fix(loc))     // (standing at the change: for the hour's end)
             Task { await loadUpcoming() }
         }
         // (the look after leaving a station takes some 6 minutes: if it went without saying so, GPS doesn’t stay on for it)
@@ -839,7 +880,6 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
                 guard let self, !Task.isCancelled else { return }
                 if forNextLeg {
                     guard self.phase == .transfer else { return }
-                    self.applyGPS()                         // (the best again in time for the next one, with or without a fix)
                     if self.endIfNoRide() { return }
                 }
                 else { guard self.vehicle == nil, self.phase == .sleeping || self.phase == .awake else { return } }
@@ -1725,11 +1765,12 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
 
     /// On a slow bus (C-rank: much slower than the fastest seen on its stretch) with a change ahead: once the room left
     /// for the next one drops under the 6 minutes a change after such a bus needs, it tells you, once for this leg, so
-    /// you're at the doors and go straight across. (Only a notification: the alarm is as it was.)
+    /// you're at the doors and go straight across; with no room left at all, that you'll likely miss it and when the
+    /// next one leaves. (Only a notification: the alarm is as it was.)
     private func checkTightChange() {
         guard !demo, phase == .sleeping || phase == .awake, let v = vehicle, !v.isTrain, let r = route, index + 1 < legs.count,
               let arr = legTo ?? legArrival else { return }
-        let key = "\(r.id)|\(index)|\(v.tripId)"
+        let key = "\(r.id)|\(index)"
         guard tightTold != key else { return }
         let planned = r.planned?[safe: index + 1]
         guard let dep = planned?.departure ?? next?.departure else { return }
@@ -1738,22 +1779,39 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         guard let g = rideGrade(v), ChangeRoom.warnOnRide(grade: g, roomMinutes: room) else { return }
         tightTold = key
         rideLog(FieldFormat.rideTight(Self.logLabel(v), grade: g, minutes: room))
-        let then: String
-        if let p = planned { then = p.isTrain ? (p.line == "IC" ? "Intercity" : p.line) : "bus \(p.line)" }
-        else if let n = next { then = n.isTrain ? n.name : "bus \(n.line)" }
-        else { then = "next one" }
-        tellBus("Tight change at \(leg?.to.short ?? "your stop")",
-                "This \(v.title) is slow (\(g)-rank): \(max(0, Int(room.rounded()))) min to the \(then) at \(Fmt.hhmm(dep)). Be at the doors and go straight across.")
+        func what(_ train: Bool, _ line: String, _ name: String) -> String { train ? (line == "IC" ? "Intercity" : name.isEmpty ? line : name) : "bus \(line)" }
+        let then = planned.map { what($0.isTrain, $0.line, $0.line) } ?? next.map { what($0.isTrain, $0.line, $0.name) } ?? "next one"
+        let at = leg?.to.short ?? "your stop"
+        if room < 0 {
+            // too late for it by its times: the next one refreshEta found that you can make, if it's a later one
+            let later = next.flatMap { n in n.departure > dep ? " The next \(what(n.isTrain, n.line, n.name)) leaves \(Fmt.hhmm(n.departure))." : nil } ?? ""
+            tellBus("You’ll likely miss the \(then) at \(at)",
+                    "This \(v.title) is slow (\(g)-rank) and gets there after the \(then) at \(Fmt.hhmm(dep)) leaves.\(later)")
+        } else {
+            tellBus("Tight change at \(at)",
+                    "This \(v.title) is slow (\(g)-rank): \(Int(room.rounded())) min to the \(then) at \(Fmt.hhmm(dep)). Be at the doors and go straight across.")
+        }
     }
 
     /// The speed rank of the bus you're on, only read: its ride as planned (the stretch the planner ranks), with its own
-    /// times on this leg once it's known. Nil: not in the list it was chosen from.
+    /// times on this leg once it's known. Not in the list it was chosen from (a ride that started by itself): by its
+    /// own timetable, its live minutes on this leg against the timetable's (`ChangeRoom.ownTimetableGrade`).
     private func rideGrade(_ v: Vehicle) -> String? {
         let rides = upcoming.map(\.trip.first) + boardAlternatives.flatMap(\.rides)
-        guard let r = rides.first(where: { $0.tripId == v.tripId }) else { return nil }
-        let dep = legFrom ?? r.departure, arr = legTo ?? r.arrival
-        return Ratings.shared.peekGrade(key: "\(r.fromId)>\(r.toStop)", minutes: arr.timeIntervalSince(dep) / 60,
-                                        scheduled: r.scheduledArrival.timeIntervalSince(r.scheduledDeparture) / 60, cancelled: r.cancelled)
+        if let r = rides.first(where: { $0.tripId == v.tripId }) {
+            let dep = legFrom ?? r.departure, arr = legTo ?? r.arrival
+            return Ratings.shared.peekGrade(key: "\(r.fromId)>\(r.toStop)", minutes: arr.timeIntervalSince(dep) / 60,
+                                            scheduled: r.scheduledArrival.timeIntervalSince(r.scheduledDeparture) / 60, cancelled: r.cancelled)
+        }
+        // its own stop times (its road, as the same-bus check last had it)
+        guard let l = leg, let road = roadOf, road.tripId == v.tripId, let from = legFrom, let to = legTo else { return nil }
+        func nearest(_ p: Place) -> LiveTrip.Stop? {
+            let c = CLLocation(latitude: p.coordinate.latitude, longitude: p.coordinate.longitude)
+            func d(_ s: LiveTrip.Stop) -> Double { c.distance(from: CLLocation(latitude: s.coordinate.latitude, longitude: s.coordinate.longitude)) }
+            return road.trip.stops.min { d($0) < d($1) }.flatMap { d($0) < 1500 ? $0 : nil }
+        }
+        guard let a = nearest(l.from)?.scheduled, let b = nearest(l.to)?.scheduled, b > a else { return nil }
+        return ChangeRoom.ownTimetableGrade(liveMinutes: to.timeIntervalSince(from) / 60, scheduledMinutes: b.timeIntervalSince(a) / 60)
     }
 
     /// The next stop the bus or train reaches, and when.
@@ -1866,6 +1924,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         // A saved board that stayed (its own answer didn't come) goes with the rest of the saved answer: all that shows is live.
         if keptSavedBoard { upcomingBoard = [] }
         upcomingAsOf = nil
+        noteChangeList()                                  // (at a change: the departures the hour's end counts from)
         let fromHere = t.from.key == "here"        // (a leg from where you were: saved with where that was)
         SnapshotStore.shared.save(SavedUpcoming(upcoming: upcoming, board: upcomingBoard,
                                                 lat: fromHere ? t.from.coordinate.latitude : nil, lon: fromHere ? t.from.coordinate.longitude : nil),
@@ -1881,7 +1940,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     /// Watches your stations with region monitoring (cheap): full GPS only switches on once you leave one.
     /// The regions iOS already watches (it keeps them across launches) stay when they're the ones wanted: no stopping and
     /// starting all of them at every launch and every authorization callback.
-    private func updateWatching() {
+    /// `force`: register them again even when they look the same (one of them failed).
+    private func updateWatching(force: Bool = false) {
         var wanted: [RegionSpec] = []
         if (autoStart || autoHome) && location.authorizationStatus == .authorizedAlways {
             if autoHome {
@@ -1900,7 +1960,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             return RegionSpec(id: r.identifier, lat: c?.center.latitude ?? .nan, lon: c?.center.longitude ?? .nan,
                               radius: c?.radius ?? -1, entry: r.notifyOnEntry, exit: r.notifyOnExit)
         }
-        if !RegionPlan.same(wanted: wanted, current: current) {
+        if force || !RegionPlan.same(wanted: wanted, current: current) {
             for r in location.monitoredRegions { location.stopMonitoring(for: r) }
             for w in wanted {
                 let r = CLCircularRegion(center: CLLocationCoordinate2D(latitude: w.lat, longitude: w.lon), radius: w.radius, identifier: w.id)

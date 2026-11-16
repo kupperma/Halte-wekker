@@ -41,6 +41,13 @@ final class FieldLogTests: XCTestCase {
         XCTAssertEqual(FieldLog(file: f).entries.map(\.text), ["n1", "old ride"])
         slow.flush()
         XCTAssertEqual(FieldLog(file: f).entries.map(\.text), ["m1", "n1", "old ride"])
+        // a file that can't be written: the old log stays where it was (and still loads)
+        let d2 = suite()
+        let old2 = FieldLog(defaults: d2)
+        old2.add(.ride, "kept"); old2.flush()
+        let nowhere = dir.appendingPathComponent("missing/dir/fieldlog.json")
+        XCTAssertEqual(FieldLog(file: nowhere, migrating: (defaults: d2, key: "fieldLog.v1")).entries.map(\.text), ["kept"])
+        XCTAssertNotNil(d2.data(forKey: "fieldLog.v1"))
         // the same caps per kind as before
         let capped = FieldLog(file: dir.appendingPathComponent("capped.json"), caps: [.net: 2, .match: 2, .ride: 1])
         for i in 0..<4 { capped.add(.net, "n\(i)") }

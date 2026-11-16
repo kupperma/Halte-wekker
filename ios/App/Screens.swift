@@ -239,7 +239,6 @@ struct HomeView: View {
             }
         }
         .onChange(of: scene) { _, s in
-            if s == .background { FieldLog.shared.flush(); DelayBook.shared.save() }
             if s == .active {
                 trip.appBecameActive()
                 autoGo()
@@ -715,8 +714,10 @@ struct HomeView: View {
                     if i > 0 {
                         let prev = t.rides[i - 1]
                         let ch = Fmt.mins(ride.departure.timeIntervalSince(prev.arrival))
-                        Label("\(ch) min to change at \(Fmt.place(prev.toStop))\(ride.walkBefore > 0 ? ", \(ride.walkBefore) min walk" : "")", systemImage: "arrow.triangle.swap")
-                            .font(BoardInk.sans(10.5, .semibold)).foregroundStyle(Double(ch - ride.walkBefore) < Risk.roomNeeded(after: prev) ? Paper.late : Paper.ink.opacity(0.8))
+                        let note = Risk.changeNote(after: prev, minutes: ch, walk: ride.walkBefore)     // (after a slow bus: why it's red)
+                        let why = note.why.map { " · \($0)" } ?? ""
+                        Label("\(ch) min to change at \(Fmt.place(prev.toStop))\(ride.walkBefore > 0 ? ", \(ride.walkBefore) min walk" : "")\(why)", systemImage: "arrow.triangle.swap")
+                            .font(BoardInk.sans(10.5, .semibold)).foregroundStyle(note.red ? Paper.lateInk : Paper.ink.opacity(0.8))
                     }
                     PlannerRideRow(ride: ride, info: ns.rail(ride), picked: picked == .ride(ride), saved: live.nextAsOf != nil) { tapRide(ride) }
                 }
