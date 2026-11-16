@@ -9,10 +9,9 @@ enum RideGuards {
     static let movingWindow: TimeInterval = 30      // going: your fixes of the last 30 s…
     static let movingSpan: TimeInterval = 20        // …spanning at least 20 s…
     static let movingMetres = 100.0                 // …the first and the newest this far apart (walking about a stop: ~40 m)
-    static let awayFromChange = 300.0               // and this far from the stop you got off at
+    static let awayFromChange = arriveM + startMargin   // and this far from the stop you got off at (past its arrival radius)
     static let pickOffRoadBus = 300.0, pickOffRoadTrain = 700.0
     static let pickLooksApart: TimeInterval = 20
-    static let pickUnknownFor: TimeInterval = 60    // its road unknown this long (3 looks): it can't hold you
 
     /// A ride started without you whose (first) stop is where you are already: it would ring and say "You're at …" at
     /// once. `d`: metres from your fix to that stop; nil or not a number: nothing to go by (not refused).
@@ -53,20 +52,29 @@ enum RideGuards {
         moving && (d ?? .infinity) > awayFromChange
     }
 
-    /// The one you picked (or that the trip was planned with) gives way to another that doesn't go where the leg goes
-    /// only once you're clearly off its road: the newest two looks at least 20 s apart each further than 300 m (a
-    /// train: 700 m) from it, and no look between them on it. (On a track two trains share, the Intercity to Breda
-    /// and the one to Den Bosch out of Eindhoven, it holds until their roads part.) A look without its road (nil) says
-    /// nothing, unless the newest looks, 3 or more over a minute, all had none: then it can't be checked and gives way.
+    /// The one you picked gives way to another that doesn't go where the leg goes only once you're clearly off its
+    /// road: the newest two looks at least 20 s apart each further than 300 m (a train: 700 m) from it, and no look
+    /// between them on it. (On a track two trains share, the Intercity to Breda and the one to Den Bosch out of
+    /// Eindhoven, it holds until their roads part.) A look without its road (nil) says nothing: the pick holds only on
+    /// a leg, where the alarm for its stop is armed (`onOtherVehicle`).
     static func pickRuledOut(_ looks: [(at: Date, metres: Double?)], isTrain: Bool) -> Bool {
         let limit = isTrain ? pickOffRoadTrain : pickOffRoadBus
         let sorted = looks.sorted { $0.at < $1.at }
-        let unknown: ((at: Date, metres: Double?)) -> Bool = { l in l.metres.map { !$0.isFinite } ?? true }
-        let run = Array(sorted.reversed().prefix(while: unknown).reversed())      // the newest looks without its road
-        if run.count >= 3, let a = run.first, let b = run.last, b.at.timeIntervalSince(a.at) >= pickUnknownFor { return true }
         let known = sorted.compactMap { l in l.metres.flatMap { $0.isFinite ? (at: l.at, m: $0) : nil } }
         guard let last = known.last, last.m > limit,
               let prev = known.last(where: { last.at.timeIntervalSince($0.at) >= pickLooksApart }) else { return false }
         return prev.m > limit && !known.contains { $0.at >= prev.at && $0.m <= limit }
+    }
+
+    enum OtherVehicle: Equatable { case replan, keepPick, startNextLeg }
+
+    /// Another vehicle, seen twice, that doesn't go where the leg goes: plan the rest again from it, or keep the one
+    /// you picked. Only a pick of yours holds ("I'm on it" for the leg, or one picked in the list), not a ride the trip
+    /// was only planned with; and it holds on a leg, where the alarm for its stop is armed, while you're on its road.
+    /// At a change nothing is armed yet: a pick held there starts the next leg (on the picked one's road) instead, so
+    /// the trip never waits at the change without an alarm.
+    static func onOtherVehicle(atChange: Bool, picked: Bool, ruledOut: Bool) -> OtherVehicle {
+        guard picked, !ruledOut else { return .replan }
+        return atChange ? .startNextLeg : .keepPick
     }
 }

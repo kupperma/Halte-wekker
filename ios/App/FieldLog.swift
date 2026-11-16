@@ -157,8 +157,10 @@ enum FieldFormat {
     /// "detect · n=9 · IC·a1b2 live 30 s | 306·c3d4 timetable off its path 180 m → keep IC·a1b2": the ones that passed
     /// first (by cost), then the rejected, nearest their path first (so the one you're on isn't hidden behind long-distance
     /// trains and coaches whose paths cross the area); at most 6. `planned` (the planned, picked or shown one) is always
-    /// there, marked "(planned)" (beyond the 6 too), or "planned ·a1b2 not in answer". `count`: how many were judged.
-    static func match(_ place: String, _ judged: [Judgement], outcome: String, planned: String? = nil, count: Int? = nil) -> String {
+    /// there, marked "(planned)" (beyond the 6 too), or "planned ·a1b2 not in answer" ("… excluded" when it was in the
+    /// answer but left out before judging: one already ruled out, or the other kind). `count`: how many were judged.
+    static func match(_ place: String, _ judged: [Judgement], outcome: String, planned: String? = nil, count: Int? = nil,
+                      plannedExcluded: Bool = false) -> String {
         func label(_ j: Judgement) -> String { "\(j.line)·\(j.id.suffix(4))" + (planned != nil && j.id == planned ? " (planned)" : "") }
         func kind(_ j: Judgement) -> String { j.realTime ? "live" : "timetable" }
         var passed: [(cost: Double, id: String, text: String)] = []
@@ -178,7 +180,9 @@ enum FieldFormat {
         var items = Array(ordered.prefix(6)).map(\.text)
         if let planned {
             if let p = ordered.dropFirst(6).first(where: { $0.id == planned }) { items.append(p.text) }
-            else if !judged.contains(where: { $0.id == planned }) { items.append("planned ·\(planned.suffix(4)) not in answer") }
+            else if !judged.contains(where: { $0.id == planned }) {
+                items.append("planned ·\(planned.suffix(4)) \(plannedExcluded ? "excluded" : "not in answer")")
+            }
         }
         let n = count.map { "n=\($0) · " } ?? ""
         return "\(place) · \(n)\(items.isEmpty ? "no vehicles" : items.joined(separator: " | ")) → \(outcome)"
@@ -215,7 +219,7 @@ enum FieldFormat {
     /// Metres rounded to 10: "180 m"; "? m" when not known.
     static func metres(_ m: Double?) -> String {
         guard let m, m.isFinite else { return "? m" }
-        return "\(Int((max(0, m) / 10).rounded()) * 10) m"
+        return "\(Int((min(max(0, m), 1e7) / 10).rounded()) * 10) m"
     }
 
     /// "bus 321·1280", "train IC·a1b2": the kind, the line, the last 4 characters of the trip id.

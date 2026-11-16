@@ -39,6 +39,10 @@ final class RideGuardsTests: XCTestCase {
         XCTAssertFalse(RideGuards.movingNow(fixes, now: now))
         XCTAssertEqual(try XCTUnwrap(RideGuards.movedMetres(fixes, now: now)), 40, accuracy: 3)
         XCTAssertFalse(RideGuards.mayTakeAtChange(moving: RideGuards.movingNow(fixes, now: now), fromChangeStop: 90))
+        // a fix from the future (a clock step) doesn't count
+        let ahead = walk + [Fix(t: now + 10, p: Fx.east(1500, north: 50), accuracy: 10, speed: 9, course: 90)]
+        XCTAssertEqual(try XCTUnwrap(RideGuards.movedMetres(ahead, now: now)), 40, accuracy: 3)
+        XCTAssertFalse(RideGuards.movingNow(ahead, now: now))
 
         // The matcher's gap this covers: a bus standing at its stop by its times, where you walk about, passes.
         let stand = (0..<16).map { k -> Fix in
@@ -66,10 +70,14 @@ final class RideGuardsTests: XCTestCase {
         XCTAssertFalse(RideGuards.movingNow(rough, now: t0 + 25))
     }
 
+    /// Away from the stop you got off at means past its arrival radius and margin (600 m): "You're at …" came at 450 m,
+    /// and you may still be on the bus you came in on.
     func test_mayTakeAtChange() {
+        XCTAssertEqual(RideGuards.awayFromChange, 600)
         XCTAssertFalse(RideGuards.mayTakeAtChange(moving: true, fromChangeStop: 250))
-        XCTAssertFalse(RideGuards.mayTakeAtChange(moving: true, fromChangeStop: 300))
-        XCTAssertTrue(RideGuards.mayTakeAtChange(moving: true, fromChangeStop: 350))
+        XCTAssertFalse(RideGuards.mayTakeAtChange(moving: true, fromChangeStop: 450))
+        XCTAssertFalse(RideGuards.mayTakeAtChange(moving: true, fromChangeStop: 600))
+        XCTAssertTrue(RideGuards.mayTakeAtChange(moving: true, fromChangeStop: 650))
         XCTAssertFalse(RideGuards.mayTakeAtChange(moving: false, fromChangeStop: 2000))
         XCTAssertTrue(RideGuards.mayTakeAtChange(moving: true, fromChangeStop: nil))
     }
@@ -96,13 +104,34 @@ final class RideGuardsTests: XCTestCase {
         XCTAssertFalse(RideGuards.pickRuledOut([], isTrain: true))
     }
 
-    /// Its road never known: after a minute (3 looks or more) it can't hold you; a known look in between starts over.
+    /// Its road never known: the pick holds (it holds only on a leg, where the alarm for its stop is armed).
     func test_pickWithoutItsRoad() {
         func at(_ s: Double) -> Date { t0 + s }
-        XCTAssertFalse(RideGuards.pickRuledOut([(at(0), nil), (at(30), nil), (at(55), nil)], isTrain: true))
-        XCTAssertTrue(RideGuards.pickRuledOut([(at(0), nil), (at(30), nil), (at(60), nil)], isTrain: true))
-        XCTAssertFalse(RideGuards.pickRuledOut([(at(0), nil), (at(60), nil)], isTrain: true))
-        XCTAssertFalse(RideGuards.pickRuledOut([(at(0), nil), (at(20), 40), (at(40), nil), (at(60), nil)], isTrain: true))
-        XCTAssertTrue(RideGuards.pickRuledOut([(at(0), 40), (at(10), nil), (at(40), nil), (at(70), nil)], isTrain: true))
+        XCTAssertFalse(RideGuards.pickRuledOut((0..<12).map { (at(Double($0) * 10), nil) }, isTrain: true))
+        XCTAssertFalse(RideGuards.pickRuledOut([(at(0), 40), (at(10), nil), (at(40), nil), (at(70), nil)], isTrain: true))
+        XCTAssertFalse(RideGuards.pickRuledOut([(at(0), .nan), (at(30), .infinity)], isTrain: true))
+    }
+
+    /// The Intercity at a change, the reviewer's case: the planned one missed, you're on the next Intercity to Breda,
+    /// and the one to Den Bosch passes twice on the track they share. Nothing you picked is at stake there: it plans
+    /// again from what it sees (and arms that leg's alarm), it never waits at the change. A pick of yours held at a
+    /// change would start the next leg instead; on a leg, where the alarm is armed, your pick holds on its road.
+    func test_otherVehicle() {
+        XCTAssertEqual(RideGuards.onOtherVehicle(atChange: true, picked: false, ruledOut: false), .replan)
+        XCTAssertEqual(RideGuards.onOtherVehicle(atChange: true, picked: true, ruledOut: false), .startNextLeg)
+        XCTAssertEqual(RideGuards.onOtherVehicle(atChange: true, picked: true, ruledOut: true), .replan)
+        XCTAssertEqual(RideGuards.onOtherVehicle(atChange: false, picked: true, ruledOut: false), .keepPick)
+        XCTAssertEqual(RideGuards.onOtherVehicle(atChange: false, picked: true, ruledOut: true), .replan)
+        XCTAssertEqual(RideGuards.onOtherVehicle(atChange: false, picked: false, ruledOut: false), .replan)
+        // never waiting at a change, whatever the looks say
+        for p in [false, true] { for r in [false, true] {
+            XCTAssertNotEqual(RideGuards.onOtherVehicle(atChange: true, picked: p, ruledOut: r), .keepPick)
+        } }
+        // the picked Breda one on the shared track to Boxtel (30 m, 60 m from its road): kept; after the split
+        // (900 m, 1200 m, 25 s apart): it gives way
+        let shared: [(at: Date, metres: Double?)] = [(t0, 30), (t0 + 25, 60)]
+        let parted: [(at: Date, metres: Double?)] = [(t0, 900), (t0 + 25, 1200)]
+        XCTAssertEqual(RideGuards.onOtherVehicle(atChange: false, picked: true, ruledOut: RideGuards.pickRuledOut(shared, isTrain: true)), .keepPick)
+        XCTAssertEqual(RideGuards.onOtherVehicle(atChange: false, picked: true, ruledOut: RideGuards.pickRuledOut(parted, isTrain: true)), .replan)
     }
 }

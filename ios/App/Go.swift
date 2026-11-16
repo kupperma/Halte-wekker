@@ -707,28 +707,35 @@ final class GoStore: ObservableObject {
         close()
         let c = UNMutableNotificationContent()
         c.title = "You’re on the \(v.title)"
-        c.body = "Your trip to \(r.station.short) started by itself. It rings before \(r.legs(trip.direction).first?.to.short ?? "your stop")."
+        let first = r.legs(trip.direction).first?.to.short ?? "your stop"
+        // (a leg that started inside its wake distance has no alarm: it tells you at the stop)
+        c.body = "Your trip to \(r.station.short) started by itself. "
+            + (trip.phase == .awake ? "It tells you when you’re at \(first)." : "It rings before \(first).")
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "goboard-\(Int(Date().timeIntervalSince1970))", content: c, trigger: nil)) { _ in }
         return true
     }
 
-    /// "I'm on it": start the trip by hand (it still looks for which one you're on). While it had another one in mind
-    /// (the one it saw you with), you said it's this one: the ride takes this one as picked, as "I'm on this one" in the
-    /// list, so another one it sees (an Intercity to Den Bosch on the track the one to Breda shares) doesn't take over.
-    func startByHand() {
-        if demo, let f = best?.first, let a = f.fromLat, let o = f.fromLon {
-            trip?.startDemo(from: .init(latitude: a, longitude: o), line: f.line)
+    /// "I'm on it" on `t`, the card you tapped (not whatever the screen shows by the time the tap comes in): start the
+    /// trip by hand. Without one it knows you're on, it still looks for which one, and the one this card rides holds
+    /// against another it sees on its road (an Intercity to Den Bosch on the track the one to Breda shares). While it
+    /// had another one in mind (the one it saw you with), you said it's this one: the ride takes it as picked, as
+    /// "I'm on this one" in the list.
+    func startByHand(_ t: DoorTrip) {
+        if demo, let a = t.first.fromLat, let o = t.first.fromLon {
+            trip?.startDemo(from: .init(latitude: a, longitude: o), line: t.first.line)
             close()
             return
         }
-        guard let t = best, let r = RoutePlan.from(t), let trip else { return }
+        guard let r = RoutePlan.from(t), let trip else { return }
+        let rest = others.filter { $0.id != t.id } + (best.map { $0.id == t.id ? [] : [$0] } ?? [])
         if let v = onBoard, t.first.tripId == v.tripId {
-            trip.start(r, vehicle: v, alternatives: [t] + others, how: "Go hand")
+            trip.start(r, vehicle: v, alternatives: [t] + rest, how: "Go hand")
         } else if onBoard != nil {
             let f = t.first
-            trip.start(r, vehicle: Vehicle(tripId: f.tripId, line: f.line, isTrain: f.isTrain), picked: true, how: "Go hand, picked")
+            trip.start(r, vehicle: Vehicle(tripId: f.tripId, line: f.line, isTrain: f.isTrain), alternatives: [t] + rest, picked: true,
+                       how: "Go hand, picked")
         } else {
-            trip.start(r, how: "Go hand")
+            trip.start(r, onIt: true, how: "Go hand")
         }
         close()
     }
@@ -1368,7 +1375,7 @@ struct GoView: View {
             BandButton(title: "Back to the map", pal: pal) { withAnimation(.easeInOut(duration: 0.35)) { go.close() } }
                 .padding(.horizontal, 12).padding(.bottom, 6)
         } else if let t = go.best, RoutePlan.from(t) != nil {
-            Button { go.startByHand() } label: {
+            Button { go.startByHand(t) } label: {
                 HStack(spacing: 8) {
                     Image(systemName: t.first.isTrain ? "tram.fill" : "bus.fill")
                     Text("I’M ON IT · START NOW").font(HWFont.display(14)).tracking(0.8)

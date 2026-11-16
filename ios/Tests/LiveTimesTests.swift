@@ -70,6 +70,17 @@ final class LiveTimesTests: XCTestCase {
         }
     }
 
+    /// 45 s late where it left, and catching up: under a minute, so as given (pins `lateFrom`).
+    func test_lessThanAMinuteLateUnchanged() {
+        XCTAssertEqual(LiveTimes.lateFrom, 60)
+        let s = [StopTimes(arrival: t0 + 45, departure: t0 + 45, scheduledArrival: t0, scheduledDeparture: t0),
+                 stop(2.5, 2), stop(4, 4), stop(6, 6)]
+        XCTAssertEqual(LiveTimes.noCatchUp(s, asOf: t0 + 50), s)
+        var on = s
+        on[0].departure = t0 + 60; on[0].arrival = t0 + 60
+        XCTAssertNotEqual(LiveTimes.noCatchUp(on, asOf: t0 + 65), on)          // a minute: carried
+    }
+
     func test_onTimeAndEarlyUnchanged() {
         for delay in [-2.0, 0, 0.5, 59.0 / 60] {
             let s = (0..<6).map { k in StopTimes(arrival: at(Double(k) * 2 + delay), departure: at(Double(k) * 2 + delay),
@@ -161,7 +172,52 @@ final class LiveTimesTests: XCTestCase {
         let s = StopTimes(arrival: at(10), departure: at(10), scheduledArrival: nil, scheduledDeparture: nil)
         XCTAssertFalse(LiveTimes.hasLeft(s, now: at(10) + 119))
         XCTAssertTrue(LiveTimes.hasLeft(s, now: at(10) + 120))
-        XCTAssertFalse(LiveTimes.hasLeft(StopTimes(), now: at(10) + 600))
+        // no live time: by the timetable; no time at all: nothing to wait for (not pinned at your stop for ever)
+        let planned = StopTimes(arrival: nil, departure: nil, scheduledArrival: at(9), scheduledDeparture: at(10))
+        XCTAssertFalse(LiveTimes.hasLeft(planned, now: at(10) + 60))
+        XCTAssertTrue(LiveTimes.hasLeft(planned, now: at(12)))
+        XCTAssertTrue(LiveTimes.hasLeft(StopTimes(), now: at(10)))
+    }
+
+    func test_carriesDelay() {
+        for m in ["BUS", "COACH", "TRAM", "tram", "TROLLEYBUS"] { XCTAssertTrue(LiveTimes.carriesDelay(mode: m, isTrain: true), m) }
+        for m in ["RAIL", "REGIONAL_RAIL", "HIGHSPEED_RAIL", "SUBURBAN", "FERRY"] { XCTAssertFalse(LiveTimes.carriesDelay(mode: m, isTrain: false), m) }
+        XCTAssertTrue(LiveTimes.carriesDelay(mode: "", isTrain: false))
+        XCTAssertFalse(LiveTimes.carriesDelay(mode: "", isTrain: true))
+    }
+
+    /// A stop as /v5/trip gives it: `scheduled` stands in for the arrival only when it has neither timetable time.
+    func test_stopTimesFromTrip() {
+        let a = StopTimes(arrival: at(5), departure: at(6), scheduled: at(1), scheduledArrival: nil, scheduledDeparture: nil)
+        XCTAssertEqual(a.scheduledArrival, at(1)); XCTAssertNil(a.scheduledDeparture)
+        let b = StopTimes(arrival: at(5), departure: at(6), scheduled: at(1), scheduledArrival: nil, scheduledDeparture: at(2))
+        XCTAssertNil(b.scheduledArrival); XCTAssertEqual(b.scheduledDeparture, at(2))
+        let c = StopTimes(arrival: at(5), departure: at(6), scheduled: at(1), scheduledArrival: at(3), scheduledDeparture: at(4))
+        XCTAssertEqual(c.scheduledArrival, at(3)); XCTAssertEqual(c.scheduledDeparture, at(4))
+    }
+
+    /// The live map's pieces of several trips at once: each late bus by itself, in the order given; a piece listed
+    /// twice counted once (both copies corrected alike); trains, timetable-only trips and pieces without timetable
+    /// times as they are.
+    func test_tripsGroupedAndOnce() {
+        func p(_ trip: String, _ k: Int, dep: Double, arr: Double, carries: Bool = true, live: Bool = true, sched: Bool = true) -> TripPiece {
+            TripPiece(trip: trip, carries: carries, live: live,
+                      times: PieceTimes(departure: at(dep), arrival: at(arr), scheduledDeparture: sched ? at(Double(k) * 2) : nil,
+                                        scheduledArrival: sched ? at(Double(k + 1) * 2) : nil),
+                      stops: "\(trip)\(k)>\(k + 1)")
+        }
+        // bus A: left +3, data +2 then +1; given out of order and its second piece twice
+        let given = [p("A", 1, dep: 4, arr: 5), p("T", 0, dep: 3, arr: 4, carries: false), p("A", 0, dep: 3, arr: 4),
+                     p("A", 1, dep: 4, arr: 5), p("O", 0, dep: 3, arr: 4, live: false), p("N", 0, dep: 3, arr: 4, sched: false)]
+        let out = LiveTimes.noCatchUp(trips: given, asOf: at(3) + 10)
+        XCTAssertEqual(out.count, given.count)
+        XCTAssertEqual(out[2].arrival, at(5)); XCTAssertEqual(out[2].departure, at(3))
+        XCTAssertEqual(out[0].departure, at(5)); XCTAssertEqual(out[0].arrival, at(7))
+        XCTAssertEqual(out[3], out[0])
+        XCTAssertEqual(out[1], given[1].times)
+        XCTAssertEqual(out[4], given[4].times)
+        XCTAssertEqual(out[5], given[5].times)
+        XCTAssertEqual(LiveTimes.noCatchUp(trips: [], asOf: t0), [])
     }
 
     func test_shownStaysAtYourStop() {

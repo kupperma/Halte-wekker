@@ -13,12 +13,30 @@ struct StopTimes: Equatable, Sendable {
     var scheduledLeaves: Date? { scheduledDeparture ?? scheduledArrival }
 }
 
+extension StopTimes {
+    /// A stop as a trip's live data has it: `scheduled` (either timetable time) stands in for the arrival when it has
+    /// neither of the two.
+    init(arrival: Date?, departure: Date?, scheduled: Date?, scheduledArrival: Date?, scheduledDeparture: Date?) {
+        self.init(arrival: arrival, departure: departure,
+                  scheduledArrival: scheduledArrival ?? (scheduledDeparture == nil ? scheduled : nil), scheduledDeparture: scheduledDeparture)
+    }
+}
+
 /// A stop-to-stop piece's times (the live map's), with the timetable's.
 struct PieceTimes: Equatable, Sendable {
     var departure: Date
     var arrival: Date
     var scheduledDeparture: Date?
     var scheduledArrival: Date?
+}
+
+/// One piece of a trip on the live map, as `LiveTimes.noCatchUp(trips:)` takes it.
+struct TripPiece: Equatable, Sendable {
+    var trip: String
+    var carries: Bool               // a bus, coach or tram (`LiveTimes.carriesDelay`): trains stay as they are
+    var live: Bool
+    var times: PieceTimes
+    var stops: String               // which stops it runs between: the same piece listed twice has the same
 }
 
 /// Where a bus is by its live times, without letting a late one run ahead of itself.
@@ -29,6 +47,14 @@ enum LiveTimes {
     static let lateFrom: TimeInterval = 60          // late: a minute or more behind its timetable
     static let horizon: TimeInterval = 15 * 60      // the delay is carried this far on (timetable time) [field]
     static let passGrace: TimeInterval = 120        // "passed your stop" only this long after it leaves there [field]
+
+    /// Late buses, coaches and trams don't catch up (OpenOV's predictions); trains are left as they are. `mode` as the
+    /// live data names it ("BUS", "TRAM", "REGIONAL_RAIL"); without one, by whether it's a train.
+    static func carriesDelay(mode: String, isTrain: Bool) -> Bool {
+        let m = mode.uppercased()
+        guard !m.isEmpty else { return !isTrain }
+        return m.contains("BUS") || m.contains("COACH") || m.contains("TRAM")
+    }
 
     /// The last stop it has reached by the answer's own times at `asOf` (nil: not at its first stop yet).
     static func reached(_ s: [StopTimes], asOf: Date) -> Int? {
@@ -89,9 +115,36 @@ enum LiveTimes {
         }
     }
 
-    /// It has left your stop: it left there (by its times) `grace` ago or more. Until then it's due, not gone.
+    /// Every trip's pieces without catching up (`noCatchUp(pieces:)`), in the order given: grouped by trip, in
+    /// departure order, a piece listed twice counted once; a trip that isn't carried (`carries`), has no live piece,
+    /// or has a piece without timetable times, as it is.
+    static func noCatchUp(trips given: [TripPiece], asOf: Date, horizon: TimeInterval = horizon) -> [PieceTimes] {
+        var out = given.map(\.times)
+        let byTrip = Dictionary(grouping: given.indices.filter { given[$0].carries }, by: { given[$0].trip })
+        for (_, idx) in byTrip {
+            guard idx.contains(where: { given[$0].live }),
+                  idx.allSatisfy({ given[$0].times.scheduledDeparture != nil && given[$0].times.scheduledArrival != nil }) else { continue }
+            var pieces: [PieceTimes] = [], slot: [Int: Int] = [:], seen: [String: Int] = [:]
+            let order = idx.sorted { a, b in
+                given[a].times.departure != given[b].times.departure ? given[a].times.departure < given[b].times.departure : a < b
+            }
+            for i in order {
+                let t = given[i].times
+                let key = "\(t.departure.timeIntervalSince1970)|\(t.arrival.timeIntervalSince1970)|\(given[i].stops)"
+                if let k = seen[key] { slot[i] = k; continue }
+                seen[key] = pieces.count; slot[i] = pieces.count
+                pieces.append(t)
+            }
+            let fixed = noCatchUp(pieces: pieces, asOf: asOf, horizon: horizon)
+            for (i, k) in slot { out[i] = fixed[k] }
+        }
+        return out
+    }
+
+    /// It has left your stop: it left there (by its times, else by the timetable) `grace` ago or more. Until then it's
+    /// due, not gone. A stop without any time: nothing to wait for (left).
     static func hasLeft(_ stop: StopTimes, now: Date, grace: TimeInterval = passGrace) -> Bool {
-        guard let l = stop.leaves else { return false }
+        guard let l = stop.leaves ?? stop.scheduledLeaves else { return true }
         return now.timeIntervalSince(l) >= grace
     }
 

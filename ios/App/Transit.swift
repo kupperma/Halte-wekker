@@ -124,6 +124,7 @@ struct VehicleSegment {
     var toLon: Double? = nil
     var scheduledDeparture: Date? = nil // the timetable's times (`departure` and `arrival` are live when it is)
     var scheduledArrival: Date? = nil
+    var mode = ""                       // as the live data names it: "BUS", "TRAM", "REGIONAL_RAIL"…
 
     /// Where the vehicle should be at `t`, by time along its path.
     func position(at t: Date) -> CLLocationCoordinate2D? {
@@ -629,7 +630,7 @@ enum Transit {
                                       fromName: (from?["name"] as? String) ?? "", toName: (to?["name"] as? String) ?? "",
                                       departure: dep, arrival: arr, path: path,
                                       realTime: live, toLat: to?["lat"] as? Double, toLon: to?["lon"] as? Double,
-                                      scheduledDeparture: date(s["scheduledDeparture"]), scheduledArrival: date(s["scheduledArrival"]))
+                                      scheduledDeparture: date(s["scheduledDeparture"]), scheduledArrival: date(s["scheduledArrival"]), mode: mode)
             }
         }
     }
@@ -651,7 +652,7 @@ enum Transit {
             return VehicleSegment(tripId: id, line: train ? trainLabel(line) : line, isTrain: train,
                                   fromName: ((s["from"] as? [String: Any])?["name"] as? String) ?? "", toName: ((s["to"] as? [String: Any])?["name"] as? String) ?? "",
                                   departure: dep, arrival: arr, path: decodePolyline(poly), realTime: (s["realTime"] as? Bool) ?? false,
-                                  scheduledDeparture: date(s["scheduledDeparture"]), scheduledArrival: date(s["scheduledArrival"]))
+                                  scheduledDeparture: date(s["scheduledDeparture"]), scheduledArrival: date(s["scheduledArrival"]), mode: mode)
         }
     }
 
@@ -703,7 +704,7 @@ enum Transit {
 
     private static func parseLiveTrip(_ json: [String: Any]) -> LiveTrip? {
         guard let legs = json["legs"] as? [[String: Any]], !legs.isEmpty else { return nil }
-        var stops: [LiveTrip.Stop] = [], path: [CLLocationCoordinate2D] = [], live = false, line = "", head = ""
+        var stops: [LiveTrip.Stop] = [], path: [CLLocationCoordinate2D] = [], live = false, line = "", head = "", mode = ""
         func stop(_ o: [String: Any]?) -> LiveTrip.Stop? {
             guard let o, let la = o["lat"] as? Double, let lo = o["lon"] as? Double else { return nil }
             return LiveTrip.Stop(name: (o["name"] as? String) ?? "", coordinate: .init(latitude: la, longitude: lo),
@@ -714,6 +715,7 @@ enum Transit {
         for l in legs {
             line = (l["routeShortName"] as? String) ?? line
             head = (l["headsign"] as? String) ?? head
+            mode = (l["mode"] as? String) ?? mode
             live = live || ((l["realTime"] as? Bool) ?? false)
             if stops.isEmpty, let x = stop(l["from"] as? [String: Any]) { stops.append(x) }
             for o in (l["intermediateStops"] as? [[String: Any]]) ?? [] { if let x = stop(o) { stops.append(x) } }
@@ -723,7 +725,7 @@ enum Transit {
             }
         }
         guard stops.count >= 2 else { return nil }
-        return LiveTrip(line: line, headsign: head, live: live, stops: stops, path: path)
+        return LiveTrip(line: line, headsign: head, live: live, stops: stops, path: path, mode: mode)
     }
 
     static func decodePolyline(_ s: String, precision: Int = 5) -> [CLLocationCoordinate2D] {

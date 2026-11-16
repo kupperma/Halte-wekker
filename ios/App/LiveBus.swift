@@ -18,11 +18,12 @@ struct LiveTrip {
     let live: Bool
     let stops: [Stop]
     let path: [CLLocationCoordinate2D]
+    let mode: String                    // as the live data names it ("BUS", "TRAM", "REGIONAL_RAIL"…), "" not known
     private let cum: [Double]           // metres along the path at each of its points
     private let at: [Int]               // the point on the path each stop is at
 
-    init(line: String, headsign: String, live: Bool, stops: [Stop], path: [CLLocationCoordinate2D]) {
-        self.line = line; self.headsign = headsign; self.live = live; self.stops = stops
+    init(line: String, headsign: String, live: Bool, stops: [Stop], path: [CLLocationCoordinate2D], mode: String = "") {
+        self.line = line; self.headsign = headsign; self.live = live; self.stops = stops; self.mode = mode
         let p = path.count >= 2 ? path : stops.map(\.coordinate)         // no road shape: straight lines between the stops
         self.path = p
         var c: [Double] = [0]

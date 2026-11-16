@@ -202,6 +202,8 @@ final class FieldLogTests: XCTestCase {
         XCTAssertEqual(FieldFormat.metres(.nan), "? m")
         XCTAssertEqual(FieldFormat.metres(14), "10 m")
         XCTAssertEqual(FieldFormat.metres(15), "20 m")
+        XCTAssertEqual(FieldFormat.metres(1e300), "10000000 m")              // (no overflow trap)
+        XCTAssertEqual(FieldFormat.metres(.greatestFiniteMagnitude), "10000000 m")
     }
 
     /// A match line always shows the planned (or picked, or shown) one, and how many were judged; the rejected ones by how
@@ -229,6 +231,8 @@ final class FieldLogTests: XCTestCase {
         let l3 = FieldFormat.match("detect", Array(judged.prefix(3)), outcome: "none", planned: "ic-abcd", count: 3)
         XCTAssertTrue(l3.hasPrefix("detect · n=3 · ICE·1000"), l3)
         XCTAssertTrue(l3.hasSuffix(" | planned ·abcd not in answer → none"), l3)
+        let l3b = FieldFormat.match("detect", Array(judged.prefix(3)), outcome: "none", planned: "ic-abcd", count: 3, plannedExcluded: true)
+        XCTAssertTrue(l3b.hasSuffix(" | planned ·abcd excluded → none"), l3b)
         // nothing planned: as before
         XCTAssertFalse(FieldFormat.match("detect", judged, outcome: "none").contains("planned"))
         // quick-box rejects (no evidence) after the measured ones, not-sure ones between
