@@ -66,6 +66,8 @@ final class SchoolAlarm: ObservableObject {
 
     /// The school days of the next week, the next one first.
     @Published private(set) var week: [Planned] = []
+    /// The days (yyyy-MM-dd) whose wake-up alarm you turned off on Your day: that day only (`SchoolSkip`).
+    @Published private(set) var skipped: Set<String> = []
     private var trips: [String: DoorTrip] = [:]         // this session's trips, by day
 
     private var lastPlan = Date.distantPast
@@ -79,6 +81,7 @@ final class SchoolAlarm: ObservableObject {
         allowed = EKEventStore.authorizationStatus(for: .event) == .fullAccess
         week = (d.data(forKey: "school.week").flatMap { try? JSONDecoder().decode([Planned].self, from: $0) } ?? [])
             .filter { $0.classStart > Date().addingTimeInterval(-2 * 86400) }
+        skipped = SchoolSkip.prune(Set(d.stringArray(forKey: SchoolSkip.key) ?? []), today: Fmt.ymd.string(from: Date()))
         updateNext()
         // the timetable changed (TimeEdit synced): plan again, once a burst of changes has settled
         observer = NotificationCenter.default.addObserver(forName: .EKEventStoreChanged, object: nil, queue: .main) { _ in
@@ -118,7 +121,8 @@ final class SchoolAlarm: ObservableObject {
     /// The next school day (whose class is still ahead), for the screens.
     @Published private(set) var next: Day?
     private func updateNext() {
-        guard let p = week.filter({ $0.classStart > Date() }).min(by: { $0.classStart < $1.classStart }) else { next = nil; return }
+        // (a day whose alarm you turned off isn't the morning to open Fastest trip by itself for)
+        guard let p = SchoolSkip.next(week, classStart: \.classStart, day: \.day, skipped: skipped, now: Date()) else { next = nil; return }
         next = Day(title: p.title, room: p.room, classStart: p.classStart, beThere: p.beThere, trip: trips[p.day], leave: p.leave, alarm: p.alarm)
     }
 
@@ -274,7 +278,14 @@ final class SchoolAlarm: ObservableObject {
             p.lines = best.rides.map { $0.isTrain ? $0.line : $0.line }.joined(separator: " · ")
             // move the alarm only if its minute changed; set none if it's already too late for one
             let sameMinute = p.alarm.map { Int($0.timeIntervalSince1970 / 60) == Int(alarmAt.timeIntervalSince1970 / 60) } ?? false
-            if !(sameMinute && p.alarmId != nil) {
+            if SchoolSkip.alarm(alarmAt, day: k, skipped: skipped) == nil {
+                // turned off for this day: no alarm (the trip is still planned, to show)
+                if p.alarmId != nil || p.alarm != nil {
+                    await WakeAlarm.cancelInBackground(p.alarmId, day: k)
+                    p.alarmId = nil; p.alarm = nil
+                    changed = true
+                }
+            } else if !(sameMinute && p.alarmId != nil) {
                 await WakeAlarm.cancelInBackground(p.alarmId, day: k)
                 p.alarmId = nil
                 p.alarm = alarmAt
@@ -744,5 +755,51 @@ struct PlanButtons: View {
             Text("Hands-free shows the walk and the bus, tells you if it changes, and starts the ride by itself once you’re on. It also opens by itself when you open the app around the time to leave.")
                 .font(BoardInk.sans(10.5, .regular)).foregroundStyle(Paper.muted).fixedSize(horizontal: false, vertical: true)
         }
+    }
+}
+
+// MARK: Your day (0.19): a day's alarm off, and what the timetable says beyond the first class
+
+extension SchoolAlarm {
+    func isSkipped(_ day: String) -> Bool { skipped.contains(day) }
+
+    /// The wake-up alarm of one day off (or on again). Off: that day's alarm goes now (if it hasn't rung) and nothing
+    /// opens by itself that morning; every other day stays as it is. On again: that day is planned again.
+    func setSkipped(_ day: String, _ skip: Bool) {
+        if skip { skipped.insert(day) } else { skipped.remove(day) }
+        d.set(Array(skipped).sorted(), forKey: SchoolSkip.key)
+        if skip, let i = week.firstIndex(where: { $0.day == day }), !week[i].rang {
+            let id = week[i].alarmId
+            week[i].alarmId = nil; week[i].alarm = nil
+            save()
+            Task { await WakeAlarm.cancelInBackground(id, day: day) }
+        }
+        updateNext()
+        if !skip { Task { await refresh(force: true, now: true) } }
+    }
+
+    /// The trip planned for a day this session (with its rides), if any.
+    func plannedTrip(_ day: String) -> DoorTrip? { trips[day] }
+
+    /// Read only: the events of the calendars you picked, from the start of today to `days` ahead (for the end of a
+    /// day's classes and Coming up). Empty without calendar access or a picked calendar.
+    func schoolEvents(days: Int) async -> [ComingUp.Event] {
+        guard EKEventStore.authorizationStatus(for: .event) == .fullAccess, !calendarIds.isEmpty else { return [] }
+        let st = await calendarStore(), ids = calendarIds
+        return await Task.detached { () -> [ComingUp.Event] in
+            let cals = st.calendars(for: .event).filter { ids.contains($0.calendarIdentifier) }
+            guard !cals.isEmpty else { return [] }
+            let start = Calendar.current.startOfDay(for: Date())
+            let evs = st.events(matching: st.predicateForEvents(withStart: start, end: start.addingTimeInterval(Double(days) * 86400), calendars: cals))
+            return evs.map { e in
+                ComingUp.Event(title: e.title ?? "", start: e.startDate, end: e.endDate, allDay: e.isAllDay,
+                               cancelled: e.status == .canceled || SchoolAlarm.isCancelled(e.title ?? ""))
+            }
+        }.value
+    }
+
+    /// When a day's last class ends (from `events`), if it has classes.
+    nonisolated static func classesEnd(_ events: [ComingUp.Event], on day: Date) -> Date? {
+        events.filter { !$0.allDay && !$0.cancelled && Calendar.current.isDate($0.start, inSameDayAs: day) }.map(\.end).max()
     }
 }
