@@ -124,6 +124,7 @@ struct HomeView: View {
     @State private var showSteady = false                  // how steady the lines are right now
     @State private var showOutfit = false                  // what to wear today
     @State private var showRecomp = false                  // protein, habits and the weekly weight
+    @ObservedObject private var workoutNav = WorkoutNav.shared  // the Workouts sheet and the running workout
     @State private var showDemo = false                    // try it at home
     @State private var showNotices = false                 // the notifications you had, and what's watched
     @State private var planByArrival = true                // the plan sheet opens on "be there by"
@@ -168,6 +169,8 @@ struct HomeView: View {
         .sheet(isPresented: $showSteady) { SteadySheet().presentationDetents([.large]) }
         .sheet(isPresented: $showOutfit) { OutfitSheet().presentationDetents([.large]) }
         .sheet(isPresented: $showRecomp) { RecompSheet().presentationDetents([.large]) }
+        .sheet(isPresented: $workoutNav.sheet, onDismiss: { workoutNav.sheetDismissed() }) { WorkoutsSheet().presentationDetents([.large]) }
+        .fullScreenCover(isPresented: $workoutNav.session) { WorkoutSessionView() }
         .sheet(isPresented: $choosingDestination) {
             DestinationSheet { d in
                 live.go(to: d)
@@ -182,15 +185,16 @@ struct HomeView: View {
         }
         .sheet(isPresented: $showDemo) { DemoSheet().presentationDetents([.large]) }
         .sheet(isPresented: $showNotices) { NotificationsSheet().presentationDetents([.medium, .large]) }
-        // on the map: the bell, what to wear and today's protein, top left, clear of the map's own buttons
+        // on the map: the bell, what to wear, today's protein and today's workout, top left, clear of the map's own buttons
         .overlay(alignment: .topLeading) {
             if stage == .map {
                 HStack(spacing: 8) {
                     NoticeBell { showNotices = true }
                     OutfitTag { showOutfit = true }
                     RecompTag { showRecomp = true }
+                    WorkoutTag()
                 }
-                .padding(.leading, 18).padding(.top, 4).transition(.opacity)
+                .padding(.horizontal, 18).padding(.top, 4).transition(.opacity)   // too wide: the workout tag shows only its icon
             }
         }
         .sheet(isPresented: $planning) { PlanSheet(byArrival: planByArrival) }
@@ -1043,6 +1047,7 @@ struct HomeView: View {
     }
 
     @ViewBuilder private var moreContent: some View {
+        WorkoutCard(pal: pal)
         Button { showOutfit = true } label: {
             HStack(spacing: 10) {
                 Image(systemName: "tshirt.fill").font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
