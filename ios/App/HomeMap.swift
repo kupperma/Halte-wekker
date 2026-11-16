@@ -40,6 +40,8 @@ enum NewLook {
 /// background lane, after the camera stops moving, at most every 20 s, and each tile kept for hours.
 @MainActor
 final class MapStopsModel: ObservableObject {
+    /// One for the app: the tiles stay while Fastest trip or the ride has the screen.
+    static let shared = MapStopsModel()
     @Published private(set) var stops: [String: Transit.NearStop] = [:]
     private var asked: [StopTile: Date] = [:]
     private var lastLook: Date?
@@ -144,7 +146,7 @@ struct NewHome: View {
     @Environment(\.scenePhase) private var scene
     @ObservedObject private var places = PlacesStore.shared
     @ObservedObject private var outfit = OutfitStore.shared
-    @StateObject private var mapStops = MapStopsModel()
+    @ObservedObject private var mapStops = MapStopsModel.shared
     @StateObject private var vehicles = LiveVehiclesModel()
     @AppStorage(NewLook.vehiclesKey) private var showVehicles = true
     @AppStorage(HomeMapStyle.key) private var styleRaw = HomeMapStyle.standard.rawValue
@@ -153,9 +155,18 @@ struct NewHome: View {
     @State private var region: MKCoordinateRegion?
     @State private var shown = false                       // on screen (not covered by Fastest trip or the ride)
     @State private var sheet: HomeSheet?
+    @ObservedObject private var nearDeps = NearDeparturesModel.shared
+    @ObservedObject private var school = SchoolAlarm.shared
+    @EnvironmentObject var stopsStore: StopsStore
+    @State private var focusedCard: String?
+    @State private var tapped: DepartureTap?
+    @State private var dayOpen = false
+    @StateObject private var plan = PlanTripModel()
+    @State private var planOpen = false
+    @State private var planFromSearch = false
 
     enum HomeSheet: String, Identifiable {
-        case settings, weather, addPlace
+        case settings, weather, addPlace, demo
         var id: String { rawValue }
     }
 
@@ -166,23 +177,50 @@ struct NewHome: View {
         _camera = State(initialValue: .userLocation(followsHeading: false, fallback: .region(Self.startRegion)))
     }
 
-    private var visible: Bool { shown && scene == .active && !goStore.isOpen }
+    /// The map is on screen: not under Your day, Fastest trip or the ride, and the app in front.
+    private var visible: Bool { shown && !dayOpen && scene == .active && !goStore.isOpen }
     private var mapStyle: HomeMapStyle { HomeMapStyle(rawValue: styleRaw) ?? .standard }
 
     var body: some View {
         ZStack(alignment: .top) {
             map.ignoresSafeArea()
-            VStack(spacing: 10) {
-                searchRow
-                chipsRow
-                HStack { Spacer(); rightColumn }
-                Spacer(minLength: 0)
+            if planOpen {
+                PlanTripOverlay(model: plan, pickOnOpen: planFromSearch, close: closePlan)
+                    .transition(.opacity)
+            } else {
+                VStack(spacing: 0) {
+                    VStack(spacing: 10) {
+                        searchRow
+                        chipsRow
+                        HStack { Spacer(); rightColumn }
+                    }
+                    .padding(.horizontal, DS.edge)
+                    .padding(.top, 6)
+                    Spacer(minLength: 0)
+                    bottomCards
+                }
+                .transition(.opacity)
             }
-            .padding(.horizontal, DS.edge)
-            .padding(.top, 6)
+            if dayOpen {
+                DaySheet(close: { withAnimation(DS.move) { dayOpen = false } })
+                    .transition(.move(edge: .bottom))
+                    .zIndex(2)
+            }
             if let t = trip.toast { toast(t) }
         }
         .modifier(HomeLoops())
+        // the departures near you, when neither the live store nor your home board has them
+        .task(id: ownDepartures && visible) {
+            guard ownDepartures else { return }
+            while !Task.isCancelled && visible {
+                await nearDeps.refresh(at: near.position)
+                try? await Task.sleep(nanoseconds: 30_000_000_000)
+            }
+        }
+        .onChange(of: focusedCard) { _, id in moveTo(card: id) }
+        .onChange(of: plan.focused) { _, _ in if planOpen { fitRoute() } }
+        .onChange(of: goStore.isOpen) { _, open in if open { planOpen = false; dayOpen = false } }
+        .sheet(item: $tapped) { DepartureDetailSheet(tap: $0).presentationDetents([.medium, .large]) }
         // the live vehicles: every 15 s while the home is on screen, the app in front and the setting on
         .task(id: showVehicles && visible) {
             guard showVehicles else { vehicles.clear(); return }
@@ -196,7 +234,11 @@ struct NewHome: View {
         .onChange(of: scene) { _, s in if s != .active { mapStops.pause() } else if let r = region { mapStops.cameraStopped(r, visible: visible) } }
         .sheet(item: $sheet) { s in
             switch s {
-            case .settings: SettingsView().presentationDetents([.large])
+            case .settings:
+                SettingsView(tryDemo: {
+                    Task { @MainActor in try? await Task.sleep(nanoseconds: 500_000_000); sheet = .demo }
+                }, newLook: true).presentationDetents([.large])
+            case .demo: DemoSheet().presentationDetents([.large])
             case .weather: OutfitSheet().presentationDetents([.medium, .large])
             case .addPlace: PlaceSearchSheet(title: "Add a place") { hit in places.add(name: Fmt.place(hit.name), lat: hit.lat, lon: hit.lon, stopIds: [hit.id]) }
             }
@@ -208,7 +250,8 @@ struct NewHome: View {
 
     private var map: some View {
         let drawn: (stops: [Transit.NearStop], names: Bool) = region.map { mapStops.drawn(in: $0) } ?? (stops: [], names: false)
-        let showV = VehiclePick.shows(vehicleGate) && region != nil
+        let showV = VehiclePick.shows(vehicleGate) && region != nil && !planOpen
+        let route = planOpen ? plan.route(plan.focused) : []
         // (the vehicles slide along their road once a second; without them the map is redrawn only when it changes)
         return TimelineView(.periodic(from: .now, by: showV ? 1 : 3600)) { tl in
             let moving: [LiveVehiclesModel.Moving] = showV ? region.map { vehicles.moving(at: tl.date, in: $0) } ?? [] : []
@@ -219,6 +262,10 @@ struct NewHome: View {
                         MapStopMark(stop: s, names: drawn.names)
                     }
                     .annotationTitles(.hidden)
+                }
+                if route.count > 1 {
+                    MapPolyline(coordinates: route)
+                        .stroke(DS.accent, style: StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round))
                 }
                 ForEach(moving) { v in
                     Annotation(v.line, coordinate: v.coordinate, anchor: .center) { VehiclePill(v: v) }
@@ -370,10 +417,127 @@ struct NewHome: View {
             .zIndex(3)
     }
 
+    // MARK: the departure cards
+
+    /// Where the cards' departures come from: the live store's boards near you (away from your usual start), your home
+    /// board (at home, going to school), or else asked for here.
+    private enum CardSource { case near, homeBoard, own }
+    private var cardSource: CardSource {
+        if live.anywhere && !live.nearStops.isEmpty { return .near }
+        if !live.anywhere && trip.direction == .toSchool && !stopsStore.boardStops.isEmpty { return .homeBoard }
+        return .own
+    }
+    private var ownDepartures: Bool { cardSource == .own }
+
+    private func metres(_ lat: Double, _ lon: Double, fallback: Double?) -> Double? {
+        guard let p = near.position else { return fallback }
+        return p.distance(from: CLLocation(latitude: lat, longitude: lon))
+    }
+
+    private func departure(_ d: BoardDeparture, rail: Bool) -> DepartureGroups.Departure {
+        let train = rail || d.train
+        return DepartureGroups.Departure(tripId: d.tripId, stopId: d.stopId, line: train ? Transit.trainLabel(d.line) : d.line, headsign: d.headsign,
+                                         time: d.time, scheduled: d.scheduled, live: d.live, cancelled: d.cancelled, platform: d.platform,
+                                         train: train, stopName: d.stopName)
+    }
+
+    private var cardData: (cards: [DepartureGroups.Card], loading: Bool, asOf: Date?, note: String?) {
+        let now = Date()
+        switch cardSource {
+        case .near:
+            let stops = live.nearStops.map { DepartureGroups.Stop(id: $0.id, name: $0.name, rail: $0.rail, metres: metres($0.lat, $0.lon, fallback: $0.meters), lat: $0.lat, lon: $0.lon) }
+            let rail = Set(live.nearStops.filter(\.rail).map(\.id))
+            let deps = live.nearBoard.map { departure($0, rail: rail.contains($0.stopId)) }
+            return (DepartureGroups.cards(stops: stops, departures: deps, now: now), false, live.nearAsOf, nil)
+        case .homeBoard:
+            let stops = stopsStore.boardStops.map { DepartureGroups.Stop(id: $0.id, name: $0.name, rail: false, metres: nil) }
+            let deps = live.board.map { departure($0, rail: false) }
+            return (DepartureGroups.cards(stops: stops, departures: deps, now: now), live.board.isEmpty && live.panelsUpdated == nil, live.panelsAsOf, nil)
+        case .own:
+            let stops = nearDeps.stops.map { DepartureGroups.Stop(id: $0.id, name: $0.name, rail: $0.rail, metres: metres($0.lat, $0.lon, fallback: $0.meters), lat: $0.lat, lon: $0.lon) }
+            let rail = Set(nearDeps.stops.filter(\.rail).map(\.id))
+            let deps = nearDeps.board.map { departure($0, rail: rail.contains($0.stopId)) }
+            var note: String?
+            if near.position == nil {
+                note = trip.locationDenied ? "Turn on location for Haltewekker to see what leaves around you." : "Finding where you are…"
+            } else if nearDeps.loaded && stops.isEmpty {
+                note = "No stops found around you."
+            }
+            return (DepartureGroups.cards(stops: stops, departures: deps, now: now), near.position != nil && !nearDeps.loaded, nil, note)
+        }
+    }
+
+    private var bottomCards: some View {
+        let data = cardData
+        return DepartureCardsView(cards: data.cards, loading: data.loading, asOf: data.asOf, note: data.note, nudge: nudge,
+                                  focused: $focusedCard, tap: { tapped = $0 }, openDay: { openDay() })
+            .padding(.bottom, 8)
+            .simultaneousGesture(DragGesture(minimumDistance: 24).onEnded { v in
+                if v.translation.height < -50 && abs(v.translation.height) > abs(v.translation.width) * 1.5 { openDay() }
+            })
+    }
+
+    /// A swipe to a stop's card moves the map there.
+    private func moveTo(card id: String?) {
+        guard let id, let s = cardData.cards.first(where: { $0.id == id })?.stop, let la = s.lat, let lo = s.lon else { return }
+        withAnimation(DS.move) {
+            camera = .region(MKCoordinateRegion(center: CLLocationCoordinate2D(latitude: la, longitude: lo), latitudinalMeters: 900, longitudinalMeters: 900))
+        }
+    }
+
+    /// When the school trip or a Be there by plan is due (the time `autoGo` opens Fastest trip by itself): one card
+    /// with when to leave and Go, before the departures.
+    private var nudge: AnyView? {
+        guard trip.phase == .idle else { return nil }
+        let now = Date()
+        if let n = school.next, GoStore.schoolWindowOpen(n, now: now), let l = n.leave, let t = n.trip,
+           let text = DepartureGroups.leaveText(leave: l, now: now) {
+            return AnyView(NudgeCard(title: text, ride: t.first, sub: "For your \(Fmt.hhmm(n.classStart)) class") {
+                HomeActions.openPlanGo(school: true, trip: trip, planner: planner, goStore: goStore, near: near)
+            })
+        }
+        if let a = planner.arrive, let t = planner.arriveChosen, GoStore.arriveWindowOpen(a, chosen: t, now: now),
+           let text = DepartureGroups.leaveText(leave: t.start, now: now) {
+            return AnyView(NudgeCard(title: text, ride: t.first, sub: a.leaving ? "Your trip \(a.out ? "to school" : "home")" : "\(a.out ? "School" : "Home") by \(a.time)") {
+                HomeActions.openPlanGo(school: false, trip: trip, planner: planner, goStore: goStore, near: near)
+            })
+        }
+        return nil
+    }
+
     // MARK: actions
 
-    private func openSearch() {}
-    private func openPlan(to p: SavedPlace) {}
+    private func openDay() { withAnimation(DS.move) { dayOpen = true } }
+
+    /// Search anywhere: Plan from your location, straight to picking where to.
+    private func openSearch() {
+        plan.from = .here; plan.to = nil; plan.when = .now; plan.clear()
+        planFromSearch = true
+        withAnimation(DS.quick) { planOpen = true }
+    }
+
+    /// A place's chip: Plan from your location to there, leaving now.
+    private func openPlan(to p: SavedPlace) {
+        plan.from = .here; plan.to = .place(places.place(p)); plan.when = .now
+        planFromSearch = false
+        withAnimation(DS.quick) { planOpen = true }
+    }
+
+    private func closePlan() {
+        withAnimation(DS.quick) { planOpen = false }
+        plan.clear()
+        withAnimation(DS.move) { camera = .userLocation(followsHeading: false, fallback: camera) }
+    }
+
+    /// The way you look at, on the map.
+    private func fitRoute() {
+        let c = plan.route(plan.focused)
+        guard c.count > 1 else { return }
+        let lats = c.map(\.latitude), lons = c.map(\.longitude)
+        let center = CLLocationCoordinate2D(latitude: (lats.min()! + lats.max()!) / 2, longitude: (lons.min()! + lons.max()!) / 2)
+        let span = MKCoordinateSpan(latitudeDelta: max(0.01, (lats.max()! - lats.min()!) * 2.2), longitudeDelta: max(0.01, (lons.max()! - lons.min()!) * 1.6))
+        withAnimation(DS.move) { camera = .region(MKCoordinateRegion(center: center, span: span)) }
+    }
 }
 
 /// Find a stop or station by name (Transitous's search), for a place or a trip's end.
@@ -422,5 +586,33 @@ struct PlaceSearchSheet: View {
             }
         }
         .tint(DS.accentText)
+    }
+}
+
+/// The next trip, due now: when to leave, the first ride, and Go (the hands-free screen; it also opens by itself).
+struct NudgeCard: View {
+    let title: String
+    let ride: Ride
+    let sub: String
+    let go: () -> Void
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                DSLinePill(line: ride.line, train: ride.isTrain)
+                Text("\(title) · \(Fmt.hhmm(ride.departure))").font(DS.headline).monospacedDigit().foregroundStyle(DS.text)
+                    .lineLimit(1).minimumScaleFactor(0.8)
+            }
+            Text("\(sub) · from \(Fmt.place(ride.fromStop))").font(DS.sub).foregroundStyle(DS.secondary).lineLimit(2)
+            Button(action: go) {
+                Text("Go").font(DS.bodyStrong).foregroundStyle(DS.onAccent)
+                    .frame(maxWidth: .infinity, minHeight: 48)
+                    .background(DS.accent, in: Capsule())
+            }
+            .buttonStyle(DSPressStyle())
+            .accessibilityHint("Opens the hands-free trip")
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .dsCard()
+        .overlay(RoundedRectangle(cornerRadius: DS.cardRadius, style: .continuous).stroke(DS.accent, lineWidth: 2))
     }
 }

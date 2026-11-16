@@ -124,7 +124,6 @@ struct HomeView: View {
     @State private var showMoving = false                  // everything moving near you, on a map
     @State private var showSteady = false                  // how steady the lines are right now
     @State private var showOutfit = false                  // what to wear today
-    @State private var showRecomp = false                  // protein, habits and the weekly weight
     @State private var showDemo = false                    // try it at home
     @State private var showNotices = false                 // the notifications you had, and what's watched
     @State private var planByArrival = true                // the plan sheet opens on "be there by"
@@ -171,7 +170,6 @@ struct HomeView: View {
         .sheet(isPresented: $showMoving) { LiveAllSheet(center: near.position?.coordinate ?? Place.breda.coordinate).presentationDetents([.large]) }
         .sheet(isPresented: $showSteady) { SteadySheet().presentationDetents([.large]) }
         .sheet(isPresented: $showOutfit) { OutfitSheet().presentationDetents([.large]) }
-        .sheet(isPresented: $showRecomp) { RecompSheet().presentationDetents([.large]) }
         .sheet(isPresented: $choosingDestination) {
             DestinationSheet { d in
                 live.go(to: d)
@@ -192,7 +190,6 @@ struct HomeView: View {
                 HStack(spacing: 8) {
                     NoticeBell { showNotices = true }
                     OutfitTag { showOutfit = true }
-                    RecompTag { showRecomp = true }
                 }
                 .padding(.leading, 18).padding(.top, 4).transition(.opacity)
             }
@@ -1081,7 +1078,6 @@ struct HomeView: View {
             .brass(pal, pad: 14)
         }
         .buttonStyle(.plain)
-        RecompCard(pal: pal) { showRecomp = true }
         Button { showSteady = true } label: {
             HStack(spacing: 10) {
                 Coin(grade: Steady.rank(line: "306", train: false), size: 32)
@@ -1715,7 +1711,6 @@ struct RideView: View {
         .frame(maxWidth: .infinity)
         Spacer(minLength: 6)
         rideStats(eta: eta).padding(.horizontal, 14)
-        RecompRideLine()
         if !trip.stopMarks.isEmpty || trip.legTo != nil { stopChips.padding(.horizontal, 14).padding(.top, 10) }
         if trip.phase == .awake {
             Text(trip.ringAtStop ? "You’re awake. A chime when you’re there." : "You’re awake. Get your things ready.")
@@ -2147,11 +2142,15 @@ struct SettingsView: View {
     @Environment(\.webAuthenticationSession) private var webAuth
     @Environment(\.dismiss) private var dismissSettings
     var tryDemo: (() -> Void)? = nil
+    /// Opened from the new look's home (0.19): its own sections first, in the system look.
+    var newLook = false
     var pal: HWPalette { .of(home: trip.direction == .home) }
     var body: some View {
         NavigationStack {
             Form {
-                if let tryDemo, trip.phase == .idle {
+                if newLook {
+                    NewLookSettings(tryDemo: tryDemo, dismissSettings: { dismissSettings() })
+                } else if let tryDemo, trip.phase == .idle {
                     Section {
                         Button { dismissSettings(); tryDemo() } label: {
                             Label("Try it at home: a pretend trip", systemImage: "play.circle.fill").foregroundStyle(pal.deep)
@@ -2221,17 +2220,20 @@ struct SettingsView: View {
                     Stepper("Bus: \(String(format: "%.1f", trip.busKm)) km", value: $trip.busKm, in: 0.5...10, step: 0.5)
                     Stepper("Train: \(String(format: "%.1f", trip.trainKm)) km", value: $trip.trainKm, in: 0.5...15, step: 0.5)
                 } header: { Text("Usual wake distance") } footer: { Text("Used until you pick a distance for a stop when you start. After that, it remembers your choice.") }
-                Section("Your stops") {
-                    Button("Live bus times stops and lines") { liveStops = true }.foregroundStyle(pal.deep)
+                if !newLook {
+                    Section("Your stops") {
+                        Button("Live bus times stops and lines") { liveStops = true }.foregroundStyle(pal.deep)
+                    }
                 }
+                NewLookSwitch()
                 Section {
                     Button("Reset everything", role: .destructive) { confirmReset = true }
                 } footer: { Text("Haltewekker \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")") }
             }
-            .scrollContentBackground(.hidden)
-            .background(PaperFill().ignoresSafeArea()).preferredColorScheme(.light)
-            .font(HWFont.body(15))
-            .tint(pal.band)
+            .scrollContentBackground(newLook ? .automatic : .hidden)
+            .background(PaperFill().ignoresSafeArea().opacity(newLook ? 0 : 1)).preferredColorScheme(newLook ? nil : .light)
+            .font(newLook ? DS.body : HWFont.body(15))
+            .tint(newLook ? DS.accentText : pal.band)
             .navigationTitle("Settings")
             .sheet(isPresented: $liveStops, onDismiss: { Task { await live.refresh(trip.direction, force: true) } }) { LiveSettingsSheet() }
             .confirmationDialog("Reset everything?", isPresented: $confirmReset, titleVisibility: .visible) {
