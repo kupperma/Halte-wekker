@@ -145,6 +145,8 @@ struct NewHome: View {
     @ObservedObject private var places = PlacesStore.shared
     @ObservedObject private var outfit = OutfitStore.shared
     @StateObject private var mapStops = MapStopsModel()
+    @StateObject private var vehicles = LiveVehiclesModel()
+    @AppStorage(NewLook.vehiclesKey) private var showVehicles = true
     @AppStorage(HomeMapStyle.key) private var styleRaw = HomeMapStyle.standard.rawValue
 
     @State private var camera: MapCameraPosition
@@ -181,6 +183,14 @@ struct NewHome: View {
             if let t = trip.toast { toast(t) }
         }
         .modifier(HomeLoops())
+        // the live vehicles: every 15 s while the home is on screen, the app in front and the setting on
+        .task(id: showVehicles && visible) {
+            guard showVehicles else { vehicles.clear(); return }
+            while !Task.isCancelled && visible {
+                await vehicles.refresh(region, gate: vehicleGate)
+                try? await Task.sleep(nanoseconds: UInt64(VehiclePick.interval * 1_000_000_000))
+            }
+        }
         .onAppear { shown = true }
         .onDisappear { shown = false; mapStops.pause() }
         .onChange(of: scene) { _, s in if s != .active { mapStops.pause() } else if let r = region { mapStops.cameraStopped(r, visible: visible) } }
@@ -198,21 +208,36 @@ struct NewHome: View {
 
     private var map: some View {
         let drawn: (stops: [Transit.NearStop], names: Bool) = region.map { mapStops.drawn(in: $0) } ?? (stops: [], names: false)
-        return Map(position: $camera) {
-            UserAnnotation()
-            ForEach(drawn.stops) { s in
-                Annotation(Fmt.place(s.name), coordinate: CLLocationCoordinate2D(latitude: s.lat, longitude: s.lon), anchor: s.rail ? .top : .leading) {
-                    StopMark(stop: s, names: drawn.names)
+        let showV = VehiclePick.shows(vehicleGate) && region != nil
+        // (the vehicles slide along their road once a second; without them the map is redrawn only when it changes)
+        return TimelineView(.periodic(from: .now, by: showV ? 1 : 3600)) { tl in
+            let moving: [LiveVehiclesModel.Moving] = showV ? region.map { vehicles.moving(at: tl.date, in: $0) } ?? [] : []
+            Map(position: $camera) {
+                UserAnnotation()
+                ForEach(drawn.stops) { s in
+                    Annotation(Fmt.place(s.name), coordinate: CLLocationCoordinate2D(latitude: s.lat, longitude: s.lon), anchor: s.rail ? .top : .leading) {
+                        StopMark(stop: s, names: drawn.names)
+                    }
+                    .annotationTitles(.hidden)
                 }
-                .annotationTitles(.hidden)
+                ForEach(moving) { v in
+                    Annotation(v.line, coordinate: v.coordinate, anchor: .center) { VehiclePill(v: v) }
+                        .annotationTitles(.hidden)
+                }
+            }
+            .mapStyle(mapStyle.style)
+            .mapControls { MapCompass() }
+            .onMapCameraChange(frequency: .onEnd) { ctx in
+                region = ctx.region
+                mapStops.cameraStopped(ctx.region, visible: visible)
+                Task { await vehicles.refresh(ctx.region, gate: vehicleGate) }
             }
         }
-        .mapStyle(mapStyle.style)
-        .mapControls { MapCompass() }
-        .onMapCameraChange(frequency: .onEnd) { ctx in
-            region = ctx.region
-            mapStops.cameraStopped(ctx.region, visible: visible)
-        }
+    }
+
+    /// May the live vehicles be asked for and drawn now (`VehiclePick`).
+    private var vehicleGate: VehiclePick.Gate {
+        LiveVehiclesModel.gate(enabled: showVehicles, visible: visible, active: scene == .active, region: region)
     }
 
     // MARK: top
