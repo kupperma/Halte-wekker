@@ -231,7 +231,7 @@ final class LiveStore: ObservableObject {
         let ranked = VehicleMatch.rank(judged, planned: nil)
         let lines = Dictionary(tracks.map { ($0.tripId, $0.line) }, uniquingKeysWith: { a, _ in a })
         let outcome = ranked.first.map { "best " + FieldFormat.label($0.id, lines) } ?? "none"
-        FieldLog.shared.add(.match, FieldFormat.match("on board", judged, outcome: outcome))
+        FieldLog.shared.add(.match, FieldFormat.match("on board", judged, outcome: outcome, count: judged.count))
         guard let id = ranked.first?.id else { return nil }
         let pieces = segs.filter { $0.tripId == id }
         return pieces.filter { $0.departure <= now }.max { $0.departure < $1.departure } ?? pieces.min { $0.departure < $1.departure }

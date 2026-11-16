@@ -632,8 +632,8 @@ final class GoStore: ObservableObject {
             guard watching, dest == d, trip.phase == .idle else { return }
             if let me = ranked.first(where: { $0.vehicle.tripId == v.tripId }), let t = best {
                 let close = ranked.filter { $0.vehicle.tripId != v.tripId && $0.cost < me.cost + R.close }.map(\.vehicle)
-                board(t, v, alternatives: ob.1, couldBe: close)
-                return
+                if board(t, v, alternatives: ob.1, couldBe: close) { return }
+                break                       // its stop is where you are: not this one, plan from where you are
             }
             guard sure else { continue }
             looks += 1
@@ -699,17 +699,22 @@ final class GoStore: ObservableObject {
     /// On board: the trip starts by itself (the ride screen takes over) and the watching stops.
     /// `alternatives`: the ways it was choosing between, so the ride can still switch if it turns out you're on another one.
     /// `couldBe`: other buses that fit about as well; the ride decides between them once they're clearly apart.
-    private func board(_ t: DoorTrip, _ v: Vehicle, alternatives: [DoorTrip] = [], couldBe: [Vehicle] = []) {
-        guard let r = RoutePlan.from(t), let trip else { return }
-        trip.start(r, vehicle: v, auto: true, alternatives: alternatives, couldBe: couldBe)
+    /// Not when its first stop is where you are already (a bus standing at the bus station you're at): it would ring and
+    /// say "You're at …" at once. False then.
+    @discardableResult private func board(_ t: DoorTrip, _ v: Vehicle, alternatives: [DoorTrip] = [], couldBe: [Vehicle] = []) -> Bool {
+        guard let r = RoutePlan.from(t), let trip, !trip.refusesAtItsStop(r, what: "Go board onto", vehicle: v) else { return false }
+        trip.start(r, vehicle: v, auto: true, alternatives: alternatives, couldBe: couldBe, how: "Go board")
         close()
         let c = UNMutableNotificationContent()
         c.title = "You’re on the \(v.title)"
         c.body = "Your trip to \(r.station.short) started by itself. It rings before \(r.legs(trip.direction).first?.to.short ?? "your stop")."
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "goboard-\(Int(Date().timeIntervalSince1970))", content: c, trigger: nil)) { _ in }
+        return true
     }
 
-    /// "I'm on it": start the trip by hand (it still looks for which one you're on).
+    /// "I'm on it": start the trip by hand (it still looks for which one you're on). While it had another one in mind
+    /// (the one it saw you with), you said it's this one: the ride takes this one as picked, as "I'm on this one" in the
+    /// list, so another one it sees (an Intercity to Den Bosch on the track the one to Breda shares) doesn't take over.
     func startByHand() {
         if demo, let f = best?.first, let a = f.fromLat, let o = f.fromLon {
             trip?.startDemo(from: .init(latitude: a, longitude: o), line: f.line)
@@ -717,7 +722,14 @@ final class GoStore: ObservableObject {
             return
         }
         guard let t = best, let r = RoutePlan.from(t), let trip else { return }
-        if let v = onBoard, t.first.tripId == v.tripId { trip.start(r, vehicle: v, alternatives: [t] + others) } else { trip.start(r) }
+        if let v = onBoard, t.first.tripId == v.tripId {
+            trip.start(r, vehicle: v, alternatives: [t] + others, how: "Go hand")
+        } else if onBoard != nil {
+            let f = t.first
+            trip.start(r, vehicle: Vehicle(tripId: f.tripId, line: f.line, isTrain: f.isTrain), picked: true, how: "Go hand, picked")
+        } else {
+            trip.start(r, how: "Go hand")
+        }
         close()
     }
 

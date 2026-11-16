@@ -130,6 +130,114 @@ final class FieldLogTests: XCTestCase {
         XCTAssertEqual(FieldFormat.notSure("board", fixes: 1, span: 0), "board · not sure (1 fix, 0 s)")
     }
 
+    /// The newest of each kind up to its cap: a burst of requests doesn't push the ride out of the log.
+    func test_perKindCaps() {
+        let d = suite()
+        let log = FieldLog(defaults: d, caps: [.net: 300, .match: 200, .ride: 100])
+        log.add(.ride, "r0"); log.add(.match, "m0")
+        for i in 0..<500 { log.add(.net, "n\(i)") }
+        log.add(.match, "m1"); log.add(.match, "m2"); log.add(.ride, "r1")
+        let e = log.entries
+        XCTAssertEqual(e.filter { $0.kind == .net }.count, 300)
+        XCTAssertEqual(e.filter { $0.kind == .match }.map(\.text), ["m2", "m1", "m0"])
+        XCTAssertEqual(e.filter { $0.kind == .ride }.map(\.text), ["r1", "r0"])
+        XCTAssertEqual(e.first?.text, "r1")
+        XCTAssertEqual(e.filter { $0.kind == .net }.first?.text, "n499")
+        XCTAssertEqual(e.filter { $0.kind == .net }.last?.text, "n200")
+        for i in 0..<150 { log.add(.ride, "x\(i)") }
+        XCTAssertEqual(log.entries.filter { $0.kind == .ride }.count, 100)
+        XCTAssertEqual(log.entries.filter { $0.kind == .ride }.last?.text, "x50")
+        // what was saved comes back with the same caps
+        log.flush()
+        XCTAssertEqual(FieldLog(defaults: d).entries, log.entries)
+        // the old single limit still caps everything together
+        let one = FieldLog(defaults: suite(), limit: 4)
+        for i in 0..<3 { one.add(.net, "n\(i)") }
+        one.add(.ride, "r"); one.add(.match, "m")
+        XCTAssertEqual(one.entries.map(\.text), ["m", "r", "n2", "n1"])
+        // a saved log over the caps comes back within them, the newest of each kind
+        let d2 = suite()
+        let big = FieldLog(defaults: d2, caps: [.net: 1000, .match: 1000, .ride: 1000])
+        for i in 0..<5 { big.add(.net, "n\(i)") }
+        big.add(.ride, "r0"); big.add(.ride, "r1")
+        big.flush()
+        XCTAssertEqual(FieldLog(defaults: d2, caps: [.net: 2, .match: 2, .ride: 1]).entries.map(\.text), ["r1", "n4", "n3"])
+        // the app's caps
+        XCTAssertEqual(FieldLog.caps, [.net: 300, .match: 200, .ride: 100])
+    }
+
+    /// Ride lines: no coordinates (no number with 3 or more decimals), only the last 4 characters of a trip id, metres
+    /// rounded to 10.
+    func test_rideLinePrivacy() {
+        let v = FieldFormat.vehicle(line: "321", tripId: "20261116_NL:OVapi:12345:1280", isTrain: false)
+        XCTAssertEqual(v, "bus 321·1280")
+        let lines = [
+            FieldFormat.rideStart(how: "replan at a change", vehicle: v, stopMetres: 183.4, leg: 1, of: 3),
+            FieldFormat.rideStart(how: "hand", vehicle: nil, stopMetres: nil, leg: 1, of: 1),
+            FieldFormat.rideRefused("replan onto", vehicle: v, stopMetres: 117, accuracy: 15.2),
+            FieldFormat.rideWait(moved: 31.7, fromStop: 88.1),
+            FieldFormat.rideWait(moved: nil, fromStop: nil),
+            FieldFormat.rideWake(startedMetres: 1937.6, after: 42),
+            FieldFormat.rideRing("approach", metres: 1604.9, legAge: 25.4, started: 1937.6),
+            FieldFormat.rideArrive(why: "by GPS", metres: 226, accuracy: 15, legAge: 12.2, started: 183.4),
+            FieldFormat.pickKept(FieldFormat.vehicle(line: "IC", tripId: "trip-abcdef", isTrain: true), metres: 38.6),
+            FieldFormat.pickKept("train IC·cdef", metres: nil),
+        ]
+        let coordinate = try! NSRegularExpression(pattern: #"\d+\.\d{3,}"#)
+        for l in lines {
+            XCTAssertNil(coordinate.firstMatch(in: l, range: NSRange(l.startIndex..., in: l)), l)
+            XCTAssertFalse(l.contains("OVapi") || l.contains("12345") || l.contains("trip-ab"), l)
+        }
+        XCTAssertEqual(lines[0], "start · replan at a change · bus 321·1280 · its stop 180 m from you · leg 1/3")
+        XCTAssertEqual(lines[1], "start · hand · no vehicle yet · its stop ? m from you · leg 1/1")
+        XCTAssertEqual(lines[2], "refused · replan onto bus 321·1280: its stop 120 m from you (±15)")
+        XCTAssertEqual(lines[3], "wait · at a change: not going yet (30 m in 30 s, 90 m from the stop)")
+        XCTAssertEqual(lines[4], "wait · at a change: not going yet (too few fixes, ? m from the stop)")
+        XCTAssertEqual(lines[5], "wake · silently (started 1940 m from its stop, first fix 42 s in)")
+        XCTAssertEqual(lines[6], "ring · approach · 1600 m · leg 25 s old · started 1940 m")
+        XCTAssertEqual(lines[7], "arrive · by GPS · 230 m (±15) · leg 12 s old · started 180 m")
+        XCTAssertEqual(lines[8], "pick kept · train IC·cdef: 40 m from its road")
+        XCTAssertEqual(lines[9], "pick kept · train IC·cdef: its road not known")
+        XCTAssertEqual(FieldFormat.metres(-3), "0 m")
+        XCTAssertEqual(FieldFormat.metres(.nan), "? m")
+        XCTAssertEqual(FieldFormat.metres(14), "10 m")
+        XCTAssertEqual(FieldFormat.metres(15), "20 m")
+    }
+
+    /// A match line always shows the planned (or picked, or shown) one, and how many were judged; the rejected ones by how
+    /// near their path is, so the bus you're on isn't hidden behind ICE and FlixBus segments.
+    func test_matchShowsPlanned() {
+        func far(_ id: String, _ line: String, _ m: Double) -> Judgement {
+            Judgement(id: id, line: line, isTrain: true, realTime: true, evidence: evidence(crossTrack: m), result: .failure(.offItsPath))
+        }
+        var judged: [Judgement] = (0..<8).map { far("ice-\(1000 + $0)", "ICE", 14_000 + Double($0)) }
+        // the planned one, 9th in the answer: too far from its times
+        judged.append(Judgement(id: "ic-abcd", line: "IC", isTrain: true, realTime: true, evidence: evidence(crossTrack: 20, offset: 900),
+                                result: .failure(.tooFarFromTimes)))
+        let line = FieldFormat.match("detect", judged, outcome: "none", planned: "ic-abcd", count: judged.count)
+        XCTAssertTrue(line.hasPrefix("detect · n=9 · IC·abcd (planned) live 900 m from its times | ICE·1000"), line)
+        XCTAssertEqual(line.components(separatedBy: " | ").count, 6)
+        // a passing one goes first; the planned one beyond the 6 still shows
+        var many: [Judgement] = (0..<7).map { k in
+            Judgement(id: "bus-\(2000 + k)", line: "1", isTrain: false, realTime: true, evidence: nil, result: .success(Double(k)))
+        }
+        many.append(judged[8])
+        let l2 = FieldFormat.match("find", many, outcome: "none", planned: "ic-abcd", count: 8)
+        XCTAssertEqual(l2.components(separatedBy: " | ").count, 7)
+        XCTAssertTrue(l2.contains("| IC·abcd (planned) live 900 m from its times → none"), l2)
+        // not in the answer
+        let l3 = FieldFormat.match("detect", Array(judged.prefix(3)), outcome: "none", planned: "ic-abcd", count: 3)
+        XCTAssertTrue(l3.hasPrefix("detect · n=3 · ICE·1000"), l3)
+        XCTAssertTrue(l3.hasSuffix(" | planned ·abcd not in answer → none"), l3)
+        // nothing planned: as before
+        XCTAssertFalse(FieldFormat.match("detect", judged, outcome: "none").contains("planned"))
+        // quick-box rejects (no evidence) after the measured ones, not-sure ones between
+        let boxed = Judgement(id: "flix-0001", line: "FlixBus", isTrain: false, realTime: true, evidence: nil, result: .failure(.offItsPath))
+        let unsure = Judgement(id: "bus-0002", line: "305", isTrain: false, realTime: true, evidence: nil, result: .failure(.noTimes))
+        let l4 = FieldFormat.match("board", [boxed, unsure, far("ice-0003", "ICE", 14_600)], outcome: "none", count: 3)
+        XCTAssertEqual(l4, "board · n=3 · ICE·0003 live off its path 14600 m | 305·0002 live no times now | FlixBus·0001 live off its path → none")
+    }
+
     func test_export() {
         let log = FieldLog(defaults: suite())
         // 07:12:03 UTC

@@ -1,34 +1,59 @@
 import Foundation
 
-/// One line of the field log: a request or a matching look.
+/// One line of the field log: a request, a matching look, or what a ride did (started, refused, woke, rang, arrived).
 struct FieldEntry: Codable, Equatable, Sendable {
-    enum Kind: String, Codable, Sendable { case net, match }
+    enum Kind: String, Codable, Sendable, CaseIterable { case net, match, ride }
     let at: Date
     let kind: Kind
     let text: String
 }
 
-/// The last requests and vehicle choices, newest first, kept on this phone. Holds paths, lanes, statuses, sizes, seconds,
-/// attempts, lines and the last 4 characters of trip ids: never coordinates or query strings.
+/// The last requests, vehicle choices and ride events, newest first, kept on this phone. Holds paths, lanes, statuses,
+/// sizes, seconds, attempts, lines, metres rounded to 10 and the last 4 characters of trip ids: never coordinates, place
+/// names or query strings.
 final class FieldLog: @unchecked Sendable {
     static let shared = FieldLog(defaults: .standard)
+    /// The newest this many of each kind are kept, so a burst of requests can't push a ride out of the log.
+    static let caps: [FieldEntry.Kind: Int] = [.net: 300, .match: 200, .ride: 100]
 
     private let defaults: UserDefaults
     private let key: String
-    private let limit: Int
+    private let limit: Int?                          // one cap for all kinds together (else `caps` per kind)
+    private let kindCaps: [FieldEntry.Kind: Int]
     private let lock = NSLock()
     private var list: [FieldEntry]
     private var dirty = false
     private var pending = false
 
-    init(defaults: UserDefaults, key: String = "fieldLog.v1", limit: Int = 400) {
+    /// The newest `limit` entries, whatever their kind.
+    convenience init(defaults: UserDefaults, key: String = "fieldLog.v1", limit: Int) {
+        self.init(defaults: defaults, key: key, limit: limit, caps: [:])
+    }
+
+    /// The newest of each kind, up to its cap.
+    convenience init(defaults: UserDefaults, key: String = "fieldLog.v1", caps: [FieldEntry.Kind: Int] = FieldLog.caps) {
+        self.init(defaults: defaults, key: key, limit: nil, caps: caps)
+    }
+
+    private init(defaults: UserDefaults, key: String, limit: Int?, caps: [FieldEntry.Kind: Int]) {
         self.defaults = defaults
         self.key = key
         self.limit = limit
+        self.kindCaps = caps
         if let data = defaults.data(forKey: key), let saved = try? JSONDecoder().decode([FieldEntry].self, from: data) {
-            list = Array(saved.prefix(limit))
+            list = FieldLog.pruned(saved, limit: limit, caps: caps)
         } else {
             list = []
+        }
+    }
+
+    /// Newest first, the oldest of a kind dropped once it's over its cap (or the oldest of all over `limit`).
+    static func pruned(_ list: [FieldEntry], limit: Int?, caps: [FieldEntry.Kind: Int]) -> [FieldEntry] {
+        if let limit { return Array(list.prefix(max(0, limit))) }
+        var seen: [FieldEntry.Kind: Int] = [:]
+        return list.filter { e in
+            seen[e.kind, default: 0] += 1
+            return seen[e.kind]! <= (caps[e.kind] ?? 100)
         }
     }
 
@@ -36,7 +61,11 @@ final class FieldLog: @unchecked Sendable {
     func add(_ kind: FieldEntry.Kind, _ text: String, at: Date = Date()) {
         lock.lock()
         list.insert(FieldEntry(at: at, kind: kind, text: text), at: 0)
-        if list.count > limit { list.removeLast(list.count - limit) }
+        if let limit {
+            if list.count > limit { list.removeLast(list.count - limit) }
+        } else if list.lazy.filter({ $0.kind == kind }).count > (kindCaps[kind] ?? 100), let i = list.lastIndex(where: { $0.kind == kind }) {
+            list.remove(at: i)
+        }
         dirty = true
         let schedule = !pending
         pending = true
@@ -125,20 +154,34 @@ enum FieldFormat {
         }
     }
 
-    /// "detect · IC·a1b2 live 30 s | 306·c3d4 timetable off its path 180 m → keep IC·a1b2": the ones that passed first
-    /// (by cost), then the rejected; at most 6.
-    static func match(_ place: String, _ judged: [Judgement], outcome: String) -> String {
-        func label(_ j: Judgement) -> String { "\(j.line)·\(j.id.suffix(4))" }
+    /// "detect · n=9 · IC·a1b2 live 30 s | 306·c3d4 timetable off its path 180 m → keep IC·a1b2": the ones that passed
+    /// first (by cost), then the rejected, nearest their path first (so the one you're on isn't hidden behind long-distance
+    /// trains and coaches whose paths cross the area); at most 6. `planned` (the planned, picked or shown one) is always
+    /// there, marked "(planned)" (beyond the 6 too), or "planned ·a1b2 not in answer". `count`: how many were judged.
+    static func match(_ place: String, _ judged: [Judgement], outcome: String, planned: String? = nil, count: Int? = nil) -> String {
+        func label(_ j: Judgement) -> String { "\(j.line)·\(j.id.suffix(4))" + (planned != nil && j.id == planned ? " (planned)" : "") }
         func kind(_ j: Judgement) -> String { j.realTime ? "live" : "timetable" }
-        var passed: [(Double, String)] = [], rejected: [String] = []
+        var passed: [(cost: Double, id: String, text: String)] = []
+        var rejected: [(near: Double, id: String, text: String)] = []
         for j in judged {
             switch j.result {
-            case .success(let c): passed.append((c, "\(label(j)) \(kind(j)) \(Int(c.rounded())) s"))
-            case .failure(let r): rejected.append("\(label(j)) \(kind(j)) \(reject(r, j.evidence))")
+            case .success(let c): passed.append((c, j.id, "\(label(j)) \(kind(j)) \(Int(c.rounded())) s"))
+            case .failure(let r):
+                // off its path by how far; not sure yet (no evidence) after those; dropped by the quick box test last
+                let near = j.evidence.map { $0.crossTrack.isFinite ? $0.crossTrack : 1e8 } ?? (r.notSure ? 1e8 : 1e9)
+                rejected.append((near, j.id, "\(label(j)) \(kind(j)) \(reject(r, j.evidence))"))
             }
         }
-        let items = (passed.sorted { $0.0 < $1.0 }.map(\.1) + rejected).prefix(6)
-        return "\(place) · \(items.isEmpty ? "no vehicles" : items.joined(separator: " | ")) → \(outcome)"
+        let ordered = passed.sorted { $0.cost < $1.cost }.map { (id: $0.id, text: $0.text) }
+            + rejected.enumerated().sorted { $0.element.near != $1.element.near ? $0.element.near < $1.element.near : $0.offset < $1.offset }
+                .map { (id: $0.element.id, text: $0.element.text) }
+        var items = Array(ordered.prefix(6)).map(\.text)
+        if let planned {
+            if let p = ordered.dropFirst(6).first(where: { $0.id == planned }) { items.append(p.text) }
+            else if !judged.contains(where: { $0.id == planned }) { items.append("planned ·\(planned.suffix(4)) not in answer") }
+        }
+        let n = count.map { "n=\($0) · " } ?? ""
+        return "\(place) · \(n)\(items.isEmpty ? "no vehicles" : items.joined(separator: " | ")) → \(outcome)"
     }
 
     /// `choosing`: what was found is only chosen between (it switches later, if at all): "choose" for the clear best.
@@ -165,6 +208,57 @@ enum FieldFormat {
 
     static func classic(_ place: String, _ found: [(label: String, metres: Double)]) -> String {
         "\(place) (classic) · " + (found.isEmpty ? "none" : found.prefix(6).map { "\($0.label) \(Int($0.metres.rounded())) m" }.joined(separator: " | "))
+    }
+
+    // MARK: ride lines: how a ride started, what it refused, when it woke you, rang and arrived
+
+    /// Metres rounded to 10: "180 m"; "? m" when not known.
+    static func metres(_ m: Double?) -> String {
+        guard let m, m.isFinite else { return "? m" }
+        return "\(Int((max(0, m) / 10).rounded()) * 10) m"
+    }
+
+    /// "bus 321·1280", "train IC·a1b2": the kind, the line, the last 4 characters of the trip id.
+    static func vehicle(line: String, tripId: String, isTrain: Bool) -> String {
+        "\(isTrain ? "train" : "bus") \(line)·\(tripId.suffix(4))"
+    }
+
+    /// "start · replan at a change · bus 321·1280 · its stop 180 m from you · leg 1/3". `how`: hand, Go board, Go hand,
+    /// auto (station left), next leg, replan at a change, replan on board, wrong way, switch, demo.
+    static func rideStart(how: String, vehicle: String?, stopMetres: Double?, leg: Int, of legs: Int) -> String {
+        "start · \(how) · \(vehicle ?? "no vehicle yet") · its stop \(metres(stopMetres)) from you · leg \(leg)/\(legs)"
+    }
+
+    /// "refused · replan onto bus 406·4068: its stop 120 m from you (±20)"
+    static func rideRefused(_ what: String, vehicle: String, stopMetres: Double?, accuracy: Double?) -> String {
+        "refused · \(what) \(vehicle): its stop \(metres(stopMetres)) from you\(accuracy.map { $0 >= 0 && $0.isFinite ? " (±\(Int($0.rounded())))" : "" } ?? "")"
+    }
+
+    /// "wait · at a change: not going yet (30 m in 30 s, 90 m from the stop)"
+    static func rideWait(moved: Double?, fromStop: Double?) -> String {
+        "wait · at a change: not going yet (\(moved.map { "\(metres($0)) in 30 s" } ?? "too few fixes"), \(metres(fromStop)) from the stop)"
+    }
+
+    /// "wake · silently (started 1940 m from its stop)": a leg that started inside its wake distance.
+    static func rideWake(startedMetres: Double?, after: TimeInterval? = nil) -> String {
+        "wake · silently (started \(metres(startedMetres)) from its stop\(after.map { ", first fix \(Int(max(0, $0).rounded())) s in" } ?? ""))"
+    }
+
+    /// "ring · approach · 1600 m · leg 25 s old · started 1940 m"
+    static func rideRing(_ why: String, metres m: Double?, legAge: TimeInterval, started: Double?) -> String {
+        "ring · \(why) · \(metres(m)) · leg \(Int(max(0, legAge).rounded())) s old · started \(metres(started))"
+    }
+
+    /// "arrive · by GPS · 230 m (±15) · leg 12 s old · started 180 m"
+    static func rideArrive(why: String, metres m: Double?, accuracy: Double?, legAge: TimeInterval, started: Double?) -> String {
+        let acc = accuracy.map { $0 >= 0 && $0.isFinite ? " (±\(Int($0.rounded())))" : "" } ?? ""
+        return "arrive · \(why) · \(metres(m))\(acc) · leg \(Int(max(0, legAge).rounded())) s old · started \(metres(started))"
+    }
+
+    /// "pick kept · train IC·a1b2: 40 m from its road", or "… its road not known": the one picked or planned holds
+    /// against another that doesn't go where the leg goes.
+    static func pickKept(_ vehicle: String, metres m: Double?) -> String {
+        "pick kept · \(vehicle): " + (m.map { $0.isFinite ? "\(metres($0)) from its road" : "its road not known" } ?? "its road not known")
     }
 }
 
