@@ -862,9 +862,11 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
                 guard var m = kind.first ?? ranked.first else {
                     lastBest = nil
                     // At a change, going and away, none matched: on the planned one's road, that's its line (late, missed
-                    // and a later one, or none of them showing): the next leg, held on that road.
-                    if forNextLeg, gateOpen, let p = planned {
-                        if await self.startOnPlannedRoad(p) { return }
+                    // and a later one, or none of them showing): the next leg, held on that road. Your own routes plan
+                    // nothing for the next leg: the one listed for it that just left (`changeReference`) is the road.
+                    if forNextLeg, gateOpen, let p = planned ?? self.changeReference() {
+                        let how = planned == nil ? "next leg, on the listed one's road" : "next leg, on the planned one's road"
+                        if await self.startOnPlannedRoad(p, how: how) { return }
                         guard !Task.isCancelled, !self.pickedByHand else { return }
                     }
                     // No live match (some have no live position): the one it planned, once you've clearly left on it.
@@ -983,11 +985,22 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     /// At a change, going: one look at the planned one's road (`RideGuards.atChange`). On it, the next leg starts with
     /// no vehicle, its alarm armed, the planned one held on that road (from the plan: it gives way off its road, or
     /// after a minute of its road not to be had). True then.
-    private func startOnPlannedRoad(_ p: PlannedRide) async -> Bool {
+    private func startOnPlannedRoad(_ p: PlannedRide, how: String = "next leg, on the planned one's road") async -> Bool {
         guard let look = await roadLook(of: p.tripId), !Task.isCancelled, !pickedByHand, phase == .transfer,
               RideGuards.atChange(plannedRoadMetres: look.metres, isTrain: p.isTrain) == .startNextLeg else { return false }
-        nextLeg(how: "next leg, on the planned one's road", held: p.tripId, fromPlan: true)
+        nextLeg(how: how, held: p.tripId, fromPlan: true)
         return true
+    }
+
+    /// At a change on one of your own routes (nothing planned for the next leg, as by the big button): the ride to go
+    /// by the road of (`RideGuards.roadReference`): of the next leg's list, the newest that has left since you got off,
+    /// else the first after. Nil: a planned trip (it has its own), or nothing listed.
+    private func changeReference() -> PlannedRide? {
+        guard phase == .transfer, route?.planned?[safe: index + 1] == nil, let n = legs[safe: index + 1], let since = changeSince else { return nil }
+        let list = upcoming.filter { $0.from.key == n.from.key }.map(\.trip.first)
+        guard let i = RideGuards.roadReference(list.map(\.departure), arrived: since, now: Date()) else { return nil }
+        let r = list[i]
+        return PlannedRide(tripId: r.tripId, line: r.line, isTrain: r.isTrain, departure: r.departure)
     }
 
     /// One look at how far you are from a trip's road: your newest fix within 150 m of the last 30 s (none: no look),

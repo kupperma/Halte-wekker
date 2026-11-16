@@ -96,4 +96,15 @@ enum RideGuards {
         guard let d, d.isFinite, d >= 0 else { return .replan }
         return d <= (isTrain ? pickOffRoadTrain : pickOffRoadBus) ? .startNextLeg : .replan
     }
+
+    /// At a change on one of your own routes (Veghel–Eindhoven–Breda by the big button: nothing planned for the next
+    /// leg), the ride whose road `atChange` goes by: of the next leg's departures (`departures`, as listed for it), the
+    /// newest one that has left by now (a minute's grace) and not before you got there (2 minutes' grace: a late one
+    /// listed by its live time); none has yet: the first after you got there. Nil: none listed.
+    static func roadReference(_ departures: [Date], arrived: Date, now: Date) -> Int? {
+        let after = departures.indices.filter { departures[$0] >= arrived.addingTimeInterval(-120) }
+        let left = after.filter { departures[$0] <= now.addingTimeInterval(60) }
+        if let i = left.max(by: { departures[$0] < departures[$1] }) { return i }
+        return after.min(by: { departures[$0] < departures[$1] })
+    }
 }

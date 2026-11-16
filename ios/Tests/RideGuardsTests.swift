@@ -209,4 +209,21 @@ final class RideGuardsTests: XCTestCase {
         // off its road twice, 20 s apart, still gives way too
         XCTAssertTrue(RideGuards.pickRuledOut([(at: t0, metres: 900), (at: t0 + 25, metres: 1200)], isTrain: true, fromPlan: true))
     }
+
+    /// Your own route (Veghel–Eindhoven–Breda by the big button) plans nothing for the next leg: the road to go by is the
+    /// listed one that left since you got off (the newest), else the first after you got there.
+    func test_roadReferenceOnYourOwnRoute() {
+        let arrived = t0                                                       // off the 306 at Eindhoven, 08:30
+        let ics = [t0 - 600, t0 + 180, t0 + 1080, t0 + 1980]                    // 08:20 (gone before), 08:33, 08:48, 09:03
+        XCTAssertEqual(RideGuards.roadReference(ics, arrived: arrived, now: t0 + 60), 1)       // none left yet: the 08:33
+        XCTAssertEqual(RideGuards.roadReference(ics, arrived: arrived, now: t0 + 240), 1)      // going at 08:34: the 08:33
+        XCTAssertEqual(RideGuards.roadReference(ics, arrived: arrived, now: t0 + 1140), 2)     // the 08:33 missed: the 08:48
+        XCTAssertEqual(RideGuards.roadReference(ics.reversed(), arrived: arrived, now: t0 + 1140), 1)  // (by time, not order)
+        XCTAssertEqual(RideGuards.roadReference([t0 - 90, t0 + 900], arrived: arrived, now: t0 + 30), 0)  // a late one, listed by its live time
+        XCTAssertEqual(RideGuards.roadReference([t0 - 600], arrived: arrived, now: t0 + 60), nil)       // only ones before you got there
+        XCTAssertNil(RideGuards.roadReference([], arrived: arrived, now: t0))
+        // and on its road (the Intercity to Breda, a train: 700 m), the next leg starts, its alarm armed, as for a planned trip
+        XCTAssertEqual(RideGuards.atChange(plannedRoadMetres: fromBredaRoad(onBredaLine(1500)), isTrain: true), .startNextLeg)
+        XCTAssertEqual(RideGuards.atChange(plannedRoadMetres: 2400, isTrain: true), .replan)
+    }
 }
