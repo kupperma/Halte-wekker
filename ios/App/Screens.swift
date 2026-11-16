@@ -2248,7 +2248,7 @@ struct SettingsView: View {
             .navigationTitle("Settings")
             .sheet(isPresented: $liveStops, onDismiss: { Task { await live.refresh(trip.direction, force: true) } }) { LiveSettingsSheet() }
             .confirmationDialog("Reset everything?", isPresented: $confirmReset, titleVisibility: .visible) {
-                Button("Reset everything", role: .destructive) { trip.resetAll(); planner.clear() }
+                Button("Reset everything", role: .destructive) { trip.resetAll(); planner.clear(); NewLook.resetAll() }
             } message: { Text("Your settings, learned speed ratings, leaderboard, watched trains, stops and Spotify sign-in are removed.") }
         }
     }

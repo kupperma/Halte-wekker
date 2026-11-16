@@ -31,10 +31,11 @@ enum DS {
     static let onAccent = Color.white
 
     // line pills, by mode (white text on them)
-    static let train = dynamic(0x2B3A55, 0x5C7CC0)
-    static let bus = dynamic(0xD9542B, 0xE2683F)
-    static let tram = dynamic(0x6B3FA0, 0x8F68C4)
-    static let ferry = dynamic(0x1C6E8C, 0x3C93B3)
+    // (white text on each ≥ 4.5:1 in both modes)
+    static let train = dynamic(0x2B3A55, 0x4A68A8)
+    static let bus = Color(hex: 0xC4461F)
+    static let tram = dynamic(0x6B3FA0, 0x7A55B0)
+    static let ferry = dynamic(0x1C6E8C, 0x2A7898)
 
     /// The pill colour for a line: a train, a bus, or (by the live data's mode name) tram, metro or ferry.
     static func mode(train: Bool, mode: String = "") -> Color {

@@ -36,6 +36,8 @@ final class PlacesStore: ObservableObject {
         guard let i = list.firstIndex(where: { $0.id == p.id }) else { return }
         list[i] = p; persist()
     }
+    /// Reset everything: back to today's defaults.
+    func reset() { list = Self.seed(); persist() }
     func remove(_ id: String) { list = PlacesLogic.remove(list, id: id); persist() }
     func move(from: Int, to: Int) { list = PlacesLogic.move(list, from: from, to: to); persist() }
 

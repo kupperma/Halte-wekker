@@ -22,7 +22,8 @@ targets:
         CFBundleDisplayName: Haltewekker
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
-        UILaunchScreen: {}
+        UILaunchScreen:
+          UIColorName: LaunchBackground
         UIBackgroundModes: [location, audio, fetch]
         BGTaskSchedulerPermittedIdentifiers: [nl.haltewekker.app.plan]
         NSLocationWhenInUseUsageDescription: Haltewekker uses your location to wake you before your stop.

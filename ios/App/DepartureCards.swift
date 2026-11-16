@@ -56,15 +56,17 @@ struct DepartureCardsView: View {
     @EnvironmentObject var lines: LineWatchStore
 
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 0) {
+            // the handle: a full-width strip to tap or drag up (the cards themselves only swipe sideways)
             Button(action: openDay) {
-                HStack(spacing: 6) {
-                    Capsule().fill(DS.secondary.opacity(0.5)).frame(width: 36, height: 5)
-                }
-                .frame(maxWidth: .infinity, minHeight: 20)
-                .contentShape(Rectangle())
+                Capsule().fill(DS.secondary.opacity(0.5)).frame(width: 36, height: 5)
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .simultaneousGesture(DragGesture(minimumDistance: 10).onEnded { v in
+                if v.translation.height < -30 && abs(v.translation.height) > abs(v.translation.width) { openDay() }
+            })
             .accessibilityLabel("Your day")
             .accessibilityHint("Shows your day: alarm, trip and classes")
             ScrollView(.horizontal, showsIndicators: false) {
@@ -99,6 +101,7 @@ struct DepartureCardsView: View {
                 }
             }
             .animation(DS.quick, value: focused)
+            .padding(.top, 8)
             .accessibilityHidden(true)
         }
     }
@@ -137,7 +140,9 @@ struct DepartureCardsView: View {
                 }
                 Spacer(minLength: 0)
             }
-            if c.departures.isEmpty {
+            if c.departures.isEmpty && loading {
+                DSSkeletonRow(); DSSkeletonRow(); DSSkeletonRow()
+            } else if c.departures.isEmpty {
                 Text("Nothing leaving here soon.").font(DS.sub).foregroundStyle(DS.secondary).padding(.vertical, 6)
             }
             ForEach(c.departures) { d in row(d, c.stop) }
@@ -159,7 +164,7 @@ struct DepartureCardsView: View {
             Button { tap(DepartureTap(dep: d, stop: s)) } label: {
                 HStack(spacing: 8) {
                     DSLinePill(line: d.line, train: d.train).frame(width: 46, alignment: .leading)
-                    Text(Fmt.place(d.headsign)).font(DS.calloutStrong).foregroundStyle(DS.text).lineLimit(1)
+                    Text(Fmt.place(d.headsign)).font(DS.calloutStrong).foregroundStyle(DS.text).lineLimit(2)
                         .strikethrough(d.cancelled)
                     Spacer(minLength: 4)
                     if let p = d.platform, d.train { Text("Pl. \(p)").font(DS.footnote).foregroundStyle(DS.secondary).monospacedDigit() }
@@ -208,6 +213,8 @@ struct DepartureCardsView: View {
 struct DepartureDetailSheet: View {
     let tap: DepartureTap
     @EnvironmentObject var lines: LineWatchStore
+    @EnvironmentObject var trains: WatchStore
+    @EnvironmentObject var live: LiveStore
     @Environment(\.dismiss) private var dismiss
     @State private var liveTrack: LiveTrackTarget?
     @State private var walkTo: WalkTarget?
@@ -246,9 +253,17 @@ struct DepartureDetailSheet: View {
                             }
                         }
                         Divider()
-                        let on = lines.isWatched(stopId: d.stopId, stopName: d.stopName, line: d.line, headsign: d.headsign)
-                        action(icon: on ? "bell.slash" : "bell", title: on ? "Stop watching this line" : "Watch this line") {
-                            lines.toggle(stopId: d.stopId, stopName: d.stopName, line: d.line, headsign: d.headsign, tripId: d.tripId, delay: d.live ? d.delay : nil)
+                        if let pt = trainTrip {
+                            // a train from one of your stations: NS tells you about a platform change or a delay
+                            let on = trains.isWatched(pt.trip.first, from: pt.from)
+                            action(icon: on ? "bell.slash" : "bell", title: on ? "Stop telling me about this train" : "Tell me about platform changes") {
+                                _ = trains.toggle(pt.trip, from: pt.from, to: pt.to)
+                            }
+                        } else {
+                            let on = lines.isWatched(stopId: d.stopId, stopName: d.stopName, line: d.line, headsign: d.headsign)
+                            action(icon: on ? "bell.slash" : "bell", title: on ? "Stop watching this line" : "Watch this line") {
+                                lines.toggle(stopId: d.stopId, stopName: d.stopName, line: d.line, headsign: d.headsign, tripId: d.tripId, delay: d.live ? d.delay : nil)
+                            }
                         }
                     }
                     .background(DS.surface2, in: RoundedRectangle(cornerRadius: DS.fieldRadius, style: .continuous))
@@ -264,6 +279,17 @@ struct DepartureDetailSheet: View {
         .tint(DS.accentText)
         .sheet(item: $liveTrack) { LiveBusSheet(target: $0).presentationDetents([.large]) }
         .sheet(item: $walkTo) { WalkMapSheet(target: $0).presentationDetents([.large]) }
+    }
+
+    /// This train as a one-ride trip between two of your stations, as the old train page watches it (`HomeView.trainTrip`):
+    /// only a train your trips or lists know (they have its number for NS), between stations NS covers.
+    private var trainTrip: PanelTrip? {
+        guard d.train else { return nil }
+        let known = (live.trains.map(\.trip) + live.next).flatMap(\.rides).first { $0.tripId == d.tripId && $0.isTrain }
+        guard let r = known, !r.num.isEmpty,
+              let from = Place.all.first(where: { $0.short == Fmt.place(r.fromStop) }), NSStore.code(from) != nil,
+              let to = Place.all.first(where: { $0.short == Fmt.place(r.toStop) }) else { return nil }
+        return PanelTrip(trip: DoorTrip(rides: [r], start: r.departure, end: r.arrival), from: from, to: to)
     }
 
     private var fromText: String {

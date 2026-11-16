@@ -11,11 +11,11 @@ import SwiftUI
 final class PlanTripModel: ObservableObject {
     enum End: Equatable {
         case here
-        case place(Place)
+        case place(Place, name: String? = nil)          // `name`: as your places call it ("Home")
         var label: String {
             switch self {
             case .here: return "My location"
-            case .place(let p): return p.short
+            case .place(let p, let n): return n ?? p.short
             }
         }
     }
@@ -36,7 +36,7 @@ final class PlanTripModel: ObservableObject {
     func place(_ e: End, here: CLLocation?) -> Place? {
         switch e {
         case .here: return here.map { Place.here($0.coordinate) }
-        case .place(let p): return p
+        case .place(let p, _): return p
         }
     }
 
@@ -53,6 +53,8 @@ final class PlanTripModel: ObservableObject {
         guard let t = to else { clear(); return }
         round += 1
         let mine = round
+        // a new question: the old answer goes at once (its cards and the Go title belonged to it)
+        options = []; labels = [:]; focused = nil
         guard let a = place(from, here: here), let b = place(t, here: here) else {
             options = []; labels = [:]; loading = false
             error = "Haltewekker doesn’t know where you are yet. Turn on location, or pick where you start."
@@ -173,7 +175,7 @@ struct PlanTripOverlay: View {
         "\(near.position == nil)|\(placeKey(model.from))>\(model.to.map(placeKey) ?? "")|\(whenKey)|\(model.modes ?? "")"
     }
     private func placeKey(_ e: PlanTripModel.End) -> String {
-        if case .place(let p) = e { return p.key + p.ids.joined(separator: ",") }
+        if case .place(let p, _) = e { return p.key + p.ids.joined(separator: ",") }
         return "here"
     }
     private var whenKey: String {
@@ -213,12 +215,14 @@ struct PlanTripOverlay: View {
                     }
                     .foregroundStyle(DS.accentSoftText).padding(.horizontal, 12).frame(minHeight: 36)
                     .background(DS.accentSoft, in: Capsule())
+                    .frame(minHeight: 44).contentShape(Rectangle())
                 }
                 .buttonStyle(DSPressStyle())
                 .accessibilityHint("Pick when, and the options")
                 Button { sheet = .when } label: {
                     Text(model.modes == nil ? "Options" : model.modes == "RAIL" ? "Trains only" : "Buses only").font(DS.sub).foregroundStyle(DS.text)
                         .padding(.horizontal, 12).frame(minHeight: 36).background(DS.surface3, in: Capsule())
+                        .frame(minHeight: 44).contentShape(Rectangle())
                 }
                 .buttonStyle(DSPressStyle())
             }
@@ -323,20 +327,38 @@ struct PlanTripOverlay: View {
         return c.dateComponents([.day], from: c.startOfDay(for: Date()), to: c.startOfDay(for: d)).day ?? 9
     }
 
-    /// Home and School, today's places (`.veghel` and `.buas` keys), one each way.
+    /// Home and School, today's places (`.veghel` and `.buas` keys), one each way. Your location counts as one of
+    /// them within about 800 m of it.
     private var homeSchoolOut: Bool? {
-        guard case .place(let a) = model.from, case .place(let b)? = model.to else { return nil }
+        guard case .place(let b, _)? = model.to else { return nil }
+        let a: Place
+        switch model.from {
+        case .place(let p, _): a = p
+        case .here:
+            guard let h = near.position, let p = nearHomeOrSchool(h) else { return nil }
+            a = p
+        }
         if a.key == Place.veghel.key && b.key == Place.buas.key { return true }
         if a.key == Place.buas.key && b.key == Place.veghel.key { return false }
         return nil
     }
 
+    private func nearHomeOrSchool(_ l: CLLocation) -> Place? {
+        let places = PlacesStore.shared
+        for sp in [places.home, places.school].compactMap({ $0 }) {
+            let p = places.place(sp)
+            guard p.key == Place.veghel.key || p.key == Place.buas.key else { continue }
+            if l.distance(from: CLLocation(latitude: sp.lat, longitude: sp.lon)) < 800 { return p }
+        }
+        return nil
+    }
+
     @ViewBuilder private var action: some View {
-        if case .place(let dest)? = model.to {
+        if case .place(let dest, _)? = model.to, trip.phase == .idle {
             if PlanCompare.offersGo(fromHere: model.fromHere, when: model.when, now: Date()) {
                 let stop = focusedTrip.map { Fmt.place($0.last.toStop) } ?? dest.short
                 DSPrimaryButton(title: "Go · wake me before \(stop)", icon: "bell.and.waves.left.and.right") { go(dest) }
-            } else if let out = homeSchoolOut, PlanCompare.offersRemind(homeSchool: true, fromHere: model.fromHere, when: model.when, day: dayOffset) {
+            } else if let out = homeSchoolOut, PlanCompare.offersRemind(homeSchool: true, fromHere: false, when: model.when, day: dayOffset) {
                 DSPrimaryButton(title: "Remind me", icon: "bell") { remind(out: out) }
             }
         }
@@ -473,7 +495,7 @@ struct EndPickerSheet: View {
                         row(icon: "location.fill", title: "My location", sub: nil) { choose(.here) }
                     }
                     Section("Your places") {
-                        ForEach(places.list) { p in row(icon: p.symbol, title: p.name, sub: nil) { choose(.place(places.place(p))) } }
+                        ForEach(places.list) { p in row(icon: p.symbol, title: p.name, sub: nil) { choose(.place(places.place(p), name: p.name)) } }
                     }
                     if !recents.isEmpty {
                         Section("Recent") {

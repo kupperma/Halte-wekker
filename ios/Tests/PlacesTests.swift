@@ -48,8 +48,10 @@ final class PlacesTests: XCTestCase {
     func test_chipsOrder() {
         let a = SavedPlace(id: "a", name: "A", kind: .custom, lat: 0, lon: 0)
         let b = SavedPlace(id: "b", name: "B", kind: .custom, lat: 0, lon: 0)
-        XCTAssertEqual(PlacesLogic.chips([a, school, b, home]).map(\.id), ["home", "school", "a", "b"])
-        XCTAssertEqual(PlacesLogic.chips([a, school, b, home], max: 3).map(\.id), ["home", "school", "a"])
+        XCTAssertEqual(PlacesLogic.chips([home, school, a, b]).map(\.id), ["home", "school", "a", "b"])
+        // moved in Settings: the chips follow
+        XCTAssertEqual(PlacesLogic.chips([a, school, b, home]).map(\.id), ["a", "school", "b", "home"])
+        XCTAssertEqual(PlacesLogic.chips([home, school, a, b], max: 3).map(\.id), ["home", "school", "a"])
     }
 
     func test_chipLabelAndMinutes() {

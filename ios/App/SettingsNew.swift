@@ -80,7 +80,7 @@ struct PlacesSettingsView: View {
                 }
                 .onMove { from, to in if let f = from.first { places.move(from: f, to: to) } }
                 .onDelete { set in for i in set { if let p = places.list[safe: i] { places.remove(p.id) } } }
-            } footer: { Text("The chips show them in this order. Your trip direction and the school alarm still use today’s home and school.") }
+            } footer: { Text("The chips under the search field show them in this order: tap Edit to move them. Your trip direction and the school alarm still use today’s home and school.") }
             Section { Button("Add a place") { adding = true } }
         }
         .navigationTitle("Your places")

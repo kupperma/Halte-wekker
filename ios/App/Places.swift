@@ -75,11 +75,8 @@ enum PlacesLogic {
         return list
     }
 
-    /// The quick chips: Home, School, then your pinned places in your order (at most `max` in all).
-    static func chips(_ list: [SavedPlace], max: Int = 6) -> [SavedPlace] {
-        let home = list.filter { $0.kind == .home }, school = list.filter { $0.kind == .school }
-        return Array((home + school + list.filter { $0.kind == .custom }).prefix(max))
-    }
+    /// The quick chips: your places in your order (Home and School first until you move them), at most `max`.
+    static func chips(_ list: [SavedPlace], max: Int = 6) -> [SavedPlace] { Array(list.prefix(max)) }
 
     /// Minutes from now until a trip gets there (nil: no trip, or it's in the past).
     static func minutesNow(arrival: Date?, now: Date) -> Int? {

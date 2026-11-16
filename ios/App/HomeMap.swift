@@ -32,6 +32,14 @@ enum HomeMapStyle: String, CaseIterable, Identifiable {
 enum NewLook {
     static let key = "ui.newLook"            // on by default (0.19)
     static let vehiclesKey = "map.liveVehicles"
+
+    /// Settings › Reset everything: the new look's settings too (your places, the map, the switch, days turned off).
+    @MainActor static func resetAll() {
+        let d = UserDefaults.standard
+        for k in [key, vehiclesKey, HomeMapStyle.key, PlanTripModel.recentsKey, PlacesLogic.storageKey] { d.removeObject(forKey: k) }
+        PlacesStore.shared.reset()
+        SchoolAlarm.shared.clearSkipped()
+    }
 }
 
 // MARK: the stops on the map
@@ -48,6 +56,10 @@ final class MapStopsModel: ObservableObject {
     private var latest: MKCoordinateRegion?
     private var pending: Task<Void, Never>?
     private var running = false
+    private var notBefore = Date.distantPast
+
+    /// No look until then (the first seconds after the home appears belong to the live times).
+    func hold(until t: Date) { notBefore = max(notBefore, t) }
 
     /// The camera stopped here: look now, or as soon as the 20 s are up (with wherever the camera is by then).
     func cameraStopped(_ r: MKCoordinateRegion, visible: Bool) {
@@ -56,10 +68,11 @@ final class MapStopsModel: ObservableObject {
         let now = Date()
         let zoom = MapZoom.level(lonDelta: r.span.longitudeDelta)
         guard zoom >= StopTiles.minZoom else { return }
-        if StopTiles.mayLook(zoom: zoom, visible: visible, last: lastLook, now: now) {
+        if now >= notBefore, StopTiles.mayLook(zoom: zoom, visible: visible, last: lastLook, now: now) {
             Task { await look() }
-        } else if pending == nil, let last = lastLook {
-            let wait = max(1, StopTiles.minInterval - now.timeIntervalSince(last))
+        } else if pending == nil {
+            let interval = lastLook.map { StopTiles.minInterval - now.timeIntervalSince($0) } ?? 0
+            let wait = max(1, interval, notBefore.timeIntervalSince(now))
             pending = Task { @MainActor [weak self] in
                 try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
                 guard let self, !Task.isCancelled else { return }
@@ -73,12 +86,14 @@ final class MapStopsModel: ObservableObject {
     func pause() { pending?.cancel(); pending = nil }
 
     private func look() async {
-        guard !running, let r = latest else { return }
+        guard !running, let r = latest, MapZoom.level(lonDelta: r.span.longitudeDelta) >= StopTiles.minZoom else { return }
         running = true
         defer { running = false }
+        let first = lastLook == nil                     // (the first look of a launch: the two nearest tiles only)
         lastLook = Date()
         let c = r.center, la = r.span.latitudeDelta / 2, lo = r.span.longitudeDelta / 2
-        let tiles = StopTiles.due(StopTiles.covering(minLat: c.latitude - la, minLon: c.longitude - lo, maxLat: c.latitude + la, maxLon: c.longitude + lo),
+        let tiles = StopTiles.due(StopTiles.covering(minLat: c.latitude - la, minLon: c.longitude - lo, maxLat: c.latitude + la, maxLon: c.longitude + lo,
+                                                     limit: first ? 2 : 6),
                                   asked: asked, now: Date())
         if stops.count > 4000 { stops = [:]; asked = [:] }      // (a long day of panning: start again)
         for t in tiles {
@@ -164,6 +179,8 @@ struct NewHome: View {
     @StateObject private var plan = PlanTripModel()
     @State private var planOpen = false
     @State private var planFromSearch = false
+    @State private var warmedUp = false                    // the first seconds after appearing: no vehicles yet
+    @State private var idsChangedAt = Date.distantPast     // when the cards last changed (not a swipe: the map stays)
 
     enum HomeSheet: String, Identifiable {
         case settings, weather, addPlace, demo
@@ -178,7 +195,9 @@ struct NewHome: View {
     }
 
     /// The map is on screen: not under Your day, Fastest trip or the ride, and the app in front.
-    private var visible: Bool { shown && !dayOpen && scene == .active && !goStore.isOpen }
+    private var visible: Bool {
+        shown && !dayOpen && !planOpen && sheet == nil && tapped == nil && scene == .active && !goStore.isOpen
+    }
     private var mapStyle: HomeMapStyle { HomeMapStyle(rawValue: styleRaw) ?? .standard }
 
     var body: some View {
@@ -186,6 +205,7 @@ struct NewHome: View {
             map.ignoresSafeArea()
             if planOpen {
                 PlanTripOverlay(model: plan, pickOnOpen: planFromSearch, close: closePlan)
+                    .dynamicTypeSize(...DynamicTypeSize.accessibility2)
                     .transition(.opacity)
             } else {
                 VStack(spacing: 0) {
@@ -199,14 +219,15 @@ struct NewHome: View {
                     Spacer(minLength: 0)
                     bottomCards
                 }
+                .dynamicTypeSize(...DynamicTypeSize.accessibility2)
                 .transition(.opacity)
             }
-            if dayOpen {
-                DaySheet(close: { withAnimation(DS.move) { dayOpen = false } })
-                    .transition(.move(edge: .bottom))
-                    .zIndex(2)
-            }
             if let t = trip.toast { toast(t) }
+        }
+        .sheet(isPresented: $dayOpen) {
+            DaySheet(close: { dayOpen = false })
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
         }
         .modifier(HomeLoops())
         // the departures near you, when neither the live store nor your home board has them
@@ -217,19 +238,35 @@ struct NewHome: View {
                 try? await Task.sleep(nanoseconds: 30_000_000_000)
             }
         }
-        .onChange(of: focusedCard) { _, id in moveTo(card: id) }
+        .onChange(of: focusedCard) { old, new in
+            // only a swipe moves the map: not the cards changing under your finger (new answers, the nudge coming)
+            let ids = cardIds
+            guard Date().timeIntervalSince(idsChangedAt) > 0.6, let new, let from = old ?? ids.first, from != new,
+                  ids.contains(new), ids.contains(from) else { return }
+            moveTo(card: new)
+        }
+        .onChange(of: cardIds) { _, _ in idsChangedAt = Date() }
+        .onChange(of: live.updated) { _, u in if u != nil { warmedUp = true } }
         .onChange(of: plan.focused) { _, _ in if planOpen { fitRoute() } }
         .onChange(of: goStore.isOpen) { _, open in if open { planOpen = false; dayOpen = false } }
         .sheet(item: $tapped) { DepartureDetailSheet(tap: $0).presentationDetents([.medium, .large]) }
         // the live vehicles: every 15 s while the home is on screen, the app in front and the setting on
-        .task(id: showVehicles && visible) {
+        .task(id: showVehicles && visible && warmedUp) {
             guard showVehicles else { vehicles.clear(); return }
-            while !Task.isCancelled && visible {
+            while !Task.isCancelled && visible && warmedUp {
                 await vehicles.refresh(region, gate: vehicleGate)
                 try? await Task.sleep(nanoseconds: UInt64(VehiclePick.interval * 1_000_000_000))
             }
         }
-        .onAppear { shown = true }
+        .onAppear {
+            shown = true
+            mapStops.hold(until: Date().addingTimeInterval(3))
+            if live.updated != nil { warmedUp = true }
+        }
+        .task {
+            try? await Task.sleep(nanoseconds: 6_000_000_000)
+            warmedUp = true
+        }
         .onDisappear { shown = false; mapStops.pause() }
         .onChange(of: scene) { _, s in if s != .active { mapStops.pause() } else if let r = region { mapStops.cameraStopped(r, visible: visible) } }
         .sheet(item: $sheet) { s in
@@ -252,8 +289,8 @@ struct NewHome: View {
         let drawn: (stops: [Transit.NearStop], names: Bool) = region.map { mapStops.drawn(in: $0) } ?? (stops: [], names: false)
         let showV = VehiclePick.shows(vehicleGate) && region != nil && !planOpen
         let route = planOpen ? plan.route(plan.focused) : []
-        // (the vehicles slide along their road once a second; without them the map is redrawn only when it changes)
-        return TimelineView(.periodic(from: .now, by: showV ? 1 : 3600)) { tl in
+        // (the vehicles slide along their road every 2 s while there are any; else the map is redrawn only when it changes)
+        return TimelineView(.periodic(from: .now, by: showV && !vehicles.segs.isEmpty ? 2 : 3600)) { tl in
             let moving: [LiveVehiclesModel.Moving] = showV ? region.map { vehicles.moving(at: tl.date, in: $0) } ?? [] : []
             Map(position: $camera) {
                 UserAnnotation()
@@ -284,7 +321,7 @@ struct NewHome: View {
 
     /// May the live vehicles be asked for and drawn now (`VehiclePick`).
     private var vehicleGate: VehiclePick.Gate {
-        LiveVehiclesModel.gate(enabled: showVehicles, visible: visible, active: scene == .active, region: region)
+        LiveVehiclesModel.gate(enabled: showVehicles, visible: visible && warmedUp, active: scene == .active, region: region)
     }
 
     // MARK: top
@@ -331,6 +368,8 @@ struct NewHome: View {
                         .padding(.horizontal, 14).frame(minHeight: 40)
                         .background(lead ? DS.accent : DS.surface, in: Capsule())
                         .dsFloat()
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(DSPressStyle())
                     .accessibilityLabel(mins.map { "\(p.name), \($0) minutes from here" } ?? p.name)
@@ -386,7 +425,7 @@ struct NewHome: View {
     }
 
     private var followButton: some View {
-        let on = camera.followsUserLocation
+        let on = camera.followsUserLocation && !trip.locationDenied
         return Button {
             withAnimation(DS.move) { camera = .userLocation(followsHeading: false, fallback: camera) }
         } label: {
@@ -448,11 +487,11 @@ struct NewHome: View {
             let stops = live.nearStops.map { DepartureGroups.Stop(id: $0.id, name: $0.name, rail: $0.rail, metres: metres($0.lat, $0.lon, fallback: $0.meters), lat: $0.lat, lon: $0.lon) }
             let rail = Set(live.nearStops.filter(\.rail).map(\.id))
             let deps = live.nearBoard.map { departure($0, rail: rail.contains($0.stopId)) }
-            return (DepartureGroups.cards(stops: stops, departures: deps, now: now), false, live.nearAsOf, nil)
+            return (DepartureGroups.cards(stops: stops, departures: deps, now: now), live.nearBoard.isEmpty && live.updated == nil, live.nearAsOf, nil)
         case .homeBoard:
             let stops = stopsStore.boardStops.map { DepartureGroups.Stop(id: $0.id, name: $0.name, rail: false, metres: nil) }
             let deps = live.board.map { departure($0, rail: false) }
-            return (DepartureGroups.cards(stops: stops, departures: deps, now: now), live.board.isEmpty && live.panelsUpdated == nil, live.panelsAsOf, nil)
+            return (DepartureGroups.cards(stops: stops, departures: deps, now: now), live.panelsUpdated == nil, live.panelsAsOf, nil)
         case .own:
             let stops = nearDeps.stops.map { DepartureGroups.Stop(id: $0.id, name: $0.name, rail: $0.rail, metres: metres($0.lat, $0.lon, fallback: $0.meters), lat: $0.lat, lon: $0.lon) }
             let rail = Set(nearDeps.stops.filter(\.rail).map(\.id))
@@ -472,9 +511,12 @@ struct NewHome: View {
         return DepartureCardsView(cards: data.cards, loading: data.loading, asOf: data.asOf, note: data.note, nudge: nudge,
                                   focused: $focusedCard, tap: { tapped = $0 }, openDay: { openDay() })
             .padding(.bottom, 8)
-            .simultaneousGesture(DragGesture(minimumDistance: 24).onEnded { v in
-                if v.translation.height < -50 && abs(v.translation.height) > abs(v.translation.width) * 1.5 { openDay() }
-            })
+    }
+
+    /// The cards' ids as they show (the nudge, the stops, or the empty card).
+    private var cardIds: [String] {
+        let c = cardData.cards.map(\.id)
+        return (nudge == nil ? [] : ["nudge"]) + (c.isEmpty ? ["empty"] : c)
     }
 
     /// A swipe to a stop's card moves the map there.
@@ -491,14 +533,14 @@ struct NewHome: View {
         guard trip.phase == .idle else { return nil }
         let now = Date()
         if let n = school.next, GoStore.schoolWindowOpen(n, now: now), let l = n.leave, let t = n.trip,
-           let text = DepartureGroups.leaveText(leave: l, now: now) {
-            return AnyView(NudgeCard(title: text, ride: t.first, sub: "For your \(Fmt.hhmm(n.classStart)) class") {
+           DepartureGroups.leaveText(leave: l, now: now) != nil {
+            return AnyView(NudgeCard(leave: l, ride: t.first, sub: "For your \(Fmt.hhmm(n.classStart)) class") {
                 HomeActions.openPlanGo(school: true, trip: trip, planner: planner, goStore: goStore, near: near)
             })
         }
         if let a = planner.arrive, let t = planner.arriveChosen, GoStore.arriveWindowOpen(a, chosen: t, now: now),
-           let text = DepartureGroups.leaveText(leave: t.start, now: now) {
-            return AnyView(NudgeCard(title: text, ride: t.first, sub: a.leaving ? "Your trip \(a.out ? "to school" : "home")" : "\(a.out ? "School" : "Home") by \(a.time)") {
+           DepartureGroups.leaveText(leave: t.start, now: now) != nil {
+            return AnyView(NudgeCard(leave: t.start, ride: t.first, sub: a.leaving ? "Your trip \(a.out ? "to school" : "home")" : "\(a.out ? "School" : "Home") by \(a.time)") {
                 HomeActions.openPlanGo(school: false, trip: trip, planner: planner, goStore: goStore, near: near)
             })
         }
@@ -518,7 +560,7 @@ struct NewHome: View {
 
     /// A place's chip: Plan from your location to there, leaving now.
     private func openPlan(to p: SavedPlace) {
-        plan.from = .here; plan.to = .place(places.place(p)); plan.when = .now
+        plan.from = .here; plan.to = .place(places.place(p), name: p.name); plan.when = .now
         planFromSearch = false
         withAnimation(DS.quick) { planOpen = true }
     }
@@ -591,16 +633,19 @@ struct PlaceSearchSheet: View {
 
 /// The next trip, due now: when to leave, the first ride, and Go (the hands-free screen; it also opens by itself).
 struct NudgeCard: View {
-    let title: String
+    let leave: Date
     let ride: Ride
     let sub: String
     let go: () -> Void
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                DSLinePill(line: ride.line, train: ride.isTrain)
-                Text("\(title) · \(Fmt.hhmm(ride.departure))").font(DS.headline).monospacedDigit().foregroundStyle(DS.text)
-                    .lineLimit(1).minimumScaleFactor(0.8)
+            TimelineView(.everyMinute) { tl in
+                HStack(spacing: 8) {
+                    DSLinePill(line: ride.line, train: ride.isTrain)
+                    Text("\(DepartureGroups.leaveText(leave: leave, now: tl.date) ?? "Leave now") · \(Fmt.hhmm(ride.departure))")
+                        .font(DS.headline).monospacedDigit().foregroundStyle(DS.text)
+                        .lineLimit(1).minimumScaleFactor(0.8)
+                }
             }
             Text("\(sub) · from \(Fmt.place(ride.fromStop))").font(DS.sub).foregroundStyle(DS.secondary).lineLimit(2)
             Button(action: go) {
