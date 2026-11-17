@@ -21,20 +21,20 @@ enum DS {
     static let surface3 = dynamic(0xF1F3F5, 0x2C3137)
     static let divider = dynamic(0xECEEF0, 0x33383E)
     /// The one accent: fills (white text on it, 5.0:1).
-    static let accent = Color(hex: 0x0E7A55)
+    static let accent = Color(hex: DSCore.accent)
     /// The accent as text or an icon on a surface.
-    static let accentText = dynamic(0x0E7A55, 0x4CC792)
+    static let accentText = dynamic(DSCore.accent, DSCore.accentTextDark)
     static let accentSoft = dynamic(0xE3F3EC, 0x163A2C)
     static let accentSoftText = dynamic(0x0A5C40, 0x8FE0BB)
     /// Late, cancelled, a tight change.
-    static let warning = dynamic(0xA84219, 0xFF8A5C)
+    static let warning = dynamic(DSCore.warning, DSCore.warningDark)
     static let onAccent = Color.white
 
     // line pills, by mode (white text on them)
-    // (white text on each ≥ 4.5:1 in both modes)
-    static let train = dynamic(0x2B3A55, 0x4A68A8)
-    static let bus = Color(hex: 0xC4461F)
-    static let tram = dynamic(0x6B3FA0, 0x7A55B0)
+    // (white text on each ≥ 4.5:1 in both modes; the values the Live Activity shares are in Shared/DesignShared.swift)
+    static let train = dynamic(DSCore.train, DSCore.trainDark)
+    static let bus = Color(hex: DSCore.bus)
+    static let tram = dynamic(DSCore.tram, DSCore.tramDark)
     static let ferry = dynamic(0x1C6E8C, 0x2A7898)
 
     // "Next trip first" (0.19.1, concept B): dark-first, the same tokens plus these two
