@@ -9,11 +9,21 @@ struct NewLookSettings: View {
     @EnvironmentObject var live: LiveStore
     @AppStorage(HomeMapStyle.key) private var styleRaw = HomeMapStyle.standard.rawValue
     @AppStorage(NewLook.vehiclesKey) private var vehicles = true
+    @AppStorage(HomeStyle.key) private var homeStyle = HomeStyle.live.rawValue
     @State private var showNotices = false
     @State private var showSteady = false
     @State private var liveStops = false
 
     var body: some View {
+        Section {
+            Picker("Home style", selection: $homeStyle) {
+                ForEach(HomeStyle.allCases) { Text($0.title).tag($0.rawValue) }
+            }
+        } header: { Text("Home") } footer: {
+            Text(HomeStyle.of(homeStyle) == .live
+                 ? "The map with what leaves from the stops around you, and your day under it."
+                 : "Your next trip big, with when to leave and Start, on a dark map. Home, School, Plan and your week at the bottom.")
+        }
         Section {
             Picker("Style", selection: $styleRaw) {
                 ForEach(HomeMapStyle.allCases) { Text($0.title).tag($0.rawValue) }

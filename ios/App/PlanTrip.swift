@@ -148,6 +148,7 @@ enum PlanSheetKind: Identifiable, Equatable {
 struct PlanTripOverlay: View {
     @ObservedObject var model: PlanTripModel
     var pickOnOpen = false                              // opened from Search: straight to Where to?
+    var legBars = false                                 // Next trip first: each option with its leg bar (B2)
     let close: () -> Void
     @EnvironmentObject var trip: TripManager
     @EnvironmentObject var near: NearMe
@@ -292,7 +293,7 @@ struct PlanTripOverlay: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 10) {
                     ForEach(model.options) { t in
-                        OptionCard(trip: t, label: model.labels[t.id], selected: t.id == model.focused)
+                        OptionCard(trip: t, label: model.labels[t.id], selected: t.id == model.focused, legBar: legBars)
                             .containerRelativeFrame(.horizontal) { w, _ in min(300, w - 120) }
                             .id(t.id)
                     }
@@ -420,6 +421,7 @@ struct OptionCard: View {
     let trip: DoorTrip
     let label: PlanCompare.Label?
     let selected: Bool
+    var legBar = false
     var body: some View {
         let changes = Array(trip.rides.indices.dropFirst())
         let tight = changes.first { k in
@@ -438,6 +440,7 @@ struct OptionCard: View {
                 Text("· \(Fmt.rideText(trip.end.timeIntervalSince(trip.start) / 60))").font(DS.footnote).monospacedDigit().foregroundStyle(DS.secondary)
                     .lineLimit(1)
             }
+            if legBar { DSLegBar(legs: NextTrip.legs(of: trip)) }
             Group {
                 if let k = tight {
                     let ch = Fmt.mins(trip.rides[k].departure.timeIntervalSince(trip.rides[k - 1].arrival))

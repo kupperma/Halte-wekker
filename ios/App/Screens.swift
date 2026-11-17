@@ -12,6 +12,9 @@ struct RootView: View {
     /// The new home is on screen: it follows the phone's light or dark setting. Everything else (still the old look)
     /// stays dark, as before.
     private var newHomeShown: Bool { newLook && ((trip.phase == .idle && !go.isOpen) || (trip.phase == .transfer && browsing)) }
+    @AppStorage(HomeStyle.key) private var homeStyle = HomeStyle.live.rawValue
+    /// The home follows the phone's light or dark, as Live around you; Next trip first is dark (as its design).
+    private var followsPhone: Bool { newHomeShown && HomeStyle.of(homeStyle) == .live }
     var body: some View {
         Group {
             switch trip.phase {
@@ -65,8 +68,8 @@ struct RootView: View {
                     .zIndex(10)
             }
         }
-        .preferredColorScheme(newHomeShown ? nil : .dark)
-        .onChange(of: newHomeShown, initial: true) { _, new in
+        .preferredColorScheme(followsPhone ? nil : .dark)
+        .onChange(of: followsPhone, initial: true) { _, new in
             DispatchQueue.main.async { WindowStyle.apply(dark: !new) }
         }
     }

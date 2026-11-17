@@ -38,8 +38,12 @@ final class DayModel: ObservableObject {
 
 /// Your day (artboard C3): pulled up from the departure cards. One day at a time: the wake-up alarm (on or off for that
 /// day), when to leave and the rides, the first class and until when, and the way home; then Coming up and what's watched.
+///
+/// `week` (Next trip first, artboard B3): "Your week" over the map, with a strip of the next seven days instead of the
+/// day switcher; the same day, alarms, Coming up and watching below it.
 struct DaySheet: View {
     let close: () -> Void
+    var week = false
     @ObservedObject private var school = SchoolAlarm.shared
     @ObservedObject private var log = NoticeLog.shared
     @EnvironmentObject var lines: LineWatchStore
@@ -63,17 +67,33 @@ struct DaySheet: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                header
-                Text(DayTimeline.title(shownDay, now: Date(), cal: cal)).font(DS.largeTitle).foregroundStyle(DS.text)
-                    .accessibilityAddTraits(.isHeader)
+                if week {
+                    weekHeader
+                    weekStrip
+                } else {
+                    header
+                    Text(DayTimeline.title(shownDay, now: Date(), cal: cal)).font(DS.largeTitle).foregroundStyle(DS.text)
+                        .accessibilityAddTraits(.isHeader)
+                }
                 if let n = latestNotice { noticeCard(n) }
-                timeline
+                if week {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text(DayTimeline.title(shownDay, now: Date(), cal: cal)).font(DS.headline).foregroundStyle(DS.text)
+                            .accessibilityAddTraits(.isHeader)
+                        timeline
+                    }
+                    .padding(DS.s16)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(DS.surface, in: RoundedRectangle(cornerRadius: DS.cardRadiusSmall, style: .continuous))
+                } else {
+                    timeline
+                }
                 comingUp
                 watching
             }
             .padding(.horizontal, DS.s20).padding(.top, 8).padding(.bottom, 32)
         }
-        .background(DS.surface.ignoresSafeArea())
+        .background((week ? DS.page : DS.surface).ignoresSafeArea())
         .task(id: key) {
             await model.load()
             // (stepping through the days: only the one you stop on asks for its way home)
@@ -112,6 +132,60 @@ struct DaySheet: View {
             .foregroundStyle(DS.text)
         }
         .padding(.top, 8)
+    }
+
+    // MARK: the week (Next trip first)
+
+    private var weekHeader: some View {
+        HStack {
+            Text("Your week").font(DS.largeTitle).foregroundStyle(DS.text).accessibilityAddTraits(.isHeader)
+            Spacer()
+            Button(action: close) {
+                Image(systemName: "map").font(.body.weight(.semibold)).foregroundStyle(DS.text)
+                    .frame(width: 44, height: 44).background(DS.surface3, in: Circle())
+            }
+            .buttonStyle(DSPressStyle())
+            .accessibilityLabel("Back to the map")
+        }
+        .padding(.top, 8)
+    }
+
+    /// Today and the six days after it; the day you look at filled, days with classes in full ink.
+    private var weekStrip: some View {
+        HStack(spacing: 6) {
+            ForEach(NextTrip.weekDays(from: Date(), cal: cal), id: \.self) { d in
+                let on = cal.isDate(d, inSameDayAs: shownDay)
+                let classes = hasClasses(d)
+                let weekend = NextTrip.isWeekend(d, cal: cal)
+                Button { withAnimation(DS.quick) { day = d } } label: {
+                    VStack(spacing: 2) {
+                        Text(DayTimeline.fmt("EEE", cal).string(from: d)).font(DS.footnoteStrong)
+                        Text(DayTimeline.fmt("d", cal).string(from: d)).font(DS.bodyStrong).monospacedDigit()
+                    }
+                    .lineLimit(1).minimumScaleFactor(0.6)
+                    .foregroundStyle(on ? DS.onAccent : classes ? DS.text : DS.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 58)
+                    .background(on ? DS.accent : weekend ? DS.page : DS.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(weekend && !on ? DS.divider : .clear, lineWidth: 1))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(DSPressStyle())
+                .accessibilityLabel(spokenDay(d, classes: classes))
+                .accessibilityAddTraits(on ? .isSelected : [])
+            }
+        }
+    }
+
+    /// "Today, Tuesday 17 November, classes"; "Thursday 19 November, no classes".
+    private func spokenDay(_ d: Date, classes: Bool) -> String {
+        let rel = DayTimeline.title(d, now: Date(), cal: cal), full = DayTimeline.fmt("EEEE d MMMM", cal).string(from: d)
+        return "\(full.hasPrefix(rel) ? full : "\(rel), \(full)"), \(classes ? "classes" : "no classes")"
+    }
+
+    /// A day with classes: a trip planned for it, or classes in the calendar.
+    private func hasClasses(_ d: Date) -> Bool {
+        let k = Fmt.ymd.string(from: cal.date(bySettingHour: 12, minute: 0, second: 0, of: d) ?? d)
+        return school.week.contains { $0.day == k } || model.events.contains { !$0.allDay && !$0.cancelled && cal.isDate($0.start, inSameDayAs: d) }
     }
 
     private func step(_ n: Int) {

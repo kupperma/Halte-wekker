@@ -81,9 +81,36 @@ struct HomeLoops: ViewModifier {
     }
 }
 
+/// The trip that's due now: the school trip or a planned one, in the window `autoGo` opens Fastest trip by itself and
+/// while it's still to leave for. The next-trip nudge (Live around you) and the big card (Next trip first) show it.
+struct DueTrip {
+    let school: Bool            // the school alarm's trip (else the Be there by / Leave at plan)
+    let leave: Date
+    let trip: DoorTrip
+    let sub: String             // "For your 09:00 class", "Home by 17:30", "Your trip home"
+    let dest: Place
+    let deadline: Date?
+}
+
 /// What the old home does to open Fastest trip for a plan, by itself or when you tap: the same code, for the new screens.
 @MainActor
 enum HomeActions {
+    /// The due trip, if any (only with no trip on: the ride screens have the screen then).
+    static func due(trip: TripManager, planner: Planner, now: Date) -> DueTrip? {
+        guard trip.phase == .idle else { return nil }
+        if let n = SchoolAlarm.shared.next, GoStore.schoolWindowOpen(n, now: now), let l = n.leave, let t = n.trip,
+           DepartureGroups.leaveText(leave: l, now: now) != nil {
+            return DueTrip(school: true, leave: l, trip: t, sub: "For your \(Fmt.hhmm(n.classStart)) class", dest: .buas, deadline: n.beThere)
+        }
+        if let a = planner.arrive, let t = planner.arriveChosen, GoStore.arriveWindowOpen(a, chosen: t, now: now),
+           DepartureGroups.leaveText(leave: t.start, now: now) != nil {
+            return DueTrip(school: false, leave: t.start, trip: t,
+                           sub: a.leaving ? "Your trip \(a.out ? "to school" : "home")" : "\(a.out ? "School" : "Home") by \(a.time)",
+                           dest: a.out ? .buas : .veghel, deadline: a.leaving ? nil : a.when)
+        }
+        return nil
+    }
+
     /// What the outfit screen plans for (as `HomeView.updateOutfit`).
     static func updateOutfit(trip: TripManager, live: LiveStore, goStore: GoStore, near: NearMe) {
         var leave: Date?, arrive: Date?

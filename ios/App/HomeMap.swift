@@ -28,6 +28,21 @@ enum HomeMapStyle: String, CaseIterable, Identifiable {
     }
 }
 
+/// Settings › Home style: the map with what leaves around you (concept C, the default), or your next trip first
+/// (concept B, 0.19.1). Both are the same home over the same stores and refreshes; only the layout differs.
+enum HomeStyle: String, CaseIterable, Identifiable {
+    case live, nextTrip
+    static let key = "ui.homeStyle"
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .live: return "Live around you"
+        case .nextTrip: return "Next trip first"
+        }
+    }
+    static func of(_ raw: String) -> HomeStyle { HomeStyle(rawValue: raw) ?? .live }
+}
+
 /// Settings keys of the new look.
 enum NewLook {
     static let key = "ui.newLook"            // on by default (0.19)
@@ -36,7 +51,7 @@ enum NewLook {
     /// Settings › Reset everything: the new look's settings too (your places, the map, the switch, days turned off).
     @MainActor static func resetAll() {
         let d = UserDefaults.standard
-        for k in [key, vehiclesKey, HomeMapStyle.key, PlanTripModel.recentsKey, PlacesLogic.storageKey] { d.removeObject(forKey: k) }
+        for k in [key, vehiclesKey, HomeMapStyle.key, HomeStyle.key, PlanTripModel.recentsKey, PlacesLogic.storageKey] { d.removeObject(forKey: k) }
         PlacesStore.shared.reset()
         SchoolAlarm.shared.clearSkipped()
     }
@@ -165,6 +180,7 @@ struct NewHome: View {
     @StateObject private var vehicles = LiveVehiclesModel()
     @AppStorage(NewLook.vehiclesKey) private var showVehicles = true
     @AppStorage(HomeMapStyle.key) private var styleRaw = HomeMapStyle.standard.rawValue
+    @AppStorage(HomeStyle.key) private var homeStyleRaw = HomeStyle.live.rawValue
 
     @State private var camera: MapCameraPosition
     @State private var region: MKCoordinateRegion?
@@ -181,6 +197,7 @@ struct NewHome: View {
     @State private var planFromSearch = false
     @State private var warmedUp = false                    // the first seconds after appearing: no vehicles yet
     @State private var idsChangedAt = Date.distantPast     // when the cards last changed (not a swipe: the map stays)
+    @State private var weekOpen = false                    // Next trip first: Your week over the map
 
     enum HomeSheet: String, Identifiable {
         case settings, weather, addPlace, demo
@@ -196,15 +213,22 @@ struct NewHome: View {
 
     /// The map is on screen: not under Your day, Fastest trip or the ride, and the app in front.
     private var visible: Bool {
-        shown && !dayOpen && !planOpen && sheet == nil && tapped == nil && scene == .active && !goStore.isOpen
+        shown && !dayOpen && !planOpen && !weekOpen && sheet == nil && tapped == nil && scene == .active && !goStore.isOpen
     }
+    /// Settings › Home style: Next trip first (concept B) instead of Live around you (concept C).
+    private var nextFirst: Bool { HomeStyle.of(homeStyleRaw) == .nextTrip }
     private var mapStyle: HomeMapStyle { HomeMapStyle(rawValue: styleRaw) ?? .standard }
 
     var body: some View {
         ZStack(alignment: .top) {
             map.ignoresSafeArea()
+                .accessibilityHidden(weekOpen)
             if planOpen {
-                PlanTripOverlay(model: plan, pickOnOpen: planFromSearch, close: closePlan)
+                PlanTripOverlay(model: plan, pickOnOpen: planFromSearch, legBars: nextFirst, close: closePlan)
+                    .dynamicTypeSize(...DynamicTypeSize.accessibility2)
+                    .transition(.opacity)
+            } else if nextFirst {
+                nextTripLayout
                     .dynamicTypeSize(...DynamicTypeSize.accessibility2)
                     .transition(.opacity)
             } else {
@@ -231,8 +255,9 @@ struct NewHome: View {
         }
         .modifier(HomeLoops())
         // the departures near you, when neither the live store nor your home board has them
-        .task(id: ownDepartures && visible) {
-            guard ownDepartures else { return }
+        // (Next trip first shows no departure cards: nothing is asked for them)
+        .task(id: ownDepartures && visible && !nextFirst) {
+            guard ownDepartures && !nextFirst else { return }
             while !Task.isCancelled && visible {
                 await nearDeps.refresh(at: near.position)
                 try? await Task.sleep(nanoseconds: 30_000_000_000)
@@ -248,7 +273,8 @@ struct NewHome: View {
         .onChange(of: cardIds) { _, _ in idsChangedAt = Date() }
         .onChange(of: live.updated) { _, u in if u != nil { warmedUp = true } }
         .onChange(of: plan.focused) { _, _ in if planOpen { fitRoute() } }
-        .onChange(of: goStore.isOpen) { _, open in if open { planOpen = false; dayOpen = false } }
+        .onChange(of: goStore.isOpen) { _, open in if open { planOpen = false; dayOpen = false; weekOpen = false } }
+        .onChange(of: homeStyleRaw) { _, _ in weekOpen = false; dayOpen = false }
         .sheet(item: $tapped) { DepartureDetailSheet(tap: $0).presentationDetents([.medium, .large]) }
         // the live vehicles: every 15 s while the home is on screen, the app in front and the setting on
         .task(id: showVehicles && visible && warmedUp) {
@@ -398,12 +424,13 @@ struct NewHome: View {
 
     private var rightColumn: some View {
         VStack(alignment: .trailing, spacing: 8) {
-            weatherChip
+            weatherChip()
             followButton
         }
     }
 
-    @ViewBuilder private var weatherChip: some View {
+    /// `inline`: inside the search field (Next trip first), without its own shadow.
+    private func weatherChip(inline: Bool = false) -> some View {
         Button { sheet = .weather } label: {
             HStack(spacing: 4) {
                 if let s = outfit.plan?.start {
@@ -415,8 +442,8 @@ struct NewHome: View {
                 }
             }
             .padding(.horizontal, 12).frame(minWidth: 44, minHeight: 36)
-            .background(DS.surface.opacity(0.96), in: Capsule())
-            .dsFloat()
+            .background(inline ? DS.surface3 : DS.surface.opacity(0.96), in: Capsule())
+            .shadow(color: .black.opacity(inline ? 0 : 0.14), radius: 8, y: 2)
             .frame(minHeight: 44)
             .contentShape(Rectangle())
         }
@@ -532,21 +559,123 @@ struct NewHome: View {
     /// When the school trip or a Be there by plan is due (the time `autoGo` opens Fastest trip by itself): one card
     /// with when to leave and Go, before the departures.
     private var nudge: AnyView? {
-        guard trip.phase == .idle else { return nil }
+        guard let d = HomeActions.due(trip: trip, planner: planner, now: Date()) else { return nil }
+        return AnyView(NudgeCard(leave: d.leave, ride: d.trip.first, sub: d.sub) {
+            HomeActions.openPlanGo(school: d.school, trip: trip, planner: planner, goStore: goStore, near: near)
+        })
+    }
+
+    // MARK: Next trip first (concept B)
+
+    /// The map on top with search and follow-me, the big card with your next trip, and the bar with Home, School,
+    /// Plan and Your week (which then covers the map, the bar staying).
+    private var nextTripLayout: some View {
+        VStack(spacing: 0) {
+            ZStack {
+                if weekOpen {
+                    DaySheet(close: { closeWeek() }, week: true)
+                        .transition(.opacity)
+                } else {
+                    VStack(spacing: 10) {
+                        nextSearchRow
+                        Spacer(minLength: 0)
+                        HStack { Spacer(); followButton }
+                        if trip.phase == .idle {
+                            NextTripCard(content: heroContent, start: startHero, otherTimes: heroOtherTimes,
+                                         plan: { openPlan(to: nil, when: .now) })
+                        }
+                    }
+                    .padding(.horizontal, DS.edge).padding(.top, 6).padding(.bottom, 10)
+                    .transition(.opacity)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            NextTripBar(home: places.home, school: places.school, weekOpen: weekOpen,
+                        openPlace: { openPlan(to: $0) }, plan: { openPlan(to: nil, when: .now) },
+                        week: { withAnimation(DS.quick) { weekOpen.toggle() } })
+        }
+    }
+
+    private func closeWeek() { withAnimation(DS.quick) { weekOpen = false } }
+
+    /// The search field, with the weather and Settings inside it.
+    private var nextSearchRow: some View {
+        HStack(spacing: 4) {
+            Button { openSearch() } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "magnifyingglass").font(.body.weight(.semibold)).foregroundStyle(DS.secondary)
+                    Text("Search a stop or place").font(DS.body).foregroundStyle(DS.secondary).lineLimit(1)
+                    Spacer(minLength: 0)
+                }
+                .padding(.leading, 18)
+                .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Search a stop or place")
+            .accessibilityHint("Plan a trip")
+            weatherChip(inline: true)
+            Button { sheet = .settings } label: {
+                Image(systemName: "gearshape").font(.body.weight(.semibold)).foregroundStyle(DS.secondary)
+                    .frame(width: 44, height: 52).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Settings")
+        }
+        .padding(.trailing, 4)
+        .background(DS.surface, in: Capsule())
+        .dsFloat()
+    }
+
+    /// What your places call a place (Home and School as you named them).
+    private func placeName(_ p: Place) -> String {
+        if p.key == Place.veghel.key { return places.home?.name ?? "Home" }
+        if p.key == Place.buas.key { return places.school?.name ?? p.short }
+        return p.short
+    }
+
+    /// The card's trip: a due school or planned trip, else the first of your next trips toward where you're going,
+    /// else nothing (`NextTrip.pick`).
+    private var heroContent: NextTripCard.Content {
         let now = Date()
-        if let n = school.next, GoStore.schoolWindowOpen(n, now: now), let l = n.leave, let t = n.trip,
-           DepartureGroups.leaveText(leave: l, now: now) != nil {
-            return AnyView(NudgeCard(leave: l, ride: t.first, sub: "For your \(Fmt.hhmm(n.classStart)) class") {
-                HomeActions.openPlanGo(school: true, trip: trip, planner: planner, goStore: goStore, near: near)
-            })
+        let due = HomeActions.due(trip: trip, planner: planner, now: now)
+        let pick = NextTrip.pick(schoolDue: due?.school == true, plannedDue: due.map { !$0.school } ?? false,
+                                 liveLeaves: live.onTheMove ? [] : live.next.map(\.start), now: now)
+        switch pick.source {
+        case .school, .planned:
+            guard let d = due else { return .empty(note: nil) }
+            return .trip(.init(title: d.sub, leave: d.leave, trip: d.trip, destName: placeName(d.dest), asOf: nil))
+        case .live:
+            guard let i = pick.index, let t = live.next[safe: i] else { return .empty(note: nil) }
+            let dest = placeName(live.destination(trip.direction))
+            return .trip(.init(title: "\(dest) · next trip", leave: t.start, trip: t, destName: dest, asOf: live.nextAsOf))
+        case .none:
+            if live.onTheMove { return .empty(note: "You’re on the move: finding the bus or train you’re on.") }
+            if live.updated == nil && live.nextError == nil { return .loading }
+            return .empty(note: live.nextError)
         }
-        if let a = planner.arrive, let t = planner.arriveChosen, GoStore.arriveWindowOpen(a, chosen: t, now: now),
-           DepartureGroups.leaveText(leave: t.start, now: now) != nil {
-            return AnyView(NudgeCard(leave: t.start, ride: t.first, sub: a.leaving ? "Your trip \(a.out ? "to school" : "home")" : "\(a.out ? "School" : "Home") by \(a.time)") {
-                HomeActions.openPlanGo(school: false, trip: trip, planner: planner, goStore: goStore, near: near)
-            })
+    }
+
+    /// Start: the hands-free Fastest trip, as Go (for the due trip with its plan; else to where you're going).
+    private func startHero() {
+        guard trip.phase == .idle else { return }
+        if let d = HomeActions.due(trip: trip, planner: planner, now: Date()) {
+            HomeActions.openPlanGo(school: d.school, trip: trip, planner: planner, goStore: goStore, near: near)
+        } else {
+            HomeActions.openGo(live: live, trip: trip, goStore: goStore, near: near)
         }
-        return nil
+    }
+
+    /// Other times: Plan to the card's place (to be there in time, for a due trip with a deadline).
+    private func heroOtherTimes() {
+        let now = Date()
+        if let d = HomeActions.due(trip: trip, planner: planner, now: now) {
+            let when: PlanCompare.When = d.deadline.map { $0 > now ? .arrive($0) : .now } ?? .now
+            openPlan(to: .place(d.dest, name: placeName(d.dest)), when: when)
+        } else {
+            let dest = live.destination(trip.direction)
+            openPlan(to: .place(dest, name: placeName(dest)), when: .now)
+        }
     }
 
     // MARK: actions
@@ -555,6 +684,7 @@ struct NewHome: View {
 
     /// Search anywhere: Plan from your location, straight to picking where to.
     private func openSearch() {
+        weekOpen = false
         plan.from = .here; plan.to = nil; plan.when = .now; plan.clear()
         planFromSearch = true
         withAnimation(DS.quick) { planOpen = true }
@@ -562,7 +692,14 @@ struct NewHome: View {
 
     /// A place's chip: Plan from your location to there, leaving now.
     private func openPlan(to p: SavedPlace) {
-        plan.from = .here; plan.to = .place(places.place(p), name: p.name); plan.when = .now
+        openPlan(to: .place(places.place(p), name: p.name), when: .now)
+    }
+
+    /// Plan from your location to there (nil: empty, to pick where to), leaving now or to be there by a time.
+    private func openPlan(to end: PlanTripModel.End?, when: PlanCompare.When) {
+        weekOpen = false
+        plan.from = .here; plan.to = end; plan.when = when
+        if end == nil { plan.clear() }
         planFromSearch = false
         withAnimation(DS.quick) { planOpen = true }
     }
