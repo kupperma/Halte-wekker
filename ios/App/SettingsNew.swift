@@ -73,7 +73,7 @@ struct NewLookSwitch: View {
         Section {
             Toggle("New look", isOn: $newLook)
         } footer: {
-            Text("The map-first home with your day and Plan a trip. Off brings back the station home of 0.18 for now.")
+            Text("The map-first home with your day and Plan a trip, and the trip screens with it: Fastest trip, the ride, the alarm and the change. Off brings back the station look of 0.18 for now.")
         }
     }
 }
