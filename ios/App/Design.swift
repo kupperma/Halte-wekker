@@ -144,13 +144,15 @@ struct DSLinePill: View {
 struct DSPrimaryButton: View {
     let title: String
     var icon: String? = nil
+    var lines = 1
     let action: () -> Void
     var body: some View {
         Button(action: action) {
             HStack(spacing: 8) {
                 if let icon { Image(systemName: icon).font(.body.weight(.semibold)) }
-                Text(title).font(DS.bodyStrong).lineLimit(1).minimumScaleFactor(0.8)
+                Text(title).font(DS.bodyStrong).lineLimit(lines).minimumScaleFactor(0.8).multilineTextAlignment(.center)
             }
+            .padding(.horizontal, DS.s16).padding(.vertical, lines > 1 ? 6 : 0)
             .foregroundStyle(DS.onAccent)
             .frame(maxWidth: .infinity, minHeight: DS.cta)
             .background(DS.accent, in: Capsule())

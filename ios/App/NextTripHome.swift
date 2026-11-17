@@ -43,6 +43,7 @@ struct NextTripCard: View {
         let trip: DoorTrip
         let destName: String        // "Home", "BUas"
         let asOf: Date?             // a saved answer: "as of 08:12"
+        var startTitle: String? = nil   // nil: "Start · wake me before <stop>"
     }
     enum Content {
         case loading
@@ -51,6 +52,8 @@ struct NextTripCard: View {
     }
 
     let content: Content
+    /// The countdown's clock (the same date the trip was picked with).
+    let now: Date
     let start: () -> Void
     let otherTimes: () -> Void
     let plan: () -> Void
@@ -104,16 +107,14 @@ struct NextTripCard: View {
                 .buttonStyle(.plain)
                 .accessibilityHint("Plan a trip to \(s.destName), with the other ways there")
             }
-            TimelineView(.periodic(from: .now, by: 15)) { tl in
-                let c = NextTrip.countdown(leave: s.leave, now: tl.date)
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    Text(c.value).font(DS.hero(min(big, 72))).monospacedDigit().foregroundStyle(DS.text)
-                        .lineLimit(1).minimumScaleFactor(0.6)
-                    Text(c.unit).font(DS.body).foregroundStyle(DS.secondary).lineLimit(2)
-                }
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(c.spoken)
+            let c = NextTrip.countdown(leave: s.leave, now: now)
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text(c.value).font(DS.hero(min(big, 72))).monospacedDigit().foregroundStyle(DS.text)
+                    .lineLimit(1).minimumScaleFactor(0.6)
+                Text(c.unit).font(DS.body).foregroundStyle(DS.secondary).lineLimit(2)
             }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(c.spoken)
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 DSLinePill(line: first.isTrain ? Transit.trainLabel(first.line) : first.line, train: first.isTrain)
                 (Text("\(Fmt.hhmm(first.departure)) from \(Fmt.place(first.fromStop))").font(DS.calloutStrong).foregroundStyle(DS.text)
@@ -127,7 +128,7 @@ struct NextTripCard: View {
                 Text(Snapshots.asOf(a)).font(DS.footnote).monospacedDigit().foregroundStyle(DS.secondary)
             }
             DSLegBar(legs: NextTrip.legs(of: s.trip))
-            DSPrimaryButton(title: "Start · wake me before \(Fmt.place(s.trip.last.toStop))", icon: "play.fill", action: start)
+            DSPrimaryButton(title: s.startTitle ?? "Start · wake me before \(Fmt.place(s.trip.last.toStop))", icon: "play.fill", lines: 2, action: start)
                 .accessibilityHint("Opens the hands-free trip")
         }
     }

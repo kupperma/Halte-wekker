@@ -37,7 +37,10 @@ struct NewLookSettings: View {
             Button("Home bus stops and lines") { liveStops = true }
                 .sheet(isPresented: $liveStops, onDismiss: { Task { await live.refresh(trip.direction, force: true) } }) { LiveSettingsSheet() }
         } header: { Text("Places") } footer: {
-            Text("Your places are the chips under the search field. The bus stops and lines are the ones the home shows near home and the school alarm plans from.")
+            Text((HomeStyle.of(homeStyle) == .live
+                  ? "Your places are the chips under the search field."
+                  : "Home and School are in the bar at the bottom; all your places show when you search.")
+                 + " The bus stops and lines are the ones the home shows near home and the school alarm plans from.")
         }
         Section("Notifications") {
             Button("Notifications and what’s watched") { showNotices = true }

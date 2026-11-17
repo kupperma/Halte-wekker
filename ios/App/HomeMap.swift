@@ -228,8 +228,9 @@ struct NewHome: View {
                     .dynamicTypeSize(...DynamicTypeSize.accessibility2)
                     .transition(.opacity)
             } else if nextFirst {
+                // (capped where its big card and the bar still fit on the screen together)
                 nextTripLayout
-                    .dynamicTypeSize(...DynamicTypeSize.accessibility2)
+                    .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
                     .transition(.opacity)
             } else {
                 VStack(spacing: 0) {
@@ -581,8 +582,11 @@ struct NewHome: View {
                         Spacer(minLength: 0)
                         HStack { Spacer(); followButton }
                         if trip.phase == .idle {
-                            NextTripCard(content: heroContent, start: startHero, otherTimes: heroOtherTimes,
-                                         plan: { openPlan(to: nil, when: .now) })
+                            // the trip picked again with the countdown's clock, so a trip that has gone makes way
+                            TimelineView(.periodic(from: .now, by: 15)) { tl in
+                                NextTripCard(content: heroContent(now: tl.date), now: tl.date, start: startHero, otherTimes: heroOtherTimes,
+                                             plan: { openPlan(to: nil, when: .now) })
+                            }
                         }
                     }
                     .padding(.horizontal, DS.edge).padding(.top, 6).padding(.bottom, 10)
@@ -590,9 +594,12 @@ struct NewHome: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            NextTripBar(home: places.home, school: places.school, weekOpen: weekOpen,
-                        openPlace: { openPlan(to: $0) }, plan: { openPlan(to: nil, when: .now) },
-                        week: { withAnimation(DS.quick) { weekOpen.toggle() } })
+            // (not while a trip runs: at a change the bar to your trip takes its place)
+            if trip.phase == .idle {
+                NextTripBar(home: places.home, school: places.school, weekOpen: weekOpen,
+                            openPlace: { openPlan(to: $0) }, plan: { openPlan(to: nil, when: .now) },
+                            week: { withAnimation(DS.quick) { weekOpen.toggle() } })
+            }
         }
     }
 
@@ -636,8 +643,7 @@ struct NewHome: View {
 
     /// The card's trip: a due school or planned trip, else the first of your next trips toward where you're going,
     /// else nothing (`NextTrip.pick`).
-    private var heroContent: NextTripCard.Content {
-        let now = Date()
+    private func heroContent(now: Date) -> NextTripCard.Content {
         let due = HomeActions.due(trip: trip, planner: planner, now: now)
         let pick = NextTrip.pick(schoolDue: due?.school == true, plannedDue: due.map { !$0.school } ?? false,
                                  liveLeaves: live.onTheMove ? [] : live.next.map(\.start), now: now)
@@ -648,7 +654,7 @@ struct NewHome: View {
         case .live:
             guard let i = pick.index, let t = live.next[safe: i] else { return .empty(note: nil) }
             let dest = placeName(live.destination(trip.direction))
-            return .trip(.init(title: "\(dest) · next trip", leave: t.start, trip: t, destName: dest, asOf: live.nextAsOf))
+            return .trip(.init(title: "\(dest) · next trip", leave: t.start, trip: t, destName: dest, asOf: live.nextAsOf, startTitle: "Start"))
         case .none:
             if live.onTheMove { return .empty(note: "You’re on the move: finding the bus or train you’re on.") }
             if live.updated == nil && live.nextError == nil { return .loading }

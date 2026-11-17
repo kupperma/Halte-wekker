@@ -150,29 +150,38 @@ struct DaySheet: View {
         .padding(.top, 8)
     }
 
-    /// Today and the six days after it; the day you look at filled, days with classes in full ink.
+    /// Today and the six days after it; the day you look at filled, days with classes in full ink. Each day at
+    /// least 44 pt wide: side by side when they fit, else a strip to scroll (large text).
     private var weekStrip: some View {
-        HStack(spacing: 6) {
-            ForEach(NextTrip.weekDays(from: Date(), cal: cal), id: \.self) { d in
-                let on = cal.isDate(d, inSameDayAs: shownDay)
-                let classes = hasClasses(d)
-                let weekend = NextTrip.isWeekend(d, cal: cal)
-                Button { withAnimation(DS.quick) { day = d } } label: {
-                    VStack(spacing: 2) {
-                        Text(DayTimeline.fmt("EEE", cal).string(from: d)).font(DS.footnoteStrong)
-                        Text(DayTimeline.fmt("d", cal).string(from: d)).font(DS.bodyStrong).monospacedDigit()
-                    }
-                    .lineLimit(1).minimumScaleFactor(0.6)
-                    .foregroundStyle(on ? DS.onAccent : classes ? DS.text : DS.secondary)
-                    .frame(maxWidth: .infinity, minHeight: 58)
-                    .background(on ? DS.accent : weekend ? DS.page : DS.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(weekend && !on ? DS.divider : .clear, lineWidth: 1))
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(DSPressStyle())
-                .accessibilityLabel(spokenDay(d, classes: classes))
-                .accessibilityAddTraits(on ? .isSelected : [])
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 4) { weekCells(fill: true) }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 4) { weekCells(fill: false) }
             }
+        }
+    }
+
+    private func weekCells(fill: Bool) -> some View {
+        ForEach(NextTrip.weekDays(from: Date(), cal: cal), id: \.self) { d in
+            let on = cal.isDate(d, inSameDayAs: shownDay)
+            let classes = hasClasses(d)
+            let weekend = NextTrip.isWeekend(d, cal: cal)
+            Button { withAnimation(DS.quick) { day = d } } label: {
+                VStack(spacing: 2) {
+                    Text(DayTimeline.fmt("EEE", cal).string(from: d)).font(DS.footnoteStrong)
+                    Text(DayTimeline.fmt("d", cal).string(from: d)).font(DS.bodyStrong).monospacedDigit()
+                }
+                .lineLimit(1)
+                .foregroundStyle(on ? DS.onAccent : classes ? DS.text : DS.secondary)
+                .padding(.horizontal, 4)
+                .frame(minWidth: 44, maxWidth: fill ? .infinity : nil, minHeight: 58)
+                .background(on ? DS.accent : DS.surface2, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(weekend && !on ? DS.divider : .clear, lineWidth: 1))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(DSPressStyle())
+            .accessibilityLabel(spokenDay(d, classes: classes))
+            .accessibilityAddTraits(on ? .isSelected : [])
         }
     }
 
