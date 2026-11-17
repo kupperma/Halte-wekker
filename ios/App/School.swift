@@ -368,10 +368,11 @@ final class SchoolAlarm: ObservableObject {
         try? BGTaskScheduler.shared.submit(r)
     }
 
-    /// Woken in the background: plan again, and ask to be woken again.
+    /// Woken in the background: plan again what's due (0.20.7: not every class day each time; a near day after 14
+    /// minutes, a far one after 6 hours, a moved class at once, as in front), and ask to be woken again.
     static func backgroundRefresh() async {
         scheduleBackground()
-        await shared.refresh(force: true)
+        await shared.refresh(force: false)
     }
 
     /// "today", "tomorrow", "Monday"
