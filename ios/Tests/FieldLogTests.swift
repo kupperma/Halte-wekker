@@ -299,4 +299,24 @@ final class FieldLogTests: XCTestCase {
         XCTAssertEqual(FieldFormat.keptByGPS(label: "305·4779", metres: 84, gpsAge: nil, instead: ""),
                        "same bus · kept by GPS · 305·4779 · 80 m from you")
     }
+
+    /// 0.20.5: a pick by hand during a ride, and the "Still on…?" question: no coordinates, no place names, trip ids by
+    /// their last 4 characters, metres rounded to 10.
+    func test_handPickLines() {
+        let v = FieldFormat.vehicle(line: "306", tripId: "20261117_13:05_nl-OpenOV_374104942", isTrain: false)
+        let was = FieldFormat.label("20261117_13:05_nl-OpenOV_374104779", ["20261117_13:05_nl-OpenOV_374104779": "305"])
+        XCTAssertEqual(FieldFormat.handPick(v, was: was, metres: 118, byGPS: true), "hand pick · bus 306·4942 (was 305·4779) · 120 m · gps")
+        XCTAssertEqual(FieldFormat.handPick(v, was: nil, metres: 432, byGPS: false), "hand pick · bus 306·4942 (was none) · 430 m · times")
+        XCTAssertEqual(FieldFormat.handPick(v, was: was, metres: nil, byGPS: nil), "hand pick · bus 306·4942 (was 305·4779) · ? m")
+        XCTAssertEqual(FieldFormat.handPick(nil, was: was, metres: nil, byGPS: nil), "hand pick · none of these: by your location (was 305·4779)")
+        XCTAssertEqual(FieldFormat.stillOnAsked(v, offFor: 185, metres: 424), "hand pick · asked: still on bus 306·4942? · off its road 3 min · 420 m")
+        XCTAssertEqual(FieldFormat.stillOnAsked(v, offFor: .nan, metres: nil), "hand pick · asked: still on bus 306·4942? · off its road 0 min · ? m")
+        XCTAssertEqual(FieldFormat.stillOnAnswered(v, yes: true), "hand pick · still on bus 306·4942: yes")
+        XCTAssertEqual(FieldFormat.stillOnAnswered(v, yes: false, fromNotification: true),
+                       "hand pick · still on bus 306·4942: pick again (from the notification)")
+        for line in [FieldFormat.handPick(v, was: was, metres: 118, byGPS: true), FieldFormat.stillOnAsked(v, offFor: 185, metres: 424)] {
+            XCTAssertFalse(line.contains("51."))
+            XCTAssertFalse(line.contains("OpenOV"))
+        }
+    }
 }

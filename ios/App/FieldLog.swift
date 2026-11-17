@@ -321,6 +321,29 @@ enum FieldFormat {
     static func pickKept(_ vehicle: String, metres m: Double?) -> String {
         "pick kept · \(vehicle): " + (m.map { $0.isFinite ? "\(metres($0)) from its road" : "its road not known" } ?? "its road not known")
     }
+
+    // MARK: picked by hand during a ride (0.20.5, the "I'm actually on…" sheet)
+
+    /// "hand pick · bus 306·4942 (was 305·4779) · 120 m · gps": you said in the ride which one you're on; `was` the one it
+    /// had ("306·4942": the line and the trip id's last 4 characters; nil: none), how far it was from you and by what
+    /// (`byGPS`: its own fix, else its times; nil: not known). `vehicle` nil: "none of these", by your location.
+    static func handPick(_ vehicle: String?, was: String?, metres m: Double?, byGPS: Bool?) -> String {
+        let before = "(was \(was ?? "none"))"
+        guard let vehicle else { return "hand pick · none of these: by your location \(before)" }
+        let how = byGPS.map { $0 ? " · gps" : " · times" } ?? ""
+        return "hand pick · \(vehicle) \(before) · \(metres(m))\(how)"
+    }
+
+    /// "hand pick · asked: still on bus 306·4942? · off its road 3 min · 420 m": the one you picked, off its road a while.
+    static func stillOnAsked(_ vehicle: String, offFor: TimeInterval, metres m: Double?) -> String {
+        let minutes = offFor.isFinite ? Int((max(0, offFor) / 60).rounded()) : 0
+        return "hand pick · asked: still on \(vehicle)? · off its road \(minutes) min · \(metres(m))"
+    }
+
+    /// "hand pick · still on bus 306·4942: yes", "…: pick again", "… (from the notification)".
+    static func stillOnAnswered(_ vehicle: String, yes: Bool, fromNotification: Bool = false) -> String {
+        "hand pick · still on \(vehicle): \(yes ? "yes" : "pick again")\(fromNotification ? " (from the notification)" : "")"
+    }
 }
 
 /// The Settings switch that brings back the way the app chose buses and trains before the new matcher.
