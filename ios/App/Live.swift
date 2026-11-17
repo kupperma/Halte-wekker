@@ -77,7 +77,11 @@ final class LiveStore: ObservableObject {
     private var plannedFrom: CLLocation?
     private var lastMoving: Date?               // when you last went at bus or train speed
     /// The bus or train you're on now (you're moving, and its live position is right where you are).
-    @Published private(set) var onBoard: OnBoard?
+    @Published private(set) var onBoard: OnBoard? { didSet { if onBoard == nil { onBoardLooks = 0 } } }
+    /// How many refreshes in a row found you on the same one (0.20.5): from two, the home starts your trip by itself.
+    @Published private(set) var onBoardLooks = 0
+    /// Your fixes of the last minutes (0.20.5), for the matcher: it judges your track, not one position.
+    private var fixes: [Fix] = []
     /// On a moving train or bus that isn't found yet: no walking plan from the railway, just "finding what you're on".
     @Published private(set) var onTheMove = false
     struct OnBoard: Equatable {
@@ -438,6 +442,7 @@ final class LiveStore: ObservableObject {
 
     func refresh(_ dir: Direction, at loc: CLLocation? = nil, force: Bool = false) async {
         scheduleTakesOver()
+        let wasMoving = lastMoving.map { Date().timeIntervalSince($0) < 180 } ?? false
         if let loc {
             // moving at bus or train speed (by the GPS, or between two positions): you're probably on board. Only on good
             // fixes, far enough apart: inside a big station the GPS jumps about and a few seconds can look like 20 km/h.
@@ -448,6 +453,10 @@ final class LiveStore: ObservableObject {
                    loc.distance(from: p) / dt >= 5 { lastMoving = loc.timestamp }
             }
             lastSeen = loc
+            if loc.horizontalAccuracy >= 0, loc.horizontalAccuracy <= 100, loc.timestamp > (fixes.last?.t ?? .distantPast) {
+                fixes.append(Fix(loc))
+                fixes.removeAll { loc.timestamp.timeIntervalSince($0.t) > 240 }
+            }
         }
         // Away from your usual start (or going somewhere you picked): trips start from where you are.
         // Going to school, anywhere in Veghel counts as home (your Veghel bus board); going home, only the BUas campus
@@ -462,7 +471,9 @@ final class LiveStore: ObservableObject {
         // A new key (or the first load) doesn't empty the lists: its saved answers show at once, the lists that still
         // answer the question stay, and both are marked "as of" until the live answers are in.
         if loadedFor != key { keyChanged(from: loadedKey, to: plan, dir: dir, at: from) }
-        let moved = from.flatMap { f in plannedFrom.map { f.distance(from: $0) > 300 } } ?? false
+        // (on board already, it looks again on the minute, not every 300 m; just started moving, it looks now)
+        let startedMoving = !wasMoving && (lastMoving.map { Date().timeIntervalSince($0) < 180 } ?? false)
+        let moved = startedMoving || (onBoard == nil && (from.flatMap { f in plannedFrom.map { f.distance(from: $0) > 300 } } ?? false))
         if !force, !moved, loadedFor == key, let u = updated, Date().timeIntervalSince(u) < 60 { return }
         busy = true; loadedFor = key; loadedKey = plan; here = from
         // (an older one, for a key it switched away from, ending first mustn't let the same refresh start twice)
@@ -478,8 +489,12 @@ final class LiveStore: ObservableObject {
             plannedFrom = f
             // on a bus or train (moving, or moved in the last 3 minutes, e.g. standing at a station): carry on with it
             let to = destination(dir)
-            if let m = lastMoving, Date().timeIntervalSince(m) < 180, let ob = await Net.within(7, { await Self.onBoardTrips(f, to: to) }) ?? nil {
+            let history = fixes.filter { Date().timeIntervalSince($0.t) < 120 }     // (as the trip's: the last 2 minutes)
+            if let m = lastMoving, Date().timeIntervalSince(m) < 180,
+               let ob = await Net.within(7, { await Self.onBoardTrips(f, to: to, wasMoving: true, history: { history }) }) ?? nil {
+                let same = onBoard?.vehicle.tripId == ob.0.vehicle.tripId
                 onBoard = ob.0; trips = ob.1; onTheMove = false
+                onBoardLooks = same ? onBoardLooks + 1 : 1
             } else if let m = lastMoving, Date().timeIntervalSince(m) < 180,
                       !VehicleMatch.planFromSpot(speed: f.speed, movedAgo: Date().timeIntervalSince(m)) {
                 onBoard = nil; onTheMove = true; trips = []

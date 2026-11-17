@@ -418,7 +418,7 @@ struct NewHome: View {
                         .stroke(DS.accent, style: StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round))
                 }
                 ForEach(moving) { v in
-                    Annotation(v.line, coordinate: v.coordinate, anchor: .center) {
+                    Annotation(v.line, coordinate: shownAt(v), anchor: .center) {
                         let mine = couldBeOn(v)
                         VehicleMark(v: v, tap: { tapVehicle(v) },
                                     onIt: mine.map { t -> () -> Void in { HomeActions.startOnThisOne(t, live: live, trip: trip) } })
@@ -681,6 +681,18 @@ struct NewHome: View {
     }
 
     /// The trip of yours this bus or train starts, if you could be on it (`MapTap.couldBeOn`).
+    /// The bus or train you're on is drawn where you are (0.20.5): your GPS, not where the open data or its times put
+    /// it (those lag between stops). Only with a fresh fix, and not when they're kilometres apart.
+    private func shownAt(_ v: LiveVehiclesModel.Moving) -> CLLocationCoordinate2D {
+        let riding = trip.phase != .idle && trip.vehicle?.tripId == v.id
+        guard riding || live.onBoard?.vehicle.tripId == v.id,
+              let p = riding ? (trip.lastFix ?? near.position) : (near.position ?? trip.lastFix),
+              Date().timeIntervalSince(p.timestamp) < 60, p.horizontalAccuracy >= 0, p.horizontalAccuracy <= 100,
+              p.distance(from: CLLocation(latitude: v.coordinate.latitude, longitude: v.coordinate.longitude)) < 3000
+        else { return v.coordinate }
+        return p.coordinate
+    }
+
     private func couldBeOn(_ v: LiveVehiclesModel.Moving) -> DoorTrip? {
         let m = near.position.map { $0.distance(from: CLLocation(latitude: v.coordinate.latitude, longitude: v.coordinate.longitude)) }
         let i = MapTap.couldBeOn(vehicleTrip: v.id, firstRides: live.next.map(\.first.tripId), fresh: live.nextAsOf == nil && !live.onTheMove,
@@ -886,6 +898,11 @@ struct NewHome: View {
     /// The card's trip: a due school or planned trip, else the first of your next trips toward where you're going,
     /// else nothing (`NextTrip.pick`).
     private func heroContent(now: Date) -> NextTripCard.Content {
+        // on the bus or train already (0.20.5): when you're there, not a countdown to one you'd still have to catch
+        if let ob = live.onBoard, let t = HomeActions.onBoardTrip(live: live) {
+            return .onBoard(.init(vehicle: ob.vehicle, trip: t, destName: placeName(live.destination(trip.direction)),
+                                  startsSoon: live.onBoardLooks == 1 && HomeActions.mayAutoStart(ob.vehicle)))
+        }
         let due = HomeActions.due(trip: trip, planner: planner, now: now)
         let dest = live.destination(trip.direction).key
         let pick = NextTrip.pick(dest: dest, dueDest: due?.dest.key, schoolDue: due?.school == true, plannedDue: due.map { !$0.school } ?? false,
@@ -967,7 +984,9 @@ struct NewHome: View {
     /// Start: the hands-free Fastest trip, as Go (for the due trip with its plan; else to where you're going).
     private func startHero() {
         guard trip.phase == .idle else { return }
-        if let d = dueHere(Date()) {
+        if let t = HomeActions.onBoardTrip(live: live) {
+            HomeActions.startOnThisOne(t, live: live, trip: trip)
+        } else if let d = dueHere(Date()) {
             HomeActions.openPlanGo(school: d.school, trip: trip, planner: planner, goStore: goStore, near: near)
         } else {
             HomeActions.openGo(live: live, trip: trip, goStore: goStore, near: near)

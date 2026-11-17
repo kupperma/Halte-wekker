@@ -45,10 +45,18 @@ struct NextTripCard: View {
         let asOf: Date?             // a saved answer: "as of 08:12"
         var startTitle: String? = nil   // nil: "Start · wake me before <stop>"
     }
+    /// On the bus or train the home found you on (0.20.5): where you get off it, when you're there, and Wake me.
+    struct Aboard {
+        let vehicle: Vehicle
+        let trip: DoorTrip          // starts with the ride you're on ("On board")
+        let destName: String
+        let startsSoon: Bool        // seen on it once: one more look and the trip starts by itself
+    }
     enum Content {
         case loading
         case empty(note: String?)
         case trip(Shown)
+        case onBoard(Aboard)
     }
 
     let content: Content
@@ -67,6 +75,7 @@ struct NextTripCard: View {
             case .loading: loading
             case .empty(let note): empty(note)
             case .trip(let s): shown(s)
+            case .onBoard(let a): aboard(a)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -94,6 +103,44 @@ struct NextTripCard: View {
                     .background(DS.accentSoft, in: Capsule())
             }
             .buttonStyle(DSPressStyle())
+        }
+    }
+
+    /// "You're on the 158": no countdown to leave (you've left), but when you're there and where to get off.
+    private func aboard(_ a: Aboard) -> some View {
+        let ride = a.trip.first
+        let more = a.trip.rides.count - 1
+        let getOff = Fmt.place(ride.toStop)
+        let last = Fmt.place(a.trip.last.toStop)
+        let then: String = more <= 0 ? "" : more == 1 ? ", then one more ride" : ", then \(more) more rides"
+        let stay: String = "Stay on until \(getOff) · \(Fmt.hhmm(ride.arrival))" + then
+        let title: String = a.vehicle.isTrain ? "You’re on the \(a.vehicle.title)" : "You’re on bus \(a.vehicle.line)"
+        return VStack(alignment: .leading, spacing: 12) {
+            if let chip { chip }
+            HStack(alignment: .center, spacing: 8) {
+                DSLinePill(line: a.vehicle.line, train: a.vehicle.isTrain)
+                Text(title)
+                    .font(DS.headline).foregroundStyle(DS.text).lineLimit(2)
+                    .accessibilityAddTraits(.isHeader)
+            }
+            .accessibilityElement(children: .combine)
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text(Fmt.hhmm(a.trip.end)).font(DS.hero(min(big, 72))).monospacedDigit().foregroundStyle(DS.text)
+                    .lineLimit(1).minimumScaleFactor(0.6)
+                Text("at \(a.destName)").font(DS.body).foregroundStyle(DS.secondary).lineLimit(2)
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("At \(a.destName) at \(Fmt.hhmm(a.trip.end))")
+            Text(stay)
+                .font(DS.calloutStrong).foregroundStyle(DS.text).monospacedDigit()
+                .fixedSize(horizontal: false, vertical: true)
+            DSLegBar(legs: NextTrip.legs(of: a.trip))
+            DSPrimaryButton(title: "Wake me before \(last)", icon: "bell.fill", lines: 2, action: start)
+                .accessibilityHint("Starts your trip on this \(a.vehicle.isTrain ? "train" : "bus")")
+            if a.startsSoon {
+                Text("Stay on and it starts by itself in about a minute.").font(DS.footnote).foregroundStyle(DS.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 

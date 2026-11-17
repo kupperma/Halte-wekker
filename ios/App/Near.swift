@@ -26,6 +26,9 @@ final class NearMe: NSObject, ObservableObject, CLLocationManagerDelegate {
 
     private let manager = CLLocationManager()
     private var lastAsk = Date.distantPast
+    /// Following you (0.20.5): while the home screen is in front and no trip runs, the GPS keeps giving positions
+    /// (every 15 m), not one every 90 s, so the home notices you're on a bus (a speed, and your track for the matcher).
+    private(set) var following = false
 
     override init() {
         super.init()
@@ -58,6 +61,25 @@ final class NearMe: NSObject, ObservableObject, CLLocationManagerDelegate {
             onPosition(l)
         }
         manager.requestLocation()
+    }
+
+    /// Keep the GPS on while the home screen is in front (`on`), or back to one position at a time. Never asks for
+    /// permission: without it, it does nothing.
+    func follow(_ on: Bool) {
+        let st = manager.authorizationStatus
+        let allowed = st == .authorizedAlways || st == .authorizedWhenInUse
+        if on && allowed {
+            guard !following else { return }
+            following = true
+            manager.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
+            manager.distanceFilter = 15
+            manager.startUpdatingLocation()
+        } else if following {
+            following = false
+            manager.stopUpdatingLocation()
+            manager.desiredAccuracy = kCLLocationAccuracyHundredMeters
+            manager.distanceFilter = kCLDistanceFilterNone
+        }
     }
 
     nonisolated func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {

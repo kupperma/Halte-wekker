@@ -20,7 +20,12 @@ struct HomeLoops: ViewModifier {
                 guard !goStore.isOpen else { return }            // (on its way out: Fastest trip has the screen)
                 Task { await live.refresh(trip.direction, at: near.position) }
             }
-            .onAppear { Handoff.fromBoards = false }
+            .onAppear { Handoff.fromBoards = false; followIfHome() }
+            .onDisappear { near.follow(false) }
+            .onChange(of: goStore.isOpen) { _, _ in followIfHome() }
+            .onChange(of: trip.phase) { _, _ in followIfHome() }
+            // seen on the same bus or train twice in a row: the trip starts by itself (0.20.5)
+            .onChange(of: live.onBoardLooks) { _, _ in HomeActions.autoStartOnBoard(live: live, trip: trip, goStore: goStore) }
             .task(id: trip.direction) {
                 await everyHalfMinute {
                     Watchdog.shared.mark("finding where you are")
@@ -57,6 +62,7 @@ struct HomeLoops: ViewModifier {
                 }
             }
             .onChange(of: scene) { _, s in
+                followIfHome()
                 if s == .active {
                     trip.appBecameActive()
                     HomeActions.autoGo(trip: trip, planner: planner, goStore: goStore, near: near)
@@ -66,6 +72,12 @@ struct HomeLoops: ViewModifier {
                     Task { await planner.refresh() }
                 }
             }
+    }
+
+    /// The GPS keeps following you while the home is in front with no trip on and Fastest trip closed (they have their
+    /// own), so being on a bus is noticed; else one position at a time, as before.
+    private func followIfHome() {
+        near.follow(scene == .active && !goStore.isOpen && trip.phase == .idle)
     }
 
     /// `step` now and every 30 s after, while the app is in front and Fastest trip isn't open, until cancelled.
@@ -109,6 +121,25 @@ enum HomeActions {
                            dest: a.out ? .buas : .veghel, deadline: a.leaving ? nil : a.when)
         }
         return nil
+    }
+
+    /// The trip from the bus or train the home found you on (0.20.5): the first of your next trips that starts on it.
+    static func onBoardTrip(live: LiveStore) -> DoorTrip? {
+        guard let ob = live.onBoard, live.nextAsOf == nil else { return nil }
+        return live.next.first { $0.first.fromId == "onboard" && $0.first.tripId == ob.vehicle.tripId }
+    }
+
+    /// The buses and trains a trip has started by itself on: stop it and it doesn't start again on that one.
+    private static var autoStartedOn: Set<String> = []
+    static func mayAutoStart(_ v: Vehicle) -> Bool { !autoStartedOn.contains(v.tripId) }
+
+    /// Found on the same bus or train in two looks in a row (about a minute, your track against its position): your trip
+    /// starts by itself with it, wake-up alarm and all, as Fastest trip's does once you're on board.
+    static func autoStartOnBoard(live: LiveStore, trip: TripManager, goStore: GoStore) {
+        guard live.onBoardLooks >= 2, trip.phase == .idle, !goStore.isOpen, let ob = live.onBoard, mayAutoStart(ob.vehicle),
+              let t = onBoardTrip(live: live), let r = RoutePlan.from(t) else { return }
+        autoStartedOn.insert(ob.vehicle.tripId)
+        trip.start(r, vehicle: ob.vehicle, auto: true, alternatives: [t], how: "Home on board, by itself")
     }
 
     /// What the outfit screen plans for (as `HomeView.updateOutfit`).
