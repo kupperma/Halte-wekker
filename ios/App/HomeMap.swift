@@ -17,13 +17,14 @@ enum HomeMapStyle: String, CaseIterable, Identifiable {
         case .hybrid: return "Hybrid"
         }
     }
-    /// Only stations, stops and vehicles of our own: no shops or restaurants.
+    /// Only stations, stops and vehicles of our own: no shops or restaurants. Realistic elevation (0.20.1): zoomed out
+    /// the map becomes the globe, as you'd expect from a maps app.
     var style: MapStyle {
         switch self {
-        case .standard: return .standard(elevation: .flat, pointsOfInterest: .excludingAll)
-        case .muted: return .standard(elevation: .flat, emphasis: .muted, pointsOfInterest: .excludingAll)
-        case .satellite: return .imagery(elevation: .flat)
-        case .hybrid: return .hybrid(elevation: .flat, pointsOfInterest: .excludingAll)
+        case .standard: return .standard(elevation: .realistic, pointsOfInterest: .excludingAll)
+        case .muted: return .standard(elevation: .realistic, emphasis: .muted, pointsOfInterest: .excludingAll)
+        case .satellite: return .imagery(elevation: .realistic)
+        case .hybrid: return .hybrid(elevation: .realistic, pointsOfInterest: .excludingAll)
         }
     }
 }
@@ -131,35 +132,74 @@ final class MapStopsModel: ObservableObject {
     }
 }
 
-/// A station (a rounded square with a train) or a bus stop (a small dot), with its name when zoomed in.
+/// A station (a rounded square with a train) or a bus stop (a small dot), with its name when zoomed in. A 44 pt button:
+/// tap for its departures; VoiceOver also offers waking you there and planning to it.
 struct MapStopMark: View {
     let stop: Transit.NearStop
     let names: Bool
+    var tap: () -> Void = {}
+    var wake: (() -> Void)? = nil
+    var planTo: (() -> Void)? = nil
     var body: some View {
         Group {
             if stop.rail {
-                VStack(spacing: 4) {
-                    Image(systemName: "tram.fill").font(.system(size: 17, weight: .semibold)).foregroundStyle(DS.onAccent)
-                        .frame(width: 34, height: 34)
-                        .background(DS.train, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                        .shadow(color: .black.opacity(0.25), radius: 4, y: 1)
-                    label(Fmt.place(stop.name), strong: true)
+                Button(action: tap) {
+                    VStack(spacing: -2) {
+                        Image(systemName: "tram.fill").font(.system(size: 17, weight: .semibold)).foregroundStyle(DS.onAccent)
+                            .frame(width: 34, height: 34)
+                            .background(DS.train, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .shadow(color: .black.opacity(0.25), radius: 4, y: 1)
+                            .frame(width: DS.hit, height: DS.hit)
+                        label(Fmt.place(stop.name), strong: true)
+                    }
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(DSPressStyle())
+                .modifier(a11y)
             } else {
-                HStack(spacing: 4) {
-                    Circle().fill(DS.bus).frame(width: 12, height: 12)
-                        .overlay(Circle().stroke(DS.surface, lineWidth: 2))
-                    if names { label(Fmt.stop(stop.name), strong: false) }
+                // (the name's mirror on the left, hidden, so the dot is the middle: the mark is centred on the stop)
+                HStack(spacing: -16) {
+                    if names { label(Fmt.stop(stop.name), strong: false).hidden().accessibilityHidden(true) }
+                    Button(action: tap) {
+                        HStack(spacing: -16) {
+                            Circle().fill(DS.bus).frame(width: 12, height: 12)
+                                .overlay(Circle().stroke(DS.surface, lineWidth: 2))
+                                .frame(width: DS.hit, height: DS.hit)
+                            if names { label(Fmt.stop(stop.name), strong: false) }
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(DSPressStyle())
+                    .modifier(a11y)
                 }
             }
         }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(stop.rail ? "Station \(Fmt.place(stop.name))" : "Bus stop \(Fmt.stop(stop.name))")
+    }
+    private var a11y: StopMarkA11y {
+        StopMarkA11y(label: stop.rail ? "Station \(Fmt.place(stop.name))" : "Bus stop \(Fmt.stop(stop.name))", wake: wake, planTo: planTo)
     }
     private func label(_ t: String, strong: Bool) -> some View {
         Text(t).font(strong ? DS.caption : .caption2.weight(.semibold)).foregroundStyle(DS.text).lineLimit(1)
             .padding(.horizontal, 5).padding(.vertical, 1)
             .background(DS.surface.opacity(0.88), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+    }
+}
+
+/// A stop's mark for VoiceOver: its name, what a double-tap does, and the other actions.
+private struct StopMarkA11y: ViewModifier {
+    let label: String
+    let wake: (() -> Void)?
+    let planTo: (() -> Void)?
+    func body(content: Content) -> some View {
+        content
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(label)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityHint("Shows its departures")
+            .accessibilityActions {
+                if let wake { Button("Wake me at this stop", action: wake) }
+                if let planTo { Button("Plan a trip to here", action: planTo) }
+            }
     }
 }
 
@@ -198,6 +238,23 @@ struct NewHome: View {
     @State private var warmedUp = false                    // the first seconds after appearing: no vehicles yet
     @State private var idsChangedAt = Date.distantPast     // when the cards last changed (not a swipe: the map stays)
     @State private var weekOpen = false                    // Next trip first: Your week over the map
+    // follow me (0.20.1): our own state, not MapKit's; kept while the home is away (Fastest trip, the ride)
+    @State private var following: Bool
+    @State private var followSince = Date()
+    @State private var followSpan: Double?                 // the zoom following settled at (a pinch changes it)
+    @State private var followLocked = false                // the map has been on you since following began
+    @State private var lastCamera: MapCamera?
+    @State private var planReturn: PlanReturn?             // where the map was before Plan fitted a route
+    // tapping the map (0.20.1)
+    @State private var stopTap: Transit.NearStop?
+    @State private var vehicleTap: VehicleTap?
+    @State private var wakeAt: WakeTarget?
+    @MainActor private static var keptFollowing = true
+    @MainActor private static var keptCamera: MapCamera?
+    /// The phone's newest fix (MapKit's own, while it follows you).
+    @MainActor private static let locator = CLLocationManager()
+
+    private struct PlanReturn { let following: Bool; let camera: MapCamera? }
 
     enum HomeSheet: String, Identifiable {
         case settings, weather, addPlace, demo
@@ -208,12 +265,20 @@ struct NewHome: View {
     private static let startRegion = MKCoordinateRegion(center: CLLocationManager().location?.coordinate ?? Place.veghel.coordinate,
                                                         latitudinalMeters: 1400, longitudinalMeters: 1400)
     init() {
-        _camera = State(initialValue: .userLocation(followsHeading: false, fallback: .region(Self.startRegion)))
+        // back from Fastest trip or the ride: the map as you left it (following you, or where you had moved it)
+        if !Self.keptFollowing, let c = Self.keptCamera {
+            _camera = State(initialValue: .camera(c))
+            _following = State(initialValue: false)
+        } else {
+            _camera = State(initialValue: .userLocation(followsHeading: false, fallback: .region(Self.startRegion)))
+            _following = State(initialValue: true)
+        }
     }
 
     /// The map is on screen: not under Your day, Fastest trip or the ride, and the app in front.
     private var visible: Bool {
-        shown && !dayOpen && !planOpen && !weekOpen && sheet == nil && tapped == nil && scene == .active && !goStore.isOpen
+        shown && !dayOpen && !planOpen && !weekOpen && sheet == nil && tapped == nil && stopTap == nil && vehicleTap == nil && wakeAt == nil
+            && scene == .active && !goStore.isOpen
     }
     /// Settings › Home style: Next trip first (concept B) instead of Live around you (concept C).
     private var nextFirst: Bool { HomeStyle.of(homeStyleRaw) == .nextTrip }
@@ -231,6 +296,11 @@ struct NewHome: View {
                 // (capped where its big card and the bar still fit on the screen together)
                 nextTripLayout
                     .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+                    .transition(.opacity)
+            } else if weekOpen {
+                // Live around you: the same Your week as Next trip first, over the map (0.20.1)
+                DaySheet(close: { closeWeek() }, week: true)
+                    .dynamicTypeSize(...DynamicTypeSize.accessibility2)
                     .transition(.opacity)
             } else {
                 VStack(spacing: 0) {
@@ -277,6 +347,20 @@ struct NewHome: View {
         .onChange(of: goStore.isOpen) { _, open in if open { planOpen = false; dayOpen = false; weekOpen = false } }
         .onChange(of: homeStyleRaw) { _, _ in weekOpen = false; dayOpen = false }
         .sheet(item: $tapped) { DepartureDetailSheet(tap: $0).presentationDetents([.medium, .large]) }
+        .sheet(item: $stopTap) { s in
+            MapStopSheet(stop: s) { from in planFrom(stop: s, from: from) }
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+        }
+        .sheet(item: $vehicleTap) { v in
+            LiveBusSheet(target: v.target, newLook: true, onIt: v.trip.map { t -> () -> Void in { HomeActions.startOnThisOne(t, live: live, trip: trip) } })
+                .presentationDetents([.large])
+        }
+        .sheet(item: $wakeAt) { WakeAtStopNew(preset: $0) }
+        .onChange(of: camera) { _, c in
+            // MapKit says a hand moved it
+            if following && c.positionedByUser { setFollowing(false) }
+        }
         // the live vehicles: every 15 s while the home is on screen, the app in front and the setting on
         .task(id: showVehicles && visible && warmedUp) {
             guard showVehicles else { vehicles.clear(); return }
@@ -322,8 +406,10 @@ struct NewHome: View {
             Map(position: $camera) {
                 UserAnnotation()
                 ForEach(drawn.stops) { s in
-                    Annotation(Fmt.place(s.name), coordinate: CLLocationCoordinate2D(latitude: s.lat, longitude: s.lon), anchor: s.rail ? .top : .leading) {
-                        MapStopMark(stop: s, names: drawn.names)
+                    Annotation(Fmt.place(s.name), coordinate: CLLocationCoordinate2D(latitude: s.lat, longitude: s.lon), anchor: s.rail ? .top : .center) {
+                        MapStopMark(stop: s, names: drawn.names, tap: { tapStop(s) },
+                                    wake: trip.phase == .idle ? { tapStop(s, wake: true) } : nil,
+                                    planTo: { planFrom(stop: s, from: false) })
                     }
                     .annotationTitles(.hidden)
                 }
@@ -332,17 +418,17 @@ struct NewHome: View {
                         .stroke(DS.accent, style: StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round))
                 }
                 ForEach(moving) { v in
-                    Annotation(v.line, coordinate: v.coordinate, anchor: .center) { VehiclePill(v: v) }
-                        .annotationTitles(.hidden)
+                    Annotation(v.line, coordinate: v.coordinate, anchor: .center) {
+                        let mine = couldBeOn(v)
+                        VehicleMark(v: v, tap: { tapVehicle(v) },
+                                    onIt: mine.map { t -> () -> Void in { HomeActions.startOnThisOne(t, live: live, trip: trip) } })
+                    }
+                    .annotationTitles(.hidden)
                 }
             }
             .mapStyle(mapStyle.style)
             .mapControls { MapCompass() }
-            .onMapCameraChange(frequency: .onEnd) { ctx in
-                region = ctx.region
-                mapStops.cameraStopped(ctx.region, visible: visible)
-                Task { await vehicles.refresh(ctx.region, gate: vehicleGate) }
-            }
+            .onMapCameraChange(frequency: .onEnd) { ctx in cameraEnded(ctx) }
         }
     }
 
@@ -427,6 +513,7 @@ struct NewHome: View {
         VStack(alignment: .trailing, spacing: 8) {
             weatherChip()
             followButton
+            weekButton
         }
     }
 
@@ -452,10 +539,17 @@ struct NewHome: View {
         .accessibilityLabel(outfit.plan?.start.map { "Weather: \(Int($0.w.temp.rounded())) degrees. What to wear" } ?? "Weather and what to wear")
     }
 
+    /// Follow me: on, the map keeps you in the middle; tapped again (or the map moved by hand), it stays where it is.
     private var followButton: some View {
-        let on = camera.followsUserLocation && !trip.locationDenied
+        let on = following && !trip.locationDenied
         return Button {
-            withAnimation(DS.move) { camera = .userLocation(followsHeading: false, fallback: camera) }
+            if on {
+                setFollowing(false)
+                if let c = lastCamera { camera = .camera(c) }       // (stays where it is, no longer tracking you)
+            } else {
+                setFollowing(true)
+                withAnimation(DS.move) { camera = .userLocation(followsHeading: false, fallback: camera) }
+            }
         } label: {
             Image(systemName: on ? "location.fill" : "location")
                 .font(.system(size: 20, weight: .semibold))
@@ -466,7 +560,119 @@ struct NewHome: View {
         }
         .buttonStyle(DSPressStyle())
         .accessibilityLabel(on ? "Following your location" : "Follow my location")
+        .accessibilityHint(on ? "Tap to stop following, so you can move the map" : "Tap to keep the map on you")
         .accessibilityAddTraits(on ? .isSelected : [])
+    }
+
+    /// Your week (the school calendar), as Next trip first's bar opens it.
+    private var weekButton: some View {
+        Button { withAnimation(DS.quick) { weekOpen = true } } label: {
+            Image(systemName: "calendar")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(DS.secondary)
+                .frame(width: DS.hit, height: DS.hit)
+                .background(DS.surface, in: Circle())
+                .dsFloat()
+        }
+        .buttonStyle(DSPressStyle())
+        .accessibilityLabel("Your week")
+        .accessibilityHint("Your classes, alarms and school dates for the next seven days")
+    }
+
+    // MARK: follow me, a free map, and taps
+
+    private func setFollowing(_ on: Bool) {
+        following = on
+        Self.keptFollowing = on
+        if on { followSince = Date(); followSpan = nil; followLocked = false }
+    }
+
+    /// The camera stopped: remember it; while following, a move by hand makes the map free (MapKit doesn't always say
+    /// so through the camera); the stops and vehicles look at it if it's a usable box (their zoom gating does the rest).
+    private func cameraEnded(_ ctx: MapCameraUpdateContext) {
+        let r = ctx.region
+        lastCamera = ctx.camera
+        Self.keptCamera = ctx.camera
+        if following {
+            let settling = Date().timeIntervalSince(followSince) < MapFollow.settle
+            let mid = CLLocation(latitude: r.center.latitude, longitude: r.center.longitude)
+            // (your newest fix, fresh: less how far you could have gone since and its accuracy, so a fix a little behind
+            // you on a bus never looks like a pan)
+            let fixes = [near.position, trip.lastFix, Self.locator.location].compactMap { $0 }
+            let you = fixes.max(by: { $0.timestamp < $1.timestamp }).flatMap { p -> Double? in
+                let age = Date().timeIntervalSince(p.timestamp)
+                guard age < 30, p.horizontalAccuracy >= 0, p.horizontalAccuracy < 150 else { return nil }
+                return max(0, p.distance(from: mid) - max(0, p.speed) * max(0, age) - p.horizontalAccuracy)
+            }
+            let view = r.span.latitudeDelta * 111_000
+            // (a zoom is judged only once the map has been on you: not MapKit's own first fly to where you are)
+            if MapFollow.handMoved(following: true, settling: settling, centreToUser: you, viewMetres: view,
+                                   span: r.span.latitudeDelta, baseline: followLocked ? followSpan : nil) {
+                setFollowing(false)
+                camera = .camera(ctx.camera)
+            } else if let d = you, d <= max(80, view * 0.2) {
+                followSpan = r.span.latitudeDelta
+                if !settling { followLocked = true }
+            }
+        }
+        guard MapTap.usable(centerLat: r.center.latitude, centerLon: r.center.longitude,
+                            latDelta: r.span.latitudeDelta, lonDelta: r.span.longitudeDelta) else { region = nil; return }
+        region = r
+        mapStops.cameraStopped(r, visible: visible)
+        Task { await vehicles.refresh(r, gate: vehicleGate) }
+    }
+
+    /// Centre the map on something you tapped (above the sheet that opens): following stops.
+    private func centre(on c: CLLocationCoordinate2D) {
+        setFollowing(false)
+        let span = MapTap.span(current: region?.span.latitudeDelta)
+        let ratio = region.map { min(3, max(0.3, $0.span.longitudeDelta / max(1e-9, $0.span.latitudeDelta))) } ?? 1
+        let m = MapTap.centre(item: GeoPoint(lat: c.latitude, lon: c.longitude), latDelta: span)
+        withAnimation(DS.move) {
+            camera = .region(MKCoordinateRegion(center: CLLocationCoordinate2D(latitude: m.lat, longitude: m.lon),
+                                                span: MKCoordinateSpan(latitudeDelta: span, longitudeDelta: span * ratio)))
+        }
+    }
+
+    /// A stop or station tapped: its departures (or, from VoiceOver's action, Wake me there).
+    private func tapStop(_ s: Transit.NearStop, wake: Bool = false) {
+        centre(on: CLLocationCoordinate2D(latitude: s.lat, longitude: s.lon))
+        if wake { wakeAt = WakeTarget(place: MapStopSheet.place(s), rail: s.rail) } else { stopTap = s }
+    }
+
+    /// A bus or train tapped: its live sheet, with "I'm on this one" when it could be yours.
+    private func tapVehicle(_ v: LiveVehiclesModel.Moving) {
+        centre(on: v.coordinate)
+        vehicleTap = VehicleTap(target: LiveTrackTarget(tripId: v.id, line: v.line, headsign: "", stopName: "", time: Date(), rail: v.isTrain),
+                                trip: couldBeOn(v))
+    }
+
+    /// The trip of yours this bus or train starts, if you could be on it (`MapTap.couldBeOn`).
+    private func couldBeOn(_ v: LiveVehiclesModel.Moving) -> DoorTrip? {
+        let m = near.position.map { $0.distance(from: CLLocation(latitude: v.coordinate.latitude, longitude: v.coordinate.longitude)) }
+        let i = MapTap.couldBeOn(vehicleTrip: v.id, firstRides: live.next.map(\.first.tripId), fresh: live.nextAsOf == nil && !live.onTheMove,
+                                 idle: trip.phase == .idle, metresFromYou: m)
+        return i.flatMap { live.next[safe: $0] }
+    }
+
+    /// Plan from or to a stop you tapped (once its sheet has gone).
+    private func planFrom(stop s: Transit.NearStop, from: Bool) {
+        let wasOpen = stopTap != nil
+        stopTap = nil
+        let e = PlanTripModel.End.place(MapStopSheet.place(s), name: s.rail ? Fmt.place(s.name) : Fmt.stop(s.name))
+        Task { @MainActor in
+            if wasOpen { try? await Task.sleep(nanoseconds: 450_000_000) }
+            weekOpen = false
+            rememberForPlan()
+            plan.when = .now; plan.clear()
+            if from { plan.from = e; plan.to = nil; planFromSearch = true } else { plan.from = .here; plan.to = e; planFromSearch = false }
+            withAnimation(DS.quick) { planOpen = true }
+        }
+    }
+
+    /// Where the map was before Plan, to go back to after.
+    private func rememberForPlan() {
+        if !planOpen { planReturn = PlanReturn(following: following, camera: lastCamera) }
     }
 
     private func toast(_ t: String) -> some View {
@@ -552,6 +758,7 @@ struct NewHome: View {
     /// A swipe to a stop's card moves the map there.
     private func moveTo(card id: String?) {
         guard let id, let s = cardData.cards.first(where: { $0.id == id })?.stop, let la = s.lat, let lo = s.lon else { return }
+        setFollowing(false)
         withAnimation(DS.move) {
             camera = .region(MKCoordinateRegion(center: CLLocationCoordinate2D(latitude: la, longitude: lo), latitudinalMeters: 900, longitudinalMeters: 900))
         }
@@ -691,6 +898,7 @@ struct NewHome: View {
     /// Search anywhere: Plan from your location, straight to picking where to.
     private func openSearch() {
         weekOpen = false
+        rememberForPlan()
         plan.from = .here; plan.to = nil; plan.when = .now; plan.clear()
         planFromSearch = true
         withAnimation(DS.quick) { planOpen = true }
@@ -704,6 +912,7 @@ struct NewHome: View {
     /// Plan from your location to there (nil: empty, to pick where to), leaving now or to be there by a time.
     private func openPlan(to end: PlanTripModel.End?, when: PlanCompare.When) {
         weekOpen = false
+        rememberForPlan()
         plan.from = .here; plan.to = end; plan.when = when
         if end == nil { plan.clear() }
         planFromSearch = false
@@ -713,13 +922,22 @@ struct NewHome: View {
     private func closePlan() {
         withAnimation(DS.quick) { planOpen = false }
         plan.clear()
-        withAnimation(DS.move) { camera = .userLocation(followsHeading: false, fallback: camera) }
+        // the map back as it was before Plan (following you only if it was)
+        let back = planReturn
+        planReturn = nil
+        if back?.following ?? following {
+            setFollowing(true)
+            withAnimation(DS.move) { camera = .userLocation(followsHeading: false, fallback: camera) }
+        } else if let c = back?.camera {
+            withAnimation(DS.move) { camera = .camera(c) }
+        }
     }
 
     /// The way you look at, on the map.
     private func fitRoute() {
         let c = plan.route(plan.focused)
         guard c.count > 1 else { return }
+        setFollowing(false)
         let lats = c.map(\.latitude), lons = c.map(\.longitude)
         let center = CLLocationCoordinate2D(latitude: (lats.min()! + lats.max()!) / 2, longitude: (lons.min()! + lons.max()!) / 2)
         let span = MKCoordinateSpan(latitudeDelta: max(0.01, (lats.max()! - lats.min()!) * 2.2), longitudeDelta: max(0.01, (lons.max()! - lons.min()!) * 1.6))

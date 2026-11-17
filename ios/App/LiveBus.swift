@@ -103,6 +103,8 @@ struct LiveTrackTarget: Identifiable, Hashable {
 struct LiveBusSheet: View {
     let target: LiveTrackTarget
     var newLook = false         // the new look (0.20): its tokens, in the phone's light or dark
+    /// A bus or train tapped on the home map that you could be on (0.20.1): "I'm on this one" starts your trip by hand.
+    var onIt: (() -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
     @State private var trip: LiveTrip?          // drawn by: without catching up
     @State private var given: LiveTrip?         // as the answer gives it: the times it prints
@@ -227,7 +229,9 @@ struct LiveBusSheet: View {
         VStack(alignment: .leading, spacing: DS.s8) {
             HStack(spacing: 10) {
                 DSLinePill(line: target.line, train: target.rail, mode: trip?.mode ?? "")
-                Text("to \(Fmt.place(target.headsign))").font(DS.headline).foregroundStyle(DS.text).lineLimit(2)
+                if !headsign.isEmpty {
+                    Text("to \(Fmt.place(headsign))").font(DS.headline).foregroundStyle(DS.text).lineLimit(2)
+                }
             }
             if let trip {
                 let w = trip.position(now), printed = given ?? trip
@@ -242,6 +246,12 @@ struct LiveBusSheet: View {
                 if w.started, !w.done, !w.atStop {
                     Text("Next stop: \(Fmt.place(trip.stops[w.next].name))\((w.next < printed.stops.count ? printed.arrival(w.next) : nil).map { " · \(Fmt.hhmm($0))" } ?? "")")
                         .font(DS.sub).monospacedDigit().foregroundStyle(DS.secondary)
+                }
+                if mine == nil { nextStops(trip, printed, w) }
+                if let onIt {
+                    DSPrimaryButton(title: "I’m on this one", icon: target.rail ? "tram.fill" : "bus.fill") { onIt(); dismiss() }
+                        .accessibilityHint("Starts your trip with this \(target.rail ? "train" : "bus"), and its alarm")
+                        .padding(.vertical, DS.s4)
                 }
                 Text(trip.live ? "Live times\(updated.map { ", updated \(Fmt.hhmm($0))" } ?? ""). Its position is worked out from them." : "No live times for this one: its position follows the timetable.")
                     .font(DS.footnote).monospacedDigit().foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
@@ -277,6 +287,34 @@ struct LiveBusSheet: View {
         .dynamicTypeSize(...DynamicTypeSize.accessibility2)
     }
 
+    /// Where it goes: the target's, or (tapped on the map) its live times'.
+    private var headsign: String { target.headsign.isEmpty ? (trip?.headsign ?? "") : target.headsign }
+
+    /// Tapped on the map (no stop of yours): the stops after its next one, with their times and how late.
+    @ViewBuilder private func nextStops(_ t: LiveTrip, _ printed: LiveTrip, _ w: (metres: Double, next: Int, atStop: Bool, started: Bool, done: Bool)) -> some View {
+        let r = MapTap.ahead(next: w.next, count: min(t.stops.count, printed.stops.count), done: w.done)
+        if !r.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Then").font(DS.footnoteStrong).foregroundStyle(DS.secondary).padding(.bottom, 2)
+                ForEach(Array(r), id: \.self) { i in
+                    let at = printed.arrival(i)
+                    let late = MapTap.delayText(at: at, scheduled: printed.stops[i].scheduledArrival ?? printed.stops[i].scheduled)
+                    HStack(spacing: DS.s8) {
+                        Circle().fill(lineColor).frame(width: 7, height: 7).accessibilityHidden(true)
+                        Text(Fmt.place(t.stops[i].name)).font(DS.sub).foregroundStyle(DS.text).lineLimit(1)
+                        Spacer(minLength: 4)
+                        if let at { Text(Fmt.hhmm(at)).font(DS.subStrong).monospacedDigit().foregroundStyle(DS.text) }
+                        if let late, printed.live {
+                            Text(late).font(DS.footnoteStrong).monospacedDigit().foregroundStyle(late.hasPrefix("+") ? DS.warning : DS.accentText)
+                        }
+                    }
+                    .frame(minHeight: 30)
+                    .accessibilityElement(children: .combine)
+                }
+            }
+        }
+    }
+
     /// Where to draw it at `now` (metres along): by its times, but not past your stop before it has left there.
     private func shownMetres(_ t: LiveTrip, _ now: Date) -> Double {
         let w = t.position(now)
@@ -302,6 +340,7 @@ struct LiveBusSheet: View {
 
     /// Your stop on its route: the one with your stop's name nearest to the time you're catching it.
     private func findMine(_ t: LiveTrip) -> Int? {
+        guard !target.stopName.isEmpty else { return nil }          // (tapped on the map: no stop of yours)
         let want = Fmt.place(target.stopName)
         let c = t.stops.indices.filter { t.stops[$0].name == target.stopName || Fmt.place(t.stops[$0].name) == want }
         return c.min { abs((t.departure($0) ?? .distantPast).timeIntervalSince(target.time)) < abs((t.departure($1) ?? .distantPast).timeIntervalSince(target.time)) }

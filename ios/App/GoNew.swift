@@ -23,23 +23,22 @@ struct GoViewNew: View {
                 GoMap(ride: go.arrived ? nil : go.best?.first, here: go.here,
                       top: g.safeAreaInsets.top + bar, bottom: g.safeAreaInsets.top + bar + window, saved: go.asOf != nil, newLook: true)
                     .ignoresSafeArea()
-                    .accessibilityHidden(true)
+                // (the map takes your hand in its window (0.20.1): the cards scroll below it, not over it)
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: DS.s12) {
-                        Color.clear.frame(height: bar + window - 6).accessibilityHidden(true)      // the map shows through here
                         content
                     }
-                    .padding(.horizontal, DS.edge).padding(.bottom, foot + 16)
+                    .padding(.horizontal, DS.edge).padding(.top, 10).padding(.bottom, foot + 16)
                 }
                 .mask {
                     VStack(spacing: 0) {
-                        Color.clear.frame(height: bar - 8)
-                        LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom).frame(height: 24)
+                        LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom).frame(height: 12)
                         Color.black
                         LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom).frame(height: 28)
                         Color.clear.frame(height: foot - 18)
                     }
                 }
+                .padding(.top, bar + window - 16)
                 VStack(spacing: 0) {
                     topBar.frame(height: bar)
                     Spacer(minLength: 0)

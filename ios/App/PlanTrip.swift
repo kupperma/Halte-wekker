@@ -405,7 +405,7 @@ struct PlanTripOverlay: View {
             PlanWhenSheet(when: model.when, modes: model.modes) { w, m in model.when = w; model.modes = m }
                 .presentationDetents([.medium, .large])
         case .wakeAtStop:
-            WakeAtStopSheet()
+            WakeAtStopNew()
         case .route(let id):
             if let r = RoutePlan.all.first(where: { $0.id == id }) { StartSheet(req: StartRequest(route: r)).presentationDetents([.medium, .large]) }
         case .planned:

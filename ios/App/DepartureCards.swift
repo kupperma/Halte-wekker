@@ -36,6 +36,16 @@ final class NearDeparturesModel: ObservableObject {
     }
 }
 
+extension DepartureGroups.Departure {
+    /// A board's departure for the cards (a station's: its trains with their train labels).
+    init(board d: BoardDeparture, rail: Bool) {
+        let train = rail || d.train
+        self.init(tripId: d.tripId, stopId: d.stopId, line: train ? Transit.trainLabel(d.line) : d.line, headsign: d.headsign,
+                  time: d.time, scheduled: d.scheduled, live: d.live, cancelled: d.cancelled, platform: d.platform,
+                  train: train, stopName: d.stopName)
+    }
+}
+
 /// A departure you tapped, and its stop.
 struct DepartureTap: Identifiable {
     let dep: DepartureGroups.Departure
@@ -160,8 +170,21 @@ struct DepartureCardsView: View {
     }
 
     private func row(_ d: DepartureGroups.Departure, _ s: DepartureGroups.Stop) -> some View {
+        DepartureRow(d: d, stop: s, tap: tap)
+    }
+}
+
+/// A departure's row (a card on the home, a stop's sheet): its line, where to, the platform, when, how late; tap for its
+/// details, hold to watch its line.
+struct DepartureRow: View {
+    let d: DepartureGroups.Departure
+    let stop: DepartureGroups.Stop
+    let tap: (DepartureTap) -> Void
+    @EnvironmentObject var lines: LineWatchStore
+
+    var body: some View {
         TimelineView(.periodic(from: .now, by: 30)) { tl in
-            Button { tap(DepartureTap(dep: d, stop: s)) } label: {
+            Button { tap(DepartureTap(dep: d, stop: stop)) } label: {
                 HStack(spacing: 8) {
                     DSLinePill(line: d.line, train: d.train).frame(width: 46, alignment: .leading)
                     Text(Fmt.place(d.headsign)).font(DS.calloutStrong).foregroundStyle(DS.text).lineLimit(2)

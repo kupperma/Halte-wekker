@@ -86,3 +86,33 @@ struct VehiclePill: View {
         .accessibilityLabel("\(v.isTrain ? "Train" : "Bus") \(v.line)\(v.to.isEmpty ? "" : ", next stop \(Fmt.place(v.to))")")
     }
 }
+
+/// A bus or train you tapped on the home map: its live sheet, and the trip of yours it starts when you could be on it.
+struct VehicleTap: Identifiable {
+    let target: LiveTrackTarget
+    let trip: DoorTrip?
+    var id: String { target.tripId }
+}
+
+/// A moving bus or train on the home map as a 44 pt button: tap for its live sheet. VoiceOver also offers "I'm on this
+/// one" when it could be yours.
+struct VehicleMark: View {
+    let v: LiveVehiclesModel.Moving
+    let tap: () -> Void
+    var onIt: (() -> Void)? = nil
+    var body: some View {
+        Button(action: tap) {
+            VehiclePill(v: v)
+                .frame(minWidth: DS.hit, minHeight: DS.hit)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(DSPressStyle())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(v.isTrain ? "Train" : "Bus") \(v.line)\(v.to.isEmpty ? "" : ", next stop \(Fmt.place(v.to))")")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityHint("Shows where it is and its next stops")
+        .accessibilityActions {
+            if let onIt { Button("I’m on this one", action: onIt) }
+        }
+    }
+}

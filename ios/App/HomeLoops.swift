@@ -167,6 +167,22 @@ enum HomeActions {
         }
     }
 
+    /// "I'm on this one" for a bus or train tapped on the home map: one of your next trips from here, started by hand the
+    /// way Fastest trip's "I'm on it" starts it (`GoStore.startByHand`): with the one the live store sees you on; you said
+    /// it's this one while it saw another (picked); or else holding the ride it was planned with.
+    static func startOnThisOne(_ t: DoorTrip, live: LiveStore, trip: TripManager) {
+        guard trip.phase == .idle, let r = RoutePlan.from(t) else { return }
+        if let ob = live.onBoard, t.first.tripId == ob.vehicle.tripId {
+            trip.start(r, vehicle: ob.vehicle, alternatives: [t], how: "Home map hand")
+        } else if live.onBoard != nil {
+            let f = t.first
+            trip.start(r, vehicle: Vehicle(tripId: f.tripId, line: f.line, isTrain: f.isTrain), alternatives: [t], picked: true,
+                       how: "Home map hand, picked")
+        } else {
+            trip.start(r, onIt: true, how: "Home map hand")
+        }
+    }
+
     /// The hands-free Fastest trip to where you're going now, seeded with the home's trips from here (as `HomeView.openGo`).
     static func openGo(live: LiveStore, trip: TripManager, goStore: GoStore, near: NearMe) {
         var seed: [DoorTrip] = []

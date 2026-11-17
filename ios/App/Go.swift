@@ -1426,11 +1426,41 @@ struct GoMap: View {
     @State private var camera: MapCameraPosition = .automatic
     @State private var size: CGSize = .zero
     @State private var tick = 0
+    /// The new look (0.20.1): the map moves by hand too. `auto`: it keeps you and your way in view by itself (the
+    /// button filled); a pan or zoom by hand makes it free (outline) until the button is tapped again.
+    @State private var auto = true
+    @State private var lastFit: Date?
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { tl in
-            Map(position: $camera, interactionModes: []) { content(tl.date) }
+            Map(position: $camera, interactionModes: newLook ? .all : []) { content(tl.date) }
                 .mapStyle(newLook ? .standard(pointsOfInterest: .excludingAll) : .standard(emphasis: .muted, pointsOfInterest: .excludingAll))
+                .onMapCameraChange(frequency: .onEnd) { _ in
+                    // a move that isn't its own fit settling is a hand's
+                    if newLook, auto, MapFollow.handMovedSinceFit(lastFit: lastFit, now: Date()) { auto = false }
+                }
+                .accessibilityHidden(true)
+        }
+        .overlay(alignment: .topTrailing) {
+            if newLook {
+                Button {
+                    auto.toggle()
+                    if auto { fit(Date(), animated: true) } else { lastFit = nil }
+                } label: {
+                    Image(systemName: auto ? "location.fill" : "location")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(auto ? DS.accentText : DS.secondary)
+                        .frame(width: 48, height: 48)
+                        .background(DS.surface, in: Circle())
+                        .dsFloat()
+                }
+                .buttonStyle(DSPressStyle())
+                .padding(.trailing, DS.edge)
+                .padding(.top, max(top + 8, bottom - 70))
+                .accessibilityLabel(auto ? "Keeping you and your way in view" : "Show me and my way")
+                .accessibilityHint(auto ? "Tap to stop, so you can move the map" : "Tap to keep you and your way in view")
+                .accessibilityAddTraits(auto ? .isSelected : [])
+            }
         }
         // a wash of the map's paper over it, and its wear (not in the new look)
         .overlay {
@@ -1445,8 +1475,10 @@ struct GoMap: View {
         .background { GeometryReader { g in Color.clear.onAppear { size = g.size }.onChange(of: g.size) { _, s in size = s } } }
         .onAppear { hereNow = here }
         .onChange(of: here?.timestamp) { _, _ in hereNow = here }
-        .onChange(of: tick) { _, t in if t <= 2 || t % 4 == 0 { fit(Date(), animated: t > 2) } }
-        .onChange(of: size) { _, _ in fit(Date(), animated: false) }
+        // (the new look: only while it keeps you in view by itself, never under a hand moving the map)
+        .onChange(of: tick) { _, t in if (!newLook || auto) && (t <= 2 || t % 4 == 0) { fit(Date(), animated: t > 2) } }
+        .onChange(of: size) { _, _ in if !newLook || auto { fit(Date(), animated: false) } }
+        .onChange(of: camera) { _, c in if newLook && auto && c.positionedByUser { auto = false } }
         .task(id: ride?.tripId ?? "") { await run() }
     }
 
@@ -1573,6 +1605,7 @@ struct GoMap: View {
         if w / h > aspect { h = w / aspect } else { w = h * aspect }
         let scale = h / winH                                       // map points per screen point
         let rect = MKMapRect(x: box.midX - w / 2, y: box.midY - h / 2 - top * scale, width: w, height: size.height * scale)
+        lastFit = Date()
         if animated { withAnimation(.easeInOut(duration: 1.2)) { camera = .rect(rect) } } else { camera = .rect(rect) }
     }
 }
