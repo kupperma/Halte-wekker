@@ -18,6 +18,12 @@ final class GoStore: ObservableObject {
     @Published private(set) var dest: Place = .veghel
     @Published private(set) var best: DoorTrip?             // the one it's watching: the fastest you can still catch
     @Published private(set) var others: [DoorTrip] = []
+    /// The ride you chose in Plan (0.20.2): shown and watched as your trip instead of the fastest, found again in each
+    /// answer by its rides' trip ids; something faster is only a note. Nil: it picks the fastest, as before (also once
+    /// your choice is gone: cancelled, left, or missing from the answers).
+    @Published private(set) var chosen: DoorTrip?
+    private var chosenMisses = 0                             // whole answers in a row it was missing from
+    private var toldBeats: Set<String> = []                  // "Faster:" noted for these rides (once each)
     @Published private(set) var error: String?
     @Published private(set) var updated: Date?
     @Published private(set) var notes: [Note] = []           // what it told you, newest first
@@ -66,9 +72,13 @@ final class GoStore: ObservableObject {
     /// `seed`: trips from where you are that the home screen just found: on screen at once, then looked up again.
     /// `planKey`: it's for a trip you planned (`schoolKey`, `arriveKey`), opened by hand or by itself: once it's closed,
     /// it doesn't open by itself for that trip again.
-    func open(to d: Place, from loc: CLLocation?, deadline dl: Date? = nil, label: String? = nil, planKey: String? = nil, seed: [DoorTrip] = []) {
+    /// `chosen`: the option you picked in Plan: that one is your trip while it's still to catch (with `seed`, Plan's
+    /// options, on screen at once, a Be there by too).
+    func open(to d: Place, from loc: CLLocation?, deadline dl: Date? = nil, label: String? = nil, planKey: String? = nil, seed: [DoorTrip] = [],
+              chosen c: DoorTrip? = nil) {
         fallback = loc
-        self.seed = dl == nil ? seed : []
+        self.seed = dl == nil || c != nil ? seed : []
+        chosen = c
         deadline = dl; deadlineLabel = label; self.planKey = planKey
         isOpen = true
         begin(d)
@@ -112,7 +122,7 @@ final class GoStore: ObservableObject {
     /// Somewhere else to go (from the menu at the top).
     func retarget(_ d: Place) {
         guard isOpen, d != dest || !watching else { return }
-        if d != dest { deadline = nil; deadlineLabel = nil }          // somewhere else: not the planned trip any more
+        if d != dest { deadline = nil; deadlineLabel = nil; chosen = nil }      // somewhere else: not the planned trip any more
         begin(d)
     }
 
@@ -120,7 +130,7 @@ final class GoStore: ObservableObject {
     func close() {
         stopWatching()
         if let k = planKey { UserDefaults.standard.set(k, forKey: "go.closedPlan") }
-        planKey = nil; deadline = nil; deadlineLabel = nil
+        planKey = nil; deadline = nil; deadlineLabel = nil; chosen = nil
         isOpen = false
         clearPosted()
         demoTask?.cancel(); demoTask = nil
@@ -138,6 +148,7 @@ final class GoStore: ObservableObject {
         best = nil; others = []; error = nil; updated = nil; notes = []; arrived = false; seen = nil; overdue = false; onBoard = nil; movingUnknown = false; slow = false; hurry = nil
         firstOnly = false; asOf = nil; emptyLooks = 0
         told = [:]; toldEnd = nil; toldGo = []; missed = nil
+        chosenMisses = 0; toldBeats = []
         since = Date()
         watching = true
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
@@ -394,7 +405,23 @@ final class GoStore: ObservableObject {
             return
         }
         // One empty answer keeps what you had (that hasn't left).
-        let list = found.isEmpty ? ([best].compactMap { $0 } + others).filter { $0.first.departure > now } : found
+        var list = found.isEmpty ? ([best].compactMap { $0 } + others).filter { $0.first.departure > now } : found
+        // The ride you chose: as this answer has it (by its rides' trip ids), else kept as it was while it's still to
+        // come (later than this answer reaches). Gone once cancelled, or missing from a few whole answers that reach past it.
+        if let c = chosen {
+            if let i = ChosenRide.match(c.rides.map(\.tripId), in: list.map { $0.rides.map(\.tripId) }) {
+                chosen = list[i]; chosenMisses = 0
+            } else if !quiet, ChosenRide.countsAsMiss(departure: c.first.departure, answer: found.map(\.first.departure), whole: !firstOnly) {
+                chosenMisses += 1
+            }
+            if let k = chosen, k.rides.contains(where: \.cancelled) {
+                dropChosen(.cancelled)
+            } else if chosenMisses >= ChosenRide.maxMisses {
+                dropChosen(.missing)
+            } else if let k = chosen, !list.contains(where: { $0.id == k.id }), k.first.departure > now {
+                list.append(k)
+            }
+        }
         // The ones you can still make: not cancelled, and you'd have had to set off at most a minute and a half ago.
         let ok = list.filter { !$0.first.cancelled && $0.start >= now.addingTimeInterval(-90) }
         // The one you're waiting for at its stop, just past its time, is still the one: buses run late without the live
@@ -444,6 +471,19 @@ final class GoStore: ObservableObject {
                     && (Risk.penalty(same) < Risk.safe || Risk.penalty(p) >= Risk.penalty(same)) { pick = same }
             } else if Risk.score(p) > Risk.score(same) - 1 {
                 pick = same
+            }
+        }
+        // The ride you chose stays your trip, whatever's faster (a way that beats it outright is a note, once); one you
+        // can't catch any more goes, and then it's the fastest again.
+        if let c = chosen {
+            if let mine = ok.first(where: { $0.id == c.id }) {
+                if !quiet, let p = pick, p.id != mine.id, ChosenRide.beats(start: p.start, end: p.end, chosenStart: mine.start, chosenEnd: mine.end),
+                   toldBeats.insert(p.first.tripId).inserted {
+                    remark("Faster: \(Self.what(p.first)) at \(Fmt.hhmm(p.first.departure)), \(d.short) \(Fmt.hhmm(p.end)) · it stays with the one you chose")
+                }
+                pick = mine
+            } else {
+                dropChosen(.left)
             }
         }
         guard let p = pick else {
@@ -555,7 +595,7 @@ final class GoStore: ObservableObject {
                 told[f.tripId] = dl
                 toldEnd = p.end
                 if dl >= 1 {
-                    tell("\(Self.title(f)) is \(dl) min late", "Leaves \(Fmt.hhmm(f.departure)) instead of \(Fmt.hhmm(f.scheduledDeparture)) · still your fastest, \(dest.short) \(Fmt.hhmm(p.end))", kind: "late")
+                    tell("\(Self.title(f)) is \(dl) min late", "Leaves \(Fmt.hhmm(f.departure)) instead of \(Fmt.hhmm(f.scheduledDeparture)) · still your \(chosen == nil ? "fastest" : "pick"), \(dest.short) \(Fmt.hhmm(p.end))", kind: "late")
                 } else if dl <= -1 {
                     tell("\(Self.title(f)) leaves \(-dl) min early", "Leaves \(Fmt.hhmm(f.departure)) instead of \(Fmt.hhmm(f.scheduledDeparture)) · be at \(Fmt.place(f.fromStop)) in time", kind: "late")
                 } else {
@@ -836,6 +876,20 @@ final class GoStore: ObservableObject {
         posted.append(id)
         NoticeLog.shared.add(key: id, title: title, body: body, kind: kind)       // kept, even when a newer one replaces it
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: id, content: c, trigger: nil)) { _ in }
+    }
+
+    /// A note on the screen only (no notification).
+    private func remark(_ text: String) {
+        notes.insert(Note(at: Date(), text: text), at: 0)
+        if notes.count > 5 { notes.removeLast(notes.count - 5) }
+    }
+
+    /// Your choice is gone: back to the fastest, as without one, with a short note on the screen. (What it switches to
+    /// is told as it always is.)
+    private func dropChosen(_ why: ChosenRide.Gone) {
+        guard chosen != nil else { return }
+        chosen = nil; chosenMisses = 0
+        remark(ChosenRide.goneNote(why))
     }
 
     private func clearPosted() {

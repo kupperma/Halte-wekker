@@ -57,6 +57,15 @@ struct GoViewNew: View {
     }
 
     private var destWord: String { go.dest.short }
+    /// It's on the ride you chose in Plan (not the fastest it picked itself).
+    private var onChosen: Bool { go.chosen.map { $0.first.tripId == go.best?.first.tripId } ?? false }
+    /// The big card's heading: "Fastest way to Breda", "For your 09:00 class", "The one you chose · to Eindhoven".
+    private var heading: String {
+        let to: String = goingHome ? "home" : "to \(destWord)"
+        if onChosen { return "The one you chose · " + (go.deadlineLabel.map { "for \($0)" } ?? to) }
+        if let l = go.deadlineLabel { return "For \(l)" }
+        return "Fastest way \(to)"
+    }
     /// Home is Veghel, unless you picked somewhere yourself.
     private var goingHome: Bool { go.dest == .veghel && live.custom == nil }
 
@@ -162,7 +171,7 @@ struct GoViewNew: View {
         let toName = Fmt.place(f.headsign.isEmpty ? f.toStop : f.headsign)
         let changes = t.rides.count > 1 ? " · \(t.rides.count - 1) change\(t.rides.count > 2 ? "s" : "")" : ""
         return VStack(alignment: .leading, spacing: DS.s12) {
-            Text(go.deadlineLabel.map { "For \($0)" } ?? (goingHome ? "Fastest way home" : "Fastest way to \(destWord)"))
+            Text(heading)
                 .font(DS.subStrong).foregroundStyle(DS.secondary).accessibilityAddTraits(.isHeader)
             // the one big number: when to set off (from the saved answer: just the time)
             TimelineView(.periodic(from: .now, by: 15)) { tl in
@@ -327,7 +336,9 @@ struct GoViewNew: View {
                     .font(DS.subStrong).foregroundStyle(DS.accentText)
             }
             if go.watching && !checking {
-                Text("You get a notification if it runs late or leaves early, or if something faster comes up: then it watches that one instead. Once you’re on board, your trip starts by itself.")
+                Text(onChosen
+                     ? "You get a notification if it runs late or leaves early. It stays with the one you chose: something faster is only noted here. Once you’re on board, your trip starts by itself."
+                     : "You get a notification if it runs late or leaves early, or if something faster comes up: then it watches that one instead. Once you’re on board, your trip starts by itself.")
                     .font(DS.sub).foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
             }
             ForEach(go.notes) { n in
@@ -371,7 +382,8 @@ struct GoViewNew: View {
 
     private func compareRow(_ o: DoorTrip, _ best: DoorTrip) -> some View {
         let fastest = o.id == best.id
-        let later = RideAhead.later(than: best.end, o.end, fastest: fastest)
+        // (on the one you chose: the others against it, sooner ones too)
+        let later = onChosen ? ChosenRide.against(chosenEnd: best.end, o.end, isChosen: fastest) : RideAhead.later(than: best.end, o.end, fastest: fastest)
         let changes = o.rides.count - 1
         let tight = Risk.weakest(o)
         return VStack(alignment: .leading, spacing: 6) {
@@ -382,7 +394,7 @@ struct GoViewNew: View {
                 Text(Fmt.rideText(o.end.timeIntervalSince(o.start) / 60)).font(DS.footnote).monospacedDigit().foregroundStyle(DS.secondary)
                 Spacer(minLength: 4)
                 Text(later).font(DS.footnoteStrong).monospacedDigit()
-                    .foregroundStyle(fastest ? DS.onAccent : later == "same time" ? DS.text : DS.warning)
+                    .foregroundStyle(fastest ? DS.onAccent : later == "same time" || later.hasSuffix("sooner") ? DS.text : DS.warning)
                     .padding(.horizontal, 8).padding(.vertical, 3)
                     .background(fastest ? AnyShapeStyle(DS.accent) : AnyShapeStyle(DS.surface3), in: Capsule())
             }

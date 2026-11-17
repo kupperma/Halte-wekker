@@ -6,7 +6,7 @@ import SwiftUI
 
 /// Plan a trip (artboard C2): from your location (or anywhere) to anywhere, leaving now, at a time, or to be there by
 /// one. The results come from one plain `Transit.plan` (urgent lane: you're waiting for it on screen); Go hands over
-/// to the hands-free Fastest trip, which makes its own pick.
+/// to the hands-free Fastest trip: on the option you moved to (0.20.2), else it makes its own pick.
 @MainActor
 final class PlanTripModel: ObservableObject {
     enum End: Equatable {
@@ -29,6 +29,8 @@ final class PlanTripModel: ObservableObject {
     @Published private(set) var loading = false
     @Published private(set) var error: String?
     @Published var focused: String?
+    /// The option it put first by itself (the fastest): on that one, Go lets Fastest trip pick as before.
+    @Published private(set) var suggested: String?
     private var round = 0
 
     var fromHere: Bool { from == .here }
@@ -46,7 +48,7 @@ final class PlanTripModel: ObservableObject {
         from = t; to = f
     }
 
-    func clear() { round += 1; options = []; labels = [:]; error = nil; loading = false; focused = nil }
+    func clear() { round += 1; options = []; labels = [:]; error = nil; loading = false; focused = nil; suggested = nil }
 
     /// Ask for the ways there (a newer question makes an older answer go unused).
     func run(here: CLLocation?) async {
@@ -54,7 +56,7 @@ final class PlanTripModel: ObservableObject {
         round += 1
         let mine = round
         // a new question: the old answer goes at once (its cards and the Go title belonged to it)
-        options = []; labels = [:]; focused = nil
+        options = []; labels = [:]; focused = nil; suggested = nil
         guard let a = place(from, here: here), let b = place(t, here: here) else {
             options = []; labels = [:]; loading = false
             error = "Haltewekker doesn’t know where you are yet. Turn on location, or pick where you start."
@@ -92,6 +94,7 @@ final class PlanTripModel: ObservableObject {
         if case .arrive(let d) = when { deadline = d }
         labels = PlanCompare.labels(options.map(Self.option), deadline: deadline)
         focused = labels.first(where: { $0.value == .fastest })?.key ?? options.first?.id
+        suggested = focused
         loading = false
         error = options.isEmpty ? (Transit.trouble.recent() ?? "No trips found. Try another time, or check the places.") : nil
     }
@@ -294,6 +297,10 @@ struct PlanTripOverlay: View {
                 LazyHStack(spacing: 10) {
                     ForEach(model.options) { t in
                         OptionCard(trip: t, label: model.labels[t.id], selected: t.id == model.focused, legBar: legBars)
+                            .contentShape(Rectangle())
+                            .onTapGesture { withAnimation(DS.quick) { model.focused = t.id } }      // tap one to choose it
+                            .accessibilityAddTraits(t.id == model.focused ? [.isButton, .isSelected] : .isButton)
+                            .accessibilityHint("Go takes this one")
                             .containerRelativeFrame(.horizontal) { w, _ in min(300, w - 120) }
                             .id(t.id)
                     }
@@ -369,11 +376,15 @@ struct PlanTripOverlay: View {
         guard trip.phase == .idle else { return }
         if dest.key == Place.buas.key, trip.direction != .toSchool { trip.pick(.toSchool) }
         if dest.key == Place.veghel.key, trip.direction != .home { trip.pick(.home) }
+        // The option you moved to is your trip there (Plan's options on screen at once); on the one Plan put first,
+        // Fastest trip picks the fastest as before.
+        let chosen = ChosenRide.pinned(focused: model.focused, suggested: model.suggested).flatMap { id in model.options.first { $0.id == id } }
+        let seed = chosen == nil ? [] : model.options
         withAnimation(.easeInOut(duration: 0.35)) {
             if case .arrive(let t) = model.when {
-                goStore.open(to: dest, from: near.position, deadline: t, label: "\(dest.short) by \(Fmt.hhmm(t))")
+                goStore.open(to: dest, from: near.position, deadline: t, label: "\(dest.short) by \(Fmt.hhmm(t))", seed: seed, chosen: chosen)
             } else {
-                goStore.open(to: dest, from: near.position)
+                goStore.open(to: dest, from: near.position, seed: seed, chosen: chosen)
             }
         }
         close()
