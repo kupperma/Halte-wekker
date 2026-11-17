@@ -613,9 +613,10 @@ enum Transit {
     private final class MapAnswers: @unchecked Sendable {
         private let lock = NSLock()
         private var last: [String: (at: Date, centre: GeoPoint, segs: [VehicleSegment])] = [:]
-        func get(_ k: String, near c: GeoPoint, now: Date) -> [VehicleSegment]? {
+        func get(_ k: String, near c: GeoPoint, now: Date, speed: Double) -> [VehicleSegment]? {
             lock.lock(); defer { lock.unlock() }
-            guard let a = last[k], MapReuse.usable(age: now.timeIntervalSince(a.at), movedMetres: Geo.metres(a.centre, c), allowed: true) else { return nil }
+            guard let a = last[k], MapReuse.usable(age: now.timeIntervalSince(a.at), movedMetres: Geo.metres(a.centre, c), allowed: true,
+                                                   speed: speed) else { return nil }
             return a.segs
         }
         func put(_ k: String, centre: GeoPoint, segs: [VehicleSegment], at: Date) {
@@ -628,12 +629,13 @@ enum Transit {
     /// `back`/`ahead`: the stretch of time (by their timetables) to look at, around now.
     /// `allTrips`: a piece several trips share (coupled and through trains) gives one segment per trip, not just the first.
     /// `reuse`: the same question's answer of the last 10 s does, when it was asked within 50 m of here (`MapReuse`):
-    /// standing about with Fastest trip open, a look every 6 s needn't download it all again.
+    /// standing about with Fastest trip open, a look every 6 s needn't download it all again. `speed` (yours, m/s; 0.20.7):
+    /// at bus speed from as far as that goes in the answer's age too.
     static func vehicles(near c: CLLocationCoordinate2D, radiusDeg: Double = 0.02, back: TimeInterval = 150, ahead: TimeInterval = 90,
-                         allTrips: Bool = false, reuse: Bool = false) async -> [VehicleSegment] {
+                         allTrips: Bool = false, reuse: Bool = false, speed: Double = 0) async -> [VehicleSegment] {
         let now = Date()
         let key = "\(radiusDeg)|\(back)|\(ahead)|\(allTrips)", here = GeoPoint(c)
-        if reuse, let kept = mapAnswers.get(key, near: here, now: now) { return kept }
+        if reuse, let kept = mapAnswers.get(key, near: here, now: now, speed: speed) { return kept }
         let q: [URLQueryItem] = [.init(name: "min", value: "\(c.latitude - radiusDeg),\(c.longitude - radiusDeg * 1.6)"),
                                  .init(name: "max", value: "\(c.latitude + radiusDeg),\(c.longitude + radiusDeg * 1.6)"),
                                  .init(name: "startTime", value: iso.string(from: now.addingTimeInterval(-back))),

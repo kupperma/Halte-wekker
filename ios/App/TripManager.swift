@@ -1226,7 +1226,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         // (no trip running: an answer of the last 10 s from within 50 m does; on a ride or at a change always a new one)
         let reuse = phase == .idle
         let segs = await Transit.$urgent.withValue(urgentAsk) {
-            await Transit.vehicles(near: last.coordinate, radiusDeg: speed > 15 ? 0.04 : 0.02, allTrips: true, reuse: reuse)
+            await Transit.vehicles(near: last.coordinate, radiusDeg: speed > 15 ? 0.04 : 0.02, allTrips: true, reuse: reuse, speed: speed)
         }
         // (a late bus by its times without catching up: its live times have it make its delay up within a few stops)
         let all = VehicleTrack.group(Transit.noCatchUp(segs, asOf: Date()).map { MapPiece($0) })

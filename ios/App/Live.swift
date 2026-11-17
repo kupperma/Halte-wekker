@@ -166,7 +166,7 @@ final class LiveStore: ObservableObject {
     /// `history`: your fixes of the last minutes, read once the vehicles near you are in. Without a `tripId` it's the
     /// one that moves with you (`movesWithYou`); classic matching: the one whose position by its times now is nearest to you.
     static func onBoardTrips(_ f: CLLocation, to dest: Place, tripId: String? = nil, wasMoving: Bool = false,
-                             late: TimeInterval? = nil, line: String? = nil, isTrain: Bool? = nil,
+                             late: TimeInterval? = nil, line: String? = nil, isTrain: Bool? = nil, reuse: Bool = false,
                              history: @MainActor @Sendable () -> [Fix] = { [] }) async -> (OnBoard, [DoorTrip])? {
         let now = Date()
         if let tripId, let late {
@@ -181,7 +181,9 @@ final class LiveStore: ObservableObject {
         let speedNow = wasMoving ? max(f.speed, 15) : f.speed
         let classic = MatchSettings.classic()
         // (the matcher reads every trip on a piece several share; classic matching the first only)
-        let segs = await Transit.vehicles(near: f.coordinate, radiusDeg: tripId == nil && speedNow < 15 ? 0.02 : 0.04, allTrips: !classic)
+        // (`reuse`, Fastest trip watching: the same map answer of the last 10 s, from about here at your speed: 0.20.7)
+        let segs = await Transit.vehicles(near: f.coordinate, radiusDeg: tripId == nil && speedNow < 15 ? 0.02 : 0.04, allTrips: !classic,
+                                          reuse: reuse, speed: speedNow)
         let chosen: VehicleSegment?
         if classic || tripId != nil {
             var best: (VehicleSegment, Double)?

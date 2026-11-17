@@ -1,6 +1,7 @@
 import CoreLocation
 import MapKit
 import SwiftUI
+import UIKit
 import UserNotifications
 
 /// "Fastest trip", hands-free: one tap and it plans from where you are, shows what to take next and the walk there,
@@ -141,12 +142,19 @@ final class GoStore: ObservableObject {
     func again() { begin(dest) }
 
     private var emptyLooks = 0                 // looks in a row that found nothing (the wait grows: 4, 8, 16, 30 s)
+    // 0.20.7
+    private var unknown = LookBackoff.State()  // moving at bus speed, not sure which one: the looks so far (4, 8, 15, 30 s)
+    private var openedFrom: CLLocation?        // where you were when it opened…
+    private var movedMax = 0.0                 // …and the furthest you've been from there
+    private var watchedFirst: Date?            // the departure it watched first: missed and not gone, it stops by itself
+    private var extrasKept: [DoorTrip] = []    // the extras of the last look in front (behind the screen: no new ones)
 
     private func begin(_ d: Place) {
         loop?.cancel(); detect?.cancel()
         dest = d
         best = nil; others = []; error = nil; updated = nil; notes = []; arrived = false; seen = nil; overdue = false; onBoard = nil; movingUnknown = false; slow = false; hurry = nil
         firstOnly = false; asOf = nil; emptyLooks = 0
+        unknown = LookBackoff.State(); openedFrom = nil; movedMax = 0; watchedFirst = nil; extrasKept = []
         told = [:]; toldEnd = nil; toldGo = []; missed = nil
         chosenMisses = 0; toldBeats = []
         since = Date()
@@ -185,19 +193,39 @@ final class GoStore: ObservableObject {
                 await self.refresh()
                 // (the saved answer on screen isn't an answer: a dead connection waits longer each time behind it too)
                 if self.best != nil && self.asOf == nil { self.emptyLooks = 0 } else if !self.movingUnknown { self.emptyLooks += 1 }
-                // quicker when the one you're catching is close
-                let soon = (self.best?.first.departure.timeIntervalSinceNow ?? .infinity) < 12 * 60
-                // nothing on screen yet (or only the saved answer): look again soon (no position yet: sooner still)
-                let wait: Double = self.best == nil || self.asOf != nil ? (self.here == nil ? 1.5 : Net.nextBackoff(failures: self.emptyLooks - 1)) : soon ? 20 : 40
+                // moving at bus speed and not sure which one: 4, 8, 15, then 30 s, from 4 again when it sees another
+                self.unknown = self.movingUnknown ? LookBackoff.step(self.unknown, key: self.seen?.tripId) : LookBackoff.State()
+                let wait: Double
+                if self.movingUnknown {
+                    wait = LookBackoff.wait(self.unknown)
+                } else if self.best == nil || self.asOf != nil {
+                    // nothing on screen yet (or only the saved answer): look again soon (no position yet: sooner still)
+                    wait = self.here == nil ? 1.5 : Net.nextBackoff(failures: self.emptyLooks - 1)
+                } else {
+                    // quicker when the one you're catching is close
+                    wait = (self.best?.first.departure.timeIntervalSinceNow ?? .infinity) < 12 * 60 ? 20 : 40
+                }
                 try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
             }
         }
         detect = Task { [weak self] in
             var last: String?
+            var unsure = LookBackoff.State(), nextAt = Date.distantPast
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 6_000_000_000)
                 guard let self, self.watching, !Task.isCancelled else { return }
+                // moving at bus speed and not sure which one: these looks back off too (4, 8, 15, 30 s), from the start
+                // again when it sees you with another one
+                if self.movingUnknown {
+                    guard Date() >= nextAt else { continue }
+                } else {
+                    unsure = LookBackoff.State(); nextAt = .distantPast
+                }
                 last = await self.checkBoarding(last)
+                if self.movingUnknown {
+                    unsure = LookBackoff.step(unsure, key: last)
+                    nextAt = Date().addingTimeInterval(LookBackoff.wait(unsure) - 1)
+                }
             }
         }
     }
@@ -651,7 +679,7 @@ final class GoStore: ObservableObject {
         let d = dest
         let moving = trip.movedRecently
         let history: @MainActor @Sendable () -> [Fix] = { trip.recentFixes }        // (read once its request is in)
-        guard var ob = await Transit.$urgent.withValue(true, operation: { await Net.within(10, { await LiveStore.onBoardTrips(f, to: d, wasMoving: moving, history: history) }) }) ?? nil,
+        guard var ob = await Transit.$urgent.withValue(true, operation: { await Net.within(10, { await LiveStore.onBoardTrips(f, to: d, wasMoving: moving, reuse: true, history: history) }) }) ?? nil,
               watching, dest == d, trip.phase == .idle, !ob.1.isEmpty else { return }
         movingUnknown = false
         forgetSaved()
@@ -679,7 +707,7 @@ final class GoStore: ObservableObject {
             looks += 1
             // another one fits you better: plan from that one, and look once more
             if let m = ranked.first, let loc = trip.lastFix,
-               let o2 = await LiveStore.onBoardTrips(loc, to: d, tripId: m.vehicle.tripId), !o2.1.isEmpty, watching, dest == d {
+               let o2 = await LiveStore.onBoardTrips(loc, to: d, tripId: m.vehicle.tripId, reuse: true), !o2.1.isEmpty, watching, dest == d {
                 ob = o2
                 onBoard = o2.0.vehicle
                 best = o2.1.first; others = Array(o2.1.dropFirst()); updated = Date()
@@ -724,7 +752,7 @@ final class GoStore: ObservableObject {
             seen = m.vehicle
             return m.vehicle.tripId
         }
-        if twice, let loc = trip.lastFix, let ob = await LiveStore.onBoardTrips(loc, to: dest, history: { trip.recentFixes }),
+        if twice, let loc = trip.lastFix, let ob = await LiveStore.onBoardTrips(loc, to: dest, reuse: true, history: { trip.recentFixes }),
            ob.0.vehicle.tripId == m.vehicle.tripId, let t = ob.1.first {
             // a long way round is probably not a bus you're on (a car or bike next to one)
             if asOf == nil, let b = best, t.end > b.end.addingTimeInterval(30 * 60) { seen = nil; return m.vehicle.tripId }
