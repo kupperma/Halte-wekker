@@ -1566,8 +1566,11 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         var judged: [Judgement] = []
         if let r = road, let plain = VehicleTrack(tripId: v.tripId, line: v.line, isTrain: v.isTrain, trip: r.trip.noCatchUp(asOf: r.at, isTrain: v.isTrain)) {
             RealPositionsStore.shared.learn(v.tripId, trip: r.trip)
-            let tracks = await RealPositionsStore.shared.forMatcher([plain])
+            // (only looking, on its road: the positions at most every 2 minutes, no hold on the feed: 0.20.7)
+            await RealPositionsStore.shared.refresh(trains: v.isTrain, ifOlderThan: FeedPolicy.confirmedEvery)
+            let tracks = await RealPositionsStore.shared.forMatcher([plain], hold: false)
             judged = VehicleMatch.judgeAll(recentFixes, tracks, strictTimes: false)
+            BatteryLog.shared.check()
         }
         guard vehicle == v, var lock = handLock, lock.tripId == v.tripId else { return }
         let at = Date()
@@ -1665,17 +1668,34 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     /// same choice again within 10 minutes of one that ran out of time).
     /// Its own GPS (0.20.3): judged by where its fix puts it when it has a fresh one; and within 200 m of you, moving
     /// with you, it's kept (`VehicleMatch.gpsKeeps`: no miss, no looking for another), whatever its judging alone says.
+    /// The positions feed (0.20.7): with the vehicle confirmed at most every 2 minutes and no hold on the feed; a look in
+    /// doubt (it fails, isn't sure, or was far from its times) fetches fresh positions and judges again before it counts.
     private func sameBusByJudging(_ v: Vehicle, trip t: LiveTrip, leg: Leg, last: CLLocation, limit: Double, now: Date) async {
-        RealPositionsStore.shared.learn(v.tripId, trip: t)
-        var track = VehicleTrack(tripId: v.tripId, line: v.line, isTrain: v.isTrain, trip: t)
-        if let k = track { track = await RealPositionsStore.shared.forMatcher([k]).first }
+        let feed = RealPositionsStore.shared
+        feed.learn(v.tripId, trip: t)
+        await feed.refresh(trains: v.isTrain, ifOlderThan: FeedPolicy.confirmedEvery)
         guard vehicle == v, cands.isEmpty else { return }
-        let judged = track.map { VehicleMatch.judgeAll(recentFixes, [$0], strictTimes: false) } ?? []
+        let plain = VehicleTrack(tripId: v.tripId, line: v.line, isTrain: v.isTrain, trip: t)
+        var track = plain
+        if let k = plain { track = await feed.forMatcher([k], hold: false).first }
+        guard vehicle == v, cands.isEmpty else { return }
+        BatteryLog.shared.check()
+        var judged = track.map { VehicleMatch.judgeAll(recentFixes, [$0], strictTimes: false) } ?? []
         let away = VehicleMatch.offRoad(Self.metres(from: last.coordinate, to: t.path), isTrain: v.isTrain)
         var verdict = VehicleMatch.verdict(judged.first?.result, offRoad: away)
+        var mine = judged.first
+        var byGPS = VehicleMatch.gpsKeeps(mine?.evidence, isTrain: v.isTrain)
+        if FeedPolicy.fetchOnDoubt(verdict, farLooks: farLooks, keptByGPS: byGPS), let k = plain,
+           await feed.refresh(trains: v.isTrain, ifOlderThan: FeedPolicy.doubtFresh) {
+            guard vehicle == v, cands.isEmpty else { return }
+            track = await feed.forMatcher([k], hold: false).first
+            guard vehicle == v, cands.isEmpty else { return }
+            judged = track.map { VehicleMatch.judgeAll(recentFixes, [$0], strictTimes: false) } ?? []
+            verdict = VehicleMatch.verdict(judged.first?.result, offRoad: away)
+            mine = judged.first
+            byGPS = VehicleMatch.gpsKeeps(mine?.evidence, isTrain: v.isTrain)
+        }
         let shown = FieldFormat.label(v.tripId, [v.tripId: v.line])
-        let mine = judged.first
-        let byGPS = VehicleMatch.gpsKeeps(mine?.evidence, isTrain: v.isTrain)
         var keptNote = ""
         if byGPS, verdict != .passes {
             // its GPS has it right with you: kept, whatever its judging alone said

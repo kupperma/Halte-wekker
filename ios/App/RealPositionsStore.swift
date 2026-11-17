@@ -5,9 +5,11 @@ import UIKit
 /// Real positions: OVapi's open GPS feed of buses (`RealPositions`, 0.20.2) and NS's positions of every train through the
 /// relay (0.20.3), each fetched only while something needs it, the Settings switch is on and Low Power Mode is off:
 /// - a map or sheet on screen draws a moving bus or train (`.realPositions(_:trains:)`), while the app is in front;
-/// - the on-board matcher is looking (`forMatcher`: boarding, confirming, finding, choosing, "same bus?"): for a
+/// - the on-board matcher is looking (`forMatcher`: boarding, confirming, finding, choosing, "Not this one?"): for a
 ///   minute and a quarter after each look, also in the background while a ride runs (the matcher runs there too; it
 ///   asks for nothing more of the GPS). Trains only while a train is among the ones it looks at.
+/// - 0.20.7: a ride whose vehicle is confirmed holds nothing: its "same bus?" look asks for one fetch at most every two
+///   minutes, and one now when it's in doubt (`refresh`, `FeedPolicy`), before a miss counts.
 /// Every 30 s at most, with its ETag (304: nothing new); not over a Low Data connection; on a failure again after 60 s,
 /// 120 s, … 5 min, silently (the relay without the route or the key: 404, 501; an answer that isn't NS's: no train
 /// fixes). The last good positions are kept, and each vehicle's fix before its newest (for its speed).
@@ -30,6 +32,7 @@ final class RealPositionsStore: ObservableObject {
         var etag: String?
         var nextAt = Date.distantPast
         var failures = 0
+        var lastOK: Date?               // the last answer (new positions, or "nothing new")
     }
     private var buses = Feed(), trains = Feed()
 
@@ -134,10 +137,11 @@ final class RealPositionsStore: ObservableObject {
     /// The matcher is about to judge `tracks` (0.20.3): the positions are fetched meanwhile (`matcherLooks`), and each
     /// one with a fresh fix of its own gets it (`VehicleTrack.gps`). A train whose number it doesn't know yet is asked
     /// for it (its trip, which the app keeps; 4 at most a look, and only once NS's positions are in).
-    func forMatcher(_ tracks: [VehicleTrack], now: Date = Date()) async -> [VehicleTrack] {
+    /// `hold`: keep the positions coming for the next minute and a quarter (not for a confirmed ride's own look: 0.20.7).
+    func forMatcher(_ tracks: [VehicleTrack], hold: Bool = true, now: Date = Date()) async -> [VehicleTrack] {
         guard Self.enabled else { return tracks }
         let anyTrain = tracks.contains(where: \.isTrain)
-        matcherLooks(trains: anyTrain, now: now)
+        if hold { matcherLooks(trains: anyTrain, now: now) }
         if anyTrain, !trainFixes.isEmpty {
             let ask = Array(tracks.filter { t in
                 t.isTrain && numbers[t.tripId] == nil && (noNumber[t.tripId].map { now.timeIntervalSince($0) > 600 } ?? true)
@@ -162,6 +166,26 @@ final class RealPositionsStore: ObservableObject {
             v.gps = gps(for: t.tripId, isTrain: t.isTrain, now: at)
             return v
         }
+    }
+
+    /// One fetch now (0.20.7), also in the background (a ride's own look), unless the last answer is at most `age` old;
+    /// trains too with `trains`. Not with the switch off, in Low Power Mode, or while a failure's wait is still on. True:
+    /// an answer came in.
+    @discardableResult
+    func refresh(trains: Bool, ifOlderThan age: TimeInterval, now: Date = Date()) async -> Bool {
+        guard Self.enabled, !ProcessInfo.processInfo.isLowPowerModeEnabled else { return false }
+        var got = false
+        if FeedPolicy.due(last: buses.lastOK, every: age, now: now), buses.failures == 0 || now >= buses.nextAt {
+            let before = buses.lastOK
+            await fetchBuses()
+            got = got || buses.lastOK != before
+        }
+        if trains, FeedPolicy.due(last: self.trains.lastOK, every: age, now: now), self.trains.failures == 0 || now >= self.trains.nextAt {
+            let before = self.trains.lastOK
+            await fetchTrains()
+            got = got || self.trains.lastOK != before
+        }
+        return got
     }
 
     /// In front, or (the matcher's looks) in the background during a ride.
@@ -266,6 +290,7 @@ final class RealPositionsStore: ObservableObject {
 
     private func succeeded(_ f: inout Feed, _ line: String, kind: String) {
         f.failures = 0
+        f.lastOK = Date()
         f.nextAt = Date().addingTimeInterval(RealPositions.every)
         log(line, kind: kind)
     }
