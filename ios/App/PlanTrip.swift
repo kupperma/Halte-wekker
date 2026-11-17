@@ -157,6 +157,7 @@ struct PlanTripOverlay: View {
     @EnvironmentObject var near: NearMe
     @EnvironmentObject var goStore: GoStore
     @EnvironmentObject var planner: Planner
+    @EnvironmentObject var live: LiveStore
     @State private var sheet: PlanSheetKind?
     @State private var after: PlanSheetKind?           // to open once the picker has gone
     @State private var note: String?
@@ -390,6 +391,25 @@ struct PlanTripOverlay: View {
         close()
     }
 
+    /// A place you searched in Where to? (or a recent one, or one of your own places) becomes the home's destination
+    /// (0.20.2): the home shows the next rides there until you change it, or your school schedule takes over again
+    /// (`HomeDest`). Home or School: back to your schedule when that's where it goes now; else nothing changes (Plan
+    /// doesn't turn your direction). Nothing else uses it: school alarms and planned trips keep going to school.
+    private func makeHome(_ e: PlanTripModel.End) {
+        guard trip.phase == .idle, case .place(let p, let name) = e else { return }
+        if p.key == Place.veghel.key || p.key == Place.buas.key {
+            guard live.custom != nil, p.key == (trip.direction == .toSchool ? Place.buas.key : Place.veghel.key) else { return }
+            live.go(to: nil)
+        } else {
+            let d = Destination(id: p.ids.first ?? "\(p.coordinate.latitude),\(p.coordinate.longitude)", name: name ?? p.name,
+                                lat: p.coordinate.latitude, lon: p.coordinate.longitude)
+            guard live.custom != d else { return }
+            live.go(to: d)
+        }
+        // (a new question for the home: asked once now, then on its usual half minute)
+        Task { await live.refresh(trip.direction, at: near.position) }
+    }
+
     private func remind(out: Bool) {
         let t: Date, leave: Bool
         switch model.when {
@@ -411,7 +431,7 @@ struct PlanTripOverlay: View {
         case .pickFrom:
             EndPickerSheet(title: "From", allowHere: true, more: nil) { model.from = $0 }
         case .pickTo:
-            EndPickerSheet(title: "Where to?", allowHere: model.from != .here, more: { after = $0 }) { model.to = $0 }
+            EndPickerSheet(title: "Where to?", allowHere: model.from != .here, more: { after = $0 }) { model.to = $0; makeHome($0) }
         case .when:
             PlanWhenSheet(when: model.when, modes: model.modes) { w, m in model.when = w; model.modes = m }
                 .presentationDetents([.medium, .large])

@@ -180,16 +180,35 @@ struct NextTripBar: View {
     }
 }
 
-/// The card's destination: "To BUas ▾", a 44 pt chip; tap it for Home, School and your other places.
+/// The card's destination: "To BUas ▾", a 44 pt chip; tap it for By your schedule, Home, School, your other places
+/// and the last places you searched (0.20.2).
 struct DestinationChip: View {
     let title: String
+    /// By your schedule: where that goes now ("BUas", "Home"), and whether the card goes there by it.
+    var schedule: (name: String, current: Bool)? = nil
     let places: [SavedPlace]
+    var recents: [Destination] = []
     let isCurrent: (SavedPlace) -> Bool
+    var isCurrentRecent: (Destination) -> Bool = { _ in false }
     let choose: (SavedPlace) -> Void
+    var chooseSchedule: () -> Void = {}
+    var chooseRecent: (Destination) -> Void = { _ in }
     var body: some View {
         Menu {
-            ForEach(places) { p in
-                Button { choose(p) } label: { Label(p.name, systemImage: isCurrent(p) ? "checkmark" : p.symbol) }
+            if let s = schedule {
+                Button { chooseSchedule() } label: { Label("By your schedule · \(s.name)", systemImage: s.current ? "checkmark" : "calendar") }
+            }
+            Section {
+                ForEach(places) { p in
+                    Button { choose(p) } label: { Label(p.name, systemImage: isCurrent(p) ? "checkmark" : p.symbol) }
+                }
+            }
+            if !recents.isEmpty {
+                Section("Recent") {
+                    ForEach(recents) { d in
+                        Button { chooseRecent(d) } label: { Label(d.short, systemImage: isCurrentRecent(d) ? "checkmark" : "clock.arrow.circlepath") }
+                    }
+                }
             }
         } label: {
             HStack(spacing: 6) {
