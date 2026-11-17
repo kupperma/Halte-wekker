@@ -9,25 +9,27 @@ struct RootView: View {
     @ObservedObject private var morning = Morning.shared
     @State private var browsing = false         // at a change: looking at the map and the boards for a bit
     @AppStorage(NewLook.key) private var newLook = true      // the map-first home (0.19); off: the station home
-    /// The new home is on screen: it follows the phone's light or dark setting. Everything else (still the old look)
-    /// stays dark, as before.
-    private var newHomeShown: Bool { newLook && ((trip.phase == .idle && !go.isOpen) || (trip.phase == .transfer && browsing)) }
-    /// A screen in the new look is on screen (the home, and since 0.20 Fastest trip).
-    private var newShown: Bool { newHomeShown || (newLook && trip.phase == .idle && go.isOpen) }
     @AppStorage(HomeStyle.key) private var homeStyle = HomeStyle.live.rawValue
-    /// The new look follows the phone's light or dark, as Live around you; Next trip first is dark (as its design).
-    private var followsPhone: Bool { newShown && HomeStyle.of(homeStyle) == .live }
+    /// With New look on, every screen is in the new look (the home, and since 0.20 Fastest trip, the ride, the alarm,
+    /// the change and the arrival): they follow the phone's light or dark, as Live around you; Next trip first is dark
+    /// (as its design). The old look stays dark.
+    private var followsPhone: Bool { newLook && HomeStyle.of(homeStyle) == .live }
     var body: some View {
         Group {
             switch trip.phase {
             case .idle where go.isOpen: Group { if newLook { GoViewNew() } else { GoView() } }.transition(.opacity)
             case .idle: if newLook { NewHome() } else { HomeView() }
-            case .alarm: AlarmView()
+            case .alarm: if newLook { AlarmViewNew() } else { AlarmView() }
             case .transfer where browsing:
                 Group { if newLook { NewHome() } else { HomeView() } }
-                    .safeAreaInset(edge: .bottom) { ChangeBar { withAnimation(.easeInOut(duration: 0.3)) { browsing = false } } }
-            case .transfer, .finished: ArrivalView(browse: { withAnimation(.easeInOut(duration: 0.3)) { browsing = true } })
-            default: RideView()
+                    .safeAreaInset(edge: .bottom) {
+                        if newLook { ChangeBarNew { withAnimation(.easeInOut(duration: 0.3)) { browsing = false } } }
+                        else { ChangeBar { withAnimation(.easeInOut(duration: 0.3)) { browsing = false } } }
+                    }
+            case .transfer, .finished:
+                if newLook { ArrivalViewNew(browse: { withAnimation(.easeInOut(duration: 0.3)) { browsing = true } }) }
+                else { ArrivalView(browse: { withAnimation(.easeInOut(duration: 0.3)) { browsing = true } }) }
+            default: if newLook { RideViewNew() } else { RideView() }
             }
         }
         .onChange(of: trip.phase) { _, p in

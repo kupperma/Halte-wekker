@@ -1828,6 +1828,9 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         return ChangeRoom.ownTimetableGrade(liveMinutes: to.timeIntervalSince(from) / 60, scheduledMinutes: b.timeIntervalSince(a) / 60)
     }
 
+    /// The speed rank of the bus you're on, for the ride screen's change ahead (read only: nothing is remembered).
+    var rideGradeNow: String? { vehicle.flatMap { $0.isTrain ? nil : rideGrade($0) } }
+
     /// The next stop the bus or train reaches, and when.
     var nextStop: TripStop? { vehicleStops.first { ($0.arrival ?? .distantPast) > Date() } }
 

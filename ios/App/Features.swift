@@ -64,6 +64,8 @@ struct CrowdIcons: View {
 struct ConsistView: View {
     let layout: TrainLayout
     let pal: HWPalette
+    var newLook = false         // the new look (0.20): its text colours, in light and dark
+    private var mutedInk: Color { newLook ? DS.secondary : Paper.muted }
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             GeometryReader { g in
@@ -74,17 +76,17 @@ struct ConsistView: View {
                         unit(u, w).offset(x: x0 + u.x * w)
                     }
                     if let d = layout.dir {
-                        Text(d == "right" ? "▶" : "◀").font(.system(size: 9)).foregroundStyle(pal.deep)
+                        Text(d == "right" ? "▶" : "◀").font(.system(size: 9)).foregroundStyle(newLook ? DS.text : pal.deep)
                             .offset(x: d == "right" ? x0 + w + 3 : 0, y: 3)
                     }
                     ForEach(layout.letters, id: \.self) { l in
-                        Text(l.letter).font(HWFont.body(9, bold: true)).foregroundStyle(Paper.muted)
+                        Text(l.letter).font(newLook ? .system(size: 9, weight: .bold) : HWFont.body(9, bold: true)).foregroundStyle(mutedInk)
                             .position(x: x0 + l.x * w, y: 27)
                     }
                 }
             }
             .frame(height: layout.letters.isEmpty ? 18 : 33)
-            if let t = layout.firstClassText { Text(t).font(HWFont.body(11)).foregroundStyle(Paper.ink.opacity(0.8)) }
+            if let t = layout.firstClassText { Text(t).font(newLook ? DS.footnote : HWFont.body(11)).foregroundStyle(newLook ? DS.secondary : Paper.ink.opacity(0.8)) }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(layout.firstClassText ?? "Train layout")
