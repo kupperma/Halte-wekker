@@ -2251,7 +2251,13 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             upcomingBoard = Snapshots.upcoming(s?.value.board ?? [], now: now) { $0.cancelled ? $0.scheduled : $0.time }
             upcomingAsOf = upcoming.isEmpty && upcomingBoard.isEmpty ? nil : s?.at
         }
-        guard !upcomingBusy, force || upcomingAt.map({ Date().timeIntervalSince($0) >= 60 }) ?? true else { return }
+        // (at a change, standing, with the next one more than 10 minutes off: every 3 minutes, 0.20.7)
+        var gap: TimeInterval = 60
+        if phase == .transfer {
+            let next = changeListed().map(\.departure).filter { $0 > Date() }.min()
+            gap = ChangePace.gap(standingFor: transferAnchor.map { Date().timeIntervalSince($0.since) }, nextIn: next.map { $0.timeIntervalSinceNow })
+        }
+        guard !upcomingBusy, force || upcomingAt.map({ Date().timeIntervalSince($0) >= gap }) ?? true else { return }
         upcomingBusy = true
         defer { upcomingBusy = false }
         let asked = Date()          // (what comes in is at least this new: it's saved as of then)
