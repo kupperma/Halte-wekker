@@ -1522,6 +1522,7 @@ struct RideView: View {
     @State private var walkTo: WalkTarget?
     @State private var loopRestart = 0
     @State private var screenH: CGFloat = 800
+    @State private var picking = false                  // the "I'm actually on…" sheet (0.20.5)
     var pal: HWPalette { .of(home: trip.direction == .home) }
     /// The ring as big as the screen allows.
     private var ringSize: CGFloat { min(250, max(170, screenH * 0.31 - (trip.phase == .awake ? 60 : 0) - (music.song == nil ? 0 : 20))) }
@@ -1551,8 +1552,11 @@ struct RideView: View {
         .environment(\.seeThrough, true)
         .background { GeometryReader { g in Color.clear.onAppear { screenH = g.size.height }.onChange(of: g.size.height) { _, h in screenH = h } } }
         .sheet(item: $walkTo) { WalkMapSheet(target: $0).presentationDetents([.large]) }
+        .sheet(isPresented: $picking) { RidePickSheet().presentationDetents([.medium, .large]) }
+        .onChange(of: trip.pickAgain) { _, p in if p { trip.pickAgain = false; picking = true } }
         .animation(.easeInOut(duration: 0.4), value: trip.waitingToBoard)
         .onAppear {
+            if trip.pickAgain { trip.pickAgain = false; picking = true }
             music.setFast(scene == .active)
             // the turn from the boards to the platform takes 1.6 s; then the station loop carries on from its first frame
             if panning {
@@ -1716,7 +1720,31 @@ struct RideView: View {
             }
         }
         sheetInfo
-        if v == nil { Text("Looking for the bus or train you’re on…").font(HWFont.body(12)).foregroundStyle(Paper.muted).padding(.horizontal, 16).padding(.top, 2) }
+        if let s = trip.stillOnAsk {
+            // (0.20.5) the one you picked, off its road for 3 minutes
+            VStack(alignment: .leading, spacing: 6) {
+                Text(RidePick.stillOn(line: s.line, isTrain: s.isTrain)).font(HWFont.display(17)).foregroundStyle(Paper.ink)
+                HStack(spacing: 10) {
+                    Button("Yes") { trip.answerStillOn(yes: true) }.frame(minHeight: 44)
+                    Button("Pick again") { trip.answerStillOn(yes: false) }.frame(minHeight: 44)
+                }
+                .font(HWFont.body(13, bold: true)).foregroundStyle(Paper.navy).buttonStyle(.plain)
+            }
+            .padding(.horizontal, 16).padding(.top, 4)
+        }
+        if !trip.demo {
+            // (0.20.5) it picked the wrong one, or none yet: say which one you're on
+            Button { picking = true } label: {
+                Text(trip.vehicle == nil || trip.choosing.count > 1 ? "Which one are you on?" : "Not this one?")
+                    .font(HWFont.body(12, bold: true)).foregroundStyle(Paper.navy)
+                    .frame(minHeight: 44).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(trip.vehicle == nil || trip.choosing.count > 1 ? "Pick the bus or train you’re on" : "I’m on a different bus or train")
+            .padding(.horizontal, 16)
+        }
+        if v == nil, trip.handLock != nil { Text("Going by your location: it wakes you by GPS.").font(HWFont.body(12)).foregroundStyle(Paper.muted).padding(.horizontal, 16).padding(.top, 2) }
+        else if v == nil { Text("Looking for the bus or train you’re on…").font(HWFont.body(12)).foregroundStyle(Paper.muted).padding(.horizontal, 16).padding(.top, 2) }
         else if trip.choosing.count > 1 {
             let c = trip.choosing
             let same = Set(c.map(\.line)).count == 1
@@ -1834,7 +1862,8 @@ struct RideView: View {
         var parts: [String] = []
         if trip.legs.count > 1, let a = trip.arrival { parts.append("\(trip.finalName) around \(Fmt.hhmm(a))") }
         if let n = trip.nextText { parts.append(n) }
-        if trip.pickedByHand { parts.append("You picked it in the list") }
+        if trip.pickedByHand, trip.handLock != nil { if trip.vehicle != nil { parts.append("You picked it yourself") } }
+        else if trip.pickedByHand { parts.append("You picked it in the list") }
         else if trip.byTimetable { parts.append("Going by its timetable") }
         else if trip.nextStop != nil, let m = trip.matchMeters { parts.append("Recognised: \(m) m from you") }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")

@@ -15,6 +15,7 @@ struct RideViewNew: View {
     @Environment(\.scenePhase) private var scene
     @State private var earlier = false
     @State private var walkTo: WalkTarget?
+    @State private var picking = false                  // the "I'm actually on…" sheet (0.20.5)
     @ScaledMetric(relativeTo: .largeTitle) private var big: CGFloat = 96
 
     var body: some View {
@@ -37,11 +38,14 @@ struct RideViewNew: View {
         .background(DS.page.ignoresSafeArea())
         .dynamicTypeSize(...DynamicTypeSize.accessibility2)
         .sheet(item: $walkTo) { WalkMapSheet(target: $0).presentationDetents([.large]) }
+        .sheet(isPresented: $picking) { RidePickSheet().presentationDetents([.medium, .large]) }
         .animation(DS.quick, value: trip.waitingToBoard)
         .onAppear {
             music.setFast(scene == .active)
             Handoff.fromBoards = false              // (the old look's turn from the boards: nothing to turn here)
+            if trip.pickAgain { trip.pickAgain = false; picking = true }
         }
+        .onChange(of: trip.pickAgain) { _, p in if p { trip.pickAgain = false; picking = true } }
         .onDisappear { music.setFast(false) }
         .onChange(of: scene) { _, s in music.setFast(s == .active) }
         .task(id: trip.index) {
@@ -96,6 +100,7 @@ struct RideViewNew: View {
         gpsLine
         Text("It notices which one you get on by itself: your GPS against the live position of every \(rail ? "train" : "bus") nearby. Or tap the one you’re on.")
             .font(DS.sub).foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
+        if !trip.demo { RidePickButton { picking = true } }
         if let l = trip.leg, let r = toCatch(list) {
             // (0.20.4) after a change, walking to the next one: where to go for it, which one, the walk
             goToCard(r, leg: l, saved: trip.upcomingAsOf != nil)
@@ -180,7 +185,8 @@ struct RideViewNew: View {
 
     /// "Leg 1 of 3 · You're on"
     private var rideKicker: String {
-        let k = trip.vehicle == nil ? "Now riding" : trip.pickedByHand ? "You picked" : trip.choosing.count > 1 ? "Checking which bus" : "You’re on"
+        let k = trip.vehicle == nil ? (trip.handLock != nil ? "By your location" : "Now riding")
+            : trip.pickedByHand ? "You picked" : trip.choosing.count > 1 ? "Checking which bus" : "You’re on"
         return [legWord, k].compactMap { $0 }.joined(separator: " · ")
     }
 
@@ -188,6 +194,7 @@ struct RideViewNew: View {
         let v = trip.vehicle
         let to = trip.leg?.to.short ?? ""
         let eta = trip.legArrival ?? trip.legTo
+        if let s = trip.stillOnAsk { StillOnCard(v: s) }
         VStack(alignment: .leading, spacing: 6) {
             Text(rideKicker).font(DS.subStrong).foregroundStyle(DS.secondary)
             HStack(spacing: 10) {
@@ -196,9 +203,14 @@ struct RideViewNew: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityAddTraits(.isHeader)
             }
+            // (0.20.5) it picked the wrong one, or none yet: say which one you're on
+            if !trip.demo { RidePickButton { picking = true } }
         }
         gpsLine
-        if v == nil {
+        if v == nil, trip.handLock != nil {
+            Text("Going by your location: it wakes you by GPS for \(to).").font(DS.sub).foregroundStyle(DS.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        } else if v == nil {
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
                 Text("Looking for the bus or train you’re on…").font(DS.sub).foregroundStyle(DS.secondary)
@@ -375,6 +387,7 @@ struct RideViewNew: View {
 
     /// How it knows the bus.
     private var howKnown: String? {
+        if trip.pickedByHand, trip.handLock != nil { return trip.vehicle == nil ? nil : "You picked it yourself: it stays with this one for this leg." }
         if trip.pickedByHand { return "You picked it in the list." }
         if trip.byTimetable { return "Going by its timetable." }
         if let m = trip.matchMeters { return "Recognised: \(m) m from you." }
