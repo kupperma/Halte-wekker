@@ -96,7 +96,10 @@ struct RideViewNew: View {
         gpsLine
         Text("It notices which one you get on by itself: your GPS against the live position of every \(rail ? "train" : "bus") nearby. Or tap the one you’re on.")
             .font(DS.sub).foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
-        if let l = trip.leg {
+        if let l = trip.leg, let r = toCatch(list) {
+            // (0.20.4) after a change, walking to the next one: where to go for it, which one, the walk
+            goToCard(r, leg: l, saved: trip.upcomingAsOf != nil)
+        } else if let l = trip.leg {
             // (from a saved list: just the way there, without "Leave by … (in 5 min)")
             let first = trip.upcomingAsOf == nil ? list.first : nil
             DSQuietButton(title: "Show the way to \(l.from.short)", icon: "figure.walk", full: true) {
@@ -151,6 +154,26 @@ struct RideViewNew: View {
             }
         }
         .dsPanel()
+    }
+
+    /// After a change, on your way to the next one (or waiting for it): the one this leg was planned with while it's
+    /// still to come, else the next that leaves.
+    private func toCatch(_ list: [PanelTrip]) -> Ride? {
+        guard trip.index > 0 else { return nil }
+        let now = Date()
+        let rides = list.map(\.trip.first).filter { !$0.cancelled && $0.departure > now.addingTimeInterval(-60) }
+        if let id = trip.route?.planned?[safe: trip.index]?.tripId, let r = rides.first(where: { $0.tripId == id }) { return r }
+        return rides.min { $0.departure < $1.departure }
+    }
+
+    private func goToCard(_ r: Ride, leg l: Leg, saved: Bool) -> some View {
+        let stop = GoToCard.leavesFrom(r, or: l.from)
+        return GoToCard(ride: r, info: r.isTrain ? ns.rail(r) : nil, stop: stop, here: trip.lastFix, findWalk: true, saved: saved,
+                        toward: l.to.short, hereNote: "It notices which one you get on by itself.",
+                        walk: {
+                            walkTo = WalkTarget(name: Fmt.place(r.fromStop), lat: stop.latitude, lon: stop.longitude, rail: r.isTrain,
+                                                catchText: saved ? nil : "the \(GoStore.what(r)) at \(Fmt.hhmm(r.departure))", leaves: saved ? nil : r.departure)
+                        })
     }
 
     // MARK: on board
@@ -523,8 +546,10 @@ struct AlarmViewNew: View {
 
 struct ArrivalViewNew: View {
     @EnvironmentObject var trip: TripManager
+    @EnvironmentObject var ns: NSStore
     var browse: (() -> Void)? = nil             // to the map and the boards, while the change stays open
     @State private var pop = false
+    @State private var walkTo: WalkTarget?
     @ScaledMetric(relativeTo: .largeTitle) private var big: CGFloat = 52
     private var nextLeg: Leg? { trip.phase == .transfer ? trip.legs[safe: trip.index + 1] : nil }
 
@@ -553,6 +578,7 @@ struct ArrivalViewNew: View {
         }
         .background(DS.page.ignoresSafeArea())
         .dynamicTypeSize(...DynamicTypeSize.accessibility2)
+        .sheet(item: $walkTo) { WalkMapSheet(target: $0).presentationDetents([.large]) }
         .onAppear { withAnimation(.spring(response: 0.45, dampingFraction: 0.6)) { pop = true } }
         .task(id: trip.index) {
             while !Task.isCancelled {
@@ -589,35 +615,32 @@ struct ArrivalViewNew: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityAddTraits(.isHeader)
         }
-        VStack(alignment: .leading, spacing: DS.s12) {
-            DSHeader(title: "Next", sub: trip.arrival.map { "\(trip.finalName) around \(Fmt.hhmm($0))" })
-            if let r = trip.next {
-                HStack(alignment: .center, spacing: DS.s12) {
-                    DSLinePill(line: r.isTrain ? Transit.trainLabel(r.line) : r.line, train: r.isTrain)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("\(r.isTrain ? r.name : "Bus \(r.line)") to \(n.to.short)").font(DS.bodyStrong).foregroundStyle(DS.text).fixedSize(horizontal: false, vertical: true)
-                        Text([r.platform.map { "Platform \($0)" }, "\(r.rideMinutes) min ride"].compactMap { $0 }.joined(separator: " · "))
-                            .font(DS.footnote).monospacedDigit().foregroundStyle(DS.secondary)
-                    }
-                    Spacer(minLength: 4)
-                    TimelineView(.periodic(from: .now, by: 15)) { tl in
-                        VStack(alignment: .trailing, spacing: 0) {
-                            Text(Fmt.hhmm(r.departure)).font(DS.hero(min(big, 52))).monospacedDigit().foregroundStyle(DS.text)
-                                .lineLimit(1).minimumScaleFactor(0.6)
-                            Text(Self.inMinutes(r.departure, now: tl.date)).font(DS.subStrong).monospacedDigit().foregroundStyle(DS.secondary)
-                        }
-                    }
-                }
-                .accessibilityElement(children: .combine)
-            } else {
+        if let r = trip.next {
+            // (0.20.4) where to go for the next one, which one, the walk there
+            let stop = GoToCard.leavesFrom(r, or: n.from)
+            GoToCard(ride: r, info: r.isTrain ? ns.rail(r) : nil, stop: stop, here: trip.lastFix, findWalk: true, toward: n.to.short,
+                     footer: changeFooter,
+                     walk: {
+                         walkTo = WalkTarget(name: Fmt.place(r.fromStop), lat: stop.latitude, lon: stop.longitude, rail: r.isTrain,
+                                             catchText: "the \(GoStore.what(r)) at \(Fmt.hhmm(r.departure))", leaves: r.departure)
+                     })
+        } else {
+            VStack(alignment: .leading, spacing: DS.s12) {
+                DSHeader(title: "Next", sub: trip.arrival.map { "\(trip.finalName) around \(Fmt.hhmm($0))" })
                 Text("\(n.mode.title) to \(n.to.short)").font(DS.bodyStrong).foregroundStyle(DS.text)
+                Text("It starts by itself once you’re on board.").font(DS.footnote).foregroundStyle(DS.secondary)
             }
-            Text("It starts by itself once you’re on board.").font(DS.footnote).foregroundStyle(DS.secondary)
+            .dsPanel()
         }
-        .dsPanel()
         DSTransferList(all: trip.upcoming, updated: trip.upcomingAt, error: trip.upcomingError, mode: n.mode,
                        dest: n.mode == .train ? n.to.short : "Veghel", asOf: trip.upcomingAsOf)
             .dsPanel()
+    }
+
+    /// Under the Go to card at a change: "Breda around 16:40. It starts by itself once you're on board."
+    private var changeFooter: String {
+        let around: String? = trip.arrival.map { "\(trip.finalName) around \(Fmt.hhmm($0))." }
+        return [around, "It starts by itself once you’re on board."].compactMap { $0 }.joined(separator: " ")
     }
 
     static func inMinutes(_ d: Date, now: Date) -> String {
