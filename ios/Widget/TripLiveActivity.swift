@@ -1,7 +1,6 @@
 import ActivityKit
 import AppIntents
 import SwiftUI
-import UIKit
 import WidgetKit
 
 @main
@@ -13,18 +12,60 @@ private let hhmm: DateFormatter = {
     let f = DateFormatter(); f.dateFormat = "HH:mm"; f.timeZone = TimeZone(identifier: "Europe/Amsterdam"); return f
 }()
 
-private func pal(_ s: TripAttributes.ContentState) -> HWPalette { .of(home: s.goingHome) }
-private func accent(_ s: TripAttributes.ContentState) -> Color { s.awake ? HWPalette.warn : pal(s).accent }
-private func riding(_ s: TripAttributes.ContentState) -> Bool { !["CHANGE HERE", "YOU’RE THERE"].contains(s.kicker) }
+private typealias TripState = TripAttributes.ContentState
 
-/// The empty platform behind the lock screen trip (the metro drives in along the bottom).
-private let platforms: [Bool: UIImage] = {
-    var out: [Bool: UIImage] = [:]
-    for (home, name) in [(false, "ls-out"), (true, "ls-home")] {
-        if let p = Bundle.main.path(forResource: name, ofType: "jpg"), let img = UIImage(contentsOfFile: p) { out[home] = img }
+private func riding(_ s: TripState) -> Bool { !["CHANGE HERE", "YOU’RE THERE"].contains(s.kicker) }
+/// The countdown, the part of the track done and your stop's dot: the accent, warm while it's waking you.
+private func tint(_ s: TripState, _ look: LiveLook) -> Color { s.awake ? look.warning : look.accent }
+
+/// What the state says over the main line, when it isn't just riding: its words, an icon, and whether it's warm.
+private func status(_ s: TripState) -> (text: String, icon: String, warm: Bool)? {
+    switch s.kicker {
+    case "NOW RIDING": return nil
+    case "WAITING TO BOARD": return ("Waiting to board", "clock", false)
+    case "GET READY": return ("Get ready", "bell.fill", true)
+    case "WAKE UP": return ("Wake up", "alarm.fill", true)
+    case "GET OFF NOW": return ("Get off now", "bell.fill", true)
+    case "CHANGE HERE": return ("Change here", "arrow.triangle.swap", false)
+    case "YOU’RE THERE": return ("You’re there", "checkmark.circle.fill", false)
+    default:
+        if s.kicker.isEmpty { return nil }
+        return (text: s.kicker.capitalized, icon: "info.circle.fill", warm: s.awake)
     }
-    return out
-}()
+}
+
+/// The big line: "Get off at Breda · 16:22" while riding; "Change at Breda" at a change; where you are at the end.
+private func mainLine(_ s: TripState) -> String {
+    switch s.kicker {
+    case "CHANGE HERE": return s.legTitle
+    case "YOU’RE THERE": return s.stopName.isEmpty ? s.finalName : s.stopName
+    default:
+        guard !s.stopName.isEmpty else { return s.legTitle }
+        return "Get off at \(s.stopName)" + (s.legTo.map { " · \(hhmm.string(from: $0))" } ?? "")
+    }
+}
+
+/// Under the track, on the left: the song while riding (as before), else the next ride ("Then bus 5 at 16:27").
+/// At a change the next ride comes first: it's what you need there.
+private enum Footnote { case song, next(String) }
+private func footnote(_ s: TripState) -> Footnote? {
+    if riding(s) {
+        if s.song != nil { return .song }
+        return s.nextText.map { .next($0) }
+    }
+    if let n = s.nextText { return .next(n) }
+    return s.song != nil ? .song : nil
+}
+
+/// A small icon for the vehicle in the Dynamic Island's compact and minimal views.
+private func glyph(_ k: VehicleKind) -> String {
+    switch k {
+    case .bus: return "bus.fill"
+    case .ic, .train: return "train.side.front.car"
+    case .sprinter, .metro: return "tram.fill"
+    case .tram: return "lightrail.fill"
+    }
+}
 
 struct Countdown: View {
     let to: Date?
@@ -35,17 +76,88 @@ struct Countdown: View {
     }
 }
 
+/// A line's pill, like the app's: an orange bus pill with its number, a navy one for a train ("IC", "SPR").
+struct LivePill: View {
+    let s: TripAttributes.ContentState
+    let look: LiveLook
+    var size: CGFloat = 14
+    var body: some View {
+        Text(VehicleKind.pillText(line: s.line, kind: s.kind))
+            .font(.system(size: size, weight: .bold)).monospacedDigit()
+            .lineLimit(1).minimumScaleFactor(0.7)
+            .foregroundStyle(.white)
+            .padding(.horizontal, size * 0.45).padding(.vertical, size * 0.15)
+            .frame(minWidth: size * 2.4)
+            .background(look.pill(s.kind), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .fixedSize()
+            .accessibilityLabel(s.kind == .bus ? "Bus \(s.line)" : VehicleKind.pillText(line: s.line, kind: s.kind))
+    }
+}
+
+/// The state's words with their icon ("Wake up", "Change here"…), warm or in the accent.
+private struct StatusLabel: View {
+    let text: String, icon: String, color: Color
+    var size: CGFloat = 15
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: icon).font(.system(size: size - 1, weight: .bold))
+            Text(text).font(.system(size: size, weight: .bold)).lineLimit(1)
+        }
+        .foregroundStyle(color)
+    }
+}
+
+/// The top of the trip: the line's pill and "to Breda", or the state's words.
+private struct TripHeading: View {
+    let s: TripAttributes.ContentState
+    let look: LiveLook
+    var size: CGFloat = 15
+    var body: some View {
+        HStack(spacing: 8) {
+            if riding(s) { LivePill(s: s, look: look, size: size - 1) }
+            if let st = status(s) {
+                StatusLabel(text: st.text, icon: st.icon, color: st.warm ? look.warning : look.accent, size: size)
+            } else if !s.stopName.isEmpty {
+                Text("to \(s.stopName)").font(.system(size: size, weight: .semibold)).foregroundStyle(look.secondary).lineLimit(1)
+            }
+        }
+        .minimumScaleFactor(0.75)
+    }
+}
+
 struct SongLine: View {
     let s: TripAttributes.ContentState
-    var size: CGFloat = 11
+    let look: LiveLook
+    var size: CGFloat = 13
     var body: some View {
         if let song = s.song {
-            HStack(spacing: 6) {
-                Image(systemName: s.songPlaying ? "music.note" : "pause.fill").font(.system(size: size - 1, weight: .bold)).foregroundStyle(pal(s).accent)
-                Text(song).font(HWFont.body(size, bold: true)).foregroundStyle(HWPalette.ink).lineLimit(1).layoutPriority(1)
-                if let a = s.artist, !a.isEmpty { Text("· \(a)").font(HWFont.body(size)).foregroundStyle(HWPalette.muted).lineLimit(1) }
-                Spacer(minLength: 4)
-                if let app = s.musicApp { Text(app.uppercased()).font(HWFont.body(size - 3)).tracking(1).foregroundStyle(HWPalette.muted).lineLimit(1) }
+            HStack(spacing: 5) {
+                Image(systemName: s.songPlaying ? "music.note" : "pause.fill").font(.system(size: size - 2, weight: .bold)).foregroundStyle(look.accent)
+                Text(song).font(.system(size: size, weight: .semibold)).foregroundStyle(look.text).lineLimit(1).layoutPriority(1)
+                if let a = s.artist, !a.isEmpty { Text("· \(a)").font(.system(size: size)).foregroundStyle(look.secondary).lineLimit(1) }
+            }
+        }
+    }
+}
+
+/// Under the track: the song or the next ride on the left, your last stop and when you're there on the right.
+private struct TripFooter: View {
+    let s: TripAttributes.ContentState
+    let look: LiveLook
+    var size: CGFloat = 13
+    var showArrival = true
+    var body: some View {
+        HStack(spacing: 8) {
+            if let f = footnote(s) {
+                switch f {
+                case .song: SongLine(s: s, look: look, size: size)
+                case .next(let n): Text(n).font(.system(size: size, weight: .medium)).foregroundStyle(look.secondary).lineLimit(1)
+                }
+            }
+            Spacer(minLength: 6)
+            if showArrival, let a = s.arrival {
+                Text("\(s.finalName) \(hhmm.string(from: a))").font(.system(size: size, weight: .semibold)).monospacedDigit()
+                    .foregroundStyle(look.text).lineLimit(1).fixedSize().layoutPriority(2)
             }
         }
     }
@@ -57,71 +169,48 @@ struct StopButton: View {
     var body: some View {
         Button(intent: StopAlarmIntent()) {
             Label("Stop alarm", systemImage: "bell.slash.fill")
-                .font(HWFont.display(size)).foregroundStyle(Color(hex: 0x1A0C08))
-                .frame(maxWidth: .infinity).padding(.vertical, 5)
-                .background(HWPalette.warn, in: RoundedRectangle(cornerRadius: 4))
+                .font(.system(size: size, weight: .semibold)).foregroundStyle(.white)
+                .frame(maxWidth: .infinity).padding(.vertical, size * 0.5)
+                .background(Color(hex: DSCore.warning), in: Capsule())
         }
         .buttonStyle(.plain)
     }
 }
 
-/// The lock screen: a small version of the ride screen, with the song you're listening to.
+/// The lock screen: the line and where it goes, the countdown to your stop, the stop, the track with the vehicle on
+/// it, and the song or the next ride. Light or dark with the phone.
 struct LockScreenTrip: View {
     let s: TripAttributes.ContentState
+    @Environment(\.colorScheme) private var scheme
     var body: some View {
-        let p = pal(s)
-        let parts = s.distanceText.split(separator: " ").map(String.init)
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(spacing: 6) {
-                Image(systemName: s.isTrain ? "tram.fill" : "bus.fill").font(.system(size: 10, weight: .semibold)).foregroundStyle(accent(s))
-                Text(s.kicker).font(HWFont.body(10, bold: true)).tracking(1.3).foregroundStyle(accent(s)).lineLimit(1).layoutPriority(1)
-                if riding(s) { Text("· \(s.legTitle.uppercased())").font(HWFont.body(10)).tracking(1).foregroundStyle(HWPalette.ink.opacity(0.85)).lineLimit(1) }
-                Spacer(minLength: 4)
-                if let a = s.arrival {
-                    Text("\(s.finalName.uppercased()) \(hhmm.string(from: a))").font(HWFont.display(13)).foregroundStyle(HWPalette.ink).lineLimit(1)
-                        .fixedSize().layoutPriority(2)
-                }
-            }
-            HStack(alignment: .lastTextBaseline, spacing: 6) {
-                if riding(s) {
-                    Text(parts.first ?? "–").font(HWFont.display(40)).foregroundStyle(HWPalette.ink).monospacedDigit()
-                        .shadow(color: p.accent.opacity(0.5), radius: 10).contentTransition(.numericText())
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text((parts.count > 1 ? parts[1] : "").uppercased()).font(HWFont.display(12))
-                        Text("TO \(s.stopName.uppercased())").font(HWFont.display(11)).tracking(1.4).lineLimit(1).minimumScaleFactor(0.7)
-                    }
-                    .foregroundStyle(p.accent)
-                } else {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(s.legTitle).font(HWFont.display(24)).foregroundStyle(HWPalette.ink).lineLimit(1).minimumScaleFactor(0.7)
-                        if let n = s.nextText { Text(n).font(HWFont.body(11)).foregroundStyle(HWPalette.ink.opacity(0.8)).lineLimit(1) }
-                    }
+        let look = LiveLook.of(scheme)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 10) {
+                VStack(alignment: .leading, spacing: 6) {
+                    TripHeading(s: s, look: look)
+                    Text(mainLine(s)).font(.system(size: 20, weight: .bold)).monospacedDigit().foregroundStyle(look.text)
+                        .lineLimit(1).minimumScaleFactor(0.7)
                 }
                 Spacer(minLength: 4)
                 if riding(s) {
                     VStack(alignment: .trailing, spacing: 0) {
-                        Countdown(to: s.legTo ?? s.arrival).font(HWFont.body(15, bold: true)).foregroundStyle(accent(s)).frame(maxWidth: 74, alignment: .trailing)
-                        Text("TO GO").font(HWFont.body(9)).tracking(1).foregroundStyle(HWPalette.muted)
+                        Countdown(to: s.legTo ?? s.arrival).font(.system(size: 28, weight: .bold, design: .rounded))
+                            .foregroundStyle(tint(s, look)).frame(maxWidth: 104, alignment: .trailing)
+                        Text(s.distanceText.isEmpty || s.distanceText == "–" ? "to go" : "\(s.distanceText) to go")
+                            .font(.system(size: 12, weight: .medium)).monospacedDigit().foregroundStyle(look.secondary).lineLimit(1)
                     }
                 }
             }
-            MetroTrack(progress: s.progress, home: s.goingHome, stops: s.stops)
-                .frame(height: 24)
-                .id(s.stopName)                              // a new leg: a new metro rolls in
+            RideTrack(progress: s.progress, kind: s.kind, stops: s.stops, look: look, tint: tint(s, look))
+                .frame(height: 28)
+                .id(s.stopName)                              // a new leg: a new vehicle rolls in
             if s.ringing { StopButton(size: 15) }
-            else if s.song != nil { SongLine(s: s) }
-            else if riding(s), let n = s.nextText { Text(n).font(HWFont.body(11)).foregroundStyle(HWPalette.muted).lineLimit(1) }
+            else { TripFooter(s: s, look: look) }
         }
-        .padding(.horizontal, 16).padding(.vertical, 12)
-        .background {
-            ZStack {
-                LinearGradient(colors: [p.paper, p.paper2], startPoint: .top, endPoint: .bottom)
-                if let img = platforms[s.goingHome] { Image(uiImage: img).resizable().scaledToFill() }
-                LinearGradient(colors: [.black.opacity(0.8), .black.opacity(0.5), .black.opacity(0.25)], startPoint: .leading, endPoint: .trailing)
-                LinearGradient(colors: [.clear, .black.opacity(0.5)], startPoint: .center, endPoint: .bottom)
-            }
-        }
-        .overlay(RoundedRectangle(cornerRadius: 2).inset(by: 5).stroke(p.brass.opacity(0.9), lineWidth: 1))
+        .padding(.horizontal, 18).padding(.vertical, 14)
+        .background(look.surface)
+        .activityBackgroundTint(look.surface)
+        .activitySystemActionForegroundColor(look.text)
     }
 }
 
@@ -129,51 +218,57 @@ struct TripLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: TripAttributes.self) { ctx in
             LockScreenTrip(s: ctx.state)
-                .activityBackgroundTint(pal(ctx.state).paper2)
-                .activitySystemActionForegroundColor(HWPalette.ink)
         } dynamicIsland: { ctx in
-            let s = ctx.state, p = pal(s)
+            let s = ctx.state, look = LiveLook.islandLook
             return DynamicIsland {
                 // The regions beside the camera are narrow: short, and allowed to shrink a little.
                 DynamicIslandExpandedRegion(.leading) {
-                    HStack(spacing: 5) {
-                        Image(systemName: s.isTrain ? "tram.fill" : "bus.fill").font(.system(size: 15, weight: .semibold))
-                        Text(s.distanceText).font(HWFont.display(16)).lineLimit(1).minimumScaleFactor(0.7)
-                    }
-                    .foregroundStyle(accent(s)).padding(.leading, 6)
+                    TripHeading(s: s, look: look, size: 14).padding(.leading, 4)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    VStack(alignment: .trailing, spacing: 0) {
-                        Text(s.arrival.map { hhmm.string(from: $0) } ?? "–").font(HWFont.display(16)).foregroundStyle(HWPalette.ink)
-                            .lineLimit(1).minimumScaleFactor(0.7)
-                        Text(s.finalName.uppercased()).font(HWFont.body(8)).tracking(1).foregroundStyle(HWPalette.muted).lineLimit(1)
+                    Group {
+                        if riding(s) {
+                            Countdown(to: s.legTo ?? s.arrival).font(.system(size: 22, weight: .bold, design: .rounded))
+                                .foregroundStyle(tint(s, look)).frame(maxWidth: 88, alignment: .trailing)
+                        } else {
+                            Text(s.arrival.map { hhmm.string(from: $0) } ?? "–").font(.system(size: 20, weight: .bold, design: .rounded))
+                                .monospacedDigit().foregroundStyle(look.text).lineLimit(1)
+                        }
                     }
-                    .padding(.trailing, 6)
+                    .padding(.trailing, 4)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
-                    VStack(alignment: .leading, spacing: 5) {
-                        HStack {
-                            Text(s.legTitle).font(HWFont.display(17)).foregroundStyle(HWPalette.ink).lineLimit(1).minimumScaleFactor(0.75)
-                            Spacer(minLength: 4)
-                            Countdown(to: s.legTo ?? s.arrival).font(HWFont.body(12, bold: true)).foregroundStyle(p.accent).frame(maxWidth: 70, alignment: .trailing)
-                        }
-                        MetroTrack(progress: s.progress, home: s.goingHome, stops: s.stops).frame(height: 18).id(s.stopName)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(mainLine(s)).font(.system(size: 16, weight: .bold)).monospacedDigit().foregroundStyle(look.text)
+                            .lineLimit(1).minimumScaleFactor(0.75)
+                        RideTrack(progress: s.progress, kind: s.kind, stops: s.stops, look: look, tint: tint(s, look))
+                            .frame(height: 24).id(s.stopName)
                         if s.ringing { StopButton(size: 14) }
-                        else if s.song != nil { SongLine(s: s, size: 10) }
-                        else if let n = s.nextText { Text(n).font(HWFont.body(11)).foregroundStyle(HWPalette.muted).lineLimit(1) }
+                        else { TripFooter(s: s, look: look, size: 12, showArrival: riding(s)) }
                     }
+                    .padding(.horizontal, 4)
                 }
             } compactLeading: {
                 HStack(spacing: 4) {
-                    Image(systemName: s.isTrain ? "tram.fill" : "bus.fill").foregroundStyle(accent(s))
-                    Text(s.distanceText).font(HWFont.body(11, bold: true)).foregroundStyle(HWPalette.ink)
+                    Image(systemName: glyph(s.kind)).font(.system(size: 13, weight: .semibold)).foregroundStyle(look.glyph(s.kind))
+                    Text(VehicleKind.pillText(line: s.line, kind: s.kind)).font(.system(size: 13, weight: .bold)).monospacedDigit()
+                        .foregroundStyle(look.text).lineLimit(1)
                 }
             } compactTrailing: {
-                Text(s.arrival.map { hhmm.string(from: $0) } ?? "–").font(HWFont.display(13)).foregroundStyle(accent(s))
+                if riding(s) {
+                    Countdown(to: s.legTo ?? s.arrival).font(.system(size: 13, weight: .bold, design: .rounded))
+                        .foregroundStyle(tint(s, look)).frame(maxWidth: 46, alignment: .trailing)
+                } else if let st = status(s) {
+                    Image(systemName: st.icon).font(.system(size: 13, weight: .bold)).foregroundStyle(look.accent)
+                }
             } minimal: {
-                Image(systemName: s.isTrain ? "tram.fill" : "bus.fill").foregroundStyle(accent(s))
+                if s.ringing {
+                    Image(systemName: "bell.fill").foregroundStyle(look.warning)
+                } else {
+                    Image(systemName: glyph(s.kind)).foregroundStyle(look.glyph(s.kind))
+                }
             }
-            .keylineTint(p.brass)
+            .keylineTint(look.accent)
         }
     }
 }

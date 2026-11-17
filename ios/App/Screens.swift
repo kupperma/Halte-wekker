@@ -1851,7 +1851,7 @@ struct StopLabels: View {
         n.replacingOccurrences(of: "Universiteit", with: "Univ.").replacingOccurrences(of: " Centraal", with: " C.")
     }
     private static func width(_ m: StopMark) -> CGFloat { CGFloat(max(short(m.name).count, 5)) * 6.2 + 8 }
-    private static func x(_ m: StopMark, _ w: CGFloat) -> CGFloat { min(w - width(m) / 2, max(width(m) / 2, MetroTrack.x(m.fraction) * w)) }
+    private static func x(_ m: StopMark, _ w: CGFloat) -> CGFloat { min(w - width(m) / 2, max(width(m) / 2, RideTrack.x(m.fraction) * w)) }
     /// Up to three rows, so names close together don't run into each other.
     private static func rows(_ marks: [StopMark], _ w: CGFloat) -> [Int] {
         var last: [CGFloat] = [-.infinity, -.infinity, -.infinity], out: [Int] = []
