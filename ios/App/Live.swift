@@ -46,6 +46,11 @@ final class LiveStore: ObservableObject {
     private var busy = false
     private var refreshes = 0                  // refreshes begun: only the newest one, when it ends, says it's not busy
     private var lastPanels = Date.distantPast
+    private var lastGrades = Date.distantPast             // the ride times for the board (0.20.7: every 10 minutes)
+    /// Which lists per leg a screen shows now (0.20.7): only those are asked for. The old look shows them all; the new
+    /// look only your home board (going to school, at home), and nothing else of them.
+    enum PanelNeed: Equatable { case all, board, none }
+    var panelsNeed: PanelNeed = .all
     private var nextAt: Date?                  // when the trips shown came in
     private var panelsFor: Direction?          // the direction the lists per leg are for
     private var livePanels = LiveLists<PanelList>()     // which lists per leg are live for `loadedFor`, and when each came in
@@ -611,12 +616,24 @@ final class LiveStore: ObservableObject {
     private func loadPanelsIfDue(_ dir: Direction, key: String, force: Bool) async {
         // From anywhere: the stops around you instead of the lists for your two routes.
         guard !anywhere, loadedFor == key else { return }
+        // (only the lists a screen shows: 0.20.7)
+        let need = panelsNeed
+        guard need != .none else { return }
         guard force || Date().timeIntervalSince(lastPanels) > 120 else { return }
         lastPanels = Date()
         let now = Date().addingTimeInterval(-30 * 60)          // from half an hour ago, for "Show earlier"
         let veghel = stops.veghel
         var empty = false, got = false
-        if dir == .toSchool {
+        if need == .board {
+            // the new look: only your home board, going to school (with the ride times, every 10 minutes)
+            guard dir == .toSchool else { return }
+            async let b = loadBoard(veghel.ids, from: now, key: key)
+            async let g: Void = loadBoardRides(veghel, key: key)
+            let bb = await b
+            await g
+            empty = bb.isEmpty
+            got = !bb.isEmpty
+        } else if dir == .toSchool {
             async let b = loadBoard(veghel.ids, from: now, key: key)
             async let g: Void = loadBoardRides(veghel, key: key)
             async let t = loadList(.trains, [PanelJob(from: .eindhoven, to: .breda, modes: "RAIL", count: 8, maxTransfers: 1),
@@ -647,6 +664,7 @@ final class LiveStore: ObservableObject {
         }
         // Transitous now and then sends nothing back: try an empty list again at the next refresh (30 s), a few times.
         if empty && emptyRetries < 3 { emptyRetries += 1; lastPanels = .distantPast } else if !empty { emptyRetries = 0 }
+        guard need == .all else { return }                    // (the trains aren't shown: nothing to fill in)
         let rail = trains
         Task { await NSStore.shared.enrich(rail.map { ($0.trip, $0.from, $0.to) }) }
     }
@@ -660,6 +678,9 @@ final class LiveStore: ObservableObject {
 
     /// How long each bus on the board takes to the stations, shown as soon as it's in.
     private func loadBoardRides(_ veghel: Place, key: String) async {
+        // (ride times hardly change: every 10 minutes, or when there are none yet: 0.20.7)
+        guard boardRides.isEmpty || Date().timeIntervalSince(lastGrades) >= 600 else { return }
+        lastGrades = Date()
         let g = await boardGrades(veghel)
         if loadedFor == key, !g.isEmpty { boardRides = g }
     }
@@ -722,7 +743,7 @@ final class LiveStore: ObservableObject {
     private func boardGrades(_ veghel: Place) async -> [String: BoardRide] {
         let at = Date().addingTimeInterval(-120)
         var asks: [(id: String, station: Place)] = []
-        for id in veghel.ids { for st in [Place.eindhoven, Place.denBosch] { asks.append((id, st)) } }
+        for id in PlanMemo.unique(veghel.ids) { for st in [Place.eindhoven, Place.denBosch] { asks.append((id, st)) } }
         var jobs: [@Sendable () async -> [DoorTrip]] = []
         for a in asks {
             let from = a.id, to = a.station.ids[0]

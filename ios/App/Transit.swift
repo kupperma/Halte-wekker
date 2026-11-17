@@ -64,6 +64,10 @@ struct DoorTrip: Identifiable, Hashable, Codable {
     var via: String? { rides.map { Fmt.place($0.toStop) }.first { $0 == "Den Bosch" || $0 == "Eindhoven" } }
 }
 
+// (the planner's answers are kept in a `Memo`, 0.20.7)
+extension Ride: @unchecked Sendable {}
+extension DoorTrip: @unchecked Sendable {}
+
 /// A departure from a stop's board (the Veghel buses).
 struct BoardDeparture: Identifiable, Hashable, Codable {
     var id: String { "\(tripId)|\(stopId)" }
@@ -272,23 +276,33 @@ enum Transit {
         return DoorTrip(rides: rides, start: s, end: e)
     }
 
-    /// The planner. `modes` nil means every kind of transport.
+    /// The planner. `modes` nil means every kind of transport. Asked to the minute (`at` rounded down), and the same
+    /// question within 45 s gets the same answer (0.20.7, `planAnswers`).
     static func plan(from: String, to: String, modes: String?, at: Date, count: Int, maxTransfers: Int, arriveBy: Bool = false) async -> [DoorTrip] {
+        let t = PlanMemo.minute(at)
+        let key = PlanMemo.key(from: from, to: to, modes: modes, at: t, count: count, maxTransfers: maxTransfers, arriveBy: arriveBy)
+        return await planAnswers.get(key, group: urgent ? 1 : 0) {
+            await planAsked(from: from, to: to, modes: modes, at: t, count: count, maxTransfers: maxTransfers, arriveBy: arriveBy)
+        } ?? []
+    }
+
+    /// One plan from Transitous (nil: no answer, or an empty one).
+    private static func planAsked(from: String, to: String, modes: String?, at: Date, count: Int, maxTransfers: Int, arriveBy: Bool) async -> [DoorTrip]? {
         var q: [URLQueryItem] = [.init(name: "fromPlace", value: from), .init(name: "toPlace", value: to),
                                  .init(name: "numItineraries", value: String(count)), .init(name: "maxTransfers", value: String(maxTransfers)),
                                  .init(name: "time", value: iso.string(from: at)),
                                  .init(name: "detailedTransfers", value: "false")]          // a third smaller: no turn-by-turn for changes
         if arriveBy { q.append(.init(name: "arriveBy", value: "true")) }       // `at` is when you want to be there
         if let m = modes { q.append(.init(name: "transitModes", value: m)) }
-        guard let json = try? await get("/v5/plan", q) as? [String: Any], let its = json["itineraries"] as? [[String: Any]] else { return [] }
+        guard let json = try? await get("/v5/plan", q) as? [String: Any], let its = json["itineraries"] as? [[String: Any]] else { return nil }
         let trips = its.compactMap(parseItinerary)
         Task { @MainActor in LiveDelays.shared.note(trips) }          // how late each line is running now
-        return trips
+        return trips.isEmpty ? nil : trips
     }
 
     static func plan(from: Place, to: Place, modes: String?, at: Date, count: Int, maxTransfers: Int, arriveBy: Bool = false) async -> [DoorTrip] {
         await withTaskGroup(of: [DoorTrip].self) { g in
-            for a in from.ids { for b in to.ids {
+            for a in PlanMemo.unique(from.ids) { for b in PlanMemo.unique(to.ids) {
                 g.addTask { await plan(from: a, to: b, modes: modes, at: at, count: count, maxTransfers: maxTransfers, arriveBy: arriveBy) }
             } }
             var all: [DoorTrip] = []
@@ -501,8 +515,12 @@ enum Transit {
 
     struct StationAnswer: Sendable { let stop: NearStop? }
     static let stations = Memo<String, StationAnswer>(ttl: 600)
-    /// The raw /v5/trip answers, for 20 seconds: the live map, the stop list and the alarm ask for the same trip.
+    /// The raw /v5/trip answers, for 20 seconds: the live map, the stop list and the alarm ask for the same trip. (A ride's
+    /// own looks take one of the last minute: `maxAge`.)
     static let tripAnswers = Memo<String, Data>(ttl: 20, limit: 50)
+    /// The planner's answers (0.20.7): 45 s for the same question asked to the minute (`PlanMemo`), shared while on
+    /// their way. An empty or failed answer isn't kept.
+    static let planAnswers = Memo<String, [DoorTrip]>(ttl: PlanMemo.ttl, limit: 80)
 
     /// A stop near you: a bus stop, or a train station (by the station, not one platform).
     struct NearStop: Identifiable, Hashable, Codable {
@@ -551,7 +569,7 @@ enum Transit {
     /// The departure board of stops. `from` a time in the past also gives the ones that already left (or were cancelled).
     static func board(stopIds: [String], from: Date? = nil, n: Int = 30, stops: Bool = false) async -> [BoardDeparture] {
         await withTaskGroup(of: [BoardDeparture].self) { g in
-            for id in stopIds {
+            for id in PlanMemo.unique(stopIds) {
                 g.addTask {
                     var q: [URLQueryItem] = [.init(name: "stopId", value: id), .init(name: "n", value: String(n))]
                     if let from { q.append(.init(name: "time", value: iso.string(from: from))) }

@@ -205,7 +205,7 @@ struct HomeView: View {
                 Task { await live.refresh(trip.direction, at: near.position, force: true) }
             }
         }
-        .onAppear { Handoff.fromBoards = stage == .station }
+        .onAppear { Handoff.fromBoards = stage == .station; live.panelsNeed = .all }      // (the station look shows them all)
         .sheet(isPresented: $settings) {
             SettingsView(tryDemo: {
                 Task { @MainActor in try? await Task.sleep(nanoseconds: 500_000_000); showDemo = true }

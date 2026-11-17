@@ -325,6 +325,9 @@ struct NewHome: View {
                 .presentationDragIndicator(.visible)
         }
         .modifier(HomeLoops())
+        // the lists per leg only while they're shown: here your home board under the map (0.20.7)
+        .onAppear { live.panelsNeed = panelsShown }
+        .onChange(of: panelsShown) { _, n in live.panelsNeed = n }
         // the departures near you, when neither the live store nor your home board has them
         // (Next trip first shows no departure cards: nothing is asked for them)
         .task(id: ownDepartures && visible && !nextFirst) {
@@ -746,6 +749,10 @@ struct NewHome: View {
         return .own
     }
     private var ownDepartures: Bool { cardSource == .own }
+    /// The lists per leg this screen shows (0.20.7): your home board in the cards, else none of them.
+    private var panelsShown: LiveStore.PanelNeed {
+        cardSource == .homeBoard && !planOpen && !nextFirst && !weekOpen ? .board : .none
+    }
 
     private func metres(_ lat: Double, _ lon: Double, fallback: Double?) -> Double? {
         guard let p = near.position else { return fallback }
