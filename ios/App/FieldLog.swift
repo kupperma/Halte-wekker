@@ -182,7 +182,8 @@ enum FieldFormat {
         }
     }
 
-    /// "detect · n=9 · IC·a1b2 live 30 s | 306·c3d4 timetable off its path 180 m → keep IC·a1b2": the ones that passed
+    /// "detect · n=9 · IC·a1b2 live 30 s | 306·c3d4 timetable off its path 180 m → keep IC·a1b2" ("305·4779 gps 12 s": judged
+    /// by its own GPS fix): the ones that passed
     /// first (by cost), then the rejected, nearest their path first (so the one you're on isn't hidden behind long-distance
     /// trains and coaches whose paths cross the area); at most 6. `planned` (the planned, picked or shown one) is always
     /// there, marked "(planned)" (beyond the 6 too), or "planned ·a1b2 not in answer" ("… excluded" when it was in the
@@ -190,7 +191,8 @@ enum FieldFormat {
     static func match(_ place: String, _ judged: [Judgement], outcome: String, planned: String? = nil, count: Int? = nil,
                       plannedExcluded: Bool = false) -> String {
         func label(_ j: Judgement) -> String { "\(j.line)·\(j.id.suffix(4))" + (planned != nil && j.id == planned ? " (planned)" : "") }
-        func kind(_ j: Judgement) -> String { j.realTime ? "live" : "timetable" }
+        // (judged by its own GPS fix: "gps", else by its live times or its timetable)
+        func kind(_ j: Judgement) -> String { j.evidence?.gps == true ? "gps" : j.realTime ? "live" : "timetable" }
         var passed: [(cost: Double, id: String, text: String)] = []
         var rejected: [(near: Double, id: String, text: String)] = []
         for j in judged {
@@ -236,6 +238,25 @@ enum FieldFormat {
     /// "detect · not sure (4 fixes, 12 s)": the matcher had too few fixes to judge by (of the last half minute).
     static func notSure(_ place: String, fixes: Int, span: TimeInterval) -> String {
         "\(place) · not sure (\(fixes) \(fixes == 1 ? "fix" : "fixes"), \(Int(max(0, span).rounded())) s)"
+    }
+
+    /// "board · fast lane · 305·4779 · GPS 120 m from you, 40 s old · 2 fixes, 9 s · you 24 m/s": the fast lane took it
+    /// (`MatchRules.fastLane`). Metres rounded to 10; the trip id by its last 4 characters.
+    static func fastLane(_ place: String, label: String, metres: Double?, gpsAge: TimeInterval?, fixes: Int, span: TimeInterval,
+                         speed: Double) -> String {
+        "\(place) · fast lane · \(label) · GPS \(Self.metres(metres)) from you\(age(gpsAge)) · \(fixes) \(fixes == 1 ? "fix" : "fixes"), "
+            + "\(Int(max(0, span).rounded())) s · you \(Int(max(0, speed.isFinite ? speed : 0).rounded())) m/s"
+    }
+
+    /// "same bus · kept by GPS · 305·4779 · 120 m from you, 40 s old (drifting 8 m/s)": its own GPS kept the ride's one
+    /// where its judging alone would not have (`VehicleMatch.gpsKeeps`); `instead`: what that said.
+    static func keptByGPS(label: String, metres: Double?, gpsAge: TimeInterval?, instead: String) -> String {
+        "same bus · kept by GPS · \(label) · \(Self.metres(metres)) from you\(age(gpsAge))\(instead.isEmpty ? "" : " (\(instead))")"
+    }
+
+    private static func age(_ a: TimeInterval?) -> String {
+        guard let a, a.isFinite else { return "" }
+        return ", \(Int(max(0, a).rounded())) s old"
     }
 
     static func classic(_ place: String, _ found: [(label: String, metres: Double)]) -> String {

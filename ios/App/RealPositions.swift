@@ -1,7 +1,7 @@
 import Foundation
 
-/// One bus's GPS position as the open data gives it (OVapi's GTFS-Realtime vehicle positions, from KV6): where it was,
-/// which way it pointed, and when.
+/// One bus's or train's GPS position as the open data gives it (OVapi's GTFS-Realtime vehicle positions, from KV6; a
+/// train's from NS's Virtual Train API, 0.20.3): where it was, which way it pointed, and when.
 struct GPSFix: Equatable, Sendable {
     let lat: Double
     let lon: Double
@@ -10,18 +10,22 @@ struct GPSFix: Equatable, Sendable {
     var startDate: String? = nil    // its trip's service date, "20261117"
     var stopSequence: Int? = nil    // the stop it's at or going to, as the feed numbers them
     var stopped: Bool? = nil        // standing at that stop (STOPPED_AT)
+    var speed: Double? = nil        // m/s, when the source gives one (NS: `snelheid`, km/h)
 
     var point: GeoPoint { GeoPoint(lat: lat, lon: lon) }
 }
 
 /// Real bus positions (0.20.2): reading OVapi's vehicle positions feed, finding a Transitous trip's fix in it, and
-/// putting the bus on its road by that fix instead of by its stop times. Display only: the on-board matcher never
-/// reads these.
+/// putting the bus on its road by that fix instead of by its stop times. Trains (0.20.3) from NS's positions of every
+/// train, through the relay, by train number. The on-board matcher (0.20.3) judges a vehicle with a fix of at most
+/// `matchFresh` by it (`VehicleMatch`).
 enum RealPositions {
     static let feedURL = URL(string: "https://gtfs.ovapi.nl/nl/vehiclePositions.pb")!
+    static let trainsPath = "/ns/vehicles"          // the relay's route to NS's positions of every train
     static let settingKey = "map.realPositions"     // the Settings switch (default on)
 
-    static let fresh: TimeInterval = 180            // a fix this old or newer is used
+    static let fresh: TimeInterval = 180            // a fix this old or newer is drawn
+    static let matchFresh: TimeInterval = 90        // …and this old or newer judged by (the matcher)
     static let maxOffRoute: Double = 150            // m: a fix further than this from its road isn't used
     static let maxAdvance: TimeInterval = 60        // s: a fix is moved on along its road for at most this long
     static let maxSpeed: Double = 30                // m/s: the fastest a piece's times move it (108 km/h)
@@ -142,14 +146,71 @@ enum RealPositions {
     /// The fix to draw a Transitous trip by at `now`, if there's one: in the feed under its key, `fresh` (no older
     /// than 3 minutes, and not more than a minute ahead of the phone's clock), of the same service date as the trip,
     /// and that date today (or yesterday: a night bus after midnight).
-    static func usable(_ fixes: [String: GPSFix], tripId: String, now: Date) -> GPSFix? {
+    /// `fresh`: the oldest a fix may be (`matchFresh` for the matcher).
+    static func usable(_ fixes: [String: GPSFix], tripId: String, now: Date, fresh: TimeInterval = fresh) -> GPSFix? {
         guard let k = key(tripId), let f = fixes[k] else { return nil }
+        return usable(f, tripId: tripId, now: now, fresh: fresh)
+    }
+
+    /// The same rules for one fix of that trip (a train's, found by its number).
+    static func usable(_ f: GPSFix, tripId: String, now: Date, fresh: TimeInterval = fresh) -> GPSFix? {
         let age = now.timeIntervalSince(f.at)
         guard age <= fresh, age >= -60 else { return nil }
         let tripDay = serviceDate(tripId)
         if let a = tripDay, let b = f.startDate, a != b { return nil }
         guard let d = tripDay ?? f.startDate else { return f }
         return d == day(now) || d == day(now.addingTimeInterval(-86_400)) ? f : nil
+    }
+
+    /// Each vehicle's fix before its newest, after a new fetch: for a key whose newest fix is newer than the one it had,
+    /// the one it had; else the one before it stays (when still older than the newest). For its speed between them.
+    static func previous<K: Hashable>(old: [K: GPSFix], previous: [K: GPSFix], new: [K: GPSFix]) -> [K: GPSFix] {
+        var out: [K: GPSFix] = [:]
+        for (k, f) in new {
+            if let o = old[k], o.at < f.at { out[k] = o }
+            else if let p = previous[k], p.at < f.at { out[k] = p }
+        }
+        return out
+    }
+
+    // MARK: trains (NS)
+
+    /// The train number in a Transitous trip's short name ("3561", or "IC 3561"): its last group of digits, 1 to 6 of
+    /// them, not 0. Nil when there is none.
+    static func trainNumber(_ shortName: String) -> Int? {
+        let groups = shortName.split { !$0.isNumber }
+        guard let last = groups.last, last.count <= 6, last.allSatisfy({ $0.isASCII }), let n = Int(last), n > 0 else { return nil }
+        return n
+    }
+
+    /// NS's positions of every train (the relay's `/ns/vehicles`: `{"payload":{"treinen":[{"treinNummer":1234,
+    /// "lat":51.5,"lng":5.3,"snelheid":120.0,"richting":45.0,…}]}}`), by train number, each at `at` (the answer has no
+    /// time of its own). Read defensively: a number may come as a string, a field may be missing (`ritId` stands in for
+    /// a missing `treinNummer`); a train without a number or a real place is left out. Nil when it isn't such an answer.
+    static func parseTrains(_ data: Data, at: Date) -> [Int: GPSFix]? {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        let payload = json["payload"] as? [String: Any] ?? json
+        guard let list = payload["treinen"] as? [Any] else { return nil }
+        func number(_ a: Any?) -> Double? {
+            if let n = a as? NSNumber { let d = n.doubleValue; return d.isFinite ? d : nil }
+            if let s = a as? String, let d = Double(s.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: ".")), d.isFinite { return d }
+            return nil
+        }
+        func train(_ a: Any?) -> Int? {
+            if let s = a as? String { return trainNumber(s) }
+            guard let d = number(a), d >= 1, d < 1_000_000, d == d.rounded() else { return nil }
+            return Int(d)
+        }
+        var out: [Int: GPSFix] = [:]
+        for item in list {
+            guard let t = item as? [String: Any], let n = train(t["treinNummer"]) ?? train(t["ritId"]),
+                  let lat = number(t["lat"]), let lon = number(t["lng"] ?? t["lon"]),
+                  abs(lat) <= 90, abs(lon) <= 180, !(lat == 0 && lon == 0) else { continue }
+            let kmh = number(t["snelheid"]).flatMap { $0 >= 0 && $0 <= 400 ? $0 : nil }
+            let dir = number(t["richting"]).flatMap { $0 >= 0 && $0 <= 360 ? $0 : nil }
+            out[n] = GPSFix(lat: lat, lon: lon, bearing: dir, at: at, speed: kmh.map { $0 / 3.6 })
+        }
+        return out
     }
 
     // MARK: putting it on its road
@@ -300,17 +361,19 @@ enum RealPositions {
 
     /// The log line for a fetch: "vehiclePositions.pb · 200 · 184.6 KB · 3856 vehicles · parse 85 ms",
     /// "… · 304 · kept 3856 vehicles", "… · error -1001 · again in 120 s".
-    static func fetchLine(status: Int?, error: Int? = nil, bytes: Int, vehicles: Int, parseMs: Double?, next: TimeInterval) -> String {
+    /// `feed`/`unit`: "ns/vehicles" and "trains" for NS's.
+    static func fetchLine(status: Int?, error: Int? = nil, bytes: Int, vehicles: Int, parseMs: Double?, next: TimeInterval,
+                          feed: String = "vehiclePositions.pb", unit: String = "vehicles") -> String {
         let size = String(format: "%.1f KB", Double(max(0, bytes)) / 1024)
-        var parts = ["vehiclePositions.pb"]
+        var parts = [feed]
         if let error { parts.append("error \(error)") }
         else if let status { parts.append(String(status)) }
         else { parts.append("no answer") }
         if status == 200 && error == nil {
-            parts += [size, "\(vehicles) vehicles"]
+            parts += [size, "\(vehicles) \(unit)"]
             if let parseMs { parts.append("parse \(Int(parseMs.rounded())) ms") }
         } else if status == 304 && error == nil {
-            parts.append("kept \(vehicles) vehicles")
+            parts.append("kept \(vehicles) \(unit)")
         } else {
             parts.append("again in \(Int(next.rounded())) s")
         }

@@ -285,4 +285,18 @@ final class FieldLogTests: XCTestCase {
         log.add(.net, "x", at: at)
         XCTAssertEqual(log.export(timeZone: TimeZone(identifier: "Europe/Amsterdam")!), "08:12:03 net x")
     }
+    /// 0.20.3: one judged by its own GPS shows "gps"; the fast lane's and the GPS keep's lines (no coordinates, the
+    /// trip id by its last 4 characters).
+    func test_gpsLines() {
+        var e = evidence(offset: 120)
+        e.gps = true
+        let a = Judgement(id: "20261117_13:05_nl-OpenOV_374104779", line: "305", isTrain: false, realTime: true, evidence: e, result: .success(12.2))
+        XCTAssertEqual(FieldFormat.match("board", [a], outcome: "best 305·4779", planned: a.id), "board · 305·4779 (planned) gps 12 s → best 305·4779")
+        XCTAssertEqual(FieldFormat.fastLane("board", label: "305·4779", metres: 118, gpsAge: 41.6, fixes: 2, span: 8.6, speed: 23.7),
+                       "board · fast lane · 305·4779 · GPS 120 m from you, 42 s old · 2 fixes, 9 s · you 24 m/s")
+        XCTAssertEqual(FieldFormat.keptByGPS(label: "305·4779", metres: 84, gpsAge: 30, instead: "drifting 8 m/s"),
+                       "same bus · kept by GPS · 305·4779 · 80 m from you, 30 s old (drifting 8 m/s)")
+        XCTAssertEqual(FieldFormat.keptByGPS(label: "305·4779", metres: 84, gpsAge: nil, instead: ""),
+                       "same bus · kept by GPS · 305·4779 · 80 m from you")
+    }
 }

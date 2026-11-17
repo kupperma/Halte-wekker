@@ -303,4 +303,83 @@ final class RealPositionsTests: XCTestCase {
                                               age: 41.6, metres: 274, behind: true),
                        "real position · bus 306·5578 · GPS 42 s old · 270 m from its times (behind)")
     }
+    // MARK: 0.20.3: the matcher's freshness, the fix before, trains
+
+    func test_usableForTheMatcher_isFresher() {
+        let now = Date(timeIntervalSince1970: TimeInterval(t0))
+        let id = "20261117_11:57_nl-OpenOV_374105578"
+        let f = GPSFix(lat: 51.6, lon: 5.5, bearing: nil, at: now.addingTimeInterval(-120), startDate: "20261117")
+        XCTAssertNotNil(RealPositions.usable(["374105578": f], tripId: id, now: now))
+        XCTAssertNil(RealPositions.usable(["374105578": f], tripId: id, now: now, fresh: RealPositions.matchFresh))
+        let g = GPSFix(lat: 51.6, lon: 5.5, bearing: nil, at: now.addingTimeInterval(-80), startDate: "20261117")
+        XCTAssertNotNil(RealPositions.usable(["374105578": g], tripId: id, now: now, fresh: RealPositions.matchFresh))
+        // a train's fix (no date of its own): the trip's date must be today or yesterday
+        let t = GPSFix(lat: 51.6, lon: 5.5, bearing: nil, at: now.addingTimeInterval(-20))
+        XCTAssertNotNil(RealPositions.usable(t, tripId: id, now: now, fresh: RealPositions.matchFresh))
+        XCTAssertNil(RealPositions.usable(t, tripId: "20261110_11:57_nl-OpenOV_374105578", now: now, fresh: RealPositions.matchFresh))
+    }
+
+    func test_previousFix_isKept() {
+        let a = Date(timeIntervalSince1970: 1000)
+        func f(_ s: TimeInterval) -> GPSFix { GPSFix(lat: 51, lon: 5, bearing: nil, at: a.addingTimeInterval(s)) }
+        // a new fix: the old one becomes the one before
+        XCTAssertEqual(RealPositions.previous(old: ["x": f(0)], previous: [:], new: ["x": f(30)]), ["x": f(0)])
+        // the same fix again (not updated yet): the one before stays
+        XCTAssertEqual(RealPositions.previous(old: ["x": f(30)], previous: ["x": f(0)], new: ["x": f(30)]), ["x": f(0)])
+        // gone from the feed: forgotten; new to it: none before
+        XCTAssertEqual(RealPositions.previous(old: ["x": f(0)], previous: ["x": f(-30)], new: ["y": f(30)]), [:])
+        XCTAssertEqual(RealPositions.previous(old: [1: f(0)], previous: [:], new: [1: f(20)]), [1: f(0)])
+    }
+
+    func test_trainNumber() {
+        XCTAssertEqual(RealPositions.trainNumber("3561"), 3561)
+        XCTAssertEqual(RealPositions.trainNumber("IC 3561"), 3561)
+        XCTAssertEqual(RealPositions.trainNumber(" 2416 "), 2416)
+        XCTAssertNil(RealPositions.trainNumber(""))
+        XCTAssertNil(RealPositions.trainNumber("Sprinter"))
+        XCTAssertNil(RealPositions.trainNumber("0"))
+        XCTAssertNil(RealPositions.trainNumber("1234567"))
+    }
+
+    func test_parseTrains() throws {
+        let at = Date(timeIntervalSince1970: TimeInterval(t0))
+        let json = """
+        {"payload":{"treinen":[
+          {"treinNummer":2416,"ritId":"2416","lat":51.69,"lng":5.29,"snelheid":72.0,"richting":45.0,"horizontaleNauwkeurigheid":10,"type":"SPR","bron":"KV6"},
+          {"treinNummer":"3561","lat":"51.44","lng":"5.48","snelheid":"0"},
+          {"ritId":"1126","lat":51.5,"lng":5.3},
+          {"treinNummer":77,"lat":51.5},
+          {"treinNummer":78,"lat":0,"lng":0},
+          {"lat":51.5,"lng":5.3},
+          "nonsense",
+          {"treinNummer":79,"lat":51.5,"lng":5.3,"snelheid":-5,"richting":400}
+        ]}}
+        """
+        let trains = try XCTUnwrap(RealPositions.parseTrains(Data(json.utf8), at: at))
+        XCTAssertEqual(Set(trains.keys), [2416, 3561, 1126, 79])
+        let s = try XCTUnwrap(trains[2416])
+        XCTAssertEqual(s.lat, 51.69, accuracy: 1e-9)
+        XCTAssertEqual(s.lon, 5.29, accuracy: 1e-9)
+        XCTAssertEqual(try XCTUnwrap(s.speed), 20, accuracy: 1e-9, "72 km/h")
+        XCTAssertEqual(s.bearing, 45)
+        XCTAssertEqual(s.at, at)
+        XCTAssertNil(s.startDate)
+        XCTAssertEqual(trains[3561]?.speed, 0)
+        XCTAssertEqual(trains[3561]?.lat ?? 0, 51.44, accuracy: 1e-9)
+        XCTAssertNil(trains[1126]?.speed)
+        XCTAssertNil(trains[79]?.speed)
+        XCTAssertNil(trains[79]?.bearing)
+        // not such an answer: nil (no train fixes)
+        XCTAssertNil(RealPositions.parseTrains(Data("not json".utf8), at: at))
+        XCTAssertNil(RealPositions.parseTrains(Data("{\"message\":\"Resource not found\"}".utf8), at: at))
+        XCTAssertNil(RealPositions.parseTrains(Data("[1,2]".utf8), at: at))
+        XCTAssertEqual(RealPositions.parseTrains(Data("{\"payload\":{\"treinen\":[]}}".utf8), at: at), [:])
+    }
+
+    func test_trainsFetchLine() {
+        XCTAssertEqual(RealPositions.fetchLine(status: 200, bytes: 120_000, vehicles: 812, parseMs: 12, next: 30, feed: "ns/vehicles", unit: "trains"),
+                       "ns/vehicles · 200 · 117.2 KB · 812 trains · parse 12 ms")
+        XCTAssertEqual(RealPositions.fetchLine(status: 404, bytes: 0, vehicles: 0, parseMs: nil, next: 600, feed: "ns/vehicles", unit: "trains"),
+                       "ns/vehicles · 404 · again in 600 s")
+    }
 }

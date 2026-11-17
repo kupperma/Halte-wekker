@@ -25,13 +25,21 @@ struct MapPiece: Equatable, Sendable {
     let piece: TimedPiece
 }
 
-/// A bus or train: its pieces in departure order, and whether its times are live.
+/// A vehicle's own GPS (0.20.3): its newest fix in the open data, and the one before it (for its speed between them).
+struct VehicleGPS: Equatable, Sendable {
+    let fix: GPSFix
+    var previous: GPSFix? = nil
+}
+
+/// A bus or train: its pieces in departure order, and whether its times are live. `gps`: its own fresh GPS fix, when
+/// the open data has one: then the matcher judges it by where that puts it, not by its times.
 struct VehicleTrack: Equatable, Sendable {
     let tripId: String
     let line: String
     let isTrain: Bool
     let realTime: Bool
     let pieces: [TimedPiece]
+    var gps: VehicleGPS? = nil
 
     /// One track per trip, in the order the trips first come; a piece that comes twice counts once; live when any of
     /// its pieces is.
@@ -68,10 +76,18 @@ struct Evidence: Equatable, Sendable {
     let progress: Double        // m you went along its path: from the first fixes to the last (the median of 3 at
                                 // each end once there are 6, so a stop's GPS jitter doesn't read as going back)
     let offset: Double          // m, your along-position minus its timetable along-position at the last fix
-    let drift: Double           // m/s, the change of the offset (between the same ends as `progress`)
+    var drift: Double           // m/s, the change of the offset (between the same ends as `progress`)
     let yourSpeed: Double       // m/s along its path (`progress` over the time between those ends)
-    let itsSpeed: Double        // m/s by its times
+    var itsSpeed: Double        // m/s by its times
     let steady: Bool            // your speed in both halves within 30 % of each other, both at least 3 m/s
+    // By its own GPS (0.20.3): `offset` and `drift` are from where its fix puts it (on its road, moved on at its
+    // piece's speed for a minute at most), `itsSpeed` its speed between its last two fixes (else its piece's).
+    var gps = false
+    var gpsAge: TimeInterval? = nil     // s: your newest fix's time minus its fix's
+    var gpsSpeed: Double? = nil         // m/s between its last two fixes (or the speed its fix gave), when known
+    var speedKnown = true               // its speed says something about your fixes' time (false: a GPS speed from
+                                        //    before them, or none): the speed tests skip it
+    var headingOff: Double? = nil       // degrees between its heading and yours (by GPS only)
 }
 
 /// Why a vehicle isn't the one you're on.
@@ -126,6 +142,20 @@ extension VehicleMatch {
     }
 }
 
+/// Where a vehicle's own GPS puts it on its joined path: `along` at its fix's time `at`, moved on (or back) at its
+/// piece's speed `speed` for `gpsAdvance` at most; `measured` its own speed, `heading` its own (or its road's there).
+struct GPSAnchor: Equatable, Sendable {
+    let along: Double
+    let at: Date
+    let speed: Double
+    let measured: Double?
+    let heading: Double?
+
+    func position(at t: Date) -> Double {
+        along + speed * min(VehicleMatch.gpsAdvance, max(-VehicleMatch.gpsAdvance, t.timeIntervalSince(at)))
+    }
+}
+
 /// Which bus or train you're on: the one that moves with you (on its path, going its way, at a possible speed, keeping
 /// pace with its own times), compared in seconds off its times. Every number here is a starting value, to be tuned from
 /// the field log.
@@ -157,6 +187,14 @@ enum VehicleMatch {
     static let jitter = 2.0                     // GPS jitter at a stop moves you up to twice the fixes' accuracy: only
                                                 //    going back further is the wrong way, and only going further is
                                                 //    moving (for "standing")
+    // Its own GPS (0.20.3)
+    static let gpsFresh: TimeInterval = 90      // a fix at most this much older than your newest one is judged by
+    static let gpsAhead: TimeInterval = 60      // …and at most this much newer (a clock off)
+    static let gpsAdvance: TimeInterval = 60    // moved on (or back) along its road at its piece's speed this long at most
+    static let gpsOffRoute = 150.0              // m: a fix further from its road isn't used
+    static let gpsSpeedOf: TimeInterval = 5     // its speed between two fixes says something about your fixes when the
+                                                //    newer one is at most this long before your oldest one
+    static let gpsKeep = 200.0                  // m: the ride's own one this close to you, moving with you, is kept
 
     /// How far a bus or train can be from where its times put it and still be the one you're on: further the faster
     /// you go (at 130 km/h, half a minute off its times is a kilometre).
@@ -185,10 +223,13 @@ enum VehicleMatch {
         let good = fixes.filter(usable)
         guard let newest = good.map(\.t).max() else { return .failure(.tooFewFixes) }
         let j = Joined(v.pieces)
+        // its own GPS, when fresh and on its road: where it puts it replaces where its times put it
+        let anchor = v.gps.flatMap { g in gpsFits(g, newest: newest) ? j.anchor(g, isTrain: v.isTrain) : nil }
         var rows: [(t: Date, along: Double, cross: Double, at: Double, accuracy: Double, connector: Bool)] = []
         var timed = 0, previous: Double?, newestBeyond = false
-        for f in good.sorted(by: { $0.t < $1.t }) where newest.timeIntervalSince(f.t) <= window {
-            let at = j.position(at: f.t)
+        let inWindow = good.sorted(by: { $0.t < $1.t }).filter { newest.timeIntervalSince($0.t) <= window }
+        for f in inWindow {
+            let at = anchor.map { $0.position(at: f.t) } ?? j.position(at: f.t)
             if at != nil { timed += 1 }
             newestBeyond = false
             // where its path passes you twice, the pass nearest its times (or, without, nearest your last fix)
@@ -223,21 +264,58 @@ enum VehicleMatch {
         let drift = median(ends.to.map { $0.along - $0.at }) - median(ends.from.map { $0.along - $0.at })
         let per: (Double, TimeInterval) -> Double = { x, t in t > 0 ? x / t : 0 }
         let recent = rows.suffix(3)
-        let e = Evidence(fixes: rows.count, span: span,
+        var e = Evidence(fixes: rows.count, span: span,
                          crossTrack: median(recent.map { $0.cross }), accuracy: median(rows.map { $0.accuracy }),
                          // a straight line it adds between pieces that don't meet has no road shape either
                          shaped: v.pieces.contains { $0.path.count > 2 } && !recent.contains { $0.connector },
                          progress: progress, offset: offset, drift: per(drift, ends.time),
                          yourSpeed: per(abs(progress), ends.time), itsSpeed: per(last.at - first.at, span),
                          steady: steady(rows.map { ($0.t, $0.along) }))
+        if let a = anchor, let g = v.gps {
+            // by its GPS: its speed is its own (between its last two fixes, else its piece's), and moving with you is
+            // your speed along its road against that one
+            e.gps = true
+            e.gpsAge = newest.timeIntervalSince(g.fix.at)
+            e.gpsSpeed = a.measured
+            e.speedKnown = a.measured != nil && g.fix.at >= first.t.addingTimeInterval(-gpsSpeedOf)
+            e.itsSpeed = a.measured ?? a.speed
+            e.drift = per(progress, ends.time) - e.itsSpeed
+            e.headingOff = Self.heading(inWindow).flatMap { yours in a.heading.map { angle(yours, $0) } }
+        }
         let numbers = [e.span, e.crossTrack, e.accuracy, e.progress, e.offset, e.drift, e.yourSpeed, e.itsSpeed]
         return numbers.allSatisfy(\.isFinite) ? .success(e) : .failure(.noTimes)
     }
 
+    /// Its GPS fix may be judged by at your newest fix's time: at most `gpsFresh` older, at most `gpsAhead` newer.
+    static func gpsFits(_ g: VehicleGPS, newest: Date) -> Bool {
+        let age = newest.timeIntervalSince(g.fix.at)
+        return age.isFinite && age <= gpsFresh && age >= -gpsAhead
+    }
+
+    /// Your heading: your newest fix's GPS course while moving (3 m/s), else the way from your first to your newest
+    /// fix when 20 m or more apart. Nil when neither.
+    private static func heading(_ sorted: [Fix]) -> Double? {
+        if let f = sorted.last, f.course.isFinite, f.course >= 0, f.course <= 360, f.speed.isFinite, f.speed >= 3 { return f.course }
+        guard let a = sorted.first, let b = sorted.last, Geo.metres(a.p, b.p) >= 20 else { return nil }
+        return Geo.bearing(a.p, b.p)
+    }
+
+    /// Degrees between two headings (0 to 180).
+    static func angle(_ a: Double, _ b: Double) -> Double {
+        var t = abs(a - b).truncatingRemainder(dividingBy: 360)
+        if t > 180 { t = 360 - t }
+        return t
+    }
+
     /// The hard tests, in order: the first one failed is the reason. Passing costs the seconds you are off its times.
     /// `strictTimes: false` (choosing between candidates): a timetable-only vehicle skips the tests that use its times.
-    static func judge(_ e: Evidence, isTrain: Bool, realTime: Bool, strictTimes: Bool = true) -> Result<Double, Reject> {
-        let byTimes = strictTimes || realTime
+    /// By its own GPS (`e.gps`) "its times" are where its fix puts it, and it's judged so even while choosing; the speed
+    /// tests (wrong speed, standing, drifting) only when its speed is known for your fixes' time (`speedKnown`).
+    /// `minFixes`/`minSpan`: enough evidence (fewer for the fast lane, `MatchRules.fastLane`).
+    static func judge(_ e: Evidence, isTrain: Bool, realTime: Bool, strictTimes: Bool = true,
+                      minFixes: Int = VehicleMatch.minFixes, minSpan: TimeInterval = VehicleMatch.minSpan) -> Result<Double, Reject> {
+        let byTimes = strictTimes || realTime || e.gps
+        let bySpeed = byTimes && e.speedKnown
         // 1. enough evidence
         guard e.fixes >= minFixes, e.span >= minSpan else { return .failure(.tooFewFixes) }
         // 2. on its path
@@ -248,15 +326,15 @@ enum VehicleMatch {
         // 4. a possible speed (its times only say something about its speed when it isn't crawling: the same 5 m/s floor
         //    as the cost)
         if !isTrain, !(e.yourSpeed <= busMax) { return .failure(.implausibleSpeed) }
-        if byTimes, e.steady, e.itsSpeed >= costSpeedMin, e.yourSpeed < e.itsSpeed / speedRatio { return .failure(.implausibleSpeed) }
+        if bySpeed, e.steady, e.itsSpeed >= costSpeedMin, e.yourSpeed < e.itsSpeed / speedRatio { return .failure(.implausibleSpeed) }
         if byTimes {
             // 5. not standing while you go (once you moved further than GPS jitter can take you): by its times it went
             //    at least a fifth as far as you, in the same time
-            if abs(e.progress) >= max(standingMin, jitter * e.accuracy), e.itsSpeed < standingShare * e.yourSpeed {
+            if bySpeed, abs(e.progress) >= max(standingMin, jitter * e.accuracy), e.itsSpeed < standingShare * e.yourSpeed {
                 return .failure(.standing)
             }
             // 6. moves with you
-            if e.steady, abs(e.drift) > max(driftMin, driftShare * e.yourSpeed) { return .failure(.drifting) }
+            if bySpeed, e.steady, abs(e.drift) > max(driftMin, driftShare * e.yourSpeed) { return .failure(.drifting) }
             // 7. near its times
             guard abs(e.offset) <= tolerance(isTrain: isTrain, speed: e.yourSpeed) else { return .failure(.tooFarFromTimes) }
         }
@@ -268,7 +346,9 @@ enum VehicleMatch {
     /// `prefilter`: a vehicle whose path's box, widened by `prefilterMargin`, has none of the fixes of the last `window`
     /// seconds is off its path at once, without projecting them (none could pass the path test); `false` projects
     /// every fix, for the tests that the outcome is the same.
-    static func judgeAll(_ fixes: [Fix], _ vs: [VehicleTrack], strictTimes: Bool = true, prefilter: Bool = true) -> [Judgement] {
+    /// `minFixes`/`minSpan`: enough evidence (fewer for the fast lane).
+    static func judgeAll(_ fixes: [Fix], _ vs: [VehicleTrack], strictTimes: Bool = true, prefilter: Bool = true,
+                         minFixes: Int = VehicleMatch.minFixes, minSpan: TimeInterval = VehicleMatch.minSpan) -> [Judgement] {
         let recent = prefilter ? lastWindow(fixes) : []
         return vs.map { v -> Judgement in
             if !recent.isEmpty, !nearPath(recent, v) {
@@ -276,7 +356,7 @@ enum VehicleMatch {
             }
             switch gather(fixes, v) {
             case .success(let e):
-                let r = judge(e, isTrain: v.isTrain, realTime: v.realTime, strictTimes: strictTimes)
+                let r = judge(e, isTrain: v.isTrain, realTime: v.realTime, strictTimes: strictTimes, minFixes: minFixes, minSpan: minSpan)
                 return Judgement(id: v.tripId, line: v.line, isTrain: v.isTrain, realTime: v.realTime, evidence: e, result: r)
             case .failure(let why):
                 return Judgement(id: v.tripId, line: v.line, isTrain: v.isTrain, realTime: v.realTime, evidence: nil, result: .failure(why))
@@ -293,15 +373,22 @@ enum VehicleMatch {
         }
         guard f.accuracy.isFinite, f.accuracy >= 0, f.accuracy <= maxAccuracy else { return verdict(nil, .failure(.tooFewFixes)) }
         let j = Joined(v.pieces)
-        guard let at = j.position(at: f.t) else { return verdict(nil, .failure(.noTimes)) }
+        // its own GPS, when fresh and on its road, instead of its times
+        let anchor = v.gps.flatMap { g in gpsFits(g, newest: f.t) ? j.anchor(g, isTrain: v.isTrain) : nil }
+        guard let at = anchor.map({ $0.position(at: f.t) }) ?? j.position(at: f.t) else { return verdict(nil, .failure(.noTimes)) }
         guard let pass = j.pass(f.p, near: at, within: max(passSlack, f.accuracy)) else { return verdict(nil, .failure(.tooFewFixes)) }
         let away = beyondAnEnd(pass.projection.crossTrack, f.accuracy)
         // before its path starts (a trip that starts at a stop ahead of you): not on its path yet
         if pass.beforeStart && away { return verdict(nil, .failure(.tooFewFixes)) }
-        let p = pass.projection, its = j.speed(at: f.t), speed = f.speed.isFinite ? f.speed : -1
-        let e = Evidence(fixes: 1, span: 0, crossTrack: p.crossTrack, accuracy: f.accuracy,
+        let p = pass.projection, speed = f.speed.isFinite ? f.speed : -1
+        let its = anchor.map { $0.measured ?? $0.speed } ?? j.speed(at: f.t)
+        var e = Evidence(fixes: 1, span: 0, crossTrack: p.crossTrack, accuracy: f.accuracy,
                          shaped: v.pieces.contains { $0.path.count > 2 } && !pass.connector, progress: 0, offset: p.along - at,
                          drift: 0, yourSpeed: max(0, speed), itsSpeed: its, steady: false)
+        if let a = anchor, let g = v.gps {
+            e.gps = true; e.gpsAge = f.t.timeIntervalSince(g.fix.at); e.gpsSpeed = a.measured; e.speedKnown = false
+            if f.course.isFinite, f.course >= 0, speed >= 3, let h = a.heading { e.headingOff = angle(f.course, h) }
+        }
         guard [e.crossTrack, e.offset, e.itsSpeed].allSatisfy(\.isFinite) else { return verdict(nil, .failure(.noTimes)) }
         // beyond its end while you're moving (a trip that ended at a stop behind you), or off its path
         if pass.beyondEnd && away && speed >= 3 { return verdict(e, .failure(.offItsPath)) }
@@ -511,6 +598,38 @@ enum VehicleMatch {
             return t <= pieces[k].arrival.addingTimeInterval(VehicleMatch.slack) ? starts[k] + lengths[k] : nil
         }
 
+        /// Where its own GPS puts it on the joined path (0.20.3): its newest fix on the pass nearest where its times have
+        /// it at the fix's time (of the passes within 30 m of the nearest), within `gpsOffRoute` of the path (beyond an
+        /// end: within `passSlack`). Its speed to move on by: its piece's by its times (30 m/s at most for a bus, 45 for
+        /// a train). Its own speed: the one its fix gives (a train's), else between its fix before and this one along
+        /// the path, 5 s to 3 minutes apart (never less than 0). Nil when the fix isn't on its path.
+        func anchor(_ g: VehicleGPS, isTrain: Bool) -> GPSAnchor? {
+            let f = g.fix
+            guard let p = pass(f.point, near: position(at: f.at), within: 30) else { return nil }
+            let cross = p.projection.crossTrack
+            guard cross.isFinite, cross <= VehicleMatch.gpsOffRoute,
+                  !(p.beforeStart || p.beyondEnd) || cross <= VehicleMatch.passSlack else { return nil }
+            let along = p.projection.along
+            // the piece it's on (in a connector between two: the next one)
+            let k = starts.indices.first { along <= starts[$0] + lengths[$0] } ?? (pieces.count - 1)
+            let cap = isTrain ? 45.0 : RealPositions.maxSpeed
+            let d = pieces[k].arrival.timeIntervalSince(pieces[k].departure)
+            let pieceSpeed = lengths[k] > 0 ? min(cap, lengths[k] / max(1, d)) : 0
+            var measured: Double?
+            if let s = f.speed, s.isFinite, s >= 0 {
+                measured = min(s, 60)
+            } else if let q = g.previous {
+                let dt = f.at.timeIntervalSince(q.at)
+                if dt >= 5, dt <= 180,
+                   let pq = pass(q.point, near: along - pieceSpeed * dt, within: 30), pq.projection.crossTrack <= VehicleMatch.gpsOffRoute {
+                    let v = (along - pq.projection.along) / dt
+                    if v.isFinite, v >= -3 { measured = min(60, max(0, v)) }
+                }
+            }
+            return GPSAnchor(along: along, at: f.at, speed: pieceSpeed, measured: measured,
+                             heading: f.bearing ?? p.projection.bearing)
+        }
+
         /// Its speed by its times around `t` (m/s over the half minute around it, or what of it it has times for).
         func speed(at t: Date) -> Double {
             let a = position(at: t.addingTimeInterval(-15)).map { ($0, -15.0) } ?? position(at: t).map { ($0, 0.0) }
@@ -667,7 +786,7 @@ extension VehicleMatch {
         let before = shown.flatMap { misses[$0] }
         let pruned = prune(judged, misses: &misses, keep: shown)
         let ranked = rank(pruned, planned: nil)
-        let live = Set(judged.filter(\.realTime).map(\.id))
+        let live = liveIds(judged)
         // failing by its times only, against a timetable-only best: not sure, this look (its miss undone)
         let failsByTimes: Bool = mineJudged.map { timesOnly($0) } ?? false
         let bestTimetableOnly: Bool = ranked.first.map { !live.contains($0.id) } ?? false
@@ -700,12 +819,55 @@ extension VehicleMatch {
 
     /// A failure by its times alone, with its road and your way along it fitting: drifting from its times, standing by
     /// them, too far from them, or a speed its times don't fit (not a bus faster than a bus can go).
+    /// (Not one judged by its own GPS: where its fix puts it is no timetable.)
     static func timesOnly(_ j: Judgement) -> Bool {
-        guard case .failure(let why) = j.result else { return false }
+        guard case .failure(let why) = j.result, j.evidence?.gps != true else { return false }
         switch why {
         case .drifting, .standing, .tooFarFromTimes: return true
         case .implausibleSpeed: return j.isTrain || (j.evidence.map { $0.yourSpeed <= busMax } ?? false)
         default: return false
+        }
+    }
+
+    /// The ones whose times are live, or that were judged by their own GPS: `decide` tells those apart by their cost.
+    static func liveIds(_ judged: [Judgement]) -> Set<String> {
+        Set(judged.filter { $0.realTime || $0.evidence?.gps == true }.map(\.id))
+    }
+
+    /// "Same bus?" (0.20.3): the ride's own one is kept by its GPS: judged by its fix, that puts it within `gpsKeep`
+    /// (200 m) of you along its road, you on its path (as the path test has it), going its way at 3 m/s or more, a
+    /// possible bus speed, and moving with you: when its speed is known for your fixes' time, not drifting from you;
+    /// else, with a speed from before them, it was moving (3 m/s) then. Nothing else (an arrival, a change, the guards)
+    /// is decided by it.
+    static func gpsKeeps(_ e: Evidence?, isTrain: Bool) -> Bool {
+        guard let e, e.gps, e.fixes >= 2, abs(e.offset) <= gpsKeep else { return false }
+        guard e.crossTrack <= max(e.shaped ? offPath : offPathUnshaped, accuracyFactor * e.accuracy) else { return false }
+        guard e.progress > 0, e.yourSpeed >= driftMin else { return false }
+        if !isTrain, !(e.yourSpeed <= busMax) { return false }
+        if e.speedKnown { return abs(e.drift) <= max(driftMin, driftShare * e.yourSpeed) }
+        if let v = e.gpsSpeed { return v >= driftMin }
+        return true
+    }
+
+    /// The fast lane's view of each judged one (`MatchRules.fastLane`): judged by its own GPS or not, how far from you
+    /// along its road (nil: no evidence), its heading against yours, whether it passed, and whether it could still be
+    /// the one (passed, or failed by its times or speed alone: not off its path, not the other way).
+    static func lane(_ judged: [Judgement]) -> [MatchRules.LaneCandidate] {
+        judged.map { j in
+            let passed: Bool
+            var plausible = false
+            switch j.result {
+            case .success: passed = true; plausible = true
+            case .failure(let why):
+                passed = false
+                switch why {
+                case .drifting, .standing, .tooFarFromTimes: plausible = true
+                case .implausibleSpeed: plausible = j.isTrain || (j.evidence.map { $0.yourSpeed <= busMax } ?? false)
+                default: plausible = false
+                }
+            }
+            return MatchRules.LaneCandidate(id: j.id, gps: j.evidence?.gps == true, metres: j.evidence.map { abs($0.offset) },
+                                            headingOff: j.evidence?.headingOff, passed: passed, plausible: plausible && j.evidence != nil)
         }
     }
 
@@ -752,5 +914,41 @@ struct MatchRules: Equatable, Sendable {
     /// Metres while "Classic vehicle matching" is on, else seconds.
     static func current(_ d: UserDefaults = .standard) -> MatchRules {
         MatchSettings.classic(d) ? .classic : .seconds
+    }
+
+    // MARK: the fast lane (0.20.3)
+
+    static let fastFixes = 2                        // enough evidence in the fast lane: 2 fixes…
+    static let fastSpan: TimeInterval = 8           // …spanning 8 s (instead of 3 and 20 s)
+    static let fastNear = 150.0                     // m: one judged by its own GPS this close to you…
+    static let fastTurn = 45.0                      // …heading your way (degrees)…
+    static let fastSpeed = 11.0                     // …while you go faster than this (m/s, 40 km/h)…
+    static let fastRivals = 400.0                   // …and no other one that could be it this close (m)
+
+    /// One judged one as the fast lane sees it (`VehicleMatch.lane`).
+    struct LaneCandidate: Equatable, Sendable {
+        let id: String
+        let gps: Bool               // judged by its own GPS
+        let metres: Double?         // from you along its road (by its GPS, or its times); nil: no evidence
+        let headingOff: Double?     // degrees between its heading and yours (GPS only)
+        let passed: Bool            // passed the hard tests (with the fast lane's few fixes)
+        let plausible: Bool         // could still be the one you're on
+    }
+
+    /// Boarding with few fixes: the one to take after `fastSpan` and `fastFixes`, when all of these hold, else nil (the
+    /// usual 20 s and 3 fixes):
+    /// - exactly one of them is judged by a fresh GPS fix within `fastNear` (150 m) of you, and it passed;
+    /// - it heads your way (`fastTurn`, 45°; a heading not known isn't);
+    /// - you go faster than `fastSpeed` (11 m/s);
+    /// - no other one (by GPS or by its times) that could be it is within `fastRivals` (400 m) of you.
+    static func fastLane(_ cands: [LaneCandidate], yourSpeed: Double, fixes: Int, span: TimeInterval) -> String? {
+        guard fixes >= fastFixes, span >= fastSpan, yourSpeed.isFinite, yourSpeed > fastSpeed else { return nil }
+        let near = cands.filter { c in c.gps && (c.metres.map { $0 <= fastNear } ?? false) }
+        guard near.count == 1, let one = near.first, one.passed,
+              let turn = one.headingOff, turn.isFinite, turn <= fastTurn else { return nil }
+        let rival = cands.contains { c in
+            c.id != one.id && c.plausible && (c.metres.map { $0 <= fastRivals } ?? false)
+        }
+        return rival ? nil : one.id
     }
 }
