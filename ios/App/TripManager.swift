@@ -2542,19 +2542,39 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         }
     }
 
+    /// The lock screen follows (0.20.7, `ActivityThrottle`): only what really changed, at most every 30 s (the countdown is
+    /// a timer text: it runs by itself), and what it says you should do (waking, ringing, a change, arriving, the
+    /// vehicle) at once. A change held back goes once the 30 s are up. `force`: a moment worth looking (as before), not a
+    /// reason to send what didn't change.
     private func pushActivity(force: Bool) {
         // riding without one (it couldn't start, or it was lost): start it now
         guard let activity else { if isRiding { startActivity() }; return }
         let s = state
-        let key = "\(s.legTitle)|\(s.distanceText)|\(s.arrival?.timeIntervalSince1970 ?? 0)|\(s.awake)|\(Int(s.progress * 50))|\(s.song ?? "")|\(s.songPlaying)|\(s.ringing)"
+        let key = "\(s.legTitle)|\(s.distanceText)|\(s.arrival?.timeIntervalSince1970 ?? 0)|\(s.awake)|\(ActivityThrottle.progressStep(s.progress))"
+            + "|\(s.song ?? "")|\(s.artist ?? "")|\(s.songPlaying)|\(s.ringing)|\(s.nextText ?? "")|\(s.vehicle)|\(s.line)"
+            + "|\(s.legFrom?.timeIntervalSince1970 ?? 0)|\(s.legTo?.timeIntervalSince1970 ?? 0)|\(s.stops.count)|\(s.finalName)"
         let say = "\(s.legTitle)|\(s.awake)|\(s.ringing)|\(s.kicker)"
-        // far from the stop, the distance and progress every 30 s (near it every 8 s); the rest at once
-        guard ActivityThrottle.send(force: force, changed: key != lastActivityKey, phaseChanged: say != lastActivitySay,
-                                    sinceLast: Date().timeIntervalSince(lastActivity), metresToStop: distance,
-                                    secondsToStop: (legTo ?? legArrival).map { $0.timeIntervalSinceNow }) else { return }
+        let since = Date().timeIntervalSince(lastActivity)
+        let changed = key != lastActivityKey
+        guard ActivityThrottle.send(changed: changed, phaseChanged: say != lastActivitySay, sinceLast: since) else {
+            if changed { pushActivityLater(after: ActivityThrottle.later(sinceLast: since)) }
+            return
+        }
+        activityLater?.cancel(); activityLater = nil
         lastActivity = Date(); lastActivityKey = key; lastActivitySay = say
         BatteryLog.shared.activityUpdate()
         Task { await activity.update(ActivityContent(state: s, staleDate: nil)) }
+    }
+
+    /// A change held back by the 30 s: it goes then (with whatever changed meanwhile).
+    private func pushActivityLater(after seconds: TimeInterval) {
+        guard activityLater == nil else { return }
+        activityLater = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(max(1, seconds) * 1_000_000_000))
+            guard let self, !Task.isCancelled else { return }
+            self.activityLater = nil
+            self.pushActivity(force: false)
+        }
     }
 
     /// Settings → Reset everything.
