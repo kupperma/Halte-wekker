@@ -262,7 +262,7 @@ struct OutfitSheetNew: View {
             if arriving != nil { Capsule().fill(DS.accent).frame(width: 2).padding(.vertical, DS.s8).offset(x: -3) }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel((arriving.map { "From here in \($0). " } ?? "")
+        .accessibilityLabel((arriving.map { "In \($0) from here on. " } ?? "")
             + OutfitWords.hourSpoken(time: time, code: h.w.code, temp: t, feels: Int(h.w.feels.rounded()), wet: h.w.wet, chance: h.w.rainChance))
         .accessibilityAddTraits(now ? AccessibilityTraits.isSelected : AccessibilityTraits())
     }
