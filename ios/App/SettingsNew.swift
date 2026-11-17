@@ -57,7 +57,7 @@ struct NewLookSettings: View {
         }
         Section("Notifications") {
             Button("Notifications and what’s watched") { showNotices = true }
-                .sheet(isPresented: $showNotices) { NotificationsSheet().presentationDetents([.medium, .large]) }
+                .sheet(isPresented: $showNotices) { NotificationsSheetNew().presentationDetents([.medium, .large]) }
         }
         Section("More") {
             NavigationLink("Leaderboard") {
@@ -66,7 +66,7 @@ struct NewLookSettings: View {
                     .navigationTitle("Leaderboard")
             }
             Button("How steady are they now?") { showSteady = true }
-                .sheet(isPresented: $showSteady) { SteadySheet().presentationDetents([.large]) }
+                .sheet(isPresented: $showSteady) { SteadySheetNew().presentationDetents([.large]) }
             if let tryDemo, trip.phase == .idle {
                 Button("Try it at home: a pretend trip") { dismissSettings(); tryDemo() }
             }

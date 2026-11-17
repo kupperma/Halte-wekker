@@ -75,12 +75,14 @@ struct RootView: View {
         // notifications pop up inside the app too, while it's open
         .overlay(alignment: .top) {
             if let n = notices.current {
-                NoticeBanner(notice: n) { notices.dismiss() }
-                    .environment(\.colorScheme, .dark)
-                    .padding(.horizontal, 10).padding(.top, 6)
-                    .transition(.move(edge: .top).combined(with: .opacity))
-                    .id(n.id)
-                    .zIndex(10)
+                Group {
+                    if newLook { NoticeBannerNew(notice: n) { notices.dismiss() } }
+                    else { NoticeBanner(notice: n) { notices.dismiss() }.environment(\.colorScheme, .dark) }
+                }
+                .padding(.horizontal, 10).padding(.top, 6)
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .id(n.id)
+                .zIndex(10)
             }
         }
         .preferredColorScheme(followsPhone ? nil : .dark)

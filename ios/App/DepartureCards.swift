@@ -306,7 +306,7 @@ struct DepartureDetailSheet: View {
         }
         .tint(DS.accentText)
         .sheet(item: $liveTrack) { LiveBusSheet(target: $0, newLook: true).presentationDetents([.large]) }
-        .sheet(item: $walkTo) { WalkMapSheet(target: $0).presentationDetents([.large]) }
+        .sheet(item: $walkTo) { WalkMapSheetNew(target: $0).presentationDetents([.large]) }
     }
 
     /// The rest of the old train and bus pages (0.20): your ride, how steady the line is, its speed rank, and for a

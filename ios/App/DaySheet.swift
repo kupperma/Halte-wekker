@@ -103,7 +103,7 @@ struct DaySheet: View {
                 await model.askWayHome(day: key, after: end)
             }
         }
-        .sheet(isPresented: $showNotices) { NotificationsSheet().presentationDetents([.medium, .large]) }
+        .sheet(isPresented: $showNotices) { NotificationsSheetNew().presentationDetents([.medium, .large]) }
     }
 
     // MARK: top

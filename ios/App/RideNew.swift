@@ -37,7 +37,7 @@ struct RideViewNew: View {
         }
         .background(DS.page.ignoresSafeArea())
         .dynamicTypeSize(...DynamicTypeSize.accessibility2)
-        .sheet(item: $walkTo) { WalkMapSheet(target: $0).presentationDetents([.large]) }
+        .sheet(item: $walkTo) { WalkMapSheetNew(target: $0).presentationDetents([.large]) }
         .sheet(isPresented: $picking) { RidePickSheet().presentationDetents([.medium, .large]) }
         .animation(DS.quick, value: trip.waitingToBoard)
         .onAppear {
@@ -591,7 +591,7 @@ struct ArrivalViewNew: View {
         }
         .background(DS.page.ignoresSafeArea())
         .dynamicTypeSize(...DynamicTypeSize.accessibility2)
-        .sheet(item: $walkTo) { WalkMapSheet(target: $0).presentationDetents([.large]) }
+        .sheet(item: $walkTo) { WalkMapSheetNew(target: $0).presentationDetents([.large]) }
         .onAppear { withAnimation(.spring(response: 0.45, dampingFraction: 0.6)) { pop = true } }
         .task(id: trip.index) {
             while !Task.isCancelled {
