@@ -64,6 +64,24 @@ final class MemoTests: XCTestCase {
         XCTAssertEqual(n, 2)
     }
 
+    /// 0.20.7: a caller may take an older answer (a ride's own looks, a minute), or want a fresher one.
+    func test_maxAge() async {
+        let clock = TestClock()
+        let memo = Memo<String, Int>(ttl: 20, now: { clock.date })
+        let f = Fetches()
+        _ = await memo.get("a") { await f.hit(); return 1 }
+        clock.date += 45
+        let old = await memo.get("a", maxAge: 60) { await f.hit(); return 2 }
+        XCTAssertEqual(old, 1)                                   // 45 s old: within the minute
+        let plain = await memo.get("a") { await f.hit(); return 3 }
+        XCTAssertEqual(plain, 3)                                  // past the memo's own 20 s
+        clock.date += 5
+        let fresh = await memo.get("a", maxAge: 2) { await f.hit(); return 4 }
+        XCTAssertEqual(fresh, 4)
+        let n = await f.count
+        XCTAssertEqual(n, 3)
+    }
+
     func test_peekIgnoresAge() async {
         let clock = TestClock()
         let t0 = clock.date

@@ -24,8 +24,10 @@ actor Memo<K: Hashable & Sendable, V: Sendable> {
 
     /// The fresh value, else one shared fetch. Callers of different `group`s (urgent / background) never share a
     /// fetch, but they share the stored answer. A real answer that arrives after every waiter left is still stored.
-    func get(_ key: K, group: Int = 0, fetch: @escaping @Sendable () async -> V?) async -> V? {
-        if let hit = items[key], (0..<ttl).contains(now().timeIntervalSince(hit.at)) { return hit.value }
+    /// `maxAge`: how old a stored answer may be for this caller (nil: the memo's `ttl`; 0.20.7, a ride's own looks take
+    /// its trip of the last minute).
+    func get(_ key: K, group: Int = 0, maxAge: TimeInterval? = nil, fetch: @escaping @Sendable () async -> V?) async -> V? {
+        if let hit = items[key], (0..<max(0, maxAge ?? ttl)).contains(now().timeIntervalSince(hit.at)) { return hit.value }
         let fk = FlightKey(key: key, group: group)
         let id = UUID()
         return await withTaskCancellationHandler {

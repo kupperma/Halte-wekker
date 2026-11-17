@@ -7,7 +7,7 @@ import Foundation
 /// The GPS a trip (or what's watched without one) needs right now: one decision, from the trip's phase and what's open.
 enum GPSPolicy {
     enum Phase: Equatable { case idle, riding, transfer, finished }
-    enum Accuracy: Equatable { case best, hundredMetres }
+    enum Accuracy: Equatable { case best, tenMetres, hundredMetres }
 
     struct Plan: Equatable {
         let on: Bool
@@ -19,6 +19,7 @@ enum GPSPolicy {
         static let off = Plan(on: false, accuracy: .best, filter: 25)
         static func best(_ filter: Double) -> Plan { Plan(on: true, accuracy: .best, filter: filter) }
         static func coarse(_ filter: Double) -> Plan { Plan(on: true, accuracy: .hundredMetres, filter: filter) }
+        static func ten(_ filter: Double) -> Plan { Plan(on: true, accuracy: .tenMetres, filter: filter) }
     }
 
     /// - Parameters:
@@ -27,16 +28,19 @@ enum GPSPolicy {
     ///   - going: Fastest trip is open
     ///   - lineWatch: a bus line is watched
     ///   - regionLook: you just left one of your stations, and it looks for what you're on
+    ///   - rideFar: on a leg, far from its stop with the vehicle confirmed (`RideGPS.far`, 0.20.7): 10 m, every 75 m
+    ///   - goCoarse: Fastest trip, standing with long to go (`GoGPS.coarse`, 0.20.7): 100 m, every 50 m
     /// At a change it stays the best, standing still too: a coarse fix could see the next one you get on (an earlier
     /// one than listed, a late one without live times) more than one look later.
-    static func plan(phase: Phase, demo: Bool, going: Bool, lineWatch: Bool, regionLook: Bool) -> Plan {
+    static func plan(phase: Phase, demo: Bool, going: Bool, lineWatch: Bool, regionLook: Bool,
+                     rideFar: Bool = false, goCoarse: Bool = false) -> Plan {
         if demo { return .off }
         switch phase {
-        case .riding: return .best(25)                              // as before, the whole leg
+        case .riding: return rideFar ? .ten(75) : .best(25)         // the best near the stop, and whenever in doubt
         case .transfer: return .best(25)
         case .finished: return .off
         case .idle:
-            if going { return .best(10) }
+            if going { return goCoarse ? .coarse(50) : .best(10) }
             if regionLook { return .best(25) }                      // (the look's matching wants good fixes)
             if lineWatch { return .coarse(30) }
             return .off
@@ -115,36 +119,37 @@ enum AfterArrival {
     static func end(finishedAt: Date, now: Date) -> Bool { now.timeIntervalSince(finishedAt) >= endAfter }
 }
 
-/// How often the Live Activity follows the distance and progress: every 8 s near your stop, every 30 s while it's far
-/// (more than 3 km, and more than 5 minutes when the time is known). Anything forced (a phase, the alarm, the vehicle,
-/// the times, the song) and a change of what it says you should do go at once.
+/// How often the Live Activity is updated (0.20.7): only when what it shows really changed, and then at most every
+/// 30 s while riding (the countdown is a timer text on the lock screen: it runs without updates). A change of what it
+/// says you should do (waking, ringing, the change, arriving, the vehicle) goes at once.
 enum ActivityThrottle {
-    static let near: TimeInterval = 8
-    static let far: TimeInterval = 30
-
-    static func gap(metresToStop d: Double?, secondsToStop s: TimeInterval?) -> TimeInterval {
-        guard let d, d.isFinite, d > 3000 else { return near }
-        if let s, s.isFinite, s <= 300 { return near }
-        return far
-    }
+    static let every: TimeInterval = 30
 
     /// `changed`: what it shows changed; `phaseChanged`: what it says (the title, awake, ringing, the kicker) changed.
-    static func send(force: Bool, changed: Bool, phaseChanged: Bool, sinceLast: TimeInterval, metresToStop: Double?,
-                     secondsToStop: TimeInterval?) -> Bool {
-        if force || phaseChanged { return true }
-        return changed && sinceLast > gap(metresToStop: metresToStop, secondsToStop: secondsToStop)
+    static func send(changed: Bool, phaseChanged: Bool, sinceLast: TimeInterval) -> Bool {
+        if phaseChanged { return true }
+        return changed && (sinceLast >= every || sinceLast < 0)
     }
+
+    /// A change held back now goes in this many seconds (when nothing newer has gone by then).
+    static func later(sinceLast: TimeInterval) -> TimeInterval { min(every, max(1, every - sinceLast)) }
+
+    /// The progress as the update key counts it: in 5% steps.
+    static func progressStep(_ p: Double) -> Int { p.isFinite ? Int((min(1, max(0, p)) * 20).rounded()) : 0 }
 }
 
 /// One `/v1/map/trips` answer for the next look too, while you haven't really moved: within 10 s and 50 m of where it
 /// was asked. Only for looks that start nothing on their own clock (Fastest trip watching for you to get on, a watched
 /// line): never on a ride or at a change, where matching drives the alarm's trip.
+/// At bus or train speed (0.20.7, `speed`): also from as far as that speed goes in that time (the box asked is a few
+/// km across, and the trips in it by their times move on their own).
 enum MapReuse {
     static let seconds: TimeInterval = 10
     static let metres = 50.0
 
-    static func usable(age: TimeInterval, movedMetres: Double, allowed: Bool) -> Bool {
-        allowed && age >= 0 && age <= seconds && movedMetres.isFinite && movedMetres >= 0 && movedMetres <= metres
+    static func usable(age: TimeInterval, movedMetres: Double, allowed: Bool, speed: Double = 0) -> Bool {
+        let v = speed.isFinite ? min(60, max(0, speed)) : 0
+        return allowed && age >= 0 && age <= seconds && movedMetres.isFinite && movedMetres >= 0 && movedMetres <= metres + v * age
     }
 }
 

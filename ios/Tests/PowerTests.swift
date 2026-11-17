@@ -178,26 +178,8 @@ final class PowerTests: XCTestCase {
         XCTAssertLessThan(AfterArrival.quietAfter, AfterArrival.endAfter)
     }
 
-    /// The lock screen: distance and progress every 30 s while far, every 8 s near the stop (3 km, 5 minutes); a forced
-    /// update or a change of what it says goes at once.
-    func test_activityThrottle() {
-        func send(force: Bool = false, changed: Bool = true, say: Bool = false, since: TimeInterval, d: Double?, s: TimeInterval?) -> Bool {
-            ActivityThrottle.send(force: force, changed: changed, phaseChanged: say, sinceLast: since, metresToStop: d, secondsToStop: s)
-        }
-        XCTAssertFalse(send(since: 20, d: 12_000, s: 900))
-        XCTAssertTrue(send(since: 31, d: 12_000, s: 900))
-        XCTAssertFalse(send(changed: false, since: 60, d: 12_000, s: 900))           // nothing changed: nothing to send
-        XCTAssertTrue(send(since: 9, d: 2_500, s: 900))                               // within 3 km: as before
-        XCTAssertFalse(send(since: 7, d: 2_500, s: 900))
-        XCTAssertTrue(send(since: 9, d: 12_000, s: 240))                              // under 5 minutes: as before
-        XCTAssertTrue(send(since: 9, d: 3_000, s: nil))
-        XCTAssertFalse(send(since: 9, d: 3_001, s: nil))
-        XCTAssertTrue(send(since: 9, d: nil, s: nil))                                 // not known: as before
-        XCTAssertTrue(send(force: true, changed: false, since: 0, d: 12_000, s: 900))  // the alarm, a phase, the vehicle
-        XCTAssertTrue(send(changed: true, say: true, since: 1, d: 12_000, s: 900))      // awake, the kicker, the title
-        XCTAssertEqual(ActivityThrottle.gap(metresToStop: 12_000, secondsToStop: 900), 30)
-        XCTAssertEqual(ActivityThrottle.gap(metresToStop: .nan, secondsToStop: 900), 8)
-    }
+    /// The lock screen (0.20.7, `ThriftTests.test_activityThrottle`): real changes only, at most every 30 s, what it
+    /// says you should do at once.
 
     /// The same map answer for a look within 10 s and 50 m, only where it's allowed.
     func test_mapReuse() {
