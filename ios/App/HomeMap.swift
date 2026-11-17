@@ -506,6 +506,8 @@ struct NewHome: View {
             }
             .padding(.vertical, 6).padding(.horizontal, 2)
         }
+        // only as tall as the chips: a sideways ScrollView otherwise takes the free height and swallows map drags
+        .fixedSize(horizontal: false, vertical: true)
         .padding(.horizontal, -2)
         .padding(.vertical, -6)
     }

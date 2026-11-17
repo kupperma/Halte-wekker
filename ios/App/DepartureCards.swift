@@ -96,6 +96,9 @@ struct DepartureCardsView: View {
             .contentMargins(.horizontal, DS.edge, for: .scrollContent)
             .scrollTargetBehavior(.viewAligned)
             .scrollPosition(id: $focused)
+            // only as tall as the cards: a sideways ScrollView otherwise takes all the free height above it, and a
+            // drag in the middle of the map scrolled the cards instead of moving the map
+            .fixedSize(horizontal: false, vertical: true)
             dots
         }
     }
