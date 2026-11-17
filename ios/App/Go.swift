@@ -1472,6 +1472,11 @@ struct GoMap: View {
     let bottom: CGFloat         // where the cards start
     var saved = false           // the ride is from the saved answer: its pin without the time
     var newLook = false         // the new look (0.20): the plain map in the phone's light or dark, the new colours
+    /// The Go to card's On the map (0.20.4): each new value stops keeping you in view by itself and shows the stop and
+    /// your walk to it.
+    var focus = 0
+    /// The walk to the stop's length on foot (nil: none, you're there), each time it's found again.
+    var onWalk: ((Double?) -> Void)? = nil
     @State private var trip: LiveTrip?
     @State private var mine: Int?
     @State private var walk: MKRoute?
@@ -1534,6 +1539,12 @@ struct GoMap: View {
         .onChange(of: tick) { _, t in if (!newLook || auto) && (t <= 2 || t % 4 == 0) { fit(Date(), animated: t > 2) } }
         .onChange(of: size) { _, _ in if !newLook || auto { fit(Date(), animated: false) } }
         .onChange(of: camera) { _, c in if newLook && auto && c.positionedByUser { auto = false } }
+        .onChange(of: focus) { _, _ in
+            guard newLook else { return }
+            auto = false
+            fit(Date(), animated: true, toStop: true)
+            lastFit = nil
+        }
         .realPositions(ride.map { RealPositions.key($0.tripId) != nil } ?? false, trains: ride?.isTrain ?? false)
         .task(id: ride?.tripId ?? "") { await run() }
     }
@@ -1600,6 +1611,7 @@ struct GoMap: View {
     /// Its live times every 30 seconds; the walk again every minute (or when you've moved).
     private func run() async {
         trip = nil; mine = nil; walk = nil; walkFrom = nil
+        onWalk?(nil)
         var lastTrip = Date.distantPast
         while !Task.isCancelled {
             let now = Date()
@@ -1615,6 +1627,7 @@ struct GoMap: View {
                 walkFrom = h
                 let d = h.distance(from: CLLocation(latitude: s.latitude, longitude: s.longitude))
                 if d > 60 { walk = await Self.walkRoute(to: s) } else { walk = nil }
+                onWalk?(walk?.distance)
             }
             tick += 1
             try? await Task.sleep(nanoseconds: 1_000_000_000)
@@ -1645,14 +1658,15 @@ struct GoMap: View {
         return pool.min { abs((t.departure($0) ?? .distantPast).timeIntervalSince(r.departure)) < abs((t.departure($1) ?? .distantPast).timeIntervalSince(r.departure)) }
     }
 
-    /// Keep you, your stop and the bus (when it's on its way, not too far) in the window above the cards.
-    private func fit(_ now: Date, animated: Bool) {
+    /// Keep you, your stop and the bus (when it's on its way, not too far) in the window above the cards. `toStop`
+    /// (On the map): you, the stop and the walk between, without the bus.
+    private func fit(_ now: Date, animated: Bool, toStop: Bool = false) {
         guard size.width > 0, size.height > 0 else { return }
         var pts: [CLLocationCoordinate2D] = []
         if let h = hereNow { pts.append(h.coordinate) }
         if let s = stop {
             pts.append(s)
-            if let t = trip, let m = mine, let r = ride {
+            if !toStop, let t = trip, let m = mine, let r = ride {
                 let w = TripPlacement(t, tripId: r.tripId, now: now, hold: hold).w
                 let at = LiveTimes.shown(w.metres, mine: t.metres(ofStop: m), left: LiveTimes.hasLeft(t.stops[m].times, now: now))
                 let bus = t.coordinate(atMetres: at)
@@ -1663,6 +1677,7 @@ struct GoMap: View {
         guard let p0 = pts.first else { return }
         var box = MKMapRect(origin: MKMapPoint(p0), size: MKMapSize(width: 1, height: 1))
         for p in pts.dropFirst() { box = box.union(MKMapRect(origin: MKMapPoint(p), size: MKMapSize(width: 1, height: 1))) }
+        if toStop, let walk { box = box.union(walk.polyline.boundingMapRect) }
         let ppm = MKMapPointsPerMeterAtLatitude(p0.latitude)
         var w = max(box.size.width * 1.35, ppm * 420), h = max(box.size.height * 1.35, ppm * 420)
         let winH = max(120, bottom - top)
@@ -1685,14 +1700,16 @@ struct TripLine: View {
     let others: [DoorTrip]
     let dest: String
     var newLook = false         // the new look (0.20): its colours, pills and text styles
+    /// NS's word on its trains (their platform now) by ride id, for the new look's platform chips.
+    var rails: [String: RailInfo] = [:]
     var tap: (Ride) -> Void = { _ in }
 
     private var ink: Color { newLook ? DS.text : Paper.ink }
     private var muted: Color { newLook ? DS.secondary : Paper.muted }
     private func color(_ r: Ride) -> Color { newLook ? DS.mode(train: r.isTrain, line: r.line) : Paper.line(r.line, train: r.isTrain) }
 
-    private struct Stop { let name: String; let time: Date; let sub: String; var end = false }
-    private struct Seg { let ride: Ride?; let height: CGFloat }
+    private struct Stop { let name: String; let time: Date; let sub: String; var end = false; var chip: String? = nil; var changed = false }
+    private struct Seg { let ride: Ride?; let height: CGFloat; var label: String? = nil }
     private struct Branch { let from: Int; let to: Int; let color: Color; let label: String }
 
     private let lineX: CGFloat = 34, stopH: CGFloat = 46
@@ -1715,6 +1732,25 @@ struct TripLine: View {
                 sub = "arrive \(Fmt.hhmm(p.arrival)) · \(ch) min to change\(r.walkBefore > 0 ? ", \(r.walkBefore) min walk" : "") · \(what)\(plat)"
             }
             boardAt[r.tripId] = stops.count
+            if newLook {
+                // (0.20.4) where you get on as a chip by the stop ("Platform 5", "Stop U"), which one on the ride's row
+                // ("Bus 5 to BUas"): not in the line under the stop
+                let kind = StopLabel.kind(isTrain: r.isTrain, line: r.line)
+                let info = r.isTrain ? rails[r.id] : nil
+                let w = StopLabel.make(kind: kind, stop: r.fromStop, track: StopLabel.clean(info?.track) ?? r.platform,
+                                       planned: StopLabel.clean(info?.plannedTrack) ?? r.plannedPlatform)
+                let ride = StopLabel.ride(StopLabel.vehicle(kind: kind, line: r.line, name: r.name),
+                                          toward: Fmt.place(r.headsign.isEmpty ? r.toStop : r.headsign))
+                var under = "get on here"
+                if i > 0 {
+                    let p = trip.rides[i - 1]
+                    let ch = Fmt.mins(r.departure.timeIntervalSince(p.arrival))
+                    under = "arrive \(Fmt.hhmm(p.arrival)) · \(ch) min to change\(r.walkBefore > 0 ? ", \(r.walkBefore) min walk" : "")"
+                }
+                stops.append(Stop(name: Fmt.place(r.fromStop), time: r.departure, sub: under, chip: w.chip, changed: w.changed))
+                segs.append(Seg(ride: r, height: 62, label: ride))
+                continue
+            }
             stops.append(Stop(name: Fmt.place(r.fromStop), time: r.departure, sub: sub))
             segs.append(Seg(ride: r, height: 62))
         }
@@ -1724,6 +1760,21 @@ struct TripLine: View {
         }
         stops.append(Stop(name: dest, time: trip.end, sub: "you’re there", end: true))
         return (stops, segs, boardAt)
+    }
+
+    /// "Eindhoven 15:46, then Breda 16:27"; the new look with where you get on and which one: "Eindhoven 15:46, Platform
+    /// 5, Intercity to Den Haag Centraal, then …".
+    private func spoken(_ stops: [Stop], _ segs: [Seg]) -> String {
+        var out: [String] = []
+        for (i, s) in stops.enumerated() {
+            var parts: [String] = ["\(s.name) \(Fmt.hhmm(s.time))"]
+            if newLook {
+                if let c = s.chip { parts.append(c) }
+                if i < segs.count, let r = segs[i].label { parts.append(r) }
+            }
+            out.append(parts.joined(separator: ", "))
+        }
+        return out.joined(separator: ", then ")
     }
 
     /// Other ways that join this trip on one of its later rides: they branch off at the top and join at that station.
@@ -1804,7 +1855,16 @@ struct TripLine: View {
                 if i < ys.count {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         VStack(alignment: .leading, spacing: 1) {
-                            Text(s.name).font(.system(size: s.end ? 17 : 15.5, weight: newLook ? .bold : .heavy)).foregroundStyle(ink).lineLimit(1).minimumScaleFactor(0.7)
+                            HStack(spacing: 6) {
+                                Text(s.name).font(.system(size: s.end ? 17 : 15.5, weight: newLook ? .bold : .heavy)).foregroundStyle(ink).lineLimit(1).minimumScaleFactor(0.7)
+                                if newLook, let c = s.chip {
+                                    Text(c).font(.system(size: 11.5, weight: .bold)).monospacedDigit()
+                                        .foregroundStyle(s.changed ? DS.onAccent : DS.text)
+                                        .padding(.horizontal, 6).padding(.vertical, 2)
+                                        .background(s.changed ? AnyShapeStyle(DS.warning) : AnyShapeStyle(DS.surface3), in: Capsule())
+                                        .fixedSize()
+                                }
+                            }
                             Text(s.sub).font(.system(size: newLook ? 12 : 11)).foregroundStyle(muted).lineLimit(2).minimumScaleFactor(0.8)
                         }
                         Spacer(minLength: 4)
@@ -1813,6 +1873,21 @@ struct TripLine: View {
                     .frame(height: stopH, alignment: .center)
                     .padding(.leading, lineX + 22)
                     .offset(y: ys[i] - stopH / 2)
+                }
+            }
+            // (the new look) which one each ride is, beside its bullet: above the branches' words when they're there too
+            if newLook {
+                let busy = Set(bs.filter { $0.to < ys.count && $0.to >= 1 }.map { $0.to - 1 })
+                ForEach(Array(l.segs.enumerated()), id: \.offset) { i, s in
+                    if let t = s.label, i + 1 < ys.count {
+                        let mid = (ys[i] + ys[i + 1]) / 2
+                        Text(t).font(.system(size: 12.5, weight: .semibold)).foregroundStyle(ink)
+                            .lineLimit(1).minimumScaleFactor(0.7)
+                            .padding(.leading, lineX + 28).padding(.trailing, 4)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .offset(y: busy.contains(i) ? mid - 24 : mid - 8)
+                            .allowsHitTesting(false)
+                    }
                 }
             }
             // each ride's bullet on its piece of line; tap it for where that bus or train is
@@ -1840,6 +1915,6 @@ struct TripLine: View {
         }
         .frame(height: height, alignment: .top)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(l.stops.map { "\($0.name) \(Fmt.hhmm($0.time))" }.joined(separator: ", then "))
+        .accessibilityLabel(spoken(l.stops, l.segs))
     }
 }

@@ -12,6 +12,8 @@ struct GoViewNew: View {
     @State private var liveTrack: LiveTrackTarget?
     @State private var showSteady = false
     @State private var choosing = false
+    @State private var mapFocus = 0                 // the Go to card's On the map: the map shows the stop and the walk
+    @State private var walkMetres: Double?          // the walk to the stop on foot, from the map
     @ScaledMetric(relativeTo: .largeTitle) private var big: CGFloat = 52
 
     var body: some View {
@@ -21,7 +23,8 @@ struct GoViewNew: View {
             let window = max(200, (g.size.height - bar) * 0.40)     // the map you see above the cards
             ZStack(alignment: .top) {
                 GoMap(ride: go.arrived ? nil : go.best?.first, here: go.here,
-                      top: g.safeAreaInsets.top + bar, bottom: g.safeAreaInsets.top + bar + window, saved: go.asOf != nil, newLook: true)
+                      top: g.safeAreaInsets.top + bar, bottom: g.safeAreaInsets.top + bar + window, saved: go.asOf != nil, newLook: true,
+                      focus: mapFocus, onWalk: { walkMetres = $0 })
                     .ignoresSafeArea()
                 // (the map takes your hand in its window (0.20.1): the cards scroll below it, not over it)
                 ScrollView(showsIndicators: false) {
@@ -124,6 +127,7 @@ struct GoViewNew: View {
         if go.arrived {
             message(icon: "checkmark.circle.fill", title: "You’re at \(destWord)", text: "Nothing to catch: you’re there. It stopped watching.")
         } else if let t = go.best {
+            if t.first.fromId != "onboard" { goToCard(t) }
             heroCard(t)
             watchingCard(t)
             if !go.others.isEmpty { compareCard(t) }
@@ -192,50 +196,54 @@ struct GoViewNew: View {
             }
             Text("\(destWord) at \(Fmt.hhmm(t.end))" + (go.asOf.map { " · \(Snapshots.asOf($0)) · checking again…" } ?? " · \(Fmt.rideText(Double(Fmt.mins(t.end.timeIntervalSinceNow))))\(changes)"))
                 .font(DS.callout).monospacedDigit().foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
-            Rectangle().fill(DS.divider).frame(height: 1)
-            // what to take
-            HStack(alignment: .center, spacing: DS.s12) {
-                DSLinePill(line: f.isTrain ? Transit.trainLabel(f.line) : f.line, train: f.isTrain)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("\(aboard ? "You’re on the" : "Take the") \(GoStore.what(f))").font(DS.bodyStrong).foregroundStyle(DS.text).lineLimit(2)
-                    Text("to \(toName)").font(DS.sub).foregroundStyle(DS.text).lineLimit(1).minimumScaleFactor(0.8)
-                    Text(fromLine).font(DS.footnote).foregroundStyle(DS.secondary).lineLimit(2)
-                }
-                Spacer(minLength: 4)
-                VStack(alignment: .trailing, spacing: 2) {
-                    if aboard {
-                        Text("off at").font(DS.footnote).foregroundStyle(DS.secondary)
-                        Text(Fmt.hhmm(f.arrival)).font(DS.bigNumber).monospacedDigit().foregroundStyle(DS.text)
-                    } else {
-                        Text(Fmt.hhmm(f.cancelled ? f.scheduledDeparture : f.departure)).font(DS.bigNumber).monospacedDigit().foregroundStyle(DS.text)
-                            .strikethrough(f.cancelled)
-                        if go.asOf == nil {             // (no countdown from the saved answer)
-                            TimelineView(.periodic(from: .now, by: 15)) { tl in
-                                let m = Int((f.departure.timeIntervalSince(tl.date) / 60).rounded(.down))
-                                Text(m <= 0 ? "now" : "in \(m) min").font(DS.footnoteStrong).monospacedDigit().foregroundStyle(m <= 2 ? DS.warning : DS.secondary)
+            // on board (planned from the bus or train you're on): what you're on, as before. Otherwise the Go to card
+            // above says where to go, which one, how it runs and the walk (0.20.4).
+            if f.fromId == "onboard" {
+                Rectangle().fill(DS.divider).frame(height: 1)
+                // what to take
+                HStack(alignment: .center, spacing: DS.s12) {
+                    DSLinePill(line: f.isTrain ? Transit.trainLabel(f.line) : f.line, train: f.isTrain)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(aboard ? "You’re on the" : "Take the") \(GoStore.what(f))").font(DS.bodyStrong).foregroundStyle(DS.text).lineLimit(2)
+                        Text("to \(toName)").font(DS.sub).foregroundStyle(DS.text).lineLimit(1).minimumScaleFactor(0.8)
+                        Text(fromLine).font(DS.footnote).foregroundStyle(DS.secondary).lineLimit(2)
+                    }
+                    Spacer(minLength: 4)
+                    VStack(alignment: .trailing, spacing: 2) {
+                        if aboard {
+                            Text("off at").font(DS.footnote).foregroundStyle(DS.secondary)
+                            Text(Fmt.hhmm(f.arrival)).font(DS.bigNumber).monospacedDigit().foregroundStyle(DS.text)
+                        } else {
+                            Text(Fmt.hhmm(f.cancelled ? f.scheduledDeparture : f.departure)).font(DS.bigNumber).monospacedDigit().foregroundStyle(DS.text)
+                                .strikethrough(f.cancelled)
+                            if go.asOf == nil {             // (no countdown from the saved answer)
+                                TimelineView(.periodic(from: .now, by: 15)) { tl in
+                                    let m = Int((f.departure.timeIntervalSince(tl.date) / 60).rounded(.down))
+                                    Text(m <= 0 ? "now" : "in \(m) min").font(DS.footnoteStrong).monospacedDigit().foregroundStyle(m <= 2 ? DS.warning : DS.secondary)
+                                }
                             }
                         }
                     }
                 }
-            }
-            .accessibilityElement(children: .combine)
-            // how it's running, and its whole route
-            HStack(spacing: DS.s8) {
-                if aboard {
-                    ProgressView().controlSize(.small).tint(DS.accentText)
-                    Text("Making sure it’s this one: then your trip starts by itself.").font(DS.footnote).foregroundStyle(DS.text)
-                        .fixedSize(horizontal: false, vertical: true)
-                } else {
-                    Circle().fill(st.warn ? DS.warning : st.ok ? DS.accent : DS.secondary).frame(width: 8, height: 8).accessibilityHidden(true)
-                    Text(st.text).font(DS.footnoteStrong).monospacedDigit().foregroundStyle(st.warn ? DS.warning : st.ok ? DS.accentText : DS.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                .accessibilityElement(children: .combine)
+                // how it's running, and its whole route
+                HStack(spacing: DS.s8) {
+                    if aboard {
+                        ProgressView().controlSize(.small).tint(DS.accentText)
+                        Text("Making sure it’s this one: then your trip starts by itself.").font(DS.footnote).foregroundStyle(DS.text)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        Circle().fill(st.warn ? DS.warning : st.ok ? DS.accent : DS.secondary).frame(width: 8, height: 8).accessibilityHidden(true)
+                        Text(st.text).font(DS.footnoteStrong).monospacedDigit().foregroundStyle(st.warn ? DS.warning : st.ok ? DS.accentText : DS.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 4)
+                    DSQuietButton(title: "Its route", icon: "point.topleft.down.to.point.bottomright.curvepath") {
+                        liveTrack = LiveTrackTarget(tripId: f.tripId, line: f.line, headsign: f.headsign.isEmpty ? Fmt.place(f.toStop) : f.headsign,
+                                                    stopName: f.fromStop, time: f.departure, rail: f.isTrain)
+                    }
+                    .accessibilityLabel("Its whole route, live")
                 }
-                Spacer(minLength: 4)
-                DSQuietButton(title: "Its route", icon: "point.topleft.down.to.point.bottomright.curvepath") {
-                    liveTrack = LiveTrackTarget(tripId: f.tripId, line: f.line, headsign: f.headsign.isEmpty ? Fmt.place(f.toStop) : f.headsign,
-                                                stopName: f.fromStop, time: f.departure, rail: f.isTrain)
-                }
-                .accessibilityLabel("Its whole route, live")
             }
             if let h = go.hurry {
                 DSNote(icon: "figure.run", text: "Hurry: \(h.meters) m to the stop and it leaves in \(h.minutes) min. A brisk walk makes it."
@@ -247,10 +255,9 @@ struct GoViewNew: View {
                        + (alt.map { ", or take \(GoStore.what($0.first)) at \(Fmt.hhmm($0.first.departure)) (\(destWord) \(Fmt.hhmm($0.end)))." } ?? "."))
             }
             changeNote(t)
-            walkRow(t)
             Rectangle().fill(DS.divider).frame(height: 1)
             DSHeader(title: "Your trip")
-            TripLine(trip: t, others: go.others, dest: destWord, newLook: true) { r in
+            TripLine(trip: t, others: go.others, dest: destWord, newLook: true, rails: rails(t)) { r in
                 liveTrack = LiveTrackTarget(tripId: r.tripId, line: r.line, headsign: r.headsign.isEmpty ? Fmt.place(r.toStop) : r.headsign,
                                             stopName: r.fromStop, time: r.departure, rail: r.isTrain)
             }
@@ -286,34 +293,35 @@ struct GoViewNew: View {
         }
     }
 
-    /// The walk to the stop (with its turns), or that you're there.
-    @ViewBuilder private func walkRow(_ t: DoorTrip) -> some View {
+    /// NS's word on the trip's trains (their platform now), by ride.
+    private func rails(_ t: DoorTrip) -> [String: RailInfo] {
+        var out: [String: RailInfo] = [:]
+        for r in t.rides where r.isTrain { if let i = ns.rail(r) { out[r.id] = i } }
+        return out
+    }
+
+    /// The Go to card (0.20.4): where to go for the first ride, which one it is, the walk there, Walk there (the turns)
+    /// and On the map; at the stop, the wait.
+    private func goToCard(_ t: DoorTrip) -> some View {
         let f = t.first
-        if f.fromId != "onboard", let a = f.fromLat, let o = f.fromLon {
-            // (from the saved answer: just the way there, without "Leave by … (in 5 min)")
-            let saved = go.asOf != nil
-            let target = WalkTarget(name: Fmt.place(f.fromStop), lat: a, lon: o, rail: f.isTrain,
-                                    catchText: saved ? nil : "the \(GoStore.what(f)) at \(Fmt.hhmm(f.departure))", leaves: saved ? nil : f.departure)
-            let away = go.here.map { $0.distance(from: CLLocation(latitude: a, longitude: o)) } ?? 9999
-            if f.walkBefore == 0 && away < 120 {
-                DSNote(icon: "mappin.and.ellipse", tint: DS.accentText,
-                       text: "You’re at the stop. Wait here for the \(GoStore.what(f)): you can see it coming on the map. It notices by itself when you get on.")
-            } else {
-                HStack(spacing: DS.s12) {
-                    Image(systemName: "figure.walk").font(.title3.weight(.semibold)).foregroundStyle(DS.accentText)
-                        .frame(width: 28).accessibilityHidden(true)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(f.walkBefore > 0 ? "\(f.walkBefore) min walk to \(Fmt.place(f.fromStop))" : "Get to \(Fmt.place(f.fromStop))")
-                            .font(DS.calloutStrong).foregroundStyle(DS.text).fixedSize(horizontal: false, vertical: true)
-                        Text("Follow the dotted line on the map.").font(DS.footnote).foregroundStyle(DS.secondary)
-                    }
-                    Spacer(minLength: 4)
-                    DSQuietButton(title: "Turns", icon: "arrow.triangle.turn.up.right.diamond.fill") { walkTo = target }
-                        .accessibilityLabel("The walk, turn by turn")
-                }
-                .accessibilityElement(children: .contain)
-            }
+        let saved = go.asOf != nil
+        let stop: CLLocationCoordinate2D? = f.fromLat.flatMap { a in f.fromLon.map { CLLocationCoordinate2D(latitude: a, longitude: $0) } }
+        // (from the saved answer: just the way there, without "Leave by … (in 5 min)")
+        let target: WalkTarget? = stop.map { s in
+            WalkTarget(name: Fmt.place(f.fromStop), lat: s.latitude, lon: s.longitude, rail: f.isTrain,
+                       catchText: saved ? nil : "the \(GoStore.what(f)) at \(Fmt.hhmm(f.departure))", leaves: saved ? nil : f.departure)
         }
+        var walk: (() -> Void)? = nil
+        if let tg = target { walk = { walkTo = tg } }
+        return GoToCard(ride: f, info: f.isTrain ? ns.rail(f) : nil, stop: stop, here: go.here, walkMetres: walkMetres,
+                        leaveBy: f.walkBefore > 0 ? t.start : nil, saved: saved,
+                        hereNote: "You can see it coming on the map. It notices by itself when you get on.",
+                        walk: walk,
+                        onMap: { mapFocus += 1 },
+                        route: {
+                            liveTrack = LiveTrackTarget(tripId: f.tripId, line: f.line, headsign: f.headsign.isEmpty ? Fmt.place(f.toStop) : f.headsign,
+                                                        stopName: f.fromStop, time: f.departure, rail: f.isTrain)
+                        })
     }
 
     // MARK: it watches for you
