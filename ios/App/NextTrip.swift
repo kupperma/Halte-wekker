@@ -23,6 +23,20 @@ enum NextTrip {
         return (.none, nil)
     }
 
+    /// The card owns where it's going (0.20.1): the trip for `dest` (a place's key). A due school or planned trip only
+    /// when it goes there (`dueDest`); else the first of the next trips you can still catch, when they're toward there
+    /// (`liveDest`: where the live store's trips go); else none (the trips there are still coming).
+    static func pick(dest: String, dueDest: String?, schoolDue: Bool, plannedDue: Bool, liveDest: String, liveLeaves: [Date],
+                     now: Date) -> (source: Source, index: Int?) {
+        let dueHere = dueDest == dest
+        if dueHere && (schoolDue || plannedDue) { return pick(schoolDue: schoolDue, plannedDue: plannedDue, liveLeaves: [], now: now) }
+        guard liveDest == dest else { return (.none, nil) }
+        return pick(schoolDue: false, plannedDue: false, liveLeaves: liveLeaves, now: now)
+    }
+
+    /// The card's destination chip: "To BUas", "To Home".
+    static func destTitle(_ name: String) -> String { "To \(name)" }
+
     // MARK: the countdown
 
     struct Countdown: Equatable {

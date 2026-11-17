@@ -2,7 +2,7 @@ import SwiftUI
 
 // The "Next trip first" home (0.19.1, concept B, artboards B1–B3): the same home as "Live around you" (`NewHome`: its
 // map, stores, refreshes, Plan and Your day), laid out around one big card with your next trip, and a bar at the
-// bottom with Home, School, Plan and Your week. These are its parts; `NewHome` puts them together.
+// bottom with Search, Your week and Settings (0.20.1: the card picks where you go). These are its parts; `NewHome` puts them together.
 
 extension NextTrip {
     /// A trip's parts for the leg bar.
@@ -54,6 +54,8 @@ struct NextTripCard: View {
     let content: Content
     /// The countdown's clock (the same date the trip was picked with).
     let now: Date
+    /// Where the card is going, as a chip to pick another (0.20.1: the card owns the destination).
+    var chip: AnyView? = nil
     let start: () -> Void
     let otherTimes: () -> Void
     let plan: () -> Void
@@ -73,6 +75,7 @@ struct NextTripCard: View {
 
     private var loading: some View {
         VStack(alignment: .leading, spacing: 10) {
+            if let chip { chip }
             Text("Finding your next trip…").font(DS.headline).foregroundStyle(DS.text)
             DSSkeletonRow(); DSSkeletonRow()
         }
@@ -81,8 +84,9 @@ struct NextTripCard: View {
 
     private func empty(_ note: String?) -> some View {
         VStack(alignment: .leading, spacing: 12) {
+            if let chip { chip }
             Text("No trip planned").font(DS.title).foregroundStyle(DS.text).accessibilityAddTraits(.isHeader)
-            Text(note ?? "Plan one, or tap a place below to see the way there.")
+            Text(note ?? (chip == nil ? "Plan one, or tap a place below to see the way there." : "Plan one, or pick another place above."))
                 .font(DS.sub).foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
             Button(action: plan) {
                 Label("Plan a trip", systemImage: "magnifyingglass").font(DS.bodyStrong).foregroundStyle(DS.accentSoftText)
@@ -96,9 +100,13 @@ struct NextTripCard: View {
     private func shown(_ s: Shown) -> some View {
         let first = s.trip.first
         return VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(s.title).font(DS.subStrong).foregroundStyle(DS.secondary).lineLimit(2)
-                    .accessibilityAddTraits(.isHeader)
+            HStack(alignment: .center, spacing: 8) {
+                if let chip {
+                    chip
+                } else {
+                    Text(s.title).font(DS.subStrong).foregroundStyle(DS.secondary).lineLimit(2)
+                        .accessibilityAddTraits(.isHeader)
+                }
                 Spacer(minLength: 8)
                 Button(action: otherTimes) {
                     Text("Other times").font(DS.subStrong).foregroundStyle(DS.accentText)
@@ -106,6 +114,9 @@ struct NextTripCard: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityHint("Plan a trip to \(s.destName), with the other ways there")
+            }
+            if chip != nil && !s.title.isEmpty {
+                Text(s.title).font(DS.subStrong).foregroundStyle(DS.secondary).lineLimit(2)
             }
             let c = NextTrip.countdown(leave: s.leave, now: now)
             HStack(alignment: .firstTextBaseline, spacing: 10) {
@@ -134,25 +145,18 @@ struct NextTripCard: View {
     }
 }
 
-/// The bar at the bottom: Home and School (Plan to there), Plan, and Your week.
+/// The bar at the bottom (0.20.1): Search (Plan, to pick where to), Your week, and Settings. Where you go is the card's.
 struct NextTripBar: View {
-    let home: SavedPlace?
-    let school: SavedPlace?
     let weekOpen: Bool
-    let openPlace: (SavedPlace) -> Void
-    let plan: () -> Void
+    let search: () -> Void
     let week: () -> Void
+    let settings: () -> Void
 
     var body: some View {
         HStack(spacing: 0) {
-            if let h = home {
-                item(h.name, icon: h.symbol, label: "Plan a trip to \(h.name)") { openPlace(h) }
-            }
-            if let s = school {
-                item(s.name, icon: s.symbol, label: "Plan a trip to \(s.name)") { openPlace(s) }
-            }
-            item("Plan", icon: "point.topleft.down.to.point.bottomright.curvepath", label: "Plan a trip", action: plan)
+            item("Search", icon: "magnifyingglass", label: "Search a stop or place", action: search)
             item("Week", icon: "calendar", label: "Your week", selected: weekOpen, action: week)
+            item("Settings", icon: "gearshape", label: "Settings", action: settings)
         }
         .padding(.horizontal, DS.s8).padding(.top, 4)
         .background(DS.page.ignoresSafeArea(edges: .bottom))
@@ -173,5 +177,31 @@ struct NextTripBar: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(label)
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+    }
+}
+
+/// The card's destination: "To BUas ▾", a 44 pt chip; tap it for Home, School and your other places.
+struct DestinationChip: View {
+    let title: String
+    let places: [SavedPlace]
+    let isCurrent: (SavedPlace) -> Bool
+    let choose: (SavedPlace) -> Void
+    var body: some View {
+        Menu {
+            ForEach(places) { p in
+                Button { choose(p) } label: { Label(p.name, systemImage: isCurrent(p) ? "checkmark" : p.symbol) }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Text(title).font(DS.calloutStrong).foregroundStyle(DS.accentSoftText).lineLimit(1).minimumScaleFactor(0.8)
+                Image(systemName: "chevron.down").font(.caption.weight(.bold)).foregroundStyle(DS.accentSoftText)
+            }
+            .padding(.horizontal, 14)
+            .frame(minHeight: DS.hit)
+            .background(DS.accentSoft, in: Capsule())
+            .contentShape(Capsule())
+        }
+        .accessibilityLabel("\(title). Where the card goes")
+        .accessibilityHint("Pick another place")
     }
 }

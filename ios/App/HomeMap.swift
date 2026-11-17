@@ -791,7 +791,7 @@ struct NewHome: View {
                         if trip.phase == .idle {
                             // the trip picked again with the countdown's clock, so a trip that has gone makes way
                             TimelineView(.periodic(from: .now, by: 15)) { tl in
-                                NextTripCard(content: heroContent(now: tl.date), now: tl.date, start: startHero, otherTimes: heroOtherTimes,
+                                NextTripCard(content: heroContent(now: tl.date), now: tl.date, chip: AnyView(destinationChip), start: startHero, otherTimes: heroOtherTimes,
                                              plan: { openPlan(to: nil, when: .now) })
                             }
                         }
@@ -803,9 +803,9 @@ struct NewHome: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             // (not while a trip runs: at a change the bar to your trip takes its place)
             if trip.phase == .idle {
-                NextTripBar(home: places.home, school: places.school, weekOpen: weekOpen,
-                            openPlace: { openPlan(to: $0) }, plan: { openPlan(to: nil, when: .now) },
-                            week: { withAnimation(DS.quick) { weekOpen.toggle() } })
+                NextTripBar(weekOpen: weekOpen, search: { openSearch() },
+                            week: { withAnimation(DS.quick) { weekOpen.toggle() } },
+                            settings: { weekOpen = false; sheet = .settings })
             }
         }
     }
@@ -829,14 +829,8 @@ struct NewHome: View {
             .accessibilityLabel("Search a stop or place")
             .accessibilityHint("Plan a trip")
             weatherChip(inline: true)
-            Button { sheet = .settings } label: {
-                Image(systemName: "gearshape").font(.body.weight(.semibold)).foregroundStyle(DS.secondary)
-                    .frame(width: 44, height: 52).contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Settings")
         }
-        .padding(.trailing, 4)
+        .padding(.trailing, 6)
         .background(DS.surface, in: Capsule())
         .dsFloat()
     }
@@ -852,8 +846,9 @@ struct NewHome: View {
     /// else nothing (`NextTrip.pick`).
     private func heroContent(now: Date) -> NextTripCard.Content {
         let due = HomeActions.due(trip: trip, planner: planner, now: now)
-        let pick = NextTrip.pick(schoolDue: due?.school == true, plannedDue: due.map { !$0.school } ?? false,
-                                 liveLeaves: live.onTheMove ? [] : live.next.map(\.start), now: now)
+        let dest = live.destination(trip.direction).key
+        let pick = NextTrip.pick(dest: dest, dueDest: due?.dest.key, schoolDue: due?.school == true, plannedDue: due.map { !$0.school } ?? false,
+                                 liveDest: dest, liveLeaves: live.onTheMove ? [] : live.next.map(\.start), now: now)
         switch pick.source {
         case .school, .planned:
             guard let d = due else { return .empty(note: nil) }
@@ -861,7 +856,7 @@ struct NewHome: View {
         case .live:
             guard let i = pick.index, let t = live.next[safe: i] else { return .empty(note: nil) }
             let dest = placeName(live.destination(trip.direction))
-            return .trip(.init(title: "\(dest) · next trip", leave: t.start, trip: t, destName: dest, asOf: live.nextAsOf, startTitle: "Start"))
+            return .trip(.init(title: "", leave: t.start, trip: t, destName: dest, asOf: live.nextAsOf, startTitle: "Start"))
         case .none:
             if live.onTheMove { return .empty(note: "You’re on the move: finding the bus or train you’re on.") }
             if live.updated == nil && live.nextError == nil { return .loading }
@@ -869,10 +864,48 @@ struct NewHome: View {
         }
     }
 
+    /// The due trip, when it goes where the card is going.
+    private func dueHere(_ now: Date) -> DueTrip? {
+        guard let d = HomeActions.due(trip: trip, planner: planner, now: now), d.dest.key == live.destination(trip.direction).key else { return nil }
+        return d
+    }
+
+    /// The card's destination chip: where the live store's trips go; pick Home, School or another of your places.
+    private var destinationChip: some View {
+        let dest = live.destination(trip.direction)
+        let current = places.list.first(where: isCurrentDest)
+        return DestinationChip(title: NextTrip.destTitle(current?.name ?? placeName(dest)), places: places.list,
+                               isCurrent: isCurrentDest, choose: chooseDest)
+    }
+
+    private func isCurrentDest(_ p: SavedPlace) -> Bool {
+        let key = places.place(p).key
+        if key == Place.veghel.key || key == Place.buas.key { return live.custom == nil && live.destination(trip.direction).key == key }
+        guard let c = live.custom else { return false }
+        return abs(c.lat - p.lat) < 1e-6 && abs(c.lon - p.lon) < 1e-6
+    }
+
+    /// Another destination for the card: the live store's own switch (your two trips' direction, or somewhere you
+    /// picked, as the old home's destination list), then its trips there. Nothing else changes.
+    private func chooseDest(_ p: SavedPlace) {
+        guard trip.phase == .idle, !isCurrentDest(p) else { return }
+        let key = places.place(p).key
+        if key == Place.buas.key {
+            live.go(to: nil)
+            if trip.direction != .toSchool { trip.pick(.toSchool) }
+        } else if key == Place.veghel.key {
+            live.go(to: nil)
+            if trip.direction != .home { trip.pick(.home) }
+        } else {
+            live.go(to: Destination(id: p.stopIds.first ?? "\(p.lat),\(p.lon)", name: p.name, lat: p.lat, lon: p.lon))
+        }
+        Task { await live.refresh(trip.direction, at: near.position, force: true) }
+    }
+
     /// Start: the hands-free Fastest trip, as Go (for the due trip with its plan; else to where you're going).
     private func startHero() {
         guard trip.phase == .idle else { return }
-        if let d = HomeActions.due(trip: trip, planner: planner, now: Date()) {
+        if let d = dueHere(Date()) {
             HomeActions.openPlanGo(school: d.school, trip: trip, planner: planner, goStore: goStore, near: near)
         } else {
             HomeActions.openGo(live: live, trip: trip, goStore: goStore, near: near)
@@ -882,7 +915,7 @@ struct NewHome: View {
     /// Other times: Plan to the card's place (to be there in time, for a due trip with a deadline).
     private func heroOtherTimes() {
         let now = Date()
-        if let d = HomeActions.due(trip: trip, planner: planner, now: now) {
+        if let d = dueHere(now) {
             let when: PlanCompare.When = d.deadline.map { $0 > now ? .arrive($0) : .now } ?? .now
             openPlan(to: .place(d.dest, name: placeName(d.dest)), when: when)
         } else {

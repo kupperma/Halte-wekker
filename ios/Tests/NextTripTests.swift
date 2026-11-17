@@ -28,6 +28,32 @@ final class NextTripTests: XCTestCase {
         XCTAssertEqual(NextTrip.pick(schoolDue: false, plannedDue: false, liveLeaves: [at(-30)], now: now).source, .none)
     }
 
+    // MARK: the destination the card shows
+
+    func test_pickForDest_dueOnlyWhenItGoesThere() {
+        let school = NextTrip.pick(dest: "buas", dueDest: "buas", schoolDue: true, plannedDue: false, liveDest: "buas", liveLeaves: [at(5)], now: now)
+        XCTAssertEqual(school.source, .school)
+        let home = NextTrip.pick(dest: "veghel", dueDest: "buas", schoolDue: true, plannedDue: false, liveDest: "veghel", liveLeaves: [at(5)], now: now)
+        XCTAssertEqual(home.source, .live, "Home picked while the school trip is due: the next trip home")
+        XCTAssertEqual(home.index, 0)
+        let planned = NextTrip.pick(dest: "veghel", dueDest: "veghel", schoolDue: false, plannedDue: true, liveDest: "veghel", liveLeaves: [at(5)], now: now)
+        XCTAssertEqual(planned.source, .planned)
+    }
+
+    func test_pickForDest_liveOnlyTowardThere() {
+        let p = NextTrip.pick(dest: "p:gran", dueDest: nil, schoolDue: false, plannedDue: false, liveDest: "buas", liveLeaves: [at(5)], now: now)
+        XCTAssertEqual(p.source, .none, "the live trips still go to BUas: not shown under another place")
+        let q = NextTrip.pick(dest: "p:gran", dueDest: nil, schoolDue: false, plannedDue: false, liveDest: "p:gran", liveLeaves: [at(-10), at(7)], now: now)
+        XCTAssertEqual(q.source, .live)
+        XCTAssertEqual(q.index, 1)
+        XCTAssertEqual(NextTrip.pick(dest: "buas", dueDest: "buas", schoolDue: false, plannedDue: false, liveDest: "buas", liveLeaves: [], now: now).source, .none)
+    }
+
+    func test_destTitle() {
+        XCTAssertEqual(NextTrip.destTitle("BUas"), "To BUas")
+        XCTAssertEqual(NextTrip.destTitle("Home"), "To Home")
+    }
+
     // MARK: the countdown
 
     func test_countdown() {
