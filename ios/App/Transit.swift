@@ -689,8 +689,9 @@ enum Transit {
 
     /// One /v5/trip answer, shared and remembered; only a body that is a trip (has `legs`) counts, so an error page is
     /// never stored and never replaces a good copy.
-    private static func tripAnswer(_ tripId: String) async -> Data? {
-        await tripAnswers.get(tripId, group: urgent ? 1 : 0) {
+    /// `maxAge`: how old the remembered answer may be (nil: 20 s; a ride's own looks take a minute's: `RideTick.tripCache`).
+    private static func tripAnswer(_ tripId: String, maxAge: TimeInterval? = nil) async -> Data? {
+        await tripAnswers.get(tripId, group: urgent ? 1 : 0, maxAge: maxAge) {
             guard let d = try? await raw("/v5/trip", [.init(name: "tripId", value: tripId)]),
                   let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any], j["legs"] is [Any] else { return nil }
             return d
@@ -698,8 +699,8 @@ enum Transit {
     }
 
     /// Every stop of one trip with its live arrival.
-    static func tripStops(_ tripId: String) async -> [TripStop] {
-        guard let data = await tripAnswer(tripId),
+    static func tripStops(_ tripId: String, maxAge: TimeInterval? = nil) async -> [TripStop] {
+        guard let data = await tripAnswer(tripId, maxAge: maxAge),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let legs = json["legs"] as? [[String: Any]] else { return [] }
         var out: [TripStop] = []
@@ -716,9 +717,9 @@ enum Transit {
     }
 
     /// A bus or train's whole trip with its live times and the road it takes, for the live map.
-    static func liveTrip(_ tripId: String) async -> LiveTrip? {
+    static func liveTrip(_ tripId: String, maxAge: TimeInterval? = nil) async -> LiveTrip? {
         if Demo.isDemo(tripId) { return await Demo.liveTrip(tripId) }
-        guard let data = await tripAnswer(tripId),
+        guard let data = await tripAnswer(tripId, maxAge: maxAge),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
         return parseLiveTrip(json)
     }

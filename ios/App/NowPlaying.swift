@@ -65,7 +65,7 @@ final class NowPlaying: ObservableObject {
 
     // MARK: when to look
 
-    /// During a trip: every 15 s, or every 5 s while the ride screen is on.
+    /// During a trip: every 15 s, every 5 s while the ride screen is on, every 30 s with the screen off (0.20.7).
     func start() { running = true; restart() }
     func stop() { running = false; loop?.cancel(); loop = nil; song = nil }
     func setFast(_ f: Bool) { guard f != fast else { return }; fast = f; restart() }
@@ -80,7 +80,7 @@ final class NowPlaying: ObservableObject {
             while !Task.isCancelled {
                 guard let self else { return }
                 await self.check()
-                let wait = self.fast ? 5.0 : 15.0
+                let wait = RideTick.musicGap(fast: self.fast, inFront: UIApplication.shared.applicationState == .active)
                 try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
             }
         }

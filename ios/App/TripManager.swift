@@ -719,9 +719,13 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             // (each new value redraws every screen that shows the trip: the home screen too, on every fix while idle)
             if SpeedPublish.worth(old: speed, new: loc.speed) { speed = loc.speed }
         }
+        // A ride's network on one clock (0.20.7): whatever is due goes on the same 30 s tick, so the radio wakes once.
+        let now = Date()
+        let tick = (phase == .transfer || phase == .sleeping || phase == .awake) && RideTick.due(last: lastNetTick, now: now)
+        if tick { lastNetTick = now }
         if phase == .transfer {
             transferAnchor = TransferPolicy.update(transferAnchor, with: Fix(loc))     // (standing at the change: for the hour's end)
-            Task { await loadUpcoming() }
+            if tick { Task { await loadUpcoming() } }
         }
         // (the look after leaving a station takes some 6 minutes: if it went without saying so, GPS doesn’t stay on for it)
         if phase == .idle, let w = watchLeft, Date().timeIntervalSince(w.at) > 10 * 60 { watchLeft = nil; applyGPS() }
@@ -737,10 +741,11 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         }
         guard let leg, phase == .sleeping || phase == .awake else { return }
         startDistance = loc.distance(from: CLLocation(latitude: leg.from.coordinate.latitude, longitude: leg.from.coordinate.longitude))
-        if vehicle == nil { if handLock == nil { Task { await loadUpcoming() } } }
-        else if Date().timeIntervalSince(lastVehicleRefresh) > 60 { lastVehicleRefresh = Date(); Task { await refreshVehicle() } }
+        if vehicle == nil { if handLock == nil, tick { Task { await loadUpcoming() } } }
+        else if tick, now.timeIntervalSince(lastVehicleRefresh) >= RideTick.vehicleEvery - 1 { lastVehicleRefresh = now; Task { await refreshVehicle() } }
+        // (choosing between buses is doubt: on its own 12 s clock)
         if vehicle != nil, !cands.isEmpty, Date() >= candCheckAt { candCheckAt = Date().addingTimeInterval(12); Task { await resolveCandidates() } }
-        else if vehicle != nil, cands.isEmpty, Date() >= sameCheckAt { sameCheckAt = Date().addingTimeInterval(30); Task { await checkSameBus() } }
+        else if vehicle != nil, cands.isEmpty, tick, now >= sameCheckAt.addingTimeInterval(-1) { sameCheckAt = now.addingTimeInterval(30); Task { await checkSameBus() } }
         let d = loc.distance(from: CLLocation(latitude: leg.to.coordinate.latitude, longitude: leg.to.coordinate.longitude))
         distance = d
         // Further from this leg's stop than you've been, at train or bus speed (800 m when it's near, 2 km else): you're going
@@ -766,9 +771,9 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         } else if phase == .awake && d <= arriveM && loc.horizontalAccuracy <= 600 {
             if ringAtStop || forceArrival { arrive() } else { legDone(why: "by GPS, quietly") }
         }
-        refreshEta(force: false)
+        if tick { refreshEta(force: false) }
         pushActivity(force: false)
-        if Date().timeIntervalSince(lastWatchCheck) > 60 { lastWatchCheck = Date(); Task { await WatchStore.shared.check() } }
+        if tick, now.timeIntervalSince(lastWatchCheck) >= 59 { lastWatchCheck = now; Task { await WatchStore.shared.check() } }
     }
 
     // MARK: alarm + announcement
@@ -1556,7 +1561,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         defer { checkingSame = false }
         if roadOf?.tripId != v.tripId || roadOf.map({ now.timeIntervalSince($0.at) > 60 }) ?? true {
             let urgentAsk = isRiding || going
-            if let t = await Transit.$urgent.withValue(urgentAsk, operation: { await Transit.liveTrip(v.tripId) }), t.path.count >= 2 {
+            if let t = await Transit.$urgent.withValue(urgentAsk, operation: { await Transit.liveTrip(v.tripId, maxAge: RideTick.tripCache) }), t.path.count >= 2 {
                 roadOf = (v.tripId, t, now)
             }
         }
@@ -1614,7 +1619,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         checkingSame = true
         defer { checkingSame = false }
         if roadOf?.tripId != v.tripId || now.timeIntervalSince(roadOf!.at) > 60 {
-            guard let t = await Transit.liveTrip(v.tripId), t.path.count >= 2 else { return }
+            // (the same answer as the vehicle's own times, of the last minute: one fetch for both)
+            guard let t = await Transit.liveTrip(v.tripId, maxAge: RideTick.tripCache), t.path.count >= 2 else { return }
             roadOf = (v.tripId, t, now)
         }
         guard let road = roadOf, vehicle == v, cands.isEmpty else { return }
@@ -2112,7 +2118,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     /// Every minute while riding: the vehicle's live times (delays, next stop).
     private func refreshVehicle() async {
         guard let v = vehicle, !demo else { return }
-        let stops = await Transit.tripStops(v.tripId)
+        let stops = await Transit.tripStops(v.tripId, maxAge: RideTick.tripCache)
         guard vehicle == v, !stops.isEmpty else { return }
         applyStops(stops)
         pushActivity(force: false)
@@ -2412,7 +2418,9 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
 
     private func refreshEta(force: Bool) {
         if demo { arrival = legArrival ?? legTo; return }
-        guard force || Date().timeIntervalSince(lastEta) > 120 else { return }
+        // every 5 minutes; every 2 when a change is within 15 (the vehicle's own arrival comes every minute anyway)
+        let changeIn = index + 1 < legs.count ? (legArrival ?? legTo).map { $0.timeIntervalSinceNow } : nil
+        guard force || Date().timeIntervalSince(lastEta) >= RideTick.etaGap(changeIn: changeIn) else { return }
         lastEta = Date()
         let legs = self.legs, i = index, start = legStart, known = legArrival
         Task {
