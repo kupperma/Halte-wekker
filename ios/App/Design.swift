@@ -37,6 +37,13 @@ enum DS {
     static let tram = dynamic(0x6B3FA0, 0x7A55B0)
     static let ferry = dynamic(0x1C6E8C, 0x2A7898)
 
+    // "Next trip first" (0.19.1, concept B): dark-first, the same tokens plus these two
+    /// The page behind its cards: the week view and the bottom bar (the map's dark ground).
+    /// (secondary on it 5.5:1 light, 8.0:1 dark; the accent text 4.8:1 / 8.7:1)
+    static let page = dynamic(0xF1F3F5, 0x111417)
+    /// The walk and wait parts of a leg bar (a shape, ≥ 3:1 on the card: 3.2:1 light, 3.5:1 dark).
+    static let legQuiet = dynamic(0x8A929A, 0x6B747E)
+
     /// The pill colour for a line: a train, a bus, or (by the live data's mode name) tram, metro or ferry.
     static func mode(train: Bool, mode: String = "") -> Color {
         let m = mode.uppercased()
@@ -61,6 +68,9 @@ enum DS {
     static let caption = Font.system(.caption, design: .default, weight: .bold)
     /// Big numbers (times, countdowns): rounded; always with `.monospacedDigit()`.
     static let bigNumber = Font.system(.title2, design: .rounded, weight: .bold)
+    /// The one big number of a screen (the next trip's countdown): rounded, at a size the view scales with
+    /// `@ScaledMetric`; always with `.monospacedDigit()`.
+    static func hero(_ size: CGFloat) -> Font { .system(size: size, weight: .bold, design: .rounded) }
 
     // MARK: shapes and spacing
 
