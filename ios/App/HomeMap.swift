@@ -470,6 +470,8 @@ struct NewHome: View {
     private var chipsRow: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
+                // a place you picked that isn't one of yours (searched in Plan): first, as where you're going
+                if let c = live.custom, !places.chips.contains(where: { isCustom($0) }) { pickedChip(c) }
                 ForEach(places.chips) { p in
                     let mins = chipMinutes(p)
                     let lead = mins != nil
@@ -507,8 +509,37 @@ struct NewHome: View {
 
     /// The travel time now, for the place you're going to (today's trips there; nothing is asked for the chips).
     private func chipMinutes(_ p: SavedPlace) -> Int? {
-        guard live.nextAsOf == nil, !live.onTheMove, places.place(p).key == live.destination(trip.direction).key else { return nil }
+        guard places.place(p).key == live.destination(trip.direction).key || isCustom(p) else { return nil }
+        return destMinutes
+    }
+    private var destMinutes: Int? {
+        guard live.nextAsOf == nil, !live.onTheMove else { return nil }
         return PlacesLogic.minutesNow(arrival: live.next.first?.end, now: Date())
+    }
+    /// One of your places is where you picked to go (`LiveStore.custom`).
+    private func isCustom(_ p: SavedPlace) -> Bool {
+        guard let c = live.custom else { return false }
+        return abs(c.lat - p.lat) < 1e-6 && abs(c.lon - p.lon) < 1e-6
+    }
+
+    /// Where you picked to go (0.20.2: a place searched in Plan), as the lead chip with its travel time: tap for Plan.
+    private func pickedChip(_ c: Destination) -> some View {
+        let mins = destMinutes
+        return Button { openPlan(to: .place(c.place), when: .now) } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "mappin").font(.subheadline.weight(.semibold)).foregroundStyle(DS.onAccent)
+                Text(PlacesLogic.chipLabel(c.short, minutes: mins)).font(DS.subStrong).monospacedDigit()
+                    .foregroundStyle(DS.onAccent).lineLimit(1)
+            }
+            .padding(.horizontal, 14).frame(minHeight: 40)
+            .background(DS.accent, in: Capsule())
+            .dsFloat()
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(DSPressStyle())
+        .accessibilityLabel(mins.map { "Where you’re going: \(c.short), \($0) minutes from here" } ?? "Where you’re going: \(c.short)")
+        .accessibilityHint("Plan a trip there")
     }
 
     private var rightColumn: some View {
@@ -768,8 +799,16 @@ struct NewHome: View {
 
     /// When the school trip or a Be there by plan is due (the time `autoGo` opens Fastest trip by itself): one card
     /// with when to leave and Go, before the departures.
+    /// Else, going to a place you picked (0.20.2: searched in Plan): its next trip, as Next trip first's big card, with
+    /// the chip to pick another place or go back to your schedule.
     private var nudge: AnyView? {
-        guard let d = HomeActions.due(trip: trip, planner: planner, now: Date()) else { return nil }
+        guard let d = HomeActions.due(trip: trip, planner: planner, now: Date()) else {
+            guard live.custom != nil, trip.phase == .idle else { return nil }
+            return AnyView(TimelineView(.periodic(from: .now, by: 15)) { tl in
+                NextTripCard(content: heroContent(now: tl.date), now: tl.date, chip: AnyView(destinationChip), start: startHero,
+                             otherTimes: heroOtherTimes, plan: { openPlan(to: nil, when: .now) })
+            })
+        }
         return AnyView(NudgeCard(leave: d.leave, ride: d.trip.first, sub: d.sub) {
             HomeActions.openPlanGo(school: d.school, trip: trip, planner: planner, goStore: goStore, near: near)
         })
@@ -872,12 +911,33 @@ struct NewHome: View {
         return d
     }
 
-    /// The card's destination chip: where the live store's trips go; pick Home, School or another of your places.
+    /// The card's destination chip: where the live store's trips go; pick By your schedule (school or home, 0.20.2),
+    /// Home, School or another of your places, or one of the last places you searched.
     private var destinationChip: some View {
         let dest = live.destination(trip.direction)
         let current = places.list.first(where: isCurrentDest)
-        return DestinationChip(title: NextTrip.destTitle(current?.name ?? placeName(dest)), places: places.list,
-                               isCurrent: isCurrentDest, choose: chooseDest)
+        let scheduled: Place = trip.direction == .toSchool ? .buas : .veghel
+        let ids = HomeDest.recents(live.recents.map { (id: $0.id, lat: $0.lat, lon: $0.lon) }, saved: places.list.map { (lat: $0.lat, lon: $0.lon) })
+        let recent = ids.compactMap { id in live.recents.first { $0.id == id } }
+        return DestinationChip(title: NextTrip.destTitle(current?.name ?? placeName(dest)),
+                               schedule: (name: placeName(scheduled), current: live.custom == nil),
+                               places: places.list, recents: recent,
+                               isCurrent: isCurrentDest, isCurrentRecent: { live.custom?.id == $0.id },
+                               choose: chooseDest, chooseSchedule: chooseSchedule, chooseRecent: chooseRecent)
+    }
+
+    /// Back to your schedule: school or home, by the direction (as before you picked a place).
+    private func chooseSchedule() {
+        guard trip.phase == .idle, live.custom != nil else { return }
+        live.go(to: nil)
+        Task { await live.refresh(trip.direction, at: near.position, force: true) }
+    }
+
+    /// One of the last places you searched, as where the card goes.
+    private func chooseRecent(_ d: Destination) {
+        guard trip.phase == .idle, live.custom?.id != d.id else { return }
+        live.go(to: d)
+        Task { await live.refresh(trip.direction, at: near.position, force: true) }
     }
 
     private func isCurrentDest(_ p: SavedPlace) -> Bool {

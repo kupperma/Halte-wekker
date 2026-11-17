@@ -95,10 +95,28 @@ final class LiveStore: ObservableObject {
     func go(to d: Destination?) {
         custom = d
         UserDefaults.standard.set(d.flatMap { try? JSONEncoder().encode($0) }, forKey: "customDest")
+        // (when you picked it, for the school window that ends it: `scheduleTakesOver`)
+        if d != nil { UserDefaults.standard.set(Date(), forKey: "customDestAt") } else { UserDefaults.standard.removeObject(forKey: "customDestAt") }
+        UserDefaults.standard.removeObject(forKey: "customDestUntil")
         if let d {
             recents = Array(([d] + recents.filter { $0.id != d.id }).prefix(6))
             UserDefaults.standard.set(try? JSONEncoder().encode(recents), forKey: "recentDests")
         }
+    }
+
+    /// A place you picked stays where you're going (across launches) until you change it, or until the next school
+    /// window opens (the one in which Fastest trip opens by itself for your class: `HomeDest.resolve`). Then it's back
+    /// to school or home, by your schedule.
+    func scheduleTakesOver(now: Date = Date()) {
+        guard custom != nil else { return }
+        let ud = UserDefaults.standard
+        let at: Date
+        if let a = ud.object(forKey: "customDestAt") as? Date { at = a } else { at = now; ud.set(now, forKey: "customDestAt") }   // (picked before 0.20.2)
+        let s = SchoolAlarm.shared
+        let until = ud.object(forKey: "customDestUntil") as? Date
+        let r = HomeDest.resolve(chosenAt: at, until: until,
+                                 windowStart: HomeDest.windowStart(on: s.on, leave: s.next?.leave, alarm: s.next?.alarm), now: now)
+        if r.over { go(to: nil) } else if let u = r.until, u != until { ud.set(u, forKey: "customDestUntil") }
     }
 
     /// You're on a bus or train: find it (its live position closest to you), then plan from its next stop, from when it
@@ -416,6 +434,7 @@ final class LiveStore: ObservableObject {
     }
 
     func refresh(_ dir: Direction, at loc: CLLocation? = nil, force: Bool = false) async {
+        scheduleTakesOver()
         if let loc {
             // moving at bus or train speed (by the GPS, or between two positions): you're probably on board. Only on good
             // fixes, far enough apart: inside a big station the GPS jumps about and a few seconds can look like 20 km/h.
