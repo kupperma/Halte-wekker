@@ -339,6 +339,8 @@ struct MorningView: View {
 /// Settings: the morning screen, and what it shows. Tap to pick (as many as you like: they take turns, one each
 /// morning), hold one to try it now.
 struct MorningSection: View {
+    @Environment(\.settingsNewLook) private var newLook
+    private var ink: SettingsInk { SettingsInk(newLook: newLook) }
     @ObservedObject private var morning = Morning.shared
     @State private var picking: [PhotosPickerItem] = []
     let preview: (MorningLook?) -> Void
@@ -351,7 +353,7 @@ struct MorningSection: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Morning screen")
                     Text("After the school alarm: the time, when to leave and your first class. Tap Open on the alarm, or just open the app.")
-                        .font(HWFont.body(12)).foregroundStyle(Paper.muted)
+                        .font(ink.note(12)).foregroundStyle(ink.muted)
                 }
             }
             if morning.on {
@@ -362,24 +364,24 @@ struct MorningSection: View {
                             Color.clear
                                 .aspectRatio(0.462, contentMode: .fit)
                                 .frame(maxWidth: .infinity)
-                                .background(Paper.navy.opacity(0.08), in: RoundedRectangle(cornerRadius: 7))
-                                .overlay(RoundedRectangle(cornerRadius: 7).stroke(Paper.navy.opacity(0.3), style: StrokeStyle(lineWidth: 1.2, dash: [4, 3])))
+                                .background(ink.link.opacity(0.08), in: RoundedRectangle(cornerRadius: 7))
+                                .overlay(RoundedRectangle(cornerRadius: 7).stroke(ink.link.opacity(0.3), style: StrokeStyle(lineWidth: 1.2, dash: [4, 3])))
                                 .overlay {
                                     VStack(spacing: 6) {
                                         Image(systemName: "photo.badge.plus").font(.system(size: 22, weight: .semibold))
-                                        Text("Add").font(HWFont.body(11, bold: true))
+                                        Text("Add").font(ink.strong(11))
                                     }
-                                    .foregroundStyle(Paper.navy)
+                                    .foregroundStyle(ink.link)
                                 }
-                            Text("Your photos").font(HWFont.body(10.5)).foregroundStyle(Paper.navy).lineLimit(1).minimumScaleFactor(0.8)
+                            Text("Your photos").font(ink.note(10.5)).foregroundStyle(ink.link).lineLimit(1).minimumScaleFactor(0.8)
                         }
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                 }
                 .padding(.vertical, 6)
-                Text(caption).font(HWFont.body(11.5)).foregroundStyle(Paper.muted)
-                Button("Show the morning screen now") { preview(nil) }.foregroundStyle(Paper.navy)
+                Text(caption).font(ink.note(11.5)).foregroundStyle(ink.muted)
+                Button("Show the morning screen now") { preview(nil) }.foregroundStyle(ink.link)
             }
         } header: { Text("Morning") }
         .onChange(of: picking) { _, items in
@@ -406,23 +408,23 @@ struct MorningSection: View {
         return VStack(spacing: 3) {
             ZStack(alignment: .topTrailing) {
                 Group {
-                    if let t = morning.thumbnail(l) { Image(uiImage: t).resizable().scaledToFill() } else { Paper.card }
+                    if let t = morning.thumbnail(l) { Image(uiImage: t).resizable().scaledToFill() } else { newLook ? DS.surface3 : Paper.card }
                 }
                 .frame(maxWidth: .infinity).aspectRatio(0.462, contentMode: .fit)
                 .clipShape(RoundedRectangle(cornerRadius: 7))
-                .overlay(RoundedRectangle(cornerRadius: 7).stroke(on ? Paper.navy : Paper.ink.opacity(0.15), lineWidth: on ? 3 : 1))
+                .overlay(RoundedRectangle(cornerRadius: 7).stroke(on ? ink.link : ink.ink.opacity(0.15), lineWidth: on ? 3 : 1))
                 .overlay(alignment: .bottomLeading) {
                     if case .station = l {
-                        Text("LIVE").font(BoardInk.sans(8.5)).tracking(1).foregroundStyle(.white)
-                            .padding(.horizontal, 4).padding(.vertical, 1.5).background(Paper.oxblood, in: RoundedRectangle(cornerRadius: 3)).padding(5)
+                        Text("LIVE").font(newLook ? Font.caption2.weight(.bold) : BoardInk.sans(8.5)).tracking(1).foregroundStyle(.white)
+                            .padding(.horizontal, 4).padding(.vertical, 1.5).background(newLook ? DS.accent : Paper.oxblood, in: RoundedRectangle(cornerRadius: 3)).padding(5)
                     }
                 }
                 Image(systemName: on ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(on ? Color.white : Color.white.opacity(0.9), on ? Paper.navy : Color.black.opacity(0.35))
+                    .foregroundStyle(on ? Color.white : Color.white.opacity(0.9), on ? (newLook ? DS.accent : Paper.navy) : Color.black.opacity(0.35))
                     .padding(4)
             }
-            Text(name(l)).font(HWFont.body(10.5)).foregroundStyle(on ? Paper.navy : Paper.muted).lineLimit(1).minimumScaleFactor(0.8)
+            Text(name(l)).font(ink.note(10.5)).foregroundStyle(on ? ink.link : ink.muted).lineLimit(1).minimumScaleFactor(0.8)
         }
         .contentShape(Rectangle())
         .onTapGesture { withAnimation(.easeInOut(duration: 0.15)) { morning.toggle(l) } }

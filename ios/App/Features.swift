@@ -686,6 +686,8 @@ struct StopSheet: View {
 // MARK: the live board's stops and lines
 
 struct LiveSettingsSheet: View {
+    /// The new look (0.21): its text styles and colours, in the phone's light or dark.
+    var newLook = false
     @EnvironmentObject var stops: StopsStore
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
@@ -711,8 +713,8 @@ struct LiveSettingsSheet: View {
                                 hits = []; query = ""
                             } label: {
                                 VStack(alignment: .leading) {
-                                    Text(h.name).foregroundStyle(Paper.ink)
-                                    if !h.town.isEmpty { Text(h.town).font(HWFont.body(11)).foregroundStyle(Paper.muted) }
+                                    Text(h.name).foregroundStyle(newLook ? DS.text : Paper.ink)
+                                    if !h.town.isEmpty { Text(h.town).font(newLook ? DS.footnote : HWFont.body(11)).foregroundStyle(newLook ? DS.secondary : Paper.muted) }
                                 }
                             }
                         }
@@ -727,10 +729,11 @@ struct LiveSettingsSheet: View {
                     }
                 }
             }
-            .navigationTitle("Live bus times stops")
+            .navigationTitle(newLook ? "Home bus stops and lines" : "Live bus times stops")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
         }
+        .tint(newLook ? DS.accentText : nil)
         .onAppear { lines = stops.lines.joined(separator: ", ") }
         .onDisappear {
             stops.lines = lines.split(whereSeparator: { $0 == "," || $0 == " " }).map { String($0).trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }

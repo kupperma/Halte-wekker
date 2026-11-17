@@ -2205,6 +2205,9 @@ struct SettingsView: View {
     /// Opened from the new look's home (0.19): its own sections first, in the system look.
     var newLook = false
     var pal: HWPalette { .of(home: trip.direction == .home) }
+    private var ink: SettingsInk { SettingsInk(newLook: newLook) }
+    /// A button in a row: the direction's colour in the old look, the accent in the new.
+    private var link: Color { newLook ? DS.accentText : pal.deep }
     var body: some View {
         NavigationStack {
             Form {
@@ -2213,7 +2216,7 @@ struct SettingsView: View {
                 } else if let tryDemo, trip.phase == .idle {
                     Section {
                         Button { dismissSettings(); tryDemo() } label: {
-                            Label("Try it at home: a pretend trip", systemImage: "play.circle.fill").foregroundStyle(pal.deep)
+                            Label("Try it at home: a pretend trip", systemImage: "play.circle.fill").foregroundStyle(link)
                         }
                     } footer: { Text("Fastest trip with the map and notifications, being recognised on the bus, the ride ring, the alarm and arriving, all pretend.") }
                 }
@@ -2230,7 +2233,7 @@ struct SettingsView: View {
                 Section {
                     Toggle(isOn: $trip.autoStart) { label("Start trips by itself", "Notices when you leave your stop or station on a bus or train, and starts the alarm. Needs location set to Always.") }
                     if trip.autoStart && !trip.always {
-                        Button("Allow location Always") { trip.askForAlways() }.foregroundStyle(pal.deep)
+                        Button("Allow location Always") { trip.askForAlways() }.foregroundStyle(link)
                     }
                     Toggle(isOn: $trip.announce) { label("Station announcement", "A jingle and a voice that names your stop, before the alarm.") }
                     Toggle(isOn: $trip.quietWhenInUse) { label("Just a notification when I’m on my phone", "If your phone is unlocked and in use when it would ring, you’re awake: you get one notification instead of the alarm. Locked, it rings as usual. (Only with a passcode on your phone.)") }
@@ -2243,14 +2246,14 @@ struct SettingsView: View {
                         ForEach(AlarmSound.Kind.allCases) { k in Text(k.title).tag(k) }
                     }
                     .onChange(of: trip.soundKind) { _, k in trip.sound.play(preview: k) }
-                    Text(trip.soundKind.detail).font(HWFont.body(12)).foregroundStyle(Paper.muted)
-                    Button("Test alarm") { trip.testAlarm() }.foregroundStyle(pal.deep)
+                    Text(trip.soundKind.detail).font(ink.note(12)).foregroundStyle(ink.muted)
+                    Button("Test alarm") { trip.testAlarm() }.foregroundStyle(link)
                     Picker("If music is playing", selection: $trip.pauseMusic) {
                         Text("Keep it playing").tag(false)
                         Text("Pause it").tag(true)
                     }
                     Text(trip.pauseMusic ? "The loudest option: your music stops while it rings. To start it again, press play on your earbuds."
-                                         : "The alarm plays over your music, a little louder than it.").font(HWFont.body(12)).foregroundStyle(Paper.muted)
+                                         : "The alarm plays over your music, a little louder than it.").font(ink.note(12)).foregroundStyle(ink.muted)
                 } header: { Text("Alarm") } footer: { Text("The alarm also rings in silent mode. Keep the volume up or wear earbuds. You can stop it from the lock screen: tap Stop alarm on the trip, or on the notification.") }
                 Section {
                     Picker("Backup alarm", selection: $trip.backupMinutes) {
@@ -2266,13 +2269,13 @@ struct SettingsView: View {
                     }
                     if music.source == .spotify { spotifyRows }
                     if music.source == .appleMusic && !music.appleMusicAllowed {
-                        Text("Let Haltewekker see Apple Music: iPhone Settings → Apps → Haltewekker → Media & Apple Music.").font(HWFont.body(12)).foregroundStyle(Paper.late)
+                        Text("Let Haltewekker see Apple Music: iPhone Settings → Apps → Haltewekker → Media & Apple Music.").font(ink.note(12)).foregroundStyle(ink.late)
                     }
                     if let s = music.song {
-                        Label("\(s.title)\(s.artist.isEmpty ? "" : " · \(s.artist)")", systemImage: s.playing ? "music.note" : "pause.fill").font(HWFont.body(13))
+                        Label("\(s.title)\(s.artist.isEmpty ? "" : " · \(s.artist)")", systemImage: s.playing ? "music.note" : "pause.fill").font(ink.note(13))
                     }
                     Button("Preview on the lock screen") { music.checkOnce(); DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { trip.previewActivity() } }
-                        .foregroundStyle(pal.deep).disabled(trip.isRiding)
+                        .foregroundStyle(link).disabled(trip.isRiding)
                 } header: { Text("Lock screen") } footer: {
                     Text("During a trip your lock screen shows a little train screen: how far to go, a metro that drives along as you get closer, your arrival time and the song you’re playing. The preview runs for about a minute: lock your phone to see it.")
                 }
@@ -2282,7 +2285,7 @@ struct SettingsView: View {
                 } header: { Text("Usual wake distance") } footer: { Text("Used until you pick a distance for a stop when you start. After that, it remembers your choice.") }
                 if !newLook {
                     Section("Your stops") {
-                        Button("Live bus times stops and lines") { liveStops = true }.foregroundStyle(pal.deep)
+                        Button("Live bus times stops and lines") { liveStops = true }.foregroundStyle(link)
                     }
                 }
                 NewLookSwitch()
@@ -2300,34 +2303,35 @@ struct SettingsView: View {
                 Button("Reset everything", role: .destructive) { trip.resetAll(); planner.clear(); NewLook.resetAll() }
             } message: { Text("Your settings, learned speed ratings, leaderboard, watched trains, stops and Spotify sign-in are removed.") }
         }
+        .environment(\.settingsNewLook, newLook)
     }
     @ViewBuilder private var spotifyRows: some View {
         if music.spotifyConnected {
-            Label("Spotify is connected", systemImage: "checkmark.circle.fill").foregroundStyle(Paper.ok)
-            Button("Check what’s playing") { music.checkOnce() }.foregroundStyle(pal.deep)
+            Label("Spotify is connected", systemImage: "checkmark.circle.fill").foregroundStyle(ink.ok)
+            Button("Check what’s playing") { music.checkOnce() }.foregroundStyle(link)
             Button("Disconnect Spotify", role: .destructive) { music.disconnectSpotify() }
         } else {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Spotify only tells apps what’s playing if you make a (free) Spotify app for it. Once, on developer.spotify.com with your Premium account:")
                 Text("1. Dashboard → Create app. Tick “Web API”.\n2. Redirect URI: the link below.\n3. Settings → User Management: add your own name and Spotify email.\n4. Copy the Client ID and paste it here.")
             }
-            .font(HWFont.body(12)).foregroundStyle(Paper.muted)
+            .font(ink.note(12)).foregroundStyle(ink.muted)
             Button { UIPasteboard.general.string = NowPlaying.redirect } label: { Label("Copy the redirect link", systemImage: "doc.on.doc") }
-                .foregroundStyle(pal.deep)
-            Text(NowPlaying.redirect).font(HWFont.body(11)).foregroundStyle(Paper.muted).textSelection(.enabled)
+                .foregroundStyle(link)
+            Text(NowPlaying.redirect).font(ink.note(11)).foregroundStyle(ink.muted).textSelection(.enabled)
             HStack {
                 TextField("Client ID", text: $music.clientId)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled().font(HWFont.body(13))
+                    .textInputAutocapitalization(.never).autocorrectionDisabled().font(ink.note(13))
                 PasteButton(payloadType: String.self) { strings in
                     Task { @MainActor in music.clientId = (strings.first ?? "").trimmingCharacters(in: .whitespacesAndNewlines) }
                 }
                 .labelStyle(.iconOnly).buttonBorderShape(.capsule)
             }
             Button(music.busy ? "Connecting…" : "Connect Spotify") { Task { await connectSpotify() } }
-                .foregroundStyle(pal.deep)
+                .foregroundStyle(link)
                 .disabled(music.clientId.trimmingCharacters(in: .whitespacesAndNewlines).count < 20 || music.busy)
         }
-        if let e = music.spotifyError { Text(e).font(HWFont.body(12)).foregroundStyle(Paper.late) }
+        if let e = music.spotifyError { Text(e).font(ink.note(12)).foregroundStyle(ink.late) }
     }
 
     private func connectSpotify() async {
@@ -2342,8 +2346,8 @@ struct SettingsView: View {
 
     private func label(_ t: String, _ d: String) -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text(t).font(HWFont.display(16))
-            Text(d).font(HWFont.body(12)).foregroundStyle(Paper.muted)
+            Text(t).font(newLook ? DS.body : HWFont.display(16))
+            Text(d).font(ink.note(12)).foregroundStyle(ink.muted)
         }
     }
 }

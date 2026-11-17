@@ -42,7 +42,7 @@ struct NewLookSettings: View {
         Section {
             NavigationLink("Your places") { PlacesSettingsView() }
             Button("Home bus stops and lines") { liveStops = true }
-                .sheet(isPresented: $liveStops, onDismiss: { Task { await live.refresh(trip.direction, force: true) } }) { LiveSettingsSheet() }
+                .sheet(isPresented: $liveStops, onDismiss: { Task { await live.refresh(trip.direction, force: true) } }) { LiveSettingsSheet(newLook: true) }
         } header: { Text("Places") } footer: {
             Text((HomeStyle.of(homeStyle) == .live
                   ? "Your places are the chips under the search field."
@@ -60,21 +60,13 @@ struct NewLookSettings: View {
                 .sheet(isPresented: $showNotices) { NotificationsSheetNew().presentationDetents([.medium, .large]) }
         }
         Section("More") {
-            NavigationLink("Leaderboard") {
-                ScrollView { LeaderboardView(pal: .toBreda).padding(16) }
-                    .background(PaperFill().ignoresSafeArea())
-                    .navigationTitle("Leaderboard")
-            }
+            NavigationLink("Leaderboard") { LeaderboardScreenNew() }
             Button("How steady are they now?") { showSteady = true }
                 .sheet(isPresented: $showSteady) { SteadySheetNew().presentationDetents([.large]) }
             if let tryDemo, trip.phase == .idle {
                 Button("Try it at home: a pretend trip") { dismissSettings(); tryDemo() }
             }
-            NavigationLink("Before you nap") {
-                ScrollView { TipsList().padding(16) }
-                    .background(PaperFill().ignoresSafeArea())
-                    .navigationTitle("Before you nap")
-            }
+            NavigationLink("Before you nap") { TipsScreenNew() }
         }
     }
 }
@@ -155,5 +147,37 @@ struct PlaceEditView: View {
         guard !n.isEmpty, n != p.name else { return }
         var q = p; q.name = n
         places.update(q)
+    }
+}
+
+// MARK: Settings' own rows in either look
+
+private struct SettingsNewLookKey: EnvironmentKey { static let defaultValue = false }
+
+extension EnvironmentValues {
+    /// Settings is open in the new look (0.21): the rows it shares with the old look (the school alarm, the morning
+    /// screen, the freeze and matching logs) take the new tokens, through `SettingsInk`.
+    var settingsNewLook: Bool {
+        get { self[SettingsNewLookKey.self] }
+        set { self[SettingsNewLookKey.self] = newValue }
+    }
+}
+
+/// The colours and text of Settings' rows: the paper's in the old look, the new tokens (light or dark) in the new.
+struct SettingsInk {
+    let newLook: Bool
+    var ink: Color { newLook ? DS.text : Paper.ink }
+    var muted: Color { newLook ? DS.secondary : Paper.muted }
+    /// A button or link in a row.
+    var link: Color { newLook ? DS.accentText : Paper.navy }
+    var late: Color { newLook ? DS.warning : Paper.late }
+    var ok: Color { newLook ? DS.accentText : Paper.ok }
+    /// A row's small note (the old look's size in points).
+    func note(_ size: CGFloat = 12) -> Font { newLook ? DS.footnote : HWFont.body(size) }
+    /// A row's bold line.
+    func strong(_ size: CGFloat = 13) -> Font { newLook ? DS.subStrong : HWFont.body(size, bold: true) }
+    /// A small label, as on a tile.
+    func caption(_ size: CGFloat, bold: Bool = false) -> Font {
+        newLook ? (bold ? DS.footnoteStrong : DS.footnote) : HWFont.body(size, bold: bold)
     }
 }

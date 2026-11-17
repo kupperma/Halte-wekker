@@ -508,6 +508,8 @@ enum WakeAlarm {
 
 /// Settings: turn it on, pick the school calendar, how early, how long before leaving it wakes you, and what's next.
 struct SchoolAlarmSection: View {
+    @Environment(\.settingsNewLook) private var newLook
+    private var ink: SettingsInk { SettingsInk(newLook: newLook) }
     @ObservedObject private var school = SchoolAlarm.shared
     var body: some View {
         Section {
@@ -515,12 +517,12 @@ struct SchoolAlarmSection: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Wake me for school")
                     Text("From your TimeEdit timetable: the first class of the next school day, the trip there, and an alarm before you have to leave.")
-                        .font(HWFont.body(12)).foregroundStyle(Paper.muted)
+                        .font(ink.note(12)).foregroundStyle(ink.muted)
                 }
             }
             if school.on {
                 if !school.allowed {
-                    Button("Allow calendar access") { Task { await school.start() } }.foregroundStyle(Paper.navy)
+                    Button("Allow calendar access") { Task { await school.start() } }.foregroundStyle(ink.link)
                 } else {
                     NavigationLink {
                         SchoolCalendarsView()
@@ -528,24 +530,24 @@ struct SchoolAlarmSection: View {
                         HStack {
                             Text("School calendar")
                             Spacer()
-                            Text(school.calendarIds.isEmpty ? "Pick one" : "\(school.calendarIds.count) picked").foregroundStyle(Paper.muted)
+                            Text(school.calendarIds.isEmpty ? "Pick one" : "\(school.calendarIds.count) picked").foregroundStyle(ink.muted)
                         }
                     }
                     Stepper("At BUas \(school.earlyMinutes) min before class", value: $school.earlyMinutes, in: 0...45, step: 5)
                     Stepper("Wake me \(school.wakeMinutes) min before I leave", value: $school.wakeMinutes, in: 15...150, step: 5)
                     if let n = school.next {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("\(SchoolAlarm.dayWord(n.classStart).capitalizedFirst): \(n.title) at \(Fmt.hhmm(n.classStart))").font(HWFont.body(13, bold: true))
+                            Text("\(SchoolAlarm.dayWord(n.classStart).capitalizedFirst): \(n.title) at \(Fmt.hhmm(n.classStart))").font(ink.strong(13))
                             if let a = n.alarm, let l = n.leave {
-                                Text("Alarm \(Fmt.hhmm(a)) · leave \(Fmt.hhmm(l)) · at BUas \(Fmt.hhmm(n.trip?.end ?? n.beThere))").font(HWFont.body(12)).foregroundStyle(Paper.muted)
+                                Text("Alarm \(Fmt.hhmm(a)) · leave \(Fmt.hhmm(l)) · at BUas \(Fmt.hhmm(n.trip?.end ?? n.beThere))").font(ink.note(12)).foregroundStyle(ink.muted)
                             }
                         }
                     }
-                    if let note = school.note { Text(note).font(HWFont.body(12)).foregroundStyle(Paper.late) }
+                    if let note = school.note { Text(note).font(ink.note(12)).foregroundStyle(ink.late) }
                     AlarmCheck()
                     if !school.realAlarm {
                         Text("On this iPhone it wakes you with loud notifications (they stay quiet on silent). With iOS 26 it’s a real alarm, like the Clock app’s.")
-                            .font(HWFont.body(11.5)).foregroundStyle(Paper.muted)
+                            .font(ink.note(11.5)).foregroundStyle(ink.muted)
                     }
                 }
             }
@@ -557,6 +559,8 @@ struct SchoolAlarmSection: View {
 
 /// Which calendars are your school timetable. The ones that look like it (TimeEdit, BUas) are picked for you.
 struct SchoolCalendarsView: View {
+    @Environment(\.settingsNewLook) private var newLook
+    private var ink: SettingsInk { SettingsInk(newLook: newLook) }
     @ObservedObject private var school = SchoolAlarm.shared
     var body: some View {
         List {
@@ -569,12 +573,12 @@ struct SchoolCalendarsView: View {
                         HStack(spacing: 10) {
                             Circle().fill(Color(cgColor: c.cgColor)).frame(width: 12, height: 12)
                             VStack(alignment: .leading, spacing: 1) {
-                                Text(c.title).foregroundStyle(Paper.ink)
+                                Text(c.title).foregroundStyle(ink.ink)
                                 Text(school.looksLikeSchool(c) ? "\(c.source.title) · looks like your timetable" : c.source.title)
-                                    .font(HWFont.body(11.5)).foregroundStyle(school.looksLikeSchool(c) ? Paper.ok : Paper.muted)
+                                    .font(ink.note(11.5)).foregroundStyle(school.looksLikeSchool(c) ? ink.ok : ink.muted)
                             }
                             Spacer()
-                            if picked { Image(systemName: "checkmark").foregroundStyle(Paper.navy).font(.system(size: 14, weight: .bold)) }
+                            if picked { Image(systemName: "checkmark").foregroundStyle(ink.link).font(.system(size: 14, weight: .bold)) }
                         }
                     }
                 }
@@ -582,8 +586,8 @@ struct SchoolCalendarsView: View {
                 Text("Pick only the calendar TimeEdit fills. The first class of each day in it sets the alarm; nothing else is read.")
             }
         }
-        .scrollContentBackground(.hidden)
-        .background(PaperFill().ignoresSafeArea())
+        .scrollContentBackground(newLook ? .automatic : .hidden)
+        .background(PaperFill().ignoresSafeArea().opacity(newLook ? 0 : 1))
         .navigationTitle("School calendar")
         .task { await school.findSchoolLike() }
     }
@@ -704,6 +708,8 @@ struct SchoolAlarmCard: View {
 
 /// Is the alarm working? Whether iOS allows it, the alarms iOS really has set, and a test that rings in a minute.
 struct AlarmCheck: View {
+    @Environment(\.settingsNewLook) private var newLook
+    private var ink: SettingsInk { SettingsInk(newLook: newLook) }
     var compact = false
     @State private var testAt: Date?
     @State private var failed = false
@@ -712,15 +718,15 @@ struct AlarmCheck: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Label(perm.text, systemImage: perm.ok ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                .font(HWFont.body(12, bold: true)).foregroundStyle(perm.ok ? Paper.ok : Paper.late)
+                .font(ink.strong(12)).foregroundStyle(perm.ok ? ink.ok : ink.late)
             if !perm.ok, let url = URL(string: UIApplication.openSettingsURLString) {
-                Link("Open Settings", destination: url).font(HWFont.body(12, bold: true)).foregroundStyle(Paper.navy)
+                Link("Open Settings", destination: url).font(ink.strong(12)).foregroundStyle(ink.link)
             }
             if !onPhone.isEmpty {
                 Text("Set on this iPhone: " + onPhone.prefix(7).map { "\(SchoolAlarm.shortDay($0)) \(Fmt.hhmm($0))" }.joined(separator: " · "))
-                    .font(HWFont.body(11.5)).foregroundStyle(Paper.muted).fixedSize(horizontal: false, vertical: true)
+                    .font(ink.note(11.5)).foregroundStyle(ink.muted).fixedSize(horizontal: false, vertical: true)
             } else if perm.ok && !compact {
-                Text("No alarms set on this iPhone yet.").font(HWFont.body(11.5)).foregroundStyle(Paper.muted)
+                Text("No alarms set on this iPhone yet.").font(ink.note(11.5)).foregroundStyle(ink.muted)
             }
             Button {
                 Task {
@@ -730,16 +736,17 @@ struct AlarmCheck: View {
                 }
             } label: {
                 Label("Test the alarm: it rings in 1 minute", systemImage: "alarm.waves.left.and.right.fill")
-                    .font(HWFont.body(13, bold: true)).foregroundStyle(.white)
-                    .frame(maxWidth: .infinity).padding(.vertical, 10).background(Paper.navy, in: RoundedRectangle(cornerRadius: 6))
+                    .font(ink.strong(13)).foregroundStyle(.white)
+                    .frame(maxWidth: .infinity, minHeight: newLook ? DS.hit : nil).padding(.vertical, newLook ? 4 : 10)
+                    .background(newLook ? DS.accent : Paper.navy, in: RoundedRectangle(cornerRadius: newLook ? 22 : 6, style: .continuous))
             }
             .buttonStyle(.plain)
             if let t = testAt {
                 Text("Test alarm set for \(Fmt.hhmm(t)). Lock your phone (put it on silent too, if you like) and wait: it should ring like a Clock alarm.")
-                    .font(HWFont.body(11.5)).foregroundStyle(Paper.ok).fixedSize(horizontal: false, vertical: true)
+                    .font(ink.note(11.5)).foregroundStyle(ink.ok).fixedSize(horizontal: false, vertical: true)
             } else if failed {
                 Text("Couldn’t set the test alarm. Check that alarms are allowed for Haltewekker in Settings.")
-                    .font(HWFont.body(11.5)).foregroundStyle(Paper.late).fixedSize(horizontal: false, vertical: true)
+                    .font(ink.note(11.5)).foregroundStyle(ink.late).fixedSize(horizontal: false, vertical: true)
             }
         }
         .task { await load() }

@@ -187,6 +187,8 @@ final class Watchdog: @unchecked Sendable {
 
 /// In Settings, only when it froze: when, how long, what it was doing and where it was stuck.
 struct FreezeSection: View {
+    @Environment(\.settingsNewLook) private var newLook
+    private var ink: SettingsInk { SettingsInk(newLook: newLook) }
     @State private var list = Watchdog.freezes
     @State private var copied = false
     var body: some View {
@@ -195,17 +197,17 @@ struct FreezeSection: View {
                 ForEach(list) { f in
                     VStack(alignment: .leading, spacing: 2) {
                         Text("\(Fmt.when(f.at)) · stuck for \(f.seconds >= 90 ? "\(Int((f.seconds / 60).rounded())) min" : "\(Int(f.seconds)) s")")
-                            .font(HWFont.body(13, bold: true))
-                        Text("While \(f.label)").font(HWFont.body(12)).foregroundStyle(Paper.muted)
-                        if let s = f.spot { Text("in \(s)").font(.system(size: 11, design: .monospaced)).foregroundStyle(Paper.oxblood).lineLimit(2) }
+                            .font(ink.strong(13))
+                        Text("While \(f.label)").font(ink.note(12)).foregroundStyle(ink.muted)
+                        if let s = f.spot { Text("in \(s)").font(newLook ? Font.system(.caption, design: .monospaced) : Font.system(size: 11, design: .monospaced)).foregroundStyle(newLook ? DS.warning : Paper.oxblood).lineLimit(2) }
                     }
                 }
                 Button(copied ? "Copied: paste it in the chat" : "Copy the details") {
                     UIPasteboard.general.string = list.map(\.details).joined(separator: "\n\n")
                     copied = true
                 }
-                .foregroundStyle(Paper.navy)
-                Button("Clear") { Watchdog.clear(); list = [] }.foregroundStyle(Paper.navy)
+                .foregroundStyle(ink.link)
+                Button("Clear") { Watchdog.clear(); list = [] }.foregroundStyle(ink.link)
             } header: { Text("When the app froze") } footer: {
                 Text("If the app stops responding for more than a few seconds, it notes what it was doing and where. Time with your phone locked doesn’t count. Send a screenshot, or copy the details, to get it fixed.")
             }
@@ -227,6 +229,8 @@ struct FieldLogSection: View {
 }
 
 struct FieldLogScreen: View {
+    @Environment(\.settingsNewLook) private var newLook
+    private var ink: SettingsInk { SettingsInk(newLook: newLook) }
     @State private var list = FieldLog.shared.entries
     @State private var copied = false
     private static let clock: DateFormatter = {
@@ -236,12 +240,12 @@ struct FieldLogScreen: View {
         List {
             Section {
                 if list.isEmpty {
-                    Text("Nothing logged yet.").font(HWFont.body(13)).foregroundStyle(Paper.muted)
+                    Text("Nothing logged yet.").font(ink.note(13)).foregroundStyle(ink.muted)
                 }
                 ForEach(Array(list.enumerated()), id: \.offset) { _, e in
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("\(Self.clock.string(from: e.at)) · \(e.kind.rawValue)").font(HWFont.body(12, bold: true))
-                        Text(e.text).font(.system(size: 11, design: .monospaced)).foregroundStyle(Paper.muted)
+                        Text("\(Self.clock.string(from: e.at)) · \(e.kind.rawValue)").font(ink.strong(12))
+                        Text(e.text).font(newLook ? Font.system(.caption, design: .monospaced) : Font.system(size: 11, design: .monospaced)).foregroundStyle(ink.muted)
                     }
                 }
             }
@@ -251,8 +255,8 @@ struct FieldLogScreen: View {
                     UIPasteboard.general.string = FieldLog.shared.export()
                     copied = true
                 }
-                .foregroundStyle(Paper.navy)
-                Button("Clear") { FieldLog.shared.clear(); FieldLog.shared.flush(); list = [] }.foregroundStyle(Paper.navy)
+                .foregroundStyle(ink.link)
+                Button("Clear") { FieldLog.shared.clear(); FieldLog.shared.flush(); list = [] }.foregroundStyle(ink.link)
             } footer: {
                 Text("The last 300 requests, 200 vehicle choices and 100 ride events (how a ride started, what it refused, when it woke you, rang and arrived), kept on this phone only. No places or coordinates.")
             }
