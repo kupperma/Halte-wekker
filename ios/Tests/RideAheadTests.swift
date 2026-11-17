@@ -19,11 +19,22 @@ final class RideAheadTests: XCTestCase {
         XCTAssertNil(RideAhead.countdown(eta: nil, metres: nil, now: now))
     }
 
-    func testAheadSkipsPassedStopsAndKeepsUntimedOnes() {
-        XCTAssertEqual(RideAhead.ahead(times: [at(-3), at(2), nil, at(9), at(12)], now: now), [1, 2, 3])
-        XCTAssertEqual(RideAhead.ahead(times: [at(-3), at(-1)], now: now), [])
-        XCTAssertEqual(RideAhead.ahead(times: [at(1), at(2)], now: now, limit: 1), [0])
-        XCTAssertEqual(RideAhead.ahead(times: [at(1)], now: now, limit: -2), [])
+    func testAheadSkipsPassedStops() {
+        let f = [0.1, 0.3, 0.5, 0.7, 0.9]
+        XCTAssertEqual(RideAhead.ahead(times: [at(-3), at(2), at(5), at(9), at(12)], fractions: f, now: now, progress: 0.2), [1, 2, 3])
+        XCTAssertEqual(RideAhead.ahead(times: [at(-3), at(-1)], fractions: [0.2, 0.4], now: now, progress: 0.5), [])
+        XCTAssertEqual(RideAhead.ahead(times: [at(1), at(2)], fractions: [0.2, 0.4], now: now, progress: 0, limit: 1), [0])
+        XCTAssertEqual(RideAhead.ahead(times: [at(1)], fractions: [0.5], now: now, progress: 0, limit: -2), [])
+    }
+
+    func testUntimedStopsGoByWhereTheyAreAlongTheLeg() {
+        // no times: the ones past how far along you are
+        XCTAssertEqual(RideAhead.ahead(times: [nil, nil, nil], fractions: [0.2, 0.5, 0.8], now: now, progress: 0.4), [1, 2])
+        XCTAssertEqual(RideAhead.ahead(times: [nil, nil], fractions: [0.2, 0.5], now: now, progress: 0.9), [])
+        // mixed: a passed timed stop, an untimed one behind you, one ahead
+        XCTAssertEqual(RideAhead.ahead(times: [at(-2), nil, nil, at(6)], fractions: [0.1, 0.3, 0.6, 0.8], now: now, progress: 0.45), [2, 3])
+        // a fraction missing: counted as ahead (the end of the leg)
+        XCTAssertEqual(RideAhead.ahead(times: [nil, nil], fractions: [0.1], now: now, progress: 0.5), [1])
     }
 
     func testChangeWithRoom() {

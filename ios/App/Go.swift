@@ -1721,7 +1721,7 @@ struct TripLine: View {
             ForEach(Array(l.segs.enumerated()), id: \.offset) { i, s in
                 if let r = s.ride, i + 1 < ys.count {
                     Button { tap(r) } label: {
-                        if newLook { DSLinePill(line: r.isTrain ? Transit.trainLabel(r.line) : r.line, train: r.isTrain).frame(minWidth: 44, minHeight: 32).contentShape(Rectangle()) }
+                        if newLook { DSLinePill(line: r.isTrain ? Transit.trainLabel(r.line) : r.line, train: r.isTrain).frame(minWidth: 44, minHeight: 44).contentShape(Rectangle()) }
                         else { LineBullet(line: r.line, train: r.isTrain, height: 20, minWidth: 36, font: 11) }
                     }
                         .buttonStyle(.plain)

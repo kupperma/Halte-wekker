@@ -181,19 +181,27 @@ struct MorningViewNew: View {
                            startPoint: .top, endPoint: light ? .init(x: 0.5, y: 0.3) : .bottom)
                 .ignoresSafeArea()
                 .allowsHitTesting(false)
-            VStack(spacing: 0) {
-                TimelineView(.everyMinute) { tl in
-                    Text(Fmt.hhmm(tl.date)).font(DS.hero(min(clock, 120))).monospacedDigit().foregroundStyle(text)
-                        .lineLimit(1).minimumScaleFactor(0.6)
-                        .shadow(color: shade, radius: 10, y: 4)
+            // the time on top and the card at the bottom; at large text it all scrolls, I'm up and the photos stay
+            GeometryReader { g in
+                ScrollView {
+                    VStack(spacing: 0) {
+                        TimelineView(.everyMinute) { tl in
+                            Text(Fmt.hhmm(tl.date)).font(DS.hero(min(clock, 120))).monospacedDigit().foregroundStyle(text)
+                                .lineLimit(1).minimumScaleFactor(0.6)
+                                .shadow(color: shade, radius: 10, y: 4)
+                        }
+                        .padding(.top, 30)
+                        Text("Good morning").font(DS.title).foregroundStyle(text).shadow(color: shade, radius: 6, y: 2)
+                            .accessibilityAddTraits(.isHeader)
+                        Spacer(minLength: DS.s16)
+                        card
+                    }
+                    .padding(.horizontal, DS.edge).padding(.bottom, 10)
+                    .frame(minHeight: g.size.height)
                 }
-                .padding(.top, 30)
-                Text("Good morning").font(DS.title).foregroundStyle(text).shadow(color: shade, radius: 6, y: 2)
-                    .accessibilityAddTraits(.isHeader)
-                Spacer(minLength: DS.s16)
-                card
+                .scrollBounceBehavior(.basedOnSize)
             }
-            .padding(.horizontal, DS.edge).padding(.bottom, 10)
+            .safeAreaInset(edge: .bottom) { bottomRow }
         }
         .dynamicTypeSize(...DynamicTypeSize.accessibility2)
         .onChange(of: picking) { _, items in
@@ -257,16 +265,28 @@ struct MorningViewNew: View {
             } else {
                 Text("No class planned today.").font(DS.headline).foregroundStyle(DS.text)
             }
-            HStack {
-                DSQuietButton(title: "I’m up") { withAnimation(.easeInOut(duration: 0.35)) { morning.showing = false } }
-                Spacer()
-                PhotosPicker(selection: $picking, maxSelectionCount: 10, matching: .images) {
-                    Label(morning.photos.isEmpty ? "Add your photos" : "Add photos", systemImage: "photo.on.rectangle")
-                        .font(DS.subStrong).foregroundStyle(DS.accentText).frame(minHeight: DS.hit)
-                }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .dsCard()
+    }
+
+    /// I'm up, and your photos: always on screen.
+    private var bottomRow: some View {
+        HStack {
+            DSQuietButton(title: "I’m up") { withAnimation(.easeInOut(duration: 0.35)) { morning.showing = false } }
+            Spacer()
+            PhotosPicker(selection: $picking, maxSelectionCount: 10, matching: .images) {
+                Label(morning.photos.isEmpty ? "Add your photos" : "Add photos", systemImage: "photo.on.rectangle")
+                    .font(DS.subStrong).foregroundStyle(DS.accentText)
+                    .padding(.horizontal, 14).frame(minHeight: DS.hit)
+                    .background(DS.surface3, in: Capsule())
+                    .contentShape(Capsule())
             }
         }
-        .dsCard()
+        .padding(DS.s8)
+        .background(DS.surface, in: Capsule())
+        .dsFloat()
+        .padding(.horizontal, DS.edge).padding(.bottom, 6)
     }
 }
 

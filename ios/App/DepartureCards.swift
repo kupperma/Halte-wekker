@@ -300,7 +300,7 @@ struct DepartureDetailSheet: View {
                     Text("Arrives \(pt.to.short) \(Fmt.hhmm(pt.trip.last.arrival))").font(DS.sub).monospacedDigit().foregroundStyle(DS.text)
                 }
             }
-            DSSteadyInfo(line: d.line, train: d.train, stop: nil, at: d.leaves)
+            DSSteadyInfo(line: d.line, train: d.train, stop: d.train ? known?.toStop : nil, at: d.leaves)
             if let r = ride {
                 DSRankInfo(rank: RankInfo(grade: d.cancelled ? nil : r.grade, minutes: r.minutes, best: r.best,
                                           stretch: "\(Fmt.place(d.stopName)) → \(r.station)"), cancelled: d.cancelled)

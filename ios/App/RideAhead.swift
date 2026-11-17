@@ -28,9 +28,13 @@ enum RideAhead {
 
     // MARK: the stops ahead
 
-    /// The stops still ahead (their time after `now`; a stop without a time counts as ahead), the first `limit` of them.
-    static func ahead(times: [Date?], now: Date, limit: Int = 3) -> [Int] {
-        Array(times.indices.filter { (times[$0] ?? .distantFuture) > now }.prefix(max(0, limit)))
+    /// The stops still ahead, the first `limit` of them: a timed stop by its time after `now`; one without a time by
+    /// where it is along the leg (`fractions`, 0 to 1) past how far along you are (`progress`).
+    static func ahead(times: [Date?], fractions: [Double], now: Date, progress: Double, limit: Int = 3) -> [Int] {
+        Array(times.indices.filter { i in
+            if let t = times[i] { return t > now }
+            return (i < fractions.count ? fractions[i] : 1) > progress
+        }.prefix(max(0, limit)))
     }
 
     // MARK: the change ahead

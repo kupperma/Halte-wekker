@@ -112,12 +112,13 @@ struct ConsistView: View {
                         .position(x: ((g.0 + g.1) / 2 - u.x) / u.w * w, y: 9)
                 }
             } else {
-                Text("?").font(HWFont.body(10, bold: true)).foregroundStyle(Paper.muted).frame(width: w, height: 18)
+                Text("?").font(HWFont.body(10, bold: true)).foregroundStyle(mutedInk).frame(width: w, height: 18)
             }
         }
         .frame(width: w, height: 18, alignment: .topLeading)
         .clipShape(RoundedRectangle(cornerRadius: 3))
-        .overlay(RoundedRectangle(cornerRadius: 3).stroke(Paper.ink.opacity(0.7), lineWidth: 1))
+        // (in the new look's dark the dark coaches need a lighter edge to show)
+        .overlay(RoundedRectangle(cornerRadius: 3).stroke(newLook ? DS.secondary : Paper.ink.opacity(0.7), lineWidth: 1))
     }
 
     /// The longest 2nd class stretch, so the "2" isn't hidden behind the yellow.

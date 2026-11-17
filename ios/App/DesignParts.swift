@@ -3,36 +3,64 @@ import SwiftUI
 // The new look's shared parts for the trip screens (0.20, phase 2): Fastest trip, the ride, the alarm, the change and
 // arrival, and the detail pages. Only the tokens in Design.swift.
 
-/// Hold to confirm, so a sleepy tap doesn't end things: it fills with the accent while you hold it.
+/// Hold to confirm, so a sleepy tap doesn't end things: it fills with the accent while you hold it, the label turning
+/// white as the fill passes under it. With VoiceOver: double-tap and hold, or its action (through `confirm`'s question
+/// when there is one).
 struct DSHoldButton: View {
     let title: String
     var seconds: Double = 1.0
     var icon: String? = nil
     var fill: Color = DS.surface3
+    /// VoiceOver's action asks this first ("End this trip?"), with `confirmTitle` as the button; nil: it acts at once.
+    var confirm: String? = nil
+    var confirmTitle = "End"
     let action: () -> Void
     @State private var progress: CGFloat = 0
-    var body: some View {
+    @State private var asking = false
+
+    private var actionName: String { title.hasPrefix("Hold to ") ? String(title.dropFirst(8)).capitalizedFirst : title }
+
+    private func label(_ color: Color) -> some View {
         HStack(spacing: 8) {
             if let icon { Image(systemName: icon).font(.body.weight(.semibold)) }
             Text(title).font(DS.bodyStrong).lineLimit(2).minimumScaleFactor(0.8).multilineTextAlignment(.center)
         }
-        .foregroundStyle(DS.text)
+        .foregroundStyle(color)
         .padding(.horizontal, DS.s16)
         .frame(maxWidth: .infinity, minHeight: DS.cta)
-        .background(alignment: .leading) { GeometryReader { g in DS.accentSoft.frame(width: g.size.width * progress) } }
-        .background(fill)
-        .clipShape(Capsule())
-        .overlay(Capsule().stroke(DS.divider, lineWidth: 1))
-        .scaleEffect(progress > 0 ? 0.98 : 1)
-        .contentShape(Capsule())
-        .onLongPressGesture(minimumDuration: seconds, perform: { progress = 0; action() }, onPressingChanged: { p in
-            withAnimation(p ? .linear(duration: seconds) : DS.quick) { progress = p ? 1 : 0 }
-        })
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(title)
-        .accessibilityAddTraits(.isButton)
-        .accessibilityHint("Double-tap and hold for a second.")
-        .accessibilityAction(named: title) { action() }
+    }
+
+    var body: some View {
+        label(DS.text)
+            .background(fill)
+            // the accent fills from the left; over it the same label in white, cut to the fill
+            .overlay(alignment: .leading) {
+                GeometryReader { g in
+                    ZStack(alignment: .leading) {
+                        DS.accent
+                        label(DS.onAccent).frame(width: g.size.width)
+                    }
+                    .frame(width: g.size.width * progress, alignment: .leading)
+                    .clipped()
+                }
+                .allowsHitTesting(false)
+            }
+            .clipShape(Capsule())
+            .overlay(Capsule().stroke(DS.divider, lineWidth: 1))
+            .scaleEffect(progress > 0 ? 0.98 : 1)
+            .contentShape(Capsule())
+            .onLongPressGesture(minimumDuration: seconds, perform: { progress = 0; action() }, onPressingChanged: { p in
+                withAnimation(p ? .linear(duration: seconds) : DS.quick) { progress = p ? 1 : 0 }
+            })
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(title)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityHint("Double-tap and hold for a second, or swipe up or down to \(actionName.lowercased()).")
+            .accessibilityAction(named: actionName) { if confirm != nil { asking = true } else { action() } }
+            .confirmationDialog(confirm ?? title, isPresented: $asking, titleVisibility: .visible) {
+                Button(confirmTitle, role: .destructive, action: action)
+                Button("Cancel", role: .cancel) {}
+            }
     }
 }
 

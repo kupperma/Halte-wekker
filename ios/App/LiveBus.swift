@@ -118,7 +118,13 @@ struct LiveBusSheet: View {
             TimelineView(.periodic(from: .now, by: 1)) { tl in
                 VStack(spacing: 0) {
                     map(tl.date).frame(minHeight: 300)
-                    if newLook { infoNew(tl.date) } else { info(tl.date) }
+                    if newLook {
+                        // (scrolls at large text, under the map)
+                        ScrollView { infoNew(tl.date) }
+                            .scrollBounceBehavior(.basedOnSize)
+                            .frame(maxHeight: 380)
+                            .background(DS.surface)
+                    } else { info(tl.date) }
                 }
             }
             .background { if newLook { DS.page.ignoresSafeArea() } else { PaperFill().ignoresSafeArea() } }

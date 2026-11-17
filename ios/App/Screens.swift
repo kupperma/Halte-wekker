@@ -14,6 +14,9 @@ struct RootView: View {
     /// the change and the arrival): they follow the phone's light or dark, as Live around you; Next trip first is dark
     /// (as its design). The old look stays dark.
     private var followsPhone: Bool { newLook && HomeStyle.of(homeStyle) == .live }
+    /// The stop alarm is ringing: nothing goes over it.
+    private var alarming: Bool { if case .alarm = trip.phase { return true }; return false }
+
     /// Morning screen › Go hands-free: Fastest trip to your first class.
     private func morningGo(_ p: SchoolAlarm.Planned) {
         withAnimation(.easeInOut(duration: 0.35)) { morning.showing = false }
@@ -48,7 +51,7 @@ struct RootView: View {
         }
         .animation(.easeInOut(duration: 0.35), value: go.isOpen)
         .overlay {
-            if let a = watch.alert {
+            if let a = watch.alert, !alarming {          // (not over the alarm: after it)
                 if newLook {
                     PlatformAlertViewNew(alert: a) { watch.dismiss() }.transition(.opacity)
                 } else {

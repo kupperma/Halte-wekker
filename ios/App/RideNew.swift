@@ -1,3 +1,4 @@
+import CoreLocation
 import SwiftUI
 
 // The ride, the alarm, the change and the arrival in the new look (0.20, phase 2): the same content and controls as
@@ -28,7 +29,7 @@ struct RideViewNew: View {
                 if trip.phase == .awake && !trip.waitingToBoard {
                     DSPrimaryButton(title: "I’m off, end this leg", icon: "figure.walk.departure") { trip.legDone() }
                 }
-                DSHoldButton(title: "Hold to end trip", icon: "stop.circle") { trip.endTrip() }
+                DSHoldButton(title: "Hold to end trip", icon: "stop.circle", confirm: "End this trip?", confirmTitle: "End trip") { trip.endTrip() }
             }
             .padding(.horizontal, DS.s16).padding(.top, 10).padding(.bottom, 6)
             .background(DS.page)
@@ -109,8 +110,11 @@ struct RideViewNew: View {
                     Text(Snapshots.asOf(a)).font(DS.footnoteStrong).monospacedDigit().foregroundStyle(DS.secondary)
                 }
                 Spacer()
-                Button(earlier ? "Hide earlier ones" : "Show earlier ones") { withAnimation(DS.quick) { earlier.toggle() } }
-                    .font(DS.subStrong).foregroundStyle(DS.accentText).frame(minHeight: DS.hit)
+                Button { withAnimation(DS.quick) { earlier.toggle() } } label: {
+                    Text(earlier ? "Hide earlier ones" : "Show earlier ones").font(DS.subStrong).foregroundStyle(DS.accentText)
+                        .frame(minWidth: DS.hit, minHeight: DS.hit).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             }
             if list.isEmpty && board.isEmpty {
                 HStack(spacing: 10) {
@@ -198,6 +202,9 @@ struct RideViewNew: View {
         }
         stopsAhead
         changeAhead
+        if trip.next == nil, trip.legs.count > 1, let a = trip.arrival {
+            Text("\(trip.finalName) around \(Fmt.hhmm(a))").font(DS.subStrong).monospacedDigit().foregroundStyle(DS.secondary)
+        }
         if let line = howKnown { Text(line).font(DS.footnote).foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true) }
         if let song = music.song { DSSongCard(song: song) }
     }
@@ -209,13 +216,22 @@ struct RideViewNew: View {
         let thereAt = eta.flatMap { c?.unit == "min" ? ", there at \(Fmt.hhmm($0))" : nil } ?? ""
         let spoken = c.map { "\($0.spoken) to \(to)\(thereAt)" } ?? "Finding how far it is to \(to)"
         return VStack(alignment: .leading, spacing: DS.s12) {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text(c?.value ?? "–").font(DS.hero(min(big, 128))).monospacedDigit().foregroundStyle(DS.text)
-                    .lineLimit(1).minimumScaleFactor(0.5)
-                    .contentTransition(.numericText())
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("\(c?.unit ?? "") to \(to)").font(DS.bodyStrong).foregroundStyle(DS.text).lineLimit(2)
-                    if let eta, c?.unit == "min" { Text("there at \(Fmt.hhmm(eta))").font(DS.sub).monospacedDigit().foregroundStyle(DS.secondary) }
+            Group {
+                if let c {
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                        Text(c.value).font(DS.hero(min(big, 128))).monospacedDigit().foregroundStyle(DS.text)
+                            .lineLimit(1).minimumScaleFactor(0.5)
+                            .contentTransition(.numericText())
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("\(c.unit) to \(to)").font(DS.bodyStrong).foregroundStyle(DS.text).lineLimit(2)
+                            if let eta, c.unit == "min" { Text("there at \(Fmt.hhmm(eta))").font(DS.sub).monospacedDigit().foregroundStyle(DS.secondary) }
+                        }
+                    }
+                } else {
+                    HStack(spacing: 10) {
+                        ProgressView()
+                        Text("Finding how far it is to \(to)…").font(DS.title).foregroundStyle(DS.text).fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             }
             .accessibilityElement(children: .ignore)
@@ -256,9 +272,6 @@ struct RideViewNew: View {
                 DSStat(value: Fmt.hhmm(a), label: "there around")
             }
             DSStat(value: speed ?? "–", label: speed == nil ? "standing still" : "speed")
-            if let m = trip.matchMeters, !trip.pickedByHand, !trip.byTimetable {
-                DSStat(value: "\(m) m", label: "recognised")
-            }
         }
         .padding(.vertical, DS.s12)
         .background(DS.surface, in: RoundedRectangle(cornerRadius: DS.cardRadiusSmall, style: .continuous))
@@ -269,11 +282,14 @@ struct RideViewNew: View {
         let marks = trip.stopMarks
         let next = trip.nextStop
         // the next stop, then the bigger stops after it (on a bus: the towns and stations)
-        let ahead = RideAhead.ahead(times: marks.map(\.time), now: next?.arrival ?? Date(), limit: next == nil ? 3 : 2)
+        let ahead = RideAhead.ahead(times: marks.map(\.time), fractions: marks.map(\.fraction), now: next?.arrival ?? Date(),
+                                    progress: trip.progress(at: Date()), limit: next == nil ? 3 : 2)
+        // (the next stop is your stop: only the row for yours)
+        let nextIsYours = next.map(isYourStop) ?? false
         if !ahead.isEmpty || next != nil || trip.legTo != nil {
             VStack(alignment: .leading, spacing: 0) {
                 DSHeader(title: "Stops ahead").padding(.bottom, 6)
-                if let n = next, let t = n.arrival, Fmt.place(n.name) != Fmt.place(trip.leg?.to.name ?? "") {
+                if let n = next, let t = n.arrival, !nextIsYours, Fmt.place(n.name) != Fmt.place(trip.leg?.to.name ?? "") {
                     stopRow(Fmt.stop(n.name), t, next: true, yours: false)
                 }
                 ForEach(Array(ahead.enumerated()), id: \.offset) { k, i in
@@ -283,6 +299,14 @@ struct RideViewNew: View {
             }
             .dsPanel()
         }
+    }
+
+    /// The next stop is your stop: at its time, or within 300 m of it.
+    private func isYourStop(_ n: TripStop) -> Bool {
+        if let t = n.arrival, let mine = trip.legTo, t == mine { return true }
+        guard let to = trip.leg?.to.coordinate else { return false }
+        let here = CLLocation(latitude: n.coordinate.latitude, longitude: n.coordinate.longitude)
+        return here.distance(from: CLLocation(latitude: to.latitude, longitude: to.longitude)) < 300
     }
 
     private func stopRow(_ name: String, _ time: Date?, next: Bool, yours: Bool) -> some View {
@@ -330,7 +354,7 @@ struct RideViewNew: View {
     private var howKnown: String? {
         if trip.pickedByHand { return "You picked it in the list." }
         if trip.byTimetable { return "Going by its timetable." }
-        if trip.nextStop != nil, let m = trip.matchMeters { return "Recognised: \(m) m from you." }
+        if let m = trip.matchMeters { return "Recognised: \(m) m from you." }
         return nil
     }
 }
@@ -464,26 +488,32 @@ struct AlarmViewNew: View {
     private let alarmFill = Color(hex: 0xA84219)
 
     var body: some View {
-        VStack(alignment: .leading, spacing: DS.s16) {
-            Image(systemName: "bell.and.waves.left.and.right.fill").font(.system(size: 44, weight: .bold))
-                .foregroundStyle(.white)
-                .symbolEffect(.pulse, options: .repeating)
-                .padding(.top, DS.s24)
-                .accessibilityHidden(true)
-            Text(approach ? "Wake up" : "Get off now").font(DS.hero(min(big, 96))).foregroundStyle(.white)
-                .lineLimit(2).minimumScaleFactor(0.6)
-                .accessibilityAddTraits(.isHeader)
-            VStack(alignment: .leading, spacing: DS.s8) {
-                Text(trip.leg?.to.name ?? "").font(DS.title).foregroundStyle(.white).fixedSize(horizontal: false, vertical: true)
-                Text(approach ? "\(Fmt.distance(trip.distance ?? 0)) to go. Get ready to get off." : "You’re at \(trip.leg?.to.short ?? "your stop").")
-                    .font(DS.body).monospacedDigit().foregroundStyle(.white.opacity(0.92)).fixedSize(horizontal: false, vertical: true)
-                if let n = trip.nextText { Text(n).font(DS.callout).monospacedDigit().foregroundStyle(.white.opacity(0.92)).fixedSize(horizontal: false, vertical: true) }
+        // the words scroll at large text; the one thing to do stays on screen
+        ScrollView {
+            VStack(alignment: .leading, spacing: DS.s16) {
+                Image(systemName: "bell.and.waves.left.and.right.fill").font(.system(size: 44, weight: .bold))
+                    .foregroundStyle(.white)
+                    .symbolEffect(.pulse, options: .repeating)
+                    .padding(.top, DS.s24)
+                    .accessibilityHidden(true)
+                Text(approach ? "Wake up" : "Get off now").font(DS.hero(min(big, 96))).foregroundStyle(.white)
+                    .lineLimit(2).minimumScaleFactor(0.6)
+                    .accessibilityAddTraits(.isHeader)
+                VStack(alignment: .leading, spacing: DS.s8) {
+                    Text(trip.leg?.to.name ?? "").font(DS.title).foregroundStyle(.white).fixedSize(horizontal: false, vertical: true)
+                    Text(approach ? "\(Fmt.distance(trip.distance ?? 0)) to go. Get ready to get off." : "You’re at \(trip.leg?.to.short ?? "your stop").")
+                        .font(DS.body).monospacedDigit().foregroundStyle(.white.opacity(0.92)).fixedSize(horizontal: false, vertical: true)
+                    if let n = trip.nextText { Text(n).font(DS.callout).monospacedDigit().foregroundStyle(.white.opacity(0.92)).fixedSize(horizontal: false, vertical: true) }
+                }
             }
-            Spacer(minLength: DS.s16)
-            DSHoldButton(title: "Hold to stop alarm", seconds: 1.2, icon: "bell.slash.fill", fill: DS.surface) { trip.stopAlarm() }
+            .padding(.horizontal, DS.s20).padding(.bottom, DS.s16)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.horizontal, DS.s20).padding(.bottom, DS.s8)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .safeAreaInset(edge: .bottom) {
+            DSHoldButton(title: "Hold to stop alarm", seconds: 1.2, icon: "bell.slash.fill", fill: DS.surface) { trip.stopAlarm() }
+                .padding(.horizontal, DS.s20).padding(.top, DS.s8).padding(.bottom, DS.s8)
+                .background(alarmFill)
+        }
         .background(alarmFill.ignoresSafeArea())
         .dynamicTypeSize(...DynamicTypeSize.accessibility2)
     }
@@ -509,8 +539,11 @@ struct ArrivalViewNew: View {
             VStack(spacing: 6) {
                 if nextLeg != nil {
                     DSPrimaryButton(title: "Start next leg", icon: "play.fill") { trip.nextLeg() }
-                    Button("End trip here") { trip.endTrip() }
-                        .font(DS.bodyStrong).foregroundStyle(DS.secondary).frame(maxWidth: .infinity, minHeight: DS.hit)
+                    Button { trip.endTrip() } label: {
+                        Text("End trip here").font(DS.bodyStrong).foregroundStyle(DS.secondary)
+                            .frame(maxWidth: .infinity, minHeight: DS.hit).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                 } else {
                     DSPrimaryButton(title: "Done", icon: "checkmark") { trip.endTrip() }
                 }
@@ -659,8 +692,11 @@ struct DSTransferList: View {
                     row
                 }
             }
-            Button(earlier ? "Hide earlier ones" : "Show earlier ones") { withAnimation(DS.quick) { earlier.toggle() } }
-                .font(DS.subStrong).foregroundStyle(DS.accentText).frame(minHeight: DS.hit)
+            Button { withAnimation(DS.quick) { earlier.toggle() } } label: {
+                Text(earlier ? "Hide earlier ones" : "Show earlier ones").font(DS.subStrong).foregroundStyle(DS.accentText)
+                    .frame(minWidth: DS.hit, minHeight: DS.hit).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
             if mode == .train { Text("Tap a train to be told if its platform changes or it runs late.").font(DS.footnote).foregroundStyle(DS.secondary) }
         }
     }
