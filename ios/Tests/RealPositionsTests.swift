@@ -331,6 +331,13 @@ final class RealPositionsTests: XCTestCase {
         XCTAssertEqual(RealPositions.previous(old: [1: f(0)], previous: [:], new: [1: f(20)]), [1: f(0)])
     }
 
+    func test_isRail() {
+        for m in ["REGIONAL_RAIL", "HIGHSPEED_RAIL", "RAIL", "LONG_DISTANCE", "SUBURBAN", "regional_fast_rail", "NIGHT_RAIL"] {
+            XCTAssertTrue(RealPositions.isRail(mode: m), m)
+        }
+        for m in ["BUS", "COACH", "TRAM", "SUBWAY", "METRO", "FERRY", "", "OTHER"] { XCTAssertFalse(RealPositions.isRail(mode: m), m) }
+    }
+
     func test_trainNumber() {
         XCTAssertEqual(RealPositions.trainNumber("3561"), 3561)
         XCTAssertEqual(RealPositions.trainNumber("IC 3561"), 3561)

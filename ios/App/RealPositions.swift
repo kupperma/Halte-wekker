@@ -175,6 +175,13 @@ enum RealPositions {
 
     // MARK: trains (NS)
 
+    /// A trip of this mode (as the live data names it) is a train NS may have the position of: rail ("REGIONAL_RAIL",
+    /// "HIGHSPEED_RAIL", "LONG_DISTANCE", "SUBURBAN"…), not a tram, metro, bus or coach (whose trip numbers aren't NS's).
+    static func isRail(mode: String) -> Bool {
+        let m = mode.uppercased()
+        return m.contains("RAIL") || m == "LONG_DISTANCE" || m == "SUBURBAN" || m == "TRAIN"
+    }
+
     /// The train number in a Transitous trip's short name ("3561", or "IC 3561"): its last group of digits, 1 to 6 of
     /// them, not 0. Nil when there is none.
     static func trainNumber(_ shortName: String) -> Int? {

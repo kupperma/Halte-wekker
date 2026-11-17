@@ -60,7 +60,9 @@ extension LiveTrip {
             LiveTrip.Stop(name: s.name, coordinate: s.coordinate, arrival: t.arrival, departure: t.departure, scheduled: s.scheduled,
                           scheduledArrival: s.scheduledArrival, scheduledDeparture: s.scheduledDeparture)
         }
-        return LiveTrip(line: line, headsign: headsign, live: live, stops: moved, path: path, mode: mode)
+        var out = LiveTrip(line: line, headsign: headsign, live: live, stops: moved, path: path, mode: mode)
+        out.num = num
+        return out
     }
 }
 

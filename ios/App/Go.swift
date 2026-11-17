@@ -1534,7 +1534,7 @@ struct GoMap: View {
         .onChange(of: tick) { _, t in if (!newLook || auto) && (t <= 2 || t % 4 == 0) { fit(Date(), animated: t > 2) } }
         .onChange(of: size) { _, _ in if !newLook || auto { fit(Date(), animated: false) } }
         .onChange(of: camera) { _, c in if newLook && auto && c.positionedByUser { auto = false } }
-        .realPositions(ride.map { !$0.isTrain && RealPositions.key($0.tripId) != nil } ?? false)
+        .realPositions(ride.map { RealPositions.key($0.tripId) != nil } ?? false, trains: ride?.isTrain ?? false)
         .task(id: ride?.tripId ?? "") { await run() }
     }
 

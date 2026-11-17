@@ -20,6 +20,7 @@ struct LiveTrip {
     let stops: [Stop]
     let path: [CLLocationCoordinate2D]
     let mode: String                    // as the live data names it ("BUS", "TRAM", "REGIONAL_RAIL"…), "" not known
+    var num = ""                        // a train's number as its trip names it ("2416"), for NS's positions; "" not known
     private let cum: [Double]           // metres along the path at each of its points
     private let at: [Int]               // the point on the path each stop is at
 
@@ -136,7 +137,7 @@ struct LiveBusSheet: View {
             .navigationTitle("\(target.rail ? "" : "Bus ")\(target.line) live")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
-            .realPositions(!target.rail && RealPositions.key(target.tripId) != nil)
+            .realPositions(RealPositions.key(target.tripId) != nil, trains: target.rail)
             .task { await run() }
         }
         .tint(newLook ? DS.accentText : nil)

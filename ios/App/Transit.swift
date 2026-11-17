@@ -733,7 +733,7 @@ enum Transit {
 
     private static func parseLiveTrip(_ json: [String: Any]) -> LiveTrip? {
         guard let legs = json["legs"] as? [[String: Any]], !legs.isEmpty else { return nil }
-        var stops: [LiveTrip.Stop] = [], path: [CLLocationCoordinate2D] = [], live = false, line = "", head = "", mode = ""
+        var stops: [LiveTrip.Stop] = [], path: [CLLocationCoordinate2D] = [], live = false, line = "", head = "", mode = "", num = ""
         func stop(_ o: [String: Any]?) -> LiveTrip.Stop? {
             guard let o, let la = o["lat"] as? Double, let lo = o["lon"] as? Double else { return nil }
             return LiveTrip.Stop(name: (o["name"] as? String) ?? "", coordinate: .init(latitude: la, longitude: lo),
@@ -745,6 +745,7 @@ enum Transit {
             line = (l["routeShortName"] as? String) ?? line
             head = (l["headsign"] as? String) ?? head
             mode = (l["mode"] as? String) ?? mode
+            if num.isEmpty { num = text(l["tripShortName"]) }
             live = live || ((l["realTime"] as? Bool) ?? false)
             if stops.isEmpty, let x = stop(l["from"] as? [String: Any]) { stops.append(x) }
             for o in (l["intermediateStops"] as? [[String: Any]]) ?? [] { if let x = stop(o) { stops.append(x) } }
@@ -754,7 +755,9 @@ enum Transit {
             }
         }
         guard stops.count >= 2 else { return nil }
-        return LiveTrip(line: line, headsign: head, live: live, stops: stops, path: path, mode: mode)
+        var t = LiveTrip(line: line, headsign: head, live: live, stops: stops, path: path, mode: mode)
+        t.num = num
+        return t
     }
 
     static func decodePolyline(_ s: String, precision: Int = 5) -> [CLLocationCoordinate2D] {

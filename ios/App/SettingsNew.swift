@@ -34,9 +34,9 @@ struct NewLookSettings: View {
             Text("Buses and trains move on the map while you look at it, zoomed in to a town or closer. Not in Low Power Mode.")
         }
         Section {
-            Toggle("Real bus positions", isOn: $realPositions)
+            Toggle("Real bus and train positions", isOn: $realPositions)
         } footer: {
-            Text("Shows buses where their GPS says they are (open data from OVapi). Uses about 10 MB an hour while a map is open; off in Low Data Mode.")
+            Text("Shows buses and trains where their GPS says they are (open data from OVapi and NS), and uses it to tell which one you’re on. Uses about 10 MB an hour while a map is open or it checks which one you’re on during a ride; off in Low Data Mode and Low Power Mode.")
         }
         Section {
             NavigationLink("Your places") { PlacesSettingsView() }
