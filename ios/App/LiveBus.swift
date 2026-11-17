@@ -145,7 +145,7 @@ struct LiveBusSheet: View {
     }
 
     /// Its colour on the map: its line's (the old look), or its mode's (the new look).
-    private var lineColor: Color { newLook ? DS.mode(train: target.rail, mode: trip?.mode ?? "") : Paper.line(target.line, train: target.rail) }
+    private var lineColor: Color { newLook ? DS.mode(train: target.rail, mode: trip?.mode ?? "", line: target.line) : Paper.line(target.line, train: target.rail) }
 
     @MapContentBuilder private func content(_ now: Date) -> some MapContent {
         UserAnnotation()

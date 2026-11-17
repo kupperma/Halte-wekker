@@ -90,7 +90,7 @@ struct VehiclePill: View {
         }
         .foregroundStyle(DS.onAccent)
         .padding(.leading, 6).padding(.trailing, 8).padding(.vertical, 4)
-        .background(DS.mode(train: v.isTrain, mode: v.mode), in: Capsule())
+        .background(DS.mode(train: v.isTrain, mode: v.mode, line: v.line), in: Capsule())
         .overlay(Capsule().stroke(Color.white.opacity(0.9), lineWidth: 1))      // (no shadow: up to 60 move every 2 s)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(v.isTrain ? "Train" : "Bus") \(v.line)\(v.to.isEmpty ? "" : ", next stop \(Fmt.place(v.to))")")

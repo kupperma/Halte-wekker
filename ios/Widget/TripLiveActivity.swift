@@ -76,7 +76,7 @@ struct Countdown: View {
     }
 }
 
-/// A line's pill, like the app's: an orange bus pill with its number, a navy one for a train ("IC", "SPR").
+/// A line's pill, like the app's: an orange bus pill with its number, indigo for an intercity ("IC"), cyan for a sprinter ("SPR").
 struct LivePill: View {
     let s: TripAttributes.ContentState
     let look: LiveLook

@@ -1544,7 +1544,7 @@ struct GoMap: View {
     }
 
     /// A line's colour: its own (the old look), or its mode's (the new look).
-    private func lineColor(_ r: Ride) -> Color { newLook ? DS.mode(train: r.isTrain) : Paper.line(r.line, train: r.isTrain) }
+    private func lineColor(_ r: Ride) -> Color { newLook ? DS.mode(train: r.isTrain, line: r.line) : Paper.line(r.line, train: r.isTrain) }
 
     @MapContentBuilder private func content(_ now: Date) -> some MapContent {
         UserAnnotation()
@@ -1588,9 +1588,9 @@ struct GoMap: View {
                         Text(saved ? r.line : "\(r.line) · \(Fmt.hhmm(r.departure))").font(newLook ? DS.footnoteStrong : BoardInk.sans(12)).monospacedDigit()
                     }
                     .foregroundStyle(.white).padding(.horizontal, 8).padding(.vertical, 5)
-                    .background(newLook ? DS.mode(train: r.isTrain) : Paper.navy, in: RoundedRectangle(cornerRadius: newLook ? DS.pillRadius : 4))
-                    Image(systemName: "triangle.fill").font(.system(size: 9)).foregroundStyle(newLook ? DS.mode(train: r.isTrain) : Paper.navy).rotationEffect(.degrees(180)).offset(y: -2)
-                    Circle().fill(Color.white).frame(width: 14, height: 14).overlay(Circle().stroke(newLook ? DS.mode(train: r.isTrain) : Paper.ink, lineWidth: 3.5))
+                    .background(newLook ? DS.mode(train: r.isTrain, line: r.line) : Paper.navy, in: RoundedRectangle(cornerRadius: newLook ? DS.pillRadius : 4))
+                    Image(systemName: "triangle.fill").font(.system(size: 9)).foregroundStyle(newLook ? DS.mode(train: r.isTrain, line: r.line) : Paper.navy).rotationEffect(.degrees(180)).offset(y: -2)
+                    Circle().fill(Color.white).frame(width: 14, height: 14).overlay(Circle().stroke(newLook ? DS.mode(train: r.isTrain, line: r.line) : Paper.ink, lineWidth: 3.5))
                 }
                 .shadow(color: .black.opacity(0.4), radius: 4, y: 2)
             }
@@ -1689,7 +1689,7 @@ struct TripLine: View {
 
     private var ink: Color { newLook ? DS.text : Paper.ink }
     private var muted: Color { newLook ? DS.secondary : Paper.muted }
-    private func color(_ r: Ride) -> Color { newLook ? DS.mode(train: r.isTrain) : Paper.line(r.line, train: r.isTrain) }
+    private func color(_ r: Ride) -> Color { newLook ? DS.mode(train: r.isTrain, line: r.line) : Paper.line(r.line, train: r.isTrain) }
 
     private struct Stop { let name: String; let time: Date; let sub: String; var end = false }
     private struct Seg { let ride: Ride?; let height: CGFloat }

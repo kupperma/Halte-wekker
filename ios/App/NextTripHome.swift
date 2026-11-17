@@ -23,7 +23,7 @@ struct DSLegBar: View {
             HStack(spacing: 3) {
                 ForEach(Array(legs.enumerated()), id: \.offset) { k, l in
                     Capsule()
-                        .fill(l.kind == .ride ? DS.mode(train: l.train) : DS.legQuiet)
+                        .fill(l.kind == .ride ? DS.mode(train: l.train, line: l.line) : DS.legQuiet)
                         .frame(width: max(2, room * CGFloat(f[safe: k] ?? 0)))
                 }
             }

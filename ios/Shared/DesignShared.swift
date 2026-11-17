@@ -10,13 +10,19 @@ enum DSCore {
     /// Late, cancelled, a tight change, "Wake up".
     static let warning: UInt32 = 0xA84219
     static let warningDark: UInt32 = 0xFF8A5C
-    /// Line pills and drawings, by mode.
-    static let bus: UInt32 = 0xC4461F
-    static let train: UInt32 = 0x2B3A55
-    static let trainDark: UInt32 = 0x4A68A8
-    /// The sprinter's lighter blue (only the drawings and glyphs; its pill is a train's).
-    static let sprinter: UInt32 = 0x4F6FB0
-    static let sprinterDark: UInt32 = 0x6A88C6
+    /// Line pills, glyphs and drawings, by kind (set C1, 0.20.4): the bus orange, the intercity indigo, the sprinter
+    /// cyan; each with a slightly darker shade (the drawings' doors) and a slightly lighter one (their stripe and nose).
+    /// A train it can't tell more about takes the intercity's. White bold text on each: bus 3.5:1, intercity 8.0:1,
+    /// sprinter 3.6:1 (fine at pill size: bold, and AA for large text).
+    static let bus: UInt32 = 0xE0632E
+    static let busLight: UInt32 = 0xE4794B
+    static let busDoor: UInt32 = 0xC55728
+    static let intercity: UInt32 = 0x3B44B0
+    static let intercityLight: UInt32 = 0x565EBB
+    static let intercityDoor: UInt32 = 0x343C9B
+    static let sprinter: UInt32 = 0x0A93B5
+    static let sprinterLight: UInt32 = 0x2CA2BF
+    static let sprinterDoor: UInt32 = 0x09819F
     static let tram: UInt32 = 0x6B3FA0
     static let tramDark: UInt32 = 0x7A55B0
 }
@@ -35,7 +41,7 @@ struct LiveLook {
     /// The accent as text, an icon or a dot.
     var accent: Color { Color(hex: dark ? DSCore.accentTextDark : DSCore.accent) }
     var warning: Color { Color(hex: dark ? DSCore.warningDark : DSCore.warning) }
-    /// A thin edge round the drawings, so a navy train still shows on a dark surface.
+    /// A thin edge round the tram and metro drawings, so they still show on the surface.
     var outline: Color { dark ? Color.white.opacity(0.22) : Color.black.opacity(0.22) }
 
     static let light = LiveLook(dark: false)
@@ -43,17 +49,15 @@ struct LiveLook {
     static let islandLook = LiveLook(dark: true, island: true)
     static func of(_ scheme: ColorScheme) -> LiveLook { scheme == .dark ? .darkLook : .light }
 
-    /// A line pill's fill: orange for a bus, navy for every train, purple for a tram or metro.
+    /// A line pill's fill, and the vehicle glyph's colour: orange for a bus, indigo for an intercity (and a train it
+    /// can't tell more about), cyan for a sprinter, purple for a tram or metro.
     func pill(_ k: VehicleKind) -> Color {
         switch k {
         case .bus: return Color(hex: DSCore.bus)
         case .tram, .metro: return Color(hex: dark ? DSCore.tramDark : DSCore.tram)
-        case .ic, .sprinter, .train: return Color(hex: dark ? DSCore.trainDark : DSCore.train)
+        case .ic, .train: return Color(hex: DSCore.intercity)
+        case .sprinter: return Color(hex: DSCore.sprinter)
         }
     }
-
-    /// A vehicle glyph's colour (the sprinter in its lighter blue).
-    func glyph(_ k: VehicleKind) -> Color {
-        k == .sprinter ? Color(hex: dark ? DSCore.sprinterDark : DSCore.sprinter) : pill(k)
-    }
+    func glyph(_ k: VehicleKind) -> Color { pill(k) }
 }

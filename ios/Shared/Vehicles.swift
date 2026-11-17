@@ -2,10 +2,13 @@ import SwiftUI
 
 // The vehicle that drives along the track on the lock screen and in the Dynamic Island: a bus, an intercity, a
 // sprinter, a tram or a metro, seen from the side, facing right (the way it drives). Drawn with plain shapes so it
-// renders on the lock screen and stays crisp small (some 18–26 pt tall). Generic shapes and the app's own colours:
-// no operator's livery or logo.
+// renders on the lock screen and stays crisp small (some 18–26 pt tall). Shapes after Dutch double-deck intercities,
+// sprinters and city buses, in the app's own line colours (the whole body in the line colour, light glass): no
+// operator's livery or logo.
 
-/// One car of a vehicle: `front` has its cab on the right, `back` on the left (a unit that can drive both ways),
+// MARK: - The tram and the metro (simple shapes, by car)
+
+/// One car of a tram or metro: `front` has its cab on the right, `back` on the left (a unit that can drive both ways),
 /// `coach` none.
 enum CarEnd { case front, back, coach }
 
@@ -14,7 +17,7 @@ enum CarEnd { case front, back, coach }
 private typealias Box = (CGFloat, CGFloat, CGFloat, CGFloat)
 
 private struct CarPath: Shape {
-    enum Part { case body, skirt, band, stripe, doors, glass, arches, wheels, hubs, bogies, lights, roof }
+    enum Part { case body, skirt, band, stripe, doors, glass, wheels, bogies, lights, roof }
     let kind: VehicleKind
     let end: CarEnd
     let part: Part
@@ -53,90 +56,17 @@ private struct CarPath: Shape {
             back ? UnevenRoundedRectangle(topLeadingRadius: ft, bottomLeadingRadius: fb, bottomTrailingRadius: rb, topTrailingRadius: rt).path(in: rect)
                  : UnevenRoundedRectangle(topLeadingRadius: rt, bottomLeadingRadius: rb, bottomTrailingRadius: fb, topTrailingRadius: ft).path(in: rect)
         }
-        let cab = end != .coach
         // a rail car's bogies: two wheels each
         let bogieAt: [CGFloat] = [0.13, 0.87]
         let wheelGap = 0.17 * h / w
 
         switch (kind, part) {
-        // MARK: the bus: a long box, a big windscreen, a dark window band, two doors, two wheels
-        case (.bus, .body):
-            return uneven(box(0, 0.04, 1, 0.84), front: h * 0.2, h * 0.07, rear: h * 0.1, h * 0.05)
-        case (.bus, .skirt): return Path(box(0, 0.68, 1, 0.84))
-        case (.bus, .glass):
-            var list: [Box] = panes(0.035, 0.415, 3, 0.13, 0.52) + panes(0.555, 0.785, 2, 0.13, 0.52)
-            list += leaves(0.44, 0.53, 0.13, 0.80) + leaves(0.80, 0.89, 0.13, 0.80)
-            var p = rects(list)
-            p.addRoundedRect(in: box(0.905, 0.10, 1.02, 0.62), cornerSize: CGSize(width: h * 0.04, height: h * 0.04))   // the windscreen
-            return p
-        case (.bus, .doors): return rects([(0.44, 0.12, 0.53, 0.82), (0.80, 0.12, 0.89, 0.82)], corner: 0.01)
-        case (.bus, .arches): return circles([0.22, 0.70], y: 0.84, radius: h * 0.175)
-        case (.bus, .wheels): return circles([0.22, 0.70], y: 0.84, radius: h * 0.14)
-        case (.bus, .hubs): return circles([0.22, 0.70], y: 0.84, radius: h * 0.055)
-        case (.bus, .lights): return circles([0.975], y: 0.71, radius: h * 0.045)
-
-        // MARK: the intercity: double-deck, a sloped pointed nose, a light window band, a thin accent stripe
-        case (.ic, .body):
-            guard cab else { return uneven(box(0, 0.02, 1, 0.84), front: h * 0.1, h * 0.04, rear: h * 0.1, h * 0.04) }
-            var p = Path()
-            p.move(to: pt(0, 0.80))
-            p.addLine(to: pt(0, 0.10))
-            p.addQuadCurve(to: pt(0.03, 0.02), control: pt(0, 0.02))
-            p.addLine(to: pt(0.74, 0.02))
-            p.addQuadCurve(to: pt(1.0, 0.64), control: pt(0.97, 0.04))            // the long sloped nose
-            p.addLine(to: pt(0.995, 0.80))
-            p.addQuadCurve(to: pt(0.97, 0.84), control: pt(0.995, 0.84))
-            p.addLine(to: pt(0.01, 0.84))
-            p.addQuadCurve(to: pt(0, 0.80), control: pt(0, 0.84))
-            p.closeSubpath()
-            return p
-        case (.ic, .band): return Path(box(0, 0.08, cab ? 0.77 : 1, 0.64))
-        case (.ic, .stripe): return Path(box(0, 0.70, 1, 0.735))
-        case (.ic, .doors):
-            let list: [Box] = cab ? [(0.03, 0.06, 0.09, 0.82)] : [(0.03, 0.06, 0.09, 0.82), (0.91, 0.06, 0.97, 0.82)]
-            return rects(list, corner: 0.01)
-        case (.ic, .glass):
-            let x1: CGFloat = cab ? 0.73 : 0.87, n = cab ? 5 : 6
-            var list: [Box] = panes(0.13, x1, n, 0.13, 0.31, gap: 0.02) + panes(0.13, x1, n, 0.40, 0.58, gap: 0.02)
-            list.append((0.042, 0.14, 0.078, 0.40))
-            if !cab { list.append((0.922, 0.14, 0.958, 0.40)) }
-            var p = rects(list)
-            if cab {                                                          // the windscreen, along the slope
-                p.move(to: pt(0.785, 0.09)); p.addLine(to: pt(0.855, 0.12)); p.addLine(to: pt(0.915, 0.23))
-                p.addLine(to: pt(0.95, 0.40)); p.addLine(to: pt(0.80, 0.40)); p.closeSubpath()
-            }
-            return p
-        case (.ic, .lights): return cab ? circles([0.976], y: 0.72, radius: h * 0.04) : Path()
-
-        // MARK: the sprinter (and a train it can't tell more about): low, single-deck, a round flat nose, wide doors
-        case (.sprinter, .body), (.train, .body):
-            let bh = 0.66 * h
-            let rect = box(0, 0.18, 1, 0.84)
-            switch end {
-            case .coach: return uneven(rect, front: bh * 0.1, bh * 0.06, rear: bh * 0.1, bh * 0.06)
-            default: return uneven(rect, front: bh * 0.5, bh * 0.2, rear: bh * 0.1, bh * 0.06)
-            }
-        case (.sprinter, .band), (.train, .band): return Path(box(0, 0.60, 1, 0.645))
-        case (.sprinter, .doors), (.train, .doors): return rects([(0.22, 0.24, 0.35, 0.82), (0.58, 0.24, 0.71, 0.82)], corner: 0.015)
-        case (.sprinter, .glass), (.train, .glass):
-            var list: [Box] = [(0.05, 0.30, 0.20, 0.54), (0.37, 0.30, 0.56, 0.54), (0.73, 0.30, 0.875, 0.54)]
-            list += leaves(0.22, 0.35, 0.30, 0.62) + leaves(0.58, 0.71, 0.30, 0.62)
-            var p = rects(list)
-            if cab { p.addRoundedRect(in: box(0.905, 0.28, 1.02, 0.55), cornerSize: CGSize(width: h * 0.05, height: h * 0.05)) }
-            return p
-        case (.sprinter, .bogies), (.train, .bogies), (.ic, .bogies), (.metro, .bogies):
+        case (.metro, .bogies):
             var p = Path()
             for b in bogieAt { p.addRoundedRect(in: box(b - wheelGap - 0.03, 0.82, b + wheelGap + 0.03, 0.89), cornerSize: CGSize(width: 1, height: 1)) }
             return p
-        case (.sprinter, .wheels), (.train, .wheels), (.ic, .wheels), (.metro, .wheels):
+        case (.metro, .wheels):
             return circles(bogieAt.flatMap { [$0 - wheelGap, $0 + wheelGap] }, y: 0.905, radius: h * 0.075)
-        case (.sprinter, .lights), (.train, .lights): return end == .front ? circles([0.968], y: 0.67, radius: h * 0.04) : Path()
-        case (.sprinter, .roof), (.train, .roof):
-            guard end == .front else { return Path() }
-            var p = Path()                                                    // a small pantograph
-            p.move(to: pt(0.46, 0.18)); p.addLine(to: pt(0.52, 0.07)); p.addLine(to: pt(0.58, 0.18))
-            p.move(to: pt(0.48, 0.07)); p.addLine(to: pt(0.56, 0.07))
-            return p
 
         // MARK: the tram: two short sections with round ends, a pantograph
         case (.tram, .body):
@@ -175,8 +105,8 @@ private struct CarPath: Shape {
     }
 }
 
-/// The colours of one kind, in the app's palette: the bus orange, the train navy, a lighter blue for the sprinter.
-private struct VehicleColors {
+/// A tram's or metro's colours.
+private struct CarColors {
     let body: Color, skirt: Color, band: Color, stripe: Color, door: Color
     let glass = Color(hex: 0x1B2431)
     let wheel = Color(hex: 0x15181C)
@@ -185,42 +115,28 @@ private struct VehicleColors {
 
     init(_ k: VehicleKind, _ look: LiveLook) {
         let d = look.dark
-        switch k {
-        case .bus:
-            body = Color(hex: DSCore.bus); skirt = Color(hex: 0x9C3415); band = .clear; stripe = .clear; door = Color(hex: 0x9C3415)
-        case .ic:
-            body = Color(hex: d ? DSCore.trainDark : DSCore.train); skirt = .clear; band = Color(hex: 0xDCE3EE)
-            stripe = look.accent; door = body
-        case .sprinter:
-            body = Color(hex: d ? DSCore.sprinterDark : DSCore.sprinter); skirt = .clear; band = Color(hex: 0xDCE4F2)
-            stripe = .clear; door = Color(hex: d ? 0x5876B4 : 0x3F5B96)
-        case .train:
-            body = Color(hex: d ? DSCore.trainDark : DSCore.train); skirt = .clear; band = Color(hex: 0xDCE3EE)
-            stripe = .clear; door = Color(hex: d ? 0x3D5A94 : 0x22304A)
-        case .tram:
+        if k == .tram {
             body = Color(hex: d ? DSCore.tramDark : DSCore.tram); skirt = Color(hex: d ? 0x5E3E8E : 0x4E2C78)
             band = Color(hex: 0xE7DDF3); stripe = .clear; door = Color(hex: d ? 0x6A479F : 0x5A3489)
-        case .metro:
+        } else {
             body = Color(hex: d ? 0xAEB5BF : 0xC3C9D2); skirt = .clear; band = .clear
             stripe = Color(hex: d ? DSCore.tramDark : DSCore.tram); door = Color(hex: d ? 0x949BA6 : 0x9FA6B1)
         }
     }
 }
 
-/// One car, drawn.
+/// One tram or metro car, drawn.
 private struct VehicleCar: View {
     let kind: VehicleKind
     let end: CarEnd
     let look: LiveLook
     var body: some View {
-        let c = VehicleColors(kind, look)
+        let c = CarColors(kind, look)
         let shape = CarPath(kind: kind, end: end, part: .body)
         ZStack {
             CarPath(kind: kind, end: end, part: .roof).stroke(look.dark ? c.hub : c.wheel, lineWidth: 1)
-            if kind != .bus {
-                CarPath(kind: kind, end: end, part: .bogies).fill(c.wheel)
-                CarPath(kind: kind, end: end, part: .wheels).fill(c.wheel)
-            }
+            CarPath(kind: kind, end: end, part: .bogies).fill(c.wheel)
+            CarPath(kind: kind, end: end, part: .wheels).fill(c.wheel)
             ZStack {
                 shape.fill(c.body)
                 CarPath(kind: kind, end: end, part: .skirt).fill(c.skirt)
@@ -229,14 +145,9 @@ private struct VehicleCar: View {
                 CarPath(kind: kind, end: end, part: .doors).fill(c.door)
                 CarPath(kind: kind, end: end, part: .glass).fill(c.glass)
                 CarPath(kind: kind, end: end, part: .lights).fill(c.light)
-                CarPath(kind: kind, end: end, part: .arches).fill(c.glass)
             }
             .clipShape(shape)
             shape.stroke(look.outline, lineWidth: 0.6)
-            if kind == .bus {
-                CarPath(kind: kind, end: end, part: .wheels).fill(c.wheel)
-                CarPath(kind: kind, end: end, part: .hubs).fill(c.hub)
-            }
         }
     }
 }
@@ -247,41 +158,293 @@ struct VehicleDrawing: View {
     let height: CGFloat
     var look: LiveLook = .darkLook
 
-    static func cars(_ k: VehicleKind) -> [CarEnd] {
-        switch k {
-        case .bus: return [.front]
-        case .ic: return [.coach, .front]                    // a cab car and one more coach
-        case .sprinter, .train, .tram, .metro: return [.back, .front]
-        }
-    }
-    /// A car's width for its height.
-    static func carAspect(_ k: VehicleKind) -> CGFloat {
-        switch k {
-        case .bus: return 3.3
-        case .ic: return 3.9
-        case .sprinter, .train: return 3.4
-        case .tram: return 2.7
-        case .metro: return 3.2
-        }
-    }
-    static func gap(_ height: CGFloat) -> CGFloat { max(1, height * 0.06) }
+    /// Below this height the finest detail (door windows, window dividers, the pantograph) is left out.
+    static let fineFrom: CGFloat = 20
+
+    // the tram and the metro: two cars each
+    private static let carAspect: [VehicleKind: CGFloat] = [.tram: 2.7, .metro: 3.2]
+    private static func gap(_ height: CGFloat) -> CGFloat { max(1, height * 0.06) }
+
     static func width(_ k: VehicleKind, height: CGFloat) -> CGFloat {
-        let n = CGFloat(cars(k).count)
-        return n * carAspect(k) * height + (n - 1) * gap(height)
+        if let art = VehicleArt.of(k) { return height * art.box.width / art.box.height }
+        return 2 * (carAspect[k] ?? 3) * height + gap(height)
     }
 
     var body: some View {
-        let cars = Self.cars(kind), cw = Self.carAspect(kind) * height
-        HStack(spacing: Self.gap(height)) {
-            ForEach(Array(cars.enumerated()), id: \.offset) { _, end in
-                VehicleCar(kind: kind, end: end, look: look).frame(width: cw, height: height)
+        Group {
+            if let art = VehicleArt.of(kind) {
+                ArtView(art: art, palette: ArtPalette.of(kind), height: height)
+            } else {
+                let cw = (Self.carAspect[kind] ?? 3) * height
+                HStack(spacing: Self.gap(height)) {
+                    VehicleCar(kind: kind, end: .back, look: look).frame(width: cw, height: height)
+                    VehicleCar(kind: kind, end: .front, look: look).frame(width: cw, height: height)
+                }
+                .background(alignment: .bottom) {                // the coupling between the cars
+                    Rectangle().fill(Color(hex: 0x1B2431)).frame(height: height * 0.14).padding(.bottom, height * 0.24).padding(.horizontal, cw * 0.4)
+                }
             }
-        }
-        .background(alignment: .bottom) {                        // the couplings between the cars
-            if cars.count > 1 { Rectangle().fill(Color(hex: 0x1B2431)).frame(height: height * 0.14).padding(.bottom, height * 0.24).padding(.horizontal, cw * 0.4) }
         }
         .frame(width: Self.width(kind, height: height), height: height)
         .accessibilityHidden(true)
+    }
+}
+
+// MARK: - The bus, the intercity and the sprinter (drawn in their own view box, scaled to the frame)
+
+/// The N1 colours: the whole body in the line colour, a slightly darker shade for the doors, a slightly lighter one
+/// for the stripe and the cab's nose, light glass, dark wheels and bogies.
+struct ArtPalette {
+    let body: Color, light: Color, door: Color
+    static let glass = Color(hex: 0xD3DCE5)
+    static let dark = Color(hex: 0x15181C)
+    static let headlight = Color(hex: 0xFFF4D6)
+    static let display = Color(hex: 0xFFB37A)
+    static let hub = Color(hex: 0x6B737B)
+
+    static func of(_ k: VehicleKind) -> ArtPalette {
+        switch k {
+        case .bus: return ArtPalette(body: Color(hex: DSCore.bus), light: Color(hex: DSCore.busLight), door: Color(hex: DSCore.busDoor))
+        case .sprinter: return ArtPalette(body: Color(hex: DSCore.sprinter), light: Color(hex: DSCore.sprinterLight), door: Color(hex: DSCore.sprinterDoor))
+        default: return ArtPalette(body: Color(hex: DSCore.intercity), light: Color(hex: DSCore.intercityLight), door: Color(hex: DSCore.intercityDoor))
+        }
+    }
+}
+
+/// One layer of a drawing: a path in the view box, filled (or stroked) in one of the palette's colours.
+private struct ArtLayer {
+    enum Role { case body, light, door, glass, dark, headlight, display, hub }
+    let path: Path
+    let role: Role
+    var stroke: CGFloat? = nil
+    var opacity: Double = 1
+    /// Fine detail, left out when the drawing is small.
+    var fine = false
+}
+
+/// A vehicle's drawing: its layers, bottom first, in a view box.
+struct VehicleArt {
+    fileprivate let box: CGSize
+    fileprivate let layers: [ArtLayer]
+
+    /// The bus, the intercity and the sprinter (a train it can't tell more about is drawn as a sprinter in the
+    /// intercity's colour); nil for the tram and the metro.
+    static func of(_ k: VehicleKind) -> VehicleArt? {
+        switch k {
+        case .bus: return bus
+        case .ic: return intercity
+        case .sprinter, .train: return sprinter
+        case .tram, .metro: return nil
+        }
+    }
+
+    // MARK: the city bus (200 × 56): a low floor, a big windscreen with a destination display, 4 + 1 side windows,
+    // two double doors, wheel arches and a roof unit
+
+    static let bus: VehicleArt = {
+        var l: [ArtLayer] = []
+        l.append(ArtLayer(path: rr(22, 3, 44, 5, 2), role: .dark, opacity: 0.6))                  // the roof unit
+        var b = PathPen(); b.M(3, 12); b.corner(6, -6, 6); b.H(184); b.c(6, 0, 10, 3, 11, 9); b.l(2, 26); b.corner(-5, 5, 5); b.H(3); b.z()
+        l.append(ArtLayer(path: b.path, role: .body))
+        var n = PathPen(); n.M(184, 6); n.c(6, 0, 10, 3, 11, 9); n.l(2, 26); n.corner(-5, 5, 5); n.H(182); n.z()
+        l.append(ArtLayer(path: n.path, role: .light))                                           // the front
+        var w = PathPen(); w.M(183, 12); w.h(9); w.c(1, 0, 2, 1, 2, 2); w.l(1.5, 21); w.H(183); w.z()
+        l.append(ArtLayer(path: w.path, role: .glass))                                           // the windscreen
+        l.append(ArtLayer(path: rr(180, 7.5, 13, 3, 1), role: .dark))                            // the destination display
+        l.append(ArtLayer(path: rr(182, 8.3, 8, 1.4, 0.7), role: .display, fine: true))
+        var win = Path()
+        for x in [10, 40, 116, 146] as [CGFloat] { win.addPath(rr(x, 12, 26, 17, 2.5)) }
+        win.addPath(rr(70, 12, 15, 17, 2.5))
+        l.append(ArtLayer(path: win, role: .glass))
+        var doors = Path(), leaves = Path()
+        for dx in [90, 165] as [CGFloat] {
+            doors.addPath(rr(dx, 10, 15, 36, 2))
+            leaves.addPath(rr(dx + 2, 12.5, 5, 26, 1)); leaves.addPath(rr(dx + 8, 12.5, 5, 26, 1))
+        }
+        l.append(ArtLayer(path: doors, role: .door))
+        l.append(ArtLayer(path: doors, role: .dark, stroke: 0.8))
+        l.append(ArtLayer(path: leaves, role: .glass))
+        l.append(ArtLayer(path: Path(CGRect(x: 3, y: 35, width: 160, height: 3)), role: .light)) // the stripe
+        var arches = Path(), wheels = Path(), hubs = Path()
+        for cx in [38, 148] as [CGFloat] {
+            arches.addPath(dot(cx, 46, 9)); wheels.addPath(dot(cx, 47, 7)); hubs.addPath(dot(cx, 47, 3))
+        }
+        l.append(ArtLayer(path: arches, role: .body))
+        l.append(ArtLayer(path: wheels, role: .dark))
+        l.append(ArtLayer(path: hubs, role: .hub))
+        l.append(ArtLayer(path: rr(194, 38, 3, 3, 1), role: .headlight))
+        return VehicleArt(box: CGSize(width: 200, height: 56), layers: l)
+    }()
+
+    // MARK: the intercity (300 × 56): double-deck, a coach and a cab car; two rows of windows between the doors, a low
+    // single-deck end with one window, doors with a small window, a sloped nose with a windscreen and a headlight, a
+    // pantograph on the cab car, two bogies a car
+
+    static let intercity: VehicleArt = {
+        var l: [ArtLayer] = []
+        func car(_ x0: CGFloat, cab: Bool) {
+            let len: CGFloat = 138
+            let end = x0 + (cab ? 118 : len)
+            if cab {
+                var b = PathPen(); b.M(x0, 14); b.corner(7, -7, 7); b.H(x0 + 118); b.c(10, 0, 18, 4, 23, 12); b.l(7, 13)
+                b.c(2, 4, 2, 8, 1, 12); b.l(-2, 4); b.H(x0); b.z()
+                l.append(ArtLayer(path: b.path, role: .body))
+                var n = PathPen(); n.M(x0 + 118, 7); n.c(10, 0, 18, 4, 23, 12); n.l(7, 13); n.c(2, 4, 2, 8, 1, 12); n.l(-2, 4); n.H(x0 + 118); n.z()
+                l.append(ArtLayer(path: n.path, role: .light))                                   // the nose
+                var w = PathPen(); w.M(x0 + 124, 10); w.c(7, 0, 12, 4, 15, 10); w.l(5, 9); w.H(x0 + 124); w.z()
+                l.append(ArtLayer(path: w.path, role: .glass))                                   // the windscreen
+                l.append(ArtLayer(path: dot(x0 + 145, 41, 1.8), role: .headlight))
+                var pan = Path()                                                                 // the pantograph
+                pan.move(to: CGPoint(x: x0 + 60, y: 7)); pan.addLine(to: CGPoint(x: x0 + 68, y: 2)); pan.addLine(to: CGPoint(x: x0 + 76, y: 7))
+                pan.move(to: CGPoint(x: x0 + 64, y: 2)); pan.addLine(to: CGPoint(x: x0 + 72, y: 2))
+                l.append(ArtLayer(path: pan, role: .dark, stroke: 1.5, fine: true))
+            } else {
+                l.append(ArtLayer(path: rr(x0, 7, len, 41, 7), role: .body))
+            }
+            var glass = rr(x0 + 5, 20, 12, 11, 2)                                                // the low ends' windows
+            if !cab { glass.addPath(rr(end - 17, 20, 12, 11, 2)) }
+            let de = cab ? x0 + 106 : end - 29
+            var doors = Path(), doorGlass = Path()
+            for dx in [x0 + 20, de] {
+                doors.addPath(rr(dx, 17, 9, 31, 1.5)); doorGlass.addPath(rr(dx + 2, 20, 5, 10, 1))
+            }
+            l.append(ArtLayer(path: doors, role: .door, opacity: 0.95))
+            l.append(ArtLayer(path: doors, role: .dark, stroke: 0.8))
+            l.append(ArtLayer(path: doorGlass, role: .glass, fine: true))
+            let xs = x0 + 33, xe = de - 4, n: CGFloat = 4, ww = (xe - xs - (n - 1) * 3) / n
+            for i in 0..<4 {                                                                     // the two decks
+                let xx = xs + CGFloat(i) * (ww + 3)
+                glass.addPath(rr(xx, 11, ww, 10, 2)); glass.addPath(rr(xx, 27, ww, 10, 2))
+            }
+            l.append(ArtLayer(path: glass, role: .glass))
+            l.append(ArtLayer(path: Path(CGRect(x: x0, y: 41, width: cab ? 118 : end - x0, height: 2.5)), role: .light))
+            var bogies = Path(), wheels = Path()
+            for bx in cab ? [x0 + 8, x0 + 110] : [x0 + 8, end - 30] {
+                bogies.addPath(rr(bx, 48, 22, 4, 2)); wheels.addPath(dot(bx + 5, 52, 3)); wheels.addPath(dot(bx + 17, 52, 3))
+            }
+            bogies.addPath(wheels)
+            l.append(ArtLayer(path: bogies, role: .dark))
+        }
+        car(2, cab: false)
+        l.append(ArtLayer(path: Path(CGRect(x: 140, y: 20, width: 4, height: 22)), role: .dark)) // the gangway
+        car(144, cab: true)
+        return VehicleArt(box: CGSize(width: 300, height: 56), layers: l)
+    }()
+
+    // MARK: the sprinter (260 × 50): two low cars, a long window band with dividers, two wide double doors a car, a
+    // rounded wrap-around front, small wheels
+
+    static let sprinter: VehicleArt = {
+        var l: [ArtLayer] = []
+        func car(_ x0: CGFloat, cab: Bool) {
+            let len: CGFloat = cab ? 96 : 122
+            if cab {
+                var b = PathPen(); b.M(x0, 15); b.corner(7, -7, 7); b.H(x0 + 96); b.c(14, 0, 24, 10, 25, 24); b.v(8); b.corner(-4, 4, 4); b.H(x0); b.z()
+                l.append(ArtLayer(path: b.path, role: .body))
+                var n = PathPen(); n.M(x0 + 96, 8); n.c(14, 0, 24, 10, 25, 24); n.v(8); n.corner(-4, 4, 4); n.H(x0 + 96); n.z()
+                l.append(ArtLayer(path: n.path, role: .light))                                   // the front
+                var w = PathPen(); w.M(x0 + 98, 12); w.c(10, 1, 17, 7, 19, 16); w.H(x0 + 98); w.z()
+                l.append(ArtLayer(path: w.path, role: .glass))
+                l.append(ArtLayer(path: dot(x0 + 117, 38, 1.8), role: .headlight))
+            } else {
+                l.append(ArtLayer(path: rr(x0, 8, 122, 36, 7), role: .body))
+            }
+            l.append(ArtLayer(path: rr(x0 + 6, 14, len - 12, 13, 3), role: .glass))             // the window band
+            var dividers = Path()
+            for k in 1...4 { dividers.addRect(CGRect(x: x0 + 6 + CGFloat(k) * (len - 12) / 5, y: 14, width: 1.5, height: 13)) }
+            l.append(ArtLayer(path: dividers, role: .body, fine: true))
+            var doors = Path(), leaves = Path()
+            for dx in cab ? [x0 + 26, x0 + 70] : [x0 + 26, x0 + 78] {
+                doors.addPath(rr(dx, 12, 14, 32, 2))
+                leaves.addPath(rr(dx + 2, 15, 4.5, 14, 1)); leaves.addPath(rr(dx + 7.5, 15, 4.5, 14, 1))
+            }
+            l.append(ArtLayer(path: doors, role: .door))
+            l.append(ArtLayer(path: doors, role: .dark, stroke: 0.8))
+            l.append(ArtLayer(path: leaves, role: .glass, fine: true))
+            l.append(ArtLayer(path: Path(CGRect(x: x0, y: 36, width: len, height: 3)), role: .light))
+            var wheels = Path()
+            for bx in cab ? [x0 + 6, x0 + 92] : [x0 + 6, x0 + 98] { wheels.addPath(dot(bx + 4, 45, 2.6)); wheels.addPath(dot(bx + 13, 45, 2.6)) }
+            l.append(ArtLayer(path: wheels, role: .dark))
+        }
+        car(2, cab: false)
+        l.append(ArtLayer(path: Path(CGRect(x: 124, y: 18, width: 4, height: 20)), role: .dark)) // the gangway
+        car(128, cab: true)
+        return VehicleArt(box: CGSize(width: 260, height: 50), layers: l)
+    }()
+}
+
+/// A rounded rectangle in view-box units.
+private func rr(_ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat, _ r: CGFloat) -> Path {
+    Path(roundedRect: CGRect(x: x, y: y, width: w, height: h), cornerRadius: r)
+}
+private func dot(_ cx: CGFloat, _ cy: CGFloat, _ r: CGFloat) -> Path {
+    Path(ellipseIn: CGRect(x: cx - r, y: cy - r, width: r * 2, height: r * 2))
+}
+
+/// SVG-style path commands (absolute capitals, relative small letters), so the drawings keep the design's numbers.
+private struct PathPen {
+    var path = Path()
+    var at = CGPoint.zero
+    mutating func M(_ x: CGFloat, _ y: CGFloat) { at = CGPoint(x: x, y: y); path.move(to: at) }
+    mutating func L(_ x: CGFloat, _ y: CGFloat) { at = CGPoint(x: x, y: y); path.addLine(to: at) }
+    mutating func l(_ dx: CGFloat, _ dy: CGFloat) { L(at.x + dx, at.y + dy) }
+    mutating func H(_ x: CGFloat) { L(x, at.y) }
+    mutating func h(_ dx: CGFloat) { L(at.x + dx, at.y) }
+    mutating func v(_ dy: CGFloat) { L(at.x, at.y + dy) }
+    mutating func c(_ x1: CGFloat, _ y1: CGFloat, _ x2: CGFloat, _ y2: CGFloat, _ dx: CGFloat, _ dy: CGFloat) {
+        let end = CGPoint(x: at.x + dx, y: at.y + dy)
+        path.addCurve(to: end, control1: CGPoint(x: at.x + x1, y: at.y + y1), control2: CGPoint(x: at.x + x2, y: at.y + y2))
+        at = end
+    }
+    /// A quarter-circle corner to (dx, dy) of radius `r`, turning from going up or down into going across (the
+    /// design's `a r r 0 0 1 dx dy`).
+    mutating func corner(_ dx: CGFloat, _ dy: CGFloat, _ r: CGFloat) {
+        let end = CGPoint(x: at.x + dx, y: at.y + dy)
+        path.addArc(tangent1End: CGPoint(x: at.x, y: end.y), tangent2End: end, radius: r)
+        at = end
+    }
+    mutating func z() { path.closeSubpath() }
+}
+
+/// A path in a view box, scaled to the frame.
+private struct BoxShape: Shape {
+    let path: Path
+    let box: CGSize
+    func path(in r: CGRect) -> Path {
+        path.applying(CGAffineTransform(a: r.width / box.width, b: 0, c: 0, d: r.height / box.height, tx: r.minX, ty: r.minY))
+    }
+}
+
+private struct ArtView: View {
+    let art: VehicleArt
+    let palette: ArtPalette
+    let height: CGFloat
+    var body: some View {
+        let scale = height / art.box.height
+        let fine = height >= VehicleDrawing.fineFrom
+        ZStack(alignment: .topLeading) {
+            ForEach(Array(art.layers.enumerated()), id: \.offset) { _, layer in
+                if fine || !layer.fine {
+                    if let w = layer.stroke {
+                        BoxShape(path: layer.path, box: art.box).stroke(color(layer.role), lineWidth: max(0.5, w * scale)).opacity(layer.opacity)
+                    } else {
+                        BoxShape(path: layer.path, box: art.box).fill(color(layer.role)).opacity(layer.opacity)
+                    }
+                }
+            }
+        }
+    }
+    private func color(_ r: ArtLayer.Role) -> Color {
+        switch r {
+        case .body: return palette.body
+        case .light: return palette.light
+        case .door: return palette.door
+        case .glass: return ArtPalette.glass
+        case .dark: return ArtPalette.dark
+        case .headlight: return ArtPalette.headlight
+        case .display: return ArtPalette.display
+        case .hub: return ArtPalette.hub
+        }
     }
 }
 

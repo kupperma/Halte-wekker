@@ -31,8 +31,11 @@ enum DS {
     static let onAccent = Color.white
 
     // line pills, by mode (white text on them)
-    // (white text on each ≥ 4.5:1 in both modes; the values the Live Activity shares are in Shared/DesignShared.swift)
-    static let train = dynamic(DSCore.train, DSCore.trainDark)
+    // (set C1, 0.20.4, the same as the Live Activity's, from Shared/DesignShared.swift: the bus orange, the intercity
+    // indigo, the sprinter cyan; white bold text on each, see DSCore. Tram and ferry ≥ 4.5:1 in both modes.)
+    /// A train: the intercity's indigo (a sprinter's is `sprinter`; `mode` picks by the line).
+    static let train = Color(hex: DSCore.intercity)
+    static let sprinter = Color(hex: DSCore.sprinter)
     static let bus = Color(hex: DSCore.bus)
     static let tram = dynamic(DSCore.tram, DSCore.tramDark)
     static let ferry = dynamic(0x1C6E8C, 0x2A7898)
@@ -44,12 +47,14 @@ enum DS {
     /// The walk and wait parts of a leg bar (a shape, ≥ 3:1 on the card: 3.2:1 light, 3.5:1 dark).
     static let legQuiet = dynamic(0x8A929A, 0x6B747E)
 
-    /// The pill colour for a line: a train, a bus, or (by the live data's mode name) tram, metro or ferry.
-    static func mode(train: Bool, mode: String = "") -> Color {
+    /// The pill colour for a line: a bus, a train (a sprinter cyan, else indigo, by its line: `VehicleKind`), or (by
+    /// the live data's mode name) tram, metro or ferry.
+    static func mode(train: Bool, mode: String = "", line: String = "") -> Color {
         let m = mode.uppercased()
         if m.contains("TRAM") || m.contains("SUBWAY") || m.contains("METRO") { return tram }
         if m.contains("FERRY") { return ferry }
-        return train ? DS.train : bus
+        guard train else { return bus }
+        return VehicleKind.of(mode: "RAIL", line: line, isTrain: true) == .sprinter ? sprinter : DS.train
     }
 
     // MARK: type (system font; text styles so Dynamic Type works)
@@ -135,7 +140,7 @@ struct DSLinePill: View {
             .foregroundStyle(DS.onAccent)
             .padding(.horizontal, 6).padding(.vertical, 2)
             .frame(minWidth: 34)
-            .background(DS.mode(train: train, mode: mode), in: RoundedRectangle(cornerRadius: DS.pillRadius, style: .continuous))
+            .background(DS.mode(train: train, mode: mode, line: line), in: RoundedRectangle(cornerRadius: DS.pillRadius, style: .continuous))
             .accessibilityLabel(train ? "Train \(line)" : "Line \(line)")
     }
 }
