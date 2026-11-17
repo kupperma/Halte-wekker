@@ -430,6 +430,8 @@ struct NewHome: View {
             .mapControls { MapCompass() }
             .onMapCameraChange(frequency: .onEnd) { ctx in cameraEnded(ctx) }
         }
+        // their GPS positions while they're drawn (0.20.2)
+        .realPositions(showV)
     }
 
     /// May the live vehicles be asked for and drawn now (`VehiclePick`).

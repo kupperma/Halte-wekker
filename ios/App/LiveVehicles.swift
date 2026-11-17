@@ -4,10 +4,12 @@ import SwiftUI
 
 /// The live buses and trains for the home map: asked for the visible box (`VehiclePick`'s gating: on screen, app
 /// active, every 15 s at most, zoomed in, not in Low Power Mode, the setting on), drawn where their live times put them,
-/// late ones without catching up (0.18.2), sliding along their road between answers.
+/// late ones without catching up (0.18.2), sliding along their road between answers; where their GPS says when the
+/// open data has a fresh fix (0.20.2, `RealPositionsStore`).
 @MainActor
 final class LiveVehiclesModel: ObservableObject {
-    @Published private(set) var segs: [VehicleSegment] = []
+    @Published private(set) var segs: [VehicleSegment] = [] { didSet { gps.reset(segs) } }
+    private let gps = GPSPlacer()               // real positions (0.20.2): where their GPS puts them
     private var lastAsk: Date?
     private var asking = false
 
@@ -20,6 +22,7 @@ final class LiveVehiclesModel: ObservableObject {
         let coordinate: CLLocationCoordinate2D
         let bearing: Double?
         let to: String
+        var gpsAt: Date? = nil          // placed by its GPS fix of then (else by its times)
     }
 
     static var lowPower: Bool { ProcessInfo.processInfo.isLowPowerModeEnabled }
@@ -57,6 +60,13 @@ final class LiveVehiclesModel: ObservableObject {
                 return m > 3 ? Heading.bearing(p, a) : nil
             }
             out[s.tripId] = Moving(id: s.tripId, line: s.line, isTrain: s.isTrain, mode: s.mode, coordinate: p, bearing: bearing, to: s.toName)
+        }
+        // where their GPS says, when there's a fresh fix on their road (0.20.2)
+        for id in gps.trips {
+            guard let g = gps.place(id, now: t) else { continue }
+            let s = g.piece
+            out[id] = Moving(id: id, line: s.line, isTrain: s.isTrain, mode: s.mode, coordinate: g.coordinate, bearing: g.bearing,
+                             to: s.toName, gpsAt: g.fix.at)
         }
         let c = GeoPoint(lat: region.center.latitude, lon: region.center.longitude)
         let box = VehiclePick.Box(minLat: region.center.latitude - region.span.latitudeDelta * 0.6,

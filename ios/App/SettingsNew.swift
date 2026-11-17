@@ -9,6 +9,7 @@ struct NewLookSettings: View {
     @EnvironmentObject var live: LiveStore
     @AppStorage(HomeMapStyle.key) private var styleRaw = HomeMapStyle.standard.rawValue
     @AppStorage(NewLook.vehiclesKey) private var vehicles = true
+    @AppStorage(RealPositions.settingKey) private var realPositions = true
     @AppStorage(HomeStyle.key) private var homeStyle = HomeStyle.live.rawValue
     @State private var showNotices = false
     @State private var showSteady = false
@@ -31,6 +32,11 @@ struct NewLookSettings: View {
             Toggle("Live buses and trains", isOn: $vehicles)
         } header: { Text("Map") } footer: {
             Text("Buses and trains move on the map while you look at it, zoomed in to a town or closer. Not in Low Power Mode.")
+        }
+        Section {
+            Toggle("Real bus positions", isOn: $realPositions)
+        } footer: {
+            Text("Shows buses where their GPS says they are (open data from OVapi). Uses about 10 MB an hour while a map is open; off in Low Data Mode.")
         }
         Section {
             NavigationLink("Your places") { PlacesSettingsView() }

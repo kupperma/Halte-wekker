@@ -1430,6 +1430,7 @@ struct GoMap: View {
     /// button filled); a pan or zoom by hand makes it free (outline) until the button is tapped again.
     @State private var auto = true
     @State private var lastFit: Date?
+    @State private var hold = GPSHold()     // real positions (0.20.2)
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { tl in
@@ -1479,6 +1480,7 @@ struct GoMap: View {
         .onChange(of: tick) { _, t in if (!newLook || auto) && (t <= 2 || t % 4 == 0) { fit(Date(), animated: t > 2) } }
         .onChange(of: size) { _, _ in if !newLook || auto { fit(Date(), animated: false) } }
         .onChange(of: camera) { _, c in if newLook && auto && c.positionedByUser { auto = false } }
+        .realPositions(ride.map { !$0.isTrain && RealPositions.key($0.tripId) != nil } ?? false)
         .task(id: ride?.tripId ?? "") { await run() }
     }
 
@@ -1496,7 +1498,7 @@ struct GoMap: View {
             MapPolyline(walk.polyline).stroke(newLook ? DS.accent : Paper.ink, style: StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round, dash: [0.5, 10]))
         }
         if let t = trip, let m = mine, let r = ride {
-            let w = t.position(now)
+            let w = TripPlacement(t, tripId: r.tripId, now: now, hold: hold).w      // by its GPS, else its times
             let me = t.metres(ofStop: m)
             // not past your stop before it has left there (two minutes after its time): a late one may still be coming
             let at = LiveTimes.shown(w.metres, mine: me, left: LiveTimes.hasLeft(t.stops[m].times, now: now))
@@ -1554,6 +1556,7 @@ struct GoMap: View {
                     if mine == nil { mine = Self.findMine(t, r) }
                 }
             }
+            if let r = ride, let t = trip { noteGPS(t, r, now) }
             if let s = stop, let h = hereNow, walkFrom.map({ h.distance(from: $0) > 40 || now.timeIntervalSince($0.timestamp) > 60 }) ?? true {
                 walkFrom = h
                 let d = h.distance(from: CLLocation(latitude: s.latitude, longitude: s.longitude))
@@ -1562,6 +1565,14 @@ struct GoMap: View {
             tick += 1
             try? await Task.sleep(nanoseconds: 1_000_000_000)
         }
+    }
+
+    /// The field log: how far its GPS put the bus you're catching from where its times have it (once per fix).
+    private func noteGPS(_ t: LiveTrip, _ r: Ride, _ now: Date) {
+        let p = TripPlacement(t, tripId: r.tripId, now: now, hold: hold)
+        guard let f = p.fix, !p.w.done else { return }
+        RealPositionsStore.shared.noteUsed(f, tripId: r.tripId, line: r.line, isTrain: r.isTrain, timeMetres: p.timeMetres,
+                                           gpsMetres: p.w.metres, now: now)
     }
 
     private static func walkRoute(to s: CLLocationCoordinate2D) async -> MKRoute? {
@@ -1587,8 +1598,8 @@ struct GoMap: View {
         if let h = hereNow { pts.append(h.coordinate) }
         if let s = stop {
             pts.append(s)
-            if let t = trip, let m = mine {
-                let w = t.position(now)
+            if let t = trip, let m = mine, let r = ride {
+                let w = TripPlacement(t, tripId: r.tripId, now: now, hold: hold).w
                 let at = LiveTimes.shown(w.metres, mine: t.metres(ofStop: m), left: LiveTimes.hasLeft(t.stops[m].times, now: now))
                 let bus = t.coordinate(atMetres: at)
                 let far = CLLocation(latitude: bus.latitude, longitude: bus.longitude).distance(from: CLLocation(latitude: s.latitude, longitude: s.longitude))

@@ -2,7 +2,8 @@ import MapKit
 import SwiftUI
 
 /// A bus or train on its way, from its live times: where it is now along the road, and how far it is from your stop.
-/// (Transitous gives live times per stop, not a GPS position: the position is worked out from those times.)
+/// (Transitous gives live times per stop, not a GPS position: the position is worked out from those times, unless
+/// OVapi's open data has a fresh GPS fix for it: `TripPlacement`.)
 struct LiveTrip {
     struct Stop {
         let name: String
@@ -98,7 +99,8 @@ struct LiveTrackTarget: Identifiable, Hashable {
 
 /// A live map of one bus or train: where it is now, moving along its route every second, how many stops and how far
 /// it is from your stop, and when it's there. Its live times are fetched again every 30 seconds.
-/// A late bus is drawn by its times without catching up (`LiveTimes.noCatchUp`), and not past your stop until two
+/// A bus with a fresh GPS fix in the open data is drawn where that puts it (0.20.2, `TripPlacement`); else a late
+/// bus is drawn by its times without catching up (`LiveTimes.noCatchUp`). Either way not past your stop until two
 /// minutes after it should have left there; the times it prints are the answer's own (as on the board).
 struct LiveBusSheet: View {
     let target: LiveTrackTarget
@@ -114,6 +116,7 @@ struct LiveBusSheet: View {
     @State private var refreshFailed = false
     @State private var camera: MapCameraPosition = .automatic
     @State private var follow = false
+    @State private var hold = GPSHold()
 
     var body: some View {
         NavigationStack {
@@ -133,6 +136,7 @@ struct LiveBusSheet: View {
             .navigationTitle("\(target.rail ? "" : "Bus ")\(target.line) live")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .realPositions(!target.rail && RealPositions.key(target.tripId) != nil)
             .task { await run() }
         }
         .tint(newLook ? DS.accentText : nil)
@@ -180,7 +184,7 @@ struct LiveBusSheet: View {
                 Text("to \(Fmt.place(target.headsign))").font(BoardInk.sans(17)).foregroundStyle(Paper.ink).lineLimit(1).minimumScaleFactor(0.7)
             }
             if let trip {
-                let w = trip.position(now), printed = given ?? trip
+                let placed = placement(trip, now), w = placed.w, printed = given ?? trip
                 Text(status(trip, w, now)).font(BoardInk.sans(15)).foregroundStyle(Paper.ink).fixedSize(horizontal: false, vertical: true)
                 if let m = mine, m < printed.stops.count, let a = printed.arrival(m), shownMetres(trip, now) <= trip.metres(ofStop: m) + 20,
                    !w.done || !LiveTimes.hasLeft(trip.stops[m].times, now: now) {
@@ -193,7 +197,7 @@ struct LiveBusSheet: View {
                     Text("Next stop: \(Fmt.place(trip.stops[w.next].name))\((w.next < printed.stops.count ? printed.arrival(w.next) : nil).map { " · \(Fmt.hhmm($0))" } ?? "")")
                         .font(BoardInk.sans(12, .regular)).foregroundStyle(Paper.ink.opacity(0.85))
                 }
-                Text(trip.live ? "Live times\(updated.map { ", updated \(Fmt.hhmm($0))" } ?? ""). Its position is worked out from them." : "No live times for this one: its position follows the timetable.")
+                Text(footnote(trip, placed, now))
                     .font(BoardInk.sans(10, .regular)).foregroundStyle(Paper.ink.opacity(0.65))
                 if refreshFailed {
                     Text("Couldn’t update just now.").font(BoardInk.sans(10, .regular)).foregroundStyle(Paper.ink.opacity(0.85))
@@ -234,7 +238,7 @@ struct LiveBusSheet: View {
                 }
             }
             if let trip {
-                let w = trip.position(now), printed = given ?? trip
+                let placed = placement(trip, now), w = placed.w, printed = given ?? trip
                 Text(status(trip, w, now)).font(DS.title).monospacedDigit().foregroundStyle(DS.text).fixedSize(horizontal: false, vertical: true)
                 if let m = mine, m < printed.stops.count, let a = printed.arrival(m), shownMetres(trip, now) <= trip.metres(ofStop: m) + 20,
                    !w.done || !LiveTimes.hasLeft(trip.stops[m].times, now: now) {
@@ -253,7 +257,7 @@ struct LiveBusSheet: View {
                         .accessibilityHint("Starts your trip with this \(target.rail ? "train" : "bus"), and its alarm")
                         .padding(.vertical, DS.s4)
                 }
-                Text(trip.live ? "Live times\(updated.map { ", updated \(Fmt.hhmm($0))" } ?? ""). Its position is worked out from them." : "No live times for this one: its position follows the timetable.")
+                Text(footnote(trip, placed, now))
                     .font(DS.footnote).monospacedDigit().foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
                 if refreshFailed {
                     Text("Couldn’t update just now.").font(DS.footnote).foregroundStyle(DS.warning)
@@ -315,11 +319,26 @@ struct LiveBusSheet: View {
         }
     }
 
-    /// Where to draw it at `now` (metres along): by its times, but not past your stop before it has left there.
+    /// Where it is at `now`: by its GPS when there's a fresh fix on its road, else by its times.
+    private func placement(_ t: LiveTrip, _ now: Date) -> TripPlacement {
+        TripPlacement(t, tripId: target.tripId, now: now, hold: hold)
+    }
+
+    /// Where to draw it at `now` (metres along): by its GPS or its times, but not past your stop before it has left there.
     private func shownMetres(_ t: LiveTrip, _ now: Date) -> Double {
-        let w = t.position(now)
+        let w = placement(t, now).w
         guard let m = mine, m < t.stops.count else { return w.metres }
         return LiveTimes.shown(w.metres, mine: t.metres(ofStop: m), left: LiveTimes.hasLeft(t.stops[m].times, now: now))
+    }
+
+    /// Where its position comes from: "Live times, updated 12:30. Position from the bus’s GPS, 40 s ago."
+    private func footnote(_ t: LiveTrip, _ p: TripPlacement, _ now: Date) -> String {
+        if let f = p.fix {
+            let what = target.rail ? "train" : t.mode.uppercased().contains("TRAM") ? "tram" : "bus"
+            let ago = "Position from the \(what)’s GPS, \(Int(max(0, now.timeIntervalSince(f.at)).rounded())) s ago."
+            return t.live ? "Live times\(updated.map { ", updated \(Fmt.hhmm($0))" } ?? ""). \(ago)" : ago
+        }
+        return t.live ? "Live times\(updated.map { ", updated \(Fmt.hhmm($0))" } ?? ""). Its position is worked out from them." : "No live times for this one: its position follows the timetable."
     }
 
     /// "3 stops away · 1.4 km", "At your stop now", "Due at your stop now", "It has passed your stop"

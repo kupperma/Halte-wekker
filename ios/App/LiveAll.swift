@@ -2,7 +2,8 @@ import MapKit
 import SwiftUI
 
 /// Every bus and train moving near you, live on a map, just to watch: each one with its line, sliding along its road
-/// every second. Move the map and it fetches what's running there.
+/// every second (where their GPS says, when the open data has a fresh fix: 0.20.2). Move the map and it fetches what's
+/// running there.
 struct LiveAllSheet: View {
     let center: CLLocationCoordinate2D
     @Environment(\.dismiss) private var dismiss
@@ -11,6 +12,7 @@ struct LiveAllSheet: View {
     @State private var region: MKCoordinateRegion
     @State private var picked: String?
     @State private var loading = true
+    @State private var gps = GPSPlacer()            // real positions (0.20.2): where their GPS puts them
 
     init(center: CLLocationCoordinate2D) {
         self.center = center
@@ -28,6 +30,7 @@ struct LiveAllSheet: View {
         let from: String
         let to: String
         let arrival: Date
+        var byGPS = false
     }
 
     /// Where each one is at `t`: the piece of its route it's on now (or, standing at a stop, the one it just finished).
@@ -36,6 +39,13 @@ struct LiveAllSheet: View {
         for s in segs.sorted(by: { $0.departure < $1.departure }) {
             guard out[s.tripId] == nil || (s.departure <= t && t <= s.arrival), let p = s.position(at: t) else { continue }
             out[s.tripId] = Moving(id: s.tripId, line: s.line, isTrain: s.isTrain, coordinate: p, from: s.fromName, to: s.toName, arrival: s.arrival)
+        }
+        // where their GPS says, when there's a fresh fix on their road
+        for id in gps.trips {
+            guard let g = gps.place(id, now: t) else { continue }
+            let s = g.piece
+            out[id] = Moving(id: id, line: s.line, isTrain: s.isTrain, coordinate: g.coordinate, from: s.fromName, to: s.toName,
+                             arrival: s.arrival, byGPS: true)
         }
         return Array(out.values)
     }
@@ -62,6 +72,7 @@ struct LiveAllSheet: View {
             .navigationTitle("Everything moving near you")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .realPositions(true)
             .task(id: regionKey) {
                 // what's running where the map is, again every 30 seconds
                 while !Task.isCancelled {
@@ -83,7 +94,7 @@ struct LiveAllSheet: View {
         let s = await Transit.liveVehicles(min: .init(latitude: c.latitude - la, longitude: c.longitude - lo),
                                            max: .init(latitude: c.latitude + la, longitude: c.longitude + lo))
         // a late bus where it is, not where its live times (that let it make its delay up) would put it
-        if !s.isEmpty || segs.isEmpty { segs = Transit.noCatchUp(s, asOf: Date()) }
+        if !s.isEmpty || segs.isEmpty { segs = Transit.noCatchUp(s, asOf: Date()); gps.reset(segs) }
         loading = false
     }
 
@@ -114,7 +125,7 @@ struct LiveAllSheet: View {
                 let buses = vs.filter { !$0.isTrain }.count, trains = vs.count - buses
                 Text(loading ? "Finding everything that’s moving…" : "\(buses) bus\(buses == 1 ? "" : "es") and \(trains) train\(trains == 1 ? "" : "s") moving here")
                     .font(BoardInk.sans(14)).foregroundStyle(Paper.ink)
-                Text("Live positions, worked out from their live times. Tap one to see where it’s going; move the map to look elsewhere.")
+                Text("\(vs.contains(where: \.byGPS) ? "Live positions: from their GPS where the open data has it, else worked out from their live times." : "Live positions, worked out from their live times.") Tap one to see where it’s going; move the map to look elsewhere.")
                     .font(BoardInk.sans(11, .regular)).foregroundStyle(Paper.ink.opacity(0.75)).fixedSize(horizontal: false, vertical: true)
             }
         }
