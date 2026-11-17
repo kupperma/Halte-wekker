@@ -208,7 +208,7 @@ struct MorningViewNew: View {
             guard !items.isEmpty else { return }
             Task { await morning.add(items); picking = [] }
         }
-        .sheet(isPresented: $showOutfit) { OutfitSheet().presentationDetents([.large]) }
+        .sheet(isPresented: $showOutfit) { OutfitSheetNew().presentationDetents([.large]) }
         .task { await OutfitStore.shared.refresh() }
     }
 

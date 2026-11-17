@@ -390,7 +390,7 @@ struct NewHome: View {
                     Task { @MainActor in try? await Task.sleep(nanoseconds: 500_000_000); sheet = .demo }
                 }, newLook: true).presentationDetents([.large])
             case .demo: DemoSheet().presentationDetents([.large])
-            case .weather: OutfitSheet().presentationDetents([.medium, .large])
+            case .weather: OutfitSheetNew().presentationDetents([.medium, .large])
             case .addPlace: PlaceSearchSheet(title: "Add a place") { hit in places.add(name: Fmt.place(hit.name), lat: hit.lat, lon: hit.lon, stopIds: [hit.id]) }
             }
         }
