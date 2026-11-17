@@ -198,7 +198,7 @@ final class LiveStore: ObservableObject {
             }
             chosen = best?.0
         } else {
-            chosen = movesWithYou(f, segs, history: history(), still: still, speed: speedNow, now: now)
+            chosen = await movesWithYou(f, segs, history: history, still: still, speed: speedNow, now: now)
         }
         guard let seg = chosen else { return nil }
         // Its next stop is where this piece goes (it left its last one, or leaves it within 20 s, and gets there after
@@ -233,12 +233,15 @@ final class LiveStore: ObservableObject {
     /// The matcher's pick for `onBoardTrips`: the bus or train that moves with you. Judged on your fixes once they span
     /// 20 s, else on this fix alone at its own time (on its path, going your way by the GPS's course, a possible speed,
     /// near its times: today's allowed distance, 250 m when you're standing); the best by the seconds you are off its
-    /// times. Its piece now: the last of its pieces that has left (else its first).
-    private static func movesWithYou(_ f: CLLocation, _ segs: [VehicleSegment], history: [Fix], still: Bool, speed: Double,
-                                     now: Date) -> VehicleSegment? {
+    /// times. Its piece now: the last of its pieces that has left (else its first). One with a fresh GPS fix of its own
+    /// is judged by where that puts it (0.20.3).
+    private static func movesWithYou(_ f: CLLocation, _ segs: [VehicleSegment], history read: @MainActor @Sendable () -> [Fix],
+                                     still: Bool, speed: Double, now: Date) async -> VehicleSegment? {
         let one = Fix(f)
         // (a late bus by its times without catching up: its live times have it make its delay up within a few stops)
-        let tracks = VehicleTrack.group(Transit.noCatchUp(segs, asOf: now).map { MapPiece($0) })
+        let plain = VehicleTrack.group(Transit.noCatchUp(segs, asOf: now).map { MapPiece($0) })
+        let tracks = await RealPositionsStore.shared.forMatcher(plain)
+        let history = read()                // (read once the vehicles near you are in)
         let judged: [Judgement]
         if VehicleMatch.enough(history) {
             judged = VehicleMatch.judgeAll(history, tracks)

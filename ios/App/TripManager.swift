@@ -1139,18 +1139,30 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     /// keeping pace with its times and near them (today's allowed distance). The ones that pass, by the seconds you are
     /// off their times; `planned` 45 s less (it only ranks: `cost` is without it). The best 10, and `planned` when it
     /// passed. Not sure yet (none, and a line in the field log at most every 30 s per place) until your fixes span 20 s.
+    /// One with a fresh GPS fix of its own is judged by where that puts it (0.20.3; the matcher's places fetch the
+    /// positions meanwhile, `RealPositionsStore.forMatcher`). Boarding (`fastLanePlaces`): before 20 s, the fast lane
+    /// may take one after 8 s (`MatchRules.fastLane`); then it's the only one.
     private func matchByJudging(mode: Mode?, excluding: Set<String>, planned: String?, place: String) async -> [Match] {
         let recent = samples.filter { $0.timestamp > Date().addingTimeInterval(-120) && $0.horizontalAccuracy < 150 }
         guard let last = recent.last, recent.count >= 2 else { return [] }
         let speed = max(last.speed, recent.first.map { last.distance(from: $0) / max(1, last.timestamp.timeIntervalSince($0.timestamp)) } ?? 0)
         guard speed > 2.5 else { return [] }                    // not moving: not on board yet
+        let gpsLook = Self.gpsPlaces.contains(place)
+        // (looking for the one you're on: the positions are fetched from now on, so the next looks have them)
+        if gpsLook { RealPositionsStore.shared.matcherLooks(trains: mode == .train) }
         let spread = VehicleMatch.spread(recentFixes)
-        guard spread.fixes >= VehicleMatch.minFixes, spread.span >= VehicleMatch.minSpan else {
-            // not sure yet: nothing would pass, so no need to ask
+        let enough = spread.fixes >= VehicleMatch.minFixes && spread.span >= VehicleMatch.minSpan
+        let laneTry = !enough && Self.fastLanePlaces.contains(place) && spread.fixes >= MatchRules.fastFixes
+            && spread.span >= MatchRules.fastSpan && speed > MatchRules.fastSpeed && RealPositionsStore.shared.hasFixes
+        func notSure(_ s: (fixes: Int, span: TimeInterval)) {
             if Date().timeIntervalSince(notSureLogged[place] ?? .distantPast) >= 30 {
                 notSureLogged[place] = Date()
-                FieldLog.shared.add(.match, FieldFormat.notSure(place, fixes: spread.fixes, span: spread.span))
+                FieldLog.shared.add(.match, FieldFormat.notSure(place, fixes: s.fixes, span: s.span))
             }
+        }
+        guard enough || laneTry else {
+            // not sure yet: nothing would pass, so no need to ask
+            notSure(spread)
             return []
         }
         // every trip on a piece several share (coupled and through trains), each put together from its pieces
@@ -1162,15 +1174,35 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         }
         // (a late bus by its times without catching up: its live times have it make its delay up within a few stops)
         let all = VehicleTrack.group(Transit.noCatchUp(segs, asOf: Date()).map { MapPiece($0) })
-        let tracks = all.filter { v in
+        var tracks = all.filter { v in
             !excluding.contains(v.tripId) && (mode.map { ($0 == .train) == v.isTrain } ?? true)
         }
-        let judged = VehicleMatch.judgeAll(recentFixes, tracks)        // with the fixes that came in while it asked
-        let ranked = VehicleMatch.top(VehicleMatch.rank(judged, planned: planned), keep: planned)
+        // each one with its own fresh GPS fix, when the open data has one
+        if gpsLook { tracks = await RealPositionsStore.shared.forMatcher(tracks) }
+        let fixesNow = recentFixes                                      // with the fixes that came in while it asked
+        let judged: [Judgement]
+        let ranked: [Ranked]
+        var lane: String?
+        if enough {
+            judged = VehicleMatch.judgeAll(fixesNow, tracks)
+            ranked = VehicleMatch.top(VehicleMatch.rank(judged, planned: planned), keep: planned)
+        } else {
+            // the fast lane: with 2 fixes over 8 s, only one by its own GPS right with you, nothing else near
+            judged = VehicleMatch.judgeAll(fixesNow, tracks, minFixes: MatchRules.fastFixes, minSpan: MatchRules.fastSpan)
+            let s = VehicleMatch.spread(fixesNow)
+            lane = MatchRules.fastLane(VehicleMatch.lane(judged), yourSpeed: speed, fixes: s.fixes, span: s.span)
+            guard let id = lane else { notSure(s); return [] }
+            ranked = VehicleMatch.rank(judged.filter { $0.id == id }, planned: planned)
+        }
         let lines = Dictionary(tracks.map { ($0.tripId, $0.line) }, uniquingKeysWith: { a, _ in a })
-        let outcome = ranked.first.map { "best " + FieldFormat.label($0.id, lines) } ?? "none"
+        let outcome = ranked.first.map { (lane != nil ? "fast lane " : "best ") + FieldFormat.label($0.id, lines) } ?? "none"
         let plannedLeftOut = planned.map { p in all.contains { $0.tripId == p } && !tracks.contains { $0.tripId == p } } ?? false
         FieldLog.shared.add(.match, FieldFormat.match(place, judged, outcome: outcome, planned: planned, count: judged.count, plannedExcluded: plannedLeftOut))
+        if let id = lane, let j = judged.first(where: { $0.id == id }) {
+            let s = VehicleMatch.spread(fixesNow)
+            FieldLog.shared.add(.match, FieldFormat.fastLane(place, label: FieldFormat.label(id, lines), metres: j.evidence.map { abs($0.offset) },
+                                                             gpsAge: j.evidence?.gpsAge, fixes: s.fixes, span: s.span, speed: speed))
+        }
         return ranked.compactMap { r -> Match? in
             guard let v = tracks.first(where: { $0.tripId == r.id }), let j = judged.first(where: { $0.id == r.id }),
                   case .success(let cost) = j.result else { return nil }
@@ -1178,6 +1210,11 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
                          meters: abs(j.evidence?.offset ?? 0), score: r.cost, cost: cost)
         }
     }
+
+    /// The looks for the one you're on that judge by the vehicles' own GPS (0.20.3; not the idle look for a watched line).
+    private static let gpsPlaces: Set<String> = ["board", "confirm", "detect", "same bus", "find nearby"]
+    /// …and those that may take one in the fast lane: boarding.
+    private static let fastLanePlaces: Set<String> = ["board", "confirm", "detect"]
 
     /// Where this leg can take you: on the first leg of a route either station (it follows the one you take).
     private var legDestinations: [Place] {
@@ -1355,15 +1392,32 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     /// switches (and tells you) only once that one has clearly been the one for a while. Otherwise as today: a new line
     /// number, and the looks far from its times (not for a timetable-only one, or one whose times are done, and not the
     /// same choice again within 10 minutes of one that ran out of time).
+    /// Its own GPS (0.20.3): judged by where its fix puts it when it has a fresh one; and within 200 m of you, moving
+    /// with you, it's kept (`VehicleMatch.gpsKeeps`: no miss, no looking for another), whatever its judging alone says.
     private func sameBusByJudging(_ v: Vehicle, trip t: LiveTrip, leg: Leg, last: CLLocation, limit: Double, now: Date) async {
-        let judged = VehicleTrack(tripId: v.tripId, line: v.line, isTrain: v.isTrain, trip: t)
-            .map { VehicleMatch.judgeAll(recentFixes, [$0], strictTimes: false) } ?? []
+        RealPositionsStore.shared.learn(v.tripId, trip: t)
+        var track = VehicleTrack(tripId: v.tripId, line: v.line, isTrain: v.isTrain, trip: t)
+        if let k = track { track = await RealPositionsStore.shared.forMatcher([k]).first }
+        guard vehicle == v, cands.isEmpty else { return }
+        let judged = track.map { VehicleMatch.judgeAll(recentFixes, [$0], strictTimes: false) } ?? []
         let away = VehicleMatch.offRoad(Self.metres(from: last.coordinate, to: t.path), isTrain: v.isTrain)
-        let verdict = VehicleMatch.verdict(judged.first?.result, offRoad: away)
+        var verdict = VehicleMatch.verdict(judged.first?.result, offRoad: away)
         let shown = FieldFormat.label(v.tripId, [v.tripId: v.line])
+        let mine = judged.first
+        let byGPS = VehicleMatch.gpsKeeps(mine?.evidence, isTrain: v.isTrain)
+        var keptNote = ""
+        if byGPS, verdict != .passes {
+            // its GPS has it right with you: kept, whatever its judging alone said
+            let instead: String
+            if case .failure(let why)? = mine?.result { instead = FieldFormat.reject(why, mine?.evidence) }
+            else { instead = away ? "off its road" : "" }
+            FieldLog.shared.add(.match, FieldFormat.keptByGPS(label: shown, metres: mine?.evidence.map { abs($0.offset) },
+                                                              gpsAge: mine?.evidence?.gpsAge, instead: instead))
+            verdict = .passes; keptNote = " · by GPS"
+        }
         if verdict != .fails {
             if verdict == .passes { offRoad = 0 }            // not sure yet, on its road: neither a miss nor a reset
-            FieldLog.shared.add(.match, FieldFormat.match("same bus", judged, outcome: "keep \(shown)" + (verdict == .notSure ? ", not sure" : ""),
+            FieldLog.shared.add(.match, FieldFormat.match("same bus", judged, outcome: "keep \(shown)" + (verdict == .notSure ? ", not sure" : "") + keptNote,
                                                           planned: v.tripId, count: judged.count))
             if !v.isTrain, !t.line.isEmpty, t.line != v.line {
                 // the same trip, under another number in its own live data
@@ -1373,9 +1427,14 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             }
             // on its road, but far from where its live times put it, three looks in a row (a minute and a half): if
             // another of the same line is right where you are, look at both again (timetable times, or times that are
-            // done, can't tell two apart)
+            // done, can't tell two apart). By its own GPS: far from where that puts it (kept by it: not far).
             let w = t.position(now), at = t.coordinate(atMetres: w.metres)
-            let far = t.live && !w.done && last.distance(from: CLLocation(latitude: at.latitude, longitude: at.longitude)) > (v.isTrain ? 2500 : 1000)
+            let far: Bool
+            if let e = mine?.evidence, e.gps {
+                far = !byGPS && abs(e.offset) > (v.isTrain ? 2500 : 1000)
+            } else {
+                far = t.live && !w.done && last.distance(from: CLLocation(latitude: at.latitude, longitude: at.longitude)) > (v.isTrain ? 2500 : 1000)
+            }
             farLooks = far ? farLooks + 1 : 0
             if farLooks >= 3 {
                 farLooks = 0
@@ -1474,10 +1533,14 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     /// or, when that one keeps failing, takes the best one.
     private func chooseByJudging(_ list: [Candidate], last: CLLocation, now: Date) async {
         let shown = vehicle?.tripId
-        let tracks: [VehicleTrack] = list.compactMap { c in
+        for c in list { RealPositionsStore.shared.learn(c.vehicle.tripId, trip: c.trip) }
+        let plain: [VehicleTrack] = list.compactMap { c in
             c.trip.flatMap { VehicleTrack(tripId: c.vehicle.tripId, line: c.vehicle.line, isTrain: c.vehicle.isTrain,
                                           trip: $0.noCatchUp(asOf: c.fetched, isTrain: c.vehicle.isTrain)) }
         }
+        // (each with its own fresh GPS fix, when the open data has one)
+        let tracks = await RealPositionsStore.shared.forMatcher(plain)
+        guard list.map(\.vehicle.tripId) == cands.map(\.vehicle.tripId), phase == .sleeping || phase == .awake else { return }
         let judged = VehicleMatch.judgeAll(recentFixes, tracks, strictTimes: false)
         // the one it shows, by today's road check: your last fix from its road
         let mine = list.first { $0.vehicle.tripId == shown }
@@ -1554,7 +1617,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         let mode = leg?.mode
         var anyKind = false
         if route?.custom != nil, let road = roadOf, road.tripId == v.tripId,
-           let mine = VehicleTrack(tripId: v.tripId, line: v.line, isTrain: v.isTrain, trip: road.trip.noCatchUp(asOf: road.at, isTrain: v.isTrain)),
+           let plain = VehicleTrack(tripId: v.tripId, line: v.line, isTrain: v.isTrain, trip: road.trip.noCatchUp(asOf: road.at, isTrain: v.isTrain)),
+           let mine = await RealPositionsStore.shared.forMatcher([plain]).first,
            case .failure(let why)? = VehicleMatch.judgeAll(recentFixes, [mine], strictTimes: false).first?.result {
             anyKind = VehicleMatch.otherKindPossible(why)
         }
@@ -1562,7 +1626,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         let planned = route?.planned?[safe: index]
         if let p = planned { ids.append((p.tripId, p.line, p.isTrain)) }
         ids += boardAlternatives.map { ($0.first.tripId, $0.first.line, $0.first.isTrain) }
-        ids += await matchVehicles(mode: anyKind ? nil : mode, excluding: [v.tripId]).map { ($0.vehicle.tripId, $0.vehicle.line, $0.vehicle.isTrain) }
+        ids += await matchVehicles(mode: anyKind ? nil : mode, excluding: [v.tripId], place: "find nearby").map { ($0.vehicle.tripId, $0.vehicle.line, $0.vehicle.isTrain) }
         // each once (not the one it has), of this leg's kind unless it may be the other, at most 8
         var seen: Set<String> = [v.tripId]
         let picked = Array(ids.filter { c in
@@ -1577,15 +1641,18 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         var found: [String: Vehicle] = [:]
         for (c, t) in zip(picked, trips) {
             guard let t else { continue }
+            RealPositionsStore.shared.learn(c.id, trip: t)
             let line = t.line.isEmpty ? c.line : (c.train ? Transit.trainLabel(t.line) : t.line)
             guard let track = VehicleTrack(tripId: c.id, line: line, isTrain: c.train, trip: t.noCatchUp(asOf: Date(), isTrain: c.train)) else { continue }
             tracks.append(track)
             found[c.id] = Vehicle(tripId: c.id, line: line, isTrain: c.train)
         }
+        // (each with its own fresh GPS fix, when the open data has one)
+        tracks = await RealPositionsStore.shared.forMatcher(tracks)
         let judged = VehicleMatch.judgeAll(recentFixes, tracks, strictTimes: false)
         let ranked = VehicleMatch.rank(judged, planned: planned?.tripId)
         var state = SwitchState()
-        let live = Set(tracks.filter(\.realTime).map(\.tripId))
+        let live = VehicleMatch.liveIds(judged)
         let d = VehicleMatch.decide(shown: nil, ranked: ranked, liveIds: live, state: &state, now: Date())
         // (what it finds is only chosen between: sameBusByJudging starts choosing with it, and switches only once sure)
         FieldLog.shared.add(.match, FieldFormat.match("find", judged, outcome: FieldFormat.outcome(d, lines: found.mapValues(\.line), choosing: true),
