@@ -16,7 +16,7 @@ private typealias TripState = TripAttributes.ContentState
 
 private func riding(_ s: TripState) -> Bool { !["CHANGE HERE", "YOU’RE THERE"].contains(s.kicker) }
 /// The countdown, the part of the track done and your stop's dot: the accent, warm while it's waking you.
-private func tint(_ s: TripState, _ look: LiveLook) -> Color { s.awake ? look.warning : look.accent }
+private func stateTint(_ s: TripState, _ look: LiveLook) -> Color { s.awake ? look.warning : look.accent }
 
 /// What the state says over the main line, when it isn't just riding: its words, an icon, and whether it's warm.
 private func status(_ s: TripState) -> (text: String, icon: String, warm: Bool)? {
@@ -195,13 +195,13 @@ struct LockScreenTrip: View {
                 if riding(s) {
                     VStack(alignment: .trailing, spacing: 0) {
                         Countdown(to: s.legTo ?? s.arrival).font(.system(size: 28, weight: .bold, design: .rounded))
-                            .foregroundStyle(tint(s, look)).frame(maxWidth: 104, alignment: .trailing)
+                            .foregroundStyle(stateTint(s, look)).frame(maxWidth: 104, alignment: .trailing)
                         Text(s.distanceText.isEmpty || s.distanceText == "–" ? "to go" : "\(s.distanceText) to go")
                             .font(.system(size: 12, weight: .medium)).monospacedDigit().foregroundStyle(look.secondary).lineLimit(1)
                     }
                 }
             }
-            RideTrack(progress: s.progress, kind: s.kind, stops: s.stops, look: look, tint: tint(s, look))
+            RideTrack(progress: s.progress, kind: s.kind, stops: s.stops, look: look, tint: stateTint(s, look))
                 .frame(height: 28)
                 .id(s.stopName)                              // a new leg: a new vehicle rolls in
             if s.ringing { StopButton(size: 15) }
@@ -229,7 +229,7 @@ struct TripLiveActivity: Widget {
                     Group {
                         if riding(s) {
                             Countdown(to: s.legTo ?? s.arrival).font(.system(size: 22, weight: .bold, design: .rounded))
-                                .foregroundStyle(tint(s, look)).frame(maxWidth: 88, alignment: .trailing)
+                                .foregroundStyle(stateTint(s, look)).frame(maxWidth: 88, alignment: .trailing)
                         } else {
                             Text(s.arrival.map { hhmm.string(from: $0) } ?? "–").font(.system(size: 20, weight: .bold, design: .rounded))
                                 .monospacedDigit().foregroundStyle(look.text).lineLimit(1)
@@ -241,7 +241,7 @@ struct TripLiveActivity: Widget {
                     VStack(alignment: .leading, spacing: 6) {
                         Text(mainLine(s)).font(.system(size: 16, weight: .bold)).monospacedDigit().foregroundStyle(look.text)
                             .lineLimit(1).minimumScaleFactor(0.75)
-                        RideTrack(progress: s.progress, kind: s.kind, stops: s.stops, look: look, tint: tint(s, look))
+                        RideTrack(progress: s.progress, kind: s.kind, stops: s.stops, look: look, tint: stateTint(s, look))
                             .frame(height: 24).id(s.stopName)
                         if s.ringing { StopButton(size: 14) }
                         else { TripFooter(s: s, look: look, size: 12, showArrival: riding(s)) }
@@ -257,7 +257,7 @@ struct TripLiveActivity: Widget {
             } compactTrailing: {
                 if riding(s) {
                     Countdown(to: s.legTo ?? s.arrival).font(.system(size: 13, weight: .bold, design: .rounded))
-                        .foregroundStyle(tint(s, look)).frame(maxWidth: 46, alignment: .trailing)
+                        .foregroundStyle(stateTint(s, look)).frame(maxWidth: 46, alignment: .trailing)
                 } else if let st = status(s) {
                     Image(systemName: st.icon).font(.system(size: 13, weight: .bold)).foregroundStyle(look.accent)
                 }
