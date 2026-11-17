@@ -2207,11 +2207,22 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         var awake = false
         if case .alarm = phase { awake = true } else if phase == .awake { awake = true }
         let song = music.song
+        let ride = rideKind
         return .init(legTitle: title, isTrain: leg?.mode == .train, distanceText: distance.map { Fmt.distance($0) } ?? "–",
                      arrival: arrival, finalName: finalName, nextText: nextText, awake: awake, goingHome: direction == .home,
                      kicker: kicker, stopName: leg?.to.spoken ?? "", progress: (progress() * 100).rounded() / 100,
                      legFrom: legFrom, legTo: legTo, song: song?.title, artist: song?.artist, songPlaying: song?.playing ?? false,
-                     musicApp: song?.app, stops: stopMarks.map(\.fraction), ringing: { () -> Bool in if case .alarm = phase { return true }; return false }())
+                     musicApp: song?.app, stops: stopMarks.map(\.fraction), ringing: { () -> Bool in if case .alarm = phase { return true }; return false }(),
+                     vehicle: ride.kind.rawValue, line: ride.line)
+    }
+
+    /// What the Live Activity draws on its track and puts on its pill: from the bus or train you're on (else the one
+    /// this leg was planned with, else the leg's own mode), by its mode and its line.
+    private var rideKind: (kind: VehicleKind, line: String) {
+        let planned = route?.planned?[safe: index]
+        let line = vehicle?.line ?? planned?.line ?? ""
+        let train = vehicle?.isTrain ?? planned?.isTrain ?? (leg?.mode == .train)
+        return (VehicleKind.of(mode: train ? "RAIL" : "BUS", line: line, isTrain: train), line)
     }
 
     private func startActivity() {
@@ -2265,10 +2276,11 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             nextText: home ? nil : "Then bus 3 to BUas from Breda", awake: false, goingHome: home,
             kicker: "NOW RIDING", stopName: home ? Place.veghel.spoken : Place.breda.spoken, progress: 0.15,
             legFrom: now.addingTimeInterval(-4 * 60), legTo: now.addingTimeInterval(home ? 9 * 60 : 18 * 60),
-            song: song?.title ?? "Your song", artist: song?.artist ?? "The artist", songPlaying: true, musicApp: song?.app ?? "Spotify")
+            song: song?.title ?? "Your song", artist: song?.artist ?? "The artist", songPlaying: true, musicApp: song?.app ?? "Spotify",
+            vehicle: home ? VehicleKind.bus.rawValue : VehicleKind.ic.rawValue, line: home ? "306" : "IC")
         guard let a = try? Activity.request(attributes: TripAttributes(routeName: "Preview"), content: ActivityContent(state: s, staleDate: nil), pushType: nil) else { return }
         Task {
-            // the metro drives along, so you can see it move
+            // the vehicle drives along, so you can see it move
             for p in [0.35, 0.55, 0.75, 0.95] {
                 try? await Task.sleep(nanoseconds: 12_000_000_000)
                 var n = s; n.progress = p
