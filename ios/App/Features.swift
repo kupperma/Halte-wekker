@@ -195,6 +195,8 @@ struct PlanSheet: View {
     @EnvironmentObject var trip: TripManager
     @Environment(\.dismiss) private var dismiss
     var byArrival = true                    // be there by a time (or else: your friend's train)
+    /// The new look (0.21): the system's grouped form in the phone's light or dark, the new tokens.
+    var newLook = false
     @State private var mode = 0             // 0 be there by, 1 leave at, 2 your friend's train
     private var arriveMode: Bool { mode != 2 }
     private var leaveMode: Bool { mode == 1 }
@@ -223,20 +225,20 @@ struct PlanSheet: View {
                         Text("Use the time of your friend’s train. The app finds that train, \(out ? "the bus from Veghel that gets you there in time and the bus to BUas after it" : "the bus from BUas to catch it and the bus to Veghel after it").")
                     }
                 }
-                if let error { Section { Text(error).foregroundStyle(Paper.late) } }
+                if let error { Section { Text(error).foregroundStyle(newLook ? DS.warning : Paper.late) } }
                 Section {
                     Button(arriveMode ? "Find the best trip" : "Find this trip") {
                         let e = arriveMode ? planner.setArrive(out: out, time: time, tomorrow: tomorrow, leave: leaveMode) : planner.set(out: out, time: time, tomorrow: tomorrow)
                         if let e { error = e } else { dismiss() }
                     }
-                    .foregroundStyle(pal.deep)
+                    .foregroundStyle(newLook ? DS.accentText : pal.deep)
                     if arriveMode && planner.arrive != nil { Button("Remove this plan", role: .destructive) { planner.clearArrive(); dismiss() } }
                     if !arriveMode && planner.trip != nil { Button("Remove the trip", role: .destructive) { planner.clear(); dismiss() } }
                 }
             }
-            .scrollContentBackground(.hidden)
-            .background(PaperFill().ignoresSafeArea()).preferredColorScheme(.light)
-            .font(HWFont.body(15)).tint(pal.band)
+            .scrollContentBackground(newLook ? .automatic : .hidden)
+            .background(PaperFill().ignoresSafeArea().opacity(newLook ? 0 : 1)).preferredColorScheme(newLook ? nil : .light)
+            .font(newLook ? DS.body : HWFont.body(15)).tint(newLook ? DS.accentText : pal.band)
             .navigationTitle(leaveMode ? "Leave at" : arriveMode ? "Be there by" : "Plan by train time")
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
         }
@@ -274,7 +276,8 @@ struct PlanSheet: View {
     }
 }
 
-private struct PassLeg: Identifiable {
+/// One ride of a planned pass: the old look's boarding-pass section, or the new look's row (`PlannedPassNew`).
+struct PassLeg: Identifiable {
     let id = UUID()
     let time: String
     let badge: String
@@ -339,7 +342,8 @@ struct PlannedPass: View {
 
     @ViewBuilder
     private func content(_ op: PlanOption, _ t: PlannedTrip, _ pal: HWPalette) -> some View {
-        let built = build(op, out: t.out, pal)
+        let info = ns.rail(op.train.first)
+        let built = Self.build(op, out: t.out, info: info, extra: AnyView(TrainExtras(info: info, pal: pal)))
         let legs = built.legs, stops = built.stops
         sub(t, right: built.right, pal)
         if planner.options.count > 1 {
@@ -382,13 +386,15 @@ struct PlannedPass: View {
         .overlay(alignment: .top) { DottedLine(vertical: false).stroke(pal.line, style: StrokeStyle(lineWidth: 1.5, dash: [4, 3])).frame(height: 1.5) }
     }
 
-    private func build(_ op: PlanOption, out: Bool, _ pal: HWPalette) -> (legs: [PassLeg], stops: [(name: String, time: String)], right: String) {
-        let o = op.train, info = ns.rail(o.first), arr = o.last.arrival
+    /// The pass's three rides (bus, your friend's train, bus), the stops along it and the line on the right; `info`:
+    /// NS's word on the train, `extra`: what goes under the train's section.
+    static func build(_ op: PlanOption, out: Bool, info: RailInfo?, extra: AnyView?) -> (legs: [PassLeg], stops: [(name: String, time: String)], right: String) {
+        let o = op.train, arr = o.last.arrival
         let train: PassLeg = PassLeg(time: Fmt.hhmm(o.first.departure), badge: o.first.line, to: out ? "to Breda" : "to \(op.to.short)",
                             grade: o.rides.count == 1 ? o.first.grade : o.last.grade,
                             lines: [RideText.passLine(o.first, info), o.changes.isEmpty ? nil : PassLine(text: "Change at \(o.changes.joined(separator: ", "))"),
                                     PassLine(text: "\(o.rideLabel) · arrives \(Fmt.hhmm(arr))")],
-                            tag: "FRIEND", gone: o.first.cancelled || info?.cancelled == true, extra: AnyView(TrainExtras(info: info, pal: pal)))
+                            tag: "FRIEND", gone: o.first.cancelled || info?.cancelled == true, extra: extra)
         let bi = op.busIn, bo = op.busOut
         func mins(_ a: Date, _ b: Date) -> Int { Int((b.timeIntervalSince(a) / 60).rounded()) }
         if out {
@@ -499,6 +505,8 @@ struct StartRequest: Identifiable {
 
 struct StartSheet: View {
     let req: StartRequest
+    /// The new look (0.21): the system's grouped form in the phone's light or dark, the new tokens.
+    var newLook = false
     @EnvironmentObject var trip: TripManager
     @Environment(\.dismiss) private var dismiss
     @State private var kms: [Double] = []
@@ -524,17 +532,18 @@ struct StartSheet: View {
                     Section(req.stop == nil ? "\(l.mode.title) to \(l.to.name)" : "Wake me") {
                         let k = kms[safe: i] ?? trip.km(for: l)
                         Stepper("Ring \(Fmt.km(k)) before the stop", value: km(i, l), in: 0.5...(l.mode == .bus ? 10 : 15), step: 0.5)
-                        Text("That’s roughly \(RideText.roughly(km: k, mode: l.mode)) before you arrive.").font(HWFont.body(12)).foregroundStyle(Paper.muted)
+                        Text("That’s roughly \(RideText.roughly(km: k, mode: l.mode)) before you arrive.")
+                            .font(newLook ? DS.footnote : HWFont.body(12)).foregroundStyle(newLook ? DS.secondary : Paper.muted)
                     }
                 }
                 Section {
-                    Button("Start sleeping") { go() }.font(HWFont.display(17)).foregroundStyle(pal.deep)
+                    Button("Start sleeping") { go() }.font(newLook ? DS.bodyStrong : HWFont.display(17)).foregroundStyle(newLook ? DS.accentText : pal.deep)
                     Button("Cancel", role: .cancel) { dismiss() }
                 }
             }
-            .scrollContentBackground(.hidden)
-            .background(PaperFill().ignoresSafeArea()).preferredColorScheme(.light)
-            .font(HWFont.body(15)).tint(pal.band)
+            .scrollContentBackground(newLook ? .automatic : .hidden)
+            .background(PaperFill().ignoresSafeArea().opacity(newLook ? 0 : 1)).preferredColorScheme(newLook ? nil : .light)
+            .font(newLook ? DS.body : HWFont.body(15)).tint(newLook ? DS.accentText : pal.band)
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
         }

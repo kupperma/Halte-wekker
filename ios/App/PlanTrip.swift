@@ -438,11 +438,11 @@ struct PlanTripOverlay: View {
         case .wakeAtStop:
             WakeAtStopNew()
         case .route(let id):
-            if let r = RoutePlan.all.first(where: { $0.id == id }) { StartSheet(req: StartRequest(route: r)).presentationDetents([.medium, .large]) }
+            if let r = RoutePlan.all.first(where: { $0.id == id }) { StartSheet(req: StartRequest(route: r), newLook: true).presentationDetents([.medium, .large]) }
         case .planned:
-            PlannedTripsSheet()
+            PlannedTripsSheetNew()
         case .newPlan(let byArrival):
-            PlanSheet(byArrival: byArrival)
+            PlanSheet(byArrival: byArrival, newLook: true)
         }
     }
 }
