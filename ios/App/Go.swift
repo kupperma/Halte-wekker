@@ -218,6 +218,7 @@ final class GoStore: ObservableObject {
                                            departureIn: self.best?.first.departure.timeIntervalSinceNow,
                                            leaveIn: self.best?.start.timeIntervalSinceNow)
                 }
+                self.trip?.goGPSCheck()             // (rough GPS while you stand with long to go: `GoGPS`)
                 try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
             }
         }

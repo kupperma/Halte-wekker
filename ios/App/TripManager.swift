@@ -587,14 +587,18 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     /// `restart`: start it again even when nothing changed (a fresh fix as a leg begins).
     private func applyGPS(restart: Bool = false) {
         let p = GPSPolicy.plan(phase: gpsPhase, demo: demo, going: going, lineWatch: !LineWatchStore.shared.watches.isEmpty,
-                               regionLook: watchLeft != nil)
+                               regionLook: watchLeft != nil, goCoarse: goCoarseNow())
         // (the battery log: the mode and why, also when only the why changed, as from a ride to a change)
         let why = p.on ? gpsReason : nil
         if restart || p != gpsApplied || why != gpsWhy { gpsWhy = why; BatteryMeter.tripGPS(p, reason: why) }
         guard restart || p != gpsApplied else { return }
         gpsApplied = p
         if p.on {
-            location.desiredAccuracy = p.accuracy == .best ? kCLLocationAccuracyBest : kCLLocationAccuracyHundredMeters
+            switch p.accuracy {
+            case .best: location.desiredAccuracy = kCLLocationAccuracyBest
+            case .tenMetres: location.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
+            case .hundredMetres: location.desiredAccuracy = kCLLocationAccuracyHundredMeters
+            }
             location.distanceFilter = p.filter
             location.allowsBackgroundLocationUpdates = p.background
             location.showsBackgroundLocationIndicator = p.background
@@ -618,6 +622,16 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             return LineWatchStore.shared.watches.isEmpty ? nil : .lineWatch
         }
     }
+
+    /// Fastest trip's rough GPS now: you leave more than 12 minutes from now, standing (`GoGPS`).
+    private func goCoarseNow() -> Bool {
+        guard going, phase == .idle, !demo, let b = GoStore.shared.best else { return false }
+        let fixes = samples.map { Fix($0) }
+        return GoGPS.coarse(leaveIn: b.start.timeIntervalSinceNow, standing: GoGPS.standing(fixes, now: Date()))
+    }
+
+    /// Fastest trip looked again: its GPS as it should be now (the time to leave comes nearer without a new fix).
+    func goGPSCheck() { if phase == .idle { applyGPS() } }
 
     /// The next leg's departures as listed just now, live: the first after you got there is latched, and it and the
     /// planned one follow their live times while they're listed (`TransferPolicy.firstListed`).
@@ -727,6 +741,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             transferAnchor = TransferPolicy.update(transferAnchor, with: Fix(loc))     // (standing at the change: for the hour's end)
             if tick { Task { await loadUpcoming() } }
         }
+        // Fastest trip: rough GPS while you stand with long to go, the best as soon as you move (`GoGPS`)
+        if phase == .idle, going { applyGPS() }
         // (the look after leaving a station takes some 6 minutes: if it went without saying so, GPS doesn’t stay on for it)
         if phase == .idle, let w = watchLeft, Date().timeIntervalSince(w.at) > 10 * 60 { watchLeft = nil; applyGPS() }
         if phase == .idle, !LineWatchStore.shared.watches.isEmpty, Date().timeIntervalSince(lastIdleMatch) > 20 {
