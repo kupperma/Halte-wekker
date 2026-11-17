@@ -48,6 +48,11 @@ struct NewLookSettings: View {
                   : "Home and School are in the bar at the bottom; all your places show when you search.")
                  + " The bus stops and lines are the ones the home shows near home and the school alarm plans from.")
         }
+        Section {
+            NavigationLink("Battery & data") { BatteryDataScreen() }
+        } header: { Text("Battery") } footer: {
+            Text("What the app itself costs: GPS, mobile data, CPU and time behind the screen, today and per ride.")
+        }
         Section("Notifications") {
             Button("Notifications and what’s watched") { showNotices = true }
                 .sheet(isPresented: $showNotices) { NotificationsSheet().presentationDetents([.medium, .large]) }

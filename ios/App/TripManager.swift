@@ -141,6 +141,17 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     private var upcomingBusy = false
     private var lastVehicleRefresh = Date.distantPast
     private var lastIdleMatch = Date.distantPast
+    // 0.20.7: less battery and data
+    private var lastNetTick: Date?                         // a ride's network: what's due goes on one 30 s tick
+    private var rideFarOn = false                          // the far GPS tier is on (`RideGPS`)
+    private var backstopHit = false                        // …the region around this leg's stop was entered: the best
+    private var backstopKey: String?                       // the leg the backstop region is up for
+    private var farTask: Task<Void, Never>?                // while far: a look every minute (time can bring the stop near)
+    private var lastEnd: (place: String, at: Date)?        // where a leg last ended (no station look right after)
+    private var activityLater: Task<Void, Never>?          // a Live Activity change held back for the 30 s
+    private var gpsWhy: GPSReason?                         // why GPS is on, as the battery log has it
+    private var sameOK: (tripId: String, looks: Int)?      // "still the same bus?" looks in a row that passed, for this one
+    private nonisolated static let backstopId = "backstop"
     private var idleBest: String?
     private var notSureLogged: [String: Date] = [:]          // the matcher's last "not sure" line in the field log, per place
     private let arriveM = 450.0
@@ -265,6 +276,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         soundKind = AlarmSound.Kind(rawValue: UserDefaults.standard.string(forKey: "sound") ?? "") ?? .steam
         super.init()
         Watchdog.shared.mark("starting the trip engine (location, notifications)")
+        BatteryMeter.start()                              // the battery and data log (0.20.7)
         location.delegate = self
         location.desiredAccuracy = kCLLocationAccuracyBest
         location.distanceFilter = 25
@@ -329,6 +341,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     /// its road. `how`: how it started, for the field log.
     func start(_ r: RoutePlan, at legIndex: Int = 0, vehicle v: Vehicle? = nil, auto: Bool = false, kms: [Double]? = nil, backup: Int? = nil, stops: [TripStop]? = nil,
                alternatives: [DoorTrip] = [], couldBe: [Vehicle] = [], picked: Bool = false, onIt: Bool = false, how: String = "hand") {
+        if !demo { BatteryMeter.rideStart() }             // (a ride already on ends there first)
         route = r
         boardAlternatives = alternatives
         legs = r.legs(direction)
@@ -528,6 +541,9 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     }
 
     func endTrip() {
+        if phase != .idle, !demo { BatteryMeter.rideEnd(legs: max(1, index - startedAtLeg + 1)) }   // its line in the field log
+        activityLater?.cancel(); activityLater = nil
+        farTask?.cancel(); farTask = nil
         detectTask?.cancel(); detectTask = nil
         demoTask?.cancel(); demoTask = nil; demo = false
         finishTask?.cancel(); finishTask = nil; finishedAt = nil
@@ -572,6 +588,9 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     private func applyGPS(restart: Bool = false) {
         let p = GPSPolicy.plan(phase: gpsPhase, demo: demo, going: going, lineWatch: !LineWatchStore.shared.watches.isEmpty,
                                regionLook: watchLeft != nil)
+        // (the battery log: the mode and why, also when only the why changed, as from a ride to a change)
+        let why = p.on ? gpsReason : nil
+        if restart || p != gpsApplied || why != gpsWhy { gpsWhy = why; BatteryMeter.tripGPS(p, reason: why) }
         guard restart || p != gpsApplied else { return }
         gpsApplied = p
         if p.on {
@@ -584,6 +603,19 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         } else {
             location.stopUpdatingLocation()
             location.allowsBackgroundLocationUpdates = false
+        }
+    }
+
+    /// Why GPS is on, for the battery log.
+    private var gpsReason: GPSReason? {
+        switch gpsPhase {
+        case .riding: return .ride
+        case .transfer: return .change
+        case .finished: return nil
+        case .idle:
+            if going { return .fastest }
+            if watchLeft != nil { return .regionLook }
+            return LineWatchStore.shared.watches.isEmpty ? nil : .lineWatch
         }
     }
 
@@ -1116,6 +1148,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         guard let last = recent.last, recent.count >= 2 else { return [] }
         let speed = max(last.speed, recent.first.map { last.distance(from: $0) / max(1, last.timestamp.timeIntervalSince($0.timestamp)) } ?? 0)
         guard speed > 2.5 else { return [] }                    // not moving: not on board yet
+        BatteryLog.shared.check()
         // Each bus or train in pieces from stop to stop: put them together, so it isn't lost when it passes a stop.
         let urgentAsk = going || isRiding      // someone is waiting for it on a ride or on Fastest trip
         let segs = await Transit.$urgent.withValue(urgentAsk) { await Transit.vehicles(near: last.coordinate, radiusDeg: speed > 15 ? 0.04 : 0.02) }
@@ -1187,6 +1220,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             notSure(spread)
             return []
         }
+        BatteryLog.shared.check()
         // every trip on a piece several share (coupled and through trains), each put together from its pieces
         let urgentAsk = going || isRiding      // someone is waiting for it on a ride or on Fastest trip
         // (no trip running: an answer of the last 10 s from within 50 m does; on a ride or at a change always a new one)
@@ -1778,6 +1812,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         // (each with its own fresh GPS fix, when the open data has one)
         let tracks = await RealPositionsStore.shared.forMatcher(plain)
         guard list.map(\.vehicle.tripId) == cands.map(\.vehicle.tripId), phase == .sleeping || phase == .awake else { return }
+        BatteryLog.shared.check()
         let judged = VehicleMatch.judgeAll(recentFixes, tracks, strictTimes: false)
         // the one it shows, by today's road check: your last fix from its road
         let mine = list.first { $0.vehicle.tripId == shown }
@@ -2490,6 +2525,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
                                     sinceLast: Date().timeIntervalSince(lastActivity), metresToStop: distance,
                                     secondsToStop: (legTo ?? legArrival).map { $0.timeIntervalSinceNow }) else { return }
         lastActivity = Date(); lastActivityKey = key; lastActivitySay = say
+        BatteryLog.shared.activityUpdate()
         Task { await activity.update(ActivityContent(state: s, staleDate: nil)) }
     }
 
@@ -2498,6 +2534,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         if isRiding { endTrip() }
         let d = UserDefaults.standard
         for k in ["busKm", "trainKm", "ringAtStop", "announce", "movingStation", "autoStart", "sound", "pauseMusic", "autoHome", "kmMem", "dir", "dirAt", "autoHomeDay", "quietWhenInUse", "backupMinutes"] { d.removeObject(forKey: k) }
+        BatteryLog.shared.clear(); BatteryLog.shared.flush()          // (the battery and data log too)
         busKm = 2; trainKm = 5; ringAtStop = true; announce = true; movingStation = true; autoStart = true
         soundKind = .steam; pauseMusic = false; autoHome = true; quietWhenInUse = true; kmMem = [:]; lastScore = nil
         direction = Self.savedDirection()

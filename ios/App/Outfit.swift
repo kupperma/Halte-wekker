@@ -49,7 +49,9 @@ enum Weather {
         req.setValue("Haltewekker-iOS", forHTTPHeaderField: "User-Agent")
         for attempt in 0..<2 {
             if attempt > 0 { try? await Task.sleep(nanoseconds: 1_000_000_000) }
-            guard let (data, _) = try? await URLSession.shared.data(for: req),
+            let got = try? await URLSession.shared.data(for: req, delegate: Net.meter)
+            BatteryLog.shared.request(.weather, body: got?.0.count ?? 0)
+            guard let (data, _) = got,
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let h = json["hourly"] as? [String: Any], let times = h["time"] as? [Double] else { continue }
             func nums(_ k: String) -> [Double] { ((h[k] as? [Any]) ?? []).map { ($0 as? Double) ?? Double(($0 as? Int) ?? 0) } }

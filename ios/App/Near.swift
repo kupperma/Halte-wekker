@@ -74,9 +74,11 @@ final class NearMe: NSObject, ObservableObject, CLLocationManagerDelegate {
             manager.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
             manager.distanceFilter = 15
             manager.startUpdatingLocation()
+            BatteryLog.shared.gps("home", mode: .tenMetres, reason: .home)          // (the battery log)
         } else if following {
             following = false
             manager.stopUpdatingLocation()
+            BatteryLog.shared.gps("home", mode: nil, reason: nil)
             manager.desiredAccuracy = kCLLocationAccuracyHundredMeters
             manager.distanceFilter = kCLDistanceFilterNone
         }

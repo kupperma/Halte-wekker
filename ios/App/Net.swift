@@ -53,8 +53,24 @@ enum Net {
         return c
     }
 
-    private static let urgentSession = URLSession(configuration: configuration(for: .urgent))
-    private static let backgroundSession = URLSession(configuration: configuration(for: .background))
+    /// 0.20.7: each request that went out (not one that shared another's answer, not one turned away while cooling
+    /// down), by its label, with the bytes of the body that came back: the battery log counts it.
+    static var onRequest: (@Sendable (String, Int) -> Void)?
+    /// 0.20.7: each request's real bytes, both ways (headers and the body as sent), and whether it went over a mobile
+    /// network, from its metrics (`meter`): the battery log counts them.
+    static var onMetrics: (@Sendable (URL?, Int, Bool) -> Void)?
+    /// The delegate that reads a request's metrics: the app's own sessions have it, and a request elsewhere can take it
+    /// (`data(for:delegate:)`).
+    static let meter: URLSessionTaskDelegate? = {
+        #if os(Linux)
+        return nil
+        #else
+        return MetricsReader()
+        #endif
+    }()
+
+    private static let urgentSession = URLSession(configuration: configuration(for: .urgent), delegate: meter, delegateQueue: nil)
+    private static let backgroundSession = URLSession(configuration: configuration(for: .background), delegate: meter, delegateQueue: nil)
     static func session(for lane: Lane) -> URLSession { lane == .urgent ? urgentSession : backgroundSession }
 
     private static let retryable: Set<URLError.Code> = [.networkConnectionLost, .cannotConnectToHost, .cannotFindHost,
@@ -92,6 +108,7 @@ enum Net {
         var began = Date()
         func note(status: Int?, error: URLError.Code?, bytes: Int, attempts: Int, extra: String? = nil) {
             guard let label else { return }
+            if attempts > 0, extra != "shared", extra != Polite.coolingNote { onRequest?(label, bytes) }
             (log ?? FieldLog.shared).add(.net, FieldFormat.net(label, lane: lane, status: status, error: error, bytes: bytes,
                                                                seconds: Date().timeIntervalSince(began), attempts: attempts,
                                                                note: extra))
@@ -615,3 +632,20 @@ private actor Latest<T: Sendable> {
     private(set) var value: T?
     func keep(_ v: T) { value = v }
 }
+
+#if !os(Linux)
+/// A request's real bytes from its metrics, handed to `Net.onMetrics` (0.20.7).
+final class MetricsReader: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    func urlSession(_ session: URLSession, task: URLSessionTask, didFinishCollecting metrics: URLSessionTaskMetrics) {
+        guard let report = Net.onMetrics else { return }
+        var bytes: Int64 = 0
+        var mobile = false
+        for t in metrics.transactionMetrics {
+            bytes += t.countOfRequestHeaderBytesSent + t.countOfRequestBodyBytesSent
+                + t.countOfResponseHeaderBytesReceived + t.countOfResponseBodyBytesReceived
+            if t.isCellular { mobile = true }
+        }
+        report(task.originalRequest?.url ?? task.currentRequest?.url, Int(clamping: bytes), mobile)
+    }
+}
+#endif

@@ -55,7 +55,7 @@ final class RealPositionsStore: ObservableObject {
         c.requestCachePolicy = .reloadIgnoringLocalCacheData
         c.urlCache = nil
         c.httpMaximumConnectionsPerHost = 1
-        session = URLSession(configuration: c)
+        session = URLSession(configuration: c, delegate: Net.meter, delegateQueue: nil)      // (the battery log's real bytes)
         // (in the background only the matcher's looks during a ride keep it going)
         let nc = NotificationCenter.default
         nc.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
@@ -194,6 +194,7 @@ final class RealPositionsStore: ObservableObject {
         if let etag = buses.etag { req.setValue(etag, forHTTPHeaderField: "If-None-Match") }
         do {
             let (data, response) = try await session.data(for: req)
+            BatteryLog.shared.request(.ovapi, body: data.count)
             let http = response as? HTTPURLResponse
             let status = http?.statusCode ?? 0
             if status == 304 {
@@ -232,6 +233,7 @@ final class RealPositionsStore: ObservableObject {
         }
         do {
             let (data, response) = try await session.data(for: req)
+            BatteryLog.shared.request(.nsVehicles, body: data.count)
             let http = response as? HTTPURLResponse
             let status = http?.statusCode ?? 0
             if status == 304 {

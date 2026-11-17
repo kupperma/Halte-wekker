@@ -179,8 +179,9 @@ final class NowPlaying: ObservableObject {
         var r = URLRequest(url: URL(string: "https://api.spotify.com/v1/me/player/currently-playing?additional_types=episode")!)
         r.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         r.timeoutInterval = 10
-        guard let res = try? await URLSession.shared.data(for: r), let http = res.1 as? HTTPURLResponse else { return nil }
+        guard let res = try? await URLSession.shared.data(for: r, delegate: Net.meter), let http = res.1 as? HTTPURLResponse else { return nil }
         let d = res.0
+        BatteryLog.shared.request(.spotify, body: d.count)
         switch http.statusCode {
         case 200: break
         case 204: return .some(nil)

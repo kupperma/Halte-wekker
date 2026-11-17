@@ -102,16 +102,26 @@ final class FieldLog: @unchecked Sendable {
     /// Writes are one at a time, each taking the list as it is once it's its turn, so an older copy can never land
     /// after a newer one. (`add` meanwhile only waits for the copy, not for the write.)
     func flush() {
-        writing.lock()
-        defer { writing.unlock() }
-        lock.lock()
-        pending = false
-        guard dirty else { lock.unlock(); return }
-        dirty = false
-        let snapshot = list
-        lock.unlock()
-        if let data = try? JSONEncoder().encode(snapshot) { store(data) }
+        do {
+            writing.lock()
+            defer { writing.unlock() }
+            lock.lock()
+            pending = false
+            if dirty {
+                dirty = false
+                let snapshot = list
+                lock.unlock()
+                if let data = try? JSONEncoder().encode(snapshot) { store(data) }
+            } else {
+                lock.unlock()
+            }
+        }
+        alsoFlush?()
     }
+
+    /// Written with it (0.20.7: the battery and data log, at the same moments: the app going to the background, a
+    /// ride's end, and after each burst of lines). Set once at launch.
+    var alsoFlush: (@Sendable () -> Void)?
 
     var entries: [FieldEntry] {
         lock.lock(); defer { lock.unlock() }

@@ -1647,6 +1647,7 @@ struct GoMap: View {
         req.source = MKMapItem.forCurrentLocation()
         req.destination = MKMapItem(placemark: MKPlacemark(coordinate: s))
         req.transportType = .walking
+        BatteryLog.shared.request(.directions, body: 0)             // (MapKit's own: its bytes aren't known)
         return try? await MKDirections(request: req).calculate().routes.first
     }
 

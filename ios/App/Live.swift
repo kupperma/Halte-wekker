@@ -245,6 +245,7 @@ final class LiveStore: ObservableObject {
         // (a late bus by its times without catching up: its live times have it make its delay up within a few stops)
         let plain = VehicleTrack.group(Transit.noCatchUp(segs, asOf: now).map { MapPiece($0) })
         let tracks = await RealPositionsStore.shared.forMatcher(plain)
+        BatteryLog.shared.check()
         let history = read()                // (read once the vehicles near you are in)
         let judged: [Judgement]
         if VehicleMatch.enough(history) {
