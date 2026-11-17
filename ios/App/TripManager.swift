@@ -384,7 +384,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         cands = []; choosing = []; candSince = nil; candLead = nil; candSwitch = SwitchState(); candMisses = [:]; candTimedOut = nil
         legClosest = nil; awayLooked = false
         transferAnchor = nil; changeSince = nil; finishedAt = nil; finishTask?.cancel(); finishTask = nil
-        applyGPS(restart: true)                           // the best GPS, also locked, for the whole leg
+        backstopHit = false; sameOK = nil
+        applyGPS(restart: true)                           // the best GPS, also locked (far from the stop: `RideGPS`)
         // A leg that starts inside its wake distance (a short one, or one started near its stop): awake from the start,
         // without the alarm, whenever its first fix comes; the announcement comes at the stop. (Without a fix that says
         // where you are now, the first fix within 20 s decides, in `handle`.)
@@ -584,11 +585,29 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         }
     }
 
-    /// GPS as `GPSPolicy` has it for now: the trip's phase, Fastest trip, a line watch, the look after leaving a station.
+    /// GPS as `GPSPolicy` has it for now: the trip's phase, Fastest trip, a line watch, the look after leaving a station;
+    /// far from the stop with the vehicle confirmed (`RideGPS`), or Fastest trip standing with long to go (`GoGPS`).
     /// `restart`: start it again even when nothing changed (a fresh fix as a leg begins).
     private func applyGPS(restart: Bool = false) {
+        let far = rideFarNow()
         let p = GPSPolicy.plan(phase: gpsPhase, demo: demo, going: going, lineWatch: !LineWatchStore.shared.watches.isEmpty,
-                               regionLook: watchLeft != nil, goCoarse: goCoarseNow())
+                               regionLook: watchLeft != nil, rideFar: far, goCoarse: goCoarseNow())
+        if far != rideFarOn {
+            rideFarOn = far
+            rideLog(far ? "gps · far from the stop, the vehicle confirmed: 10 m, every 75 m"
+                        : "gps · the best again (\(FieldFormat.metres(metresToLegStop)) from the stop)", once: "far|\(far)", every: 60)
+            farTask?.cancel(); farTask = nil
+            if far {
+                farTask = Task { [weak self] in
+                    while !Task.isCancelled {
+                        try? await Task.sleep(nanoseconds: 60_000_000_000)
+                        guard let self, !Task.isCancelled, self.rideFarOn else { return }
+                        self.applyGPS()
+                    }
+                }
+            }
+        }
+        updateBackstop(far)
         // (the battery log: the mode and why, also when only the why changed, as from a ride to a change)
         let why = p.on ? gpsReason : nil
         if restart || p != gpsApplied || why != gpsWhy { gpsWhy = why; BatteryMeter.tripGPS(p, reason: why) }
@@ -624,6 +643,34 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         }
     }
 
+    /// The vehicle you're on is confirmed: its "still the same bus?" look passed (the last one, for this one), none to
+    /// choose between, on its road and near its times, not picked by hand during the ride (that one is watched on its
+    /// road), not taken by its timetable alone.
+    private var rideConfirmed: Bool {
+        guard let v = vehicle, let ok = sameOK, ok.tripId == v.tripId, ok.looks >= 1 else { return false }
+        return cands.isEmpty && choosing.isEmpty && offRoad == 0 && farLooks == 0 && handLock == nil && stillOnAsk == nil
+            && !byTimetable && !demo
+    }
+
+    /// A "still the same bus?" look on `v`: passed (counted on), or not (back to none).
+    private func noteSameLook(_ v: Vehicle, passed: Bool) {
+        if passed { sameOK = (v.tripId, sameOK?.tripId == v.tripId ? (sameOK?.looks ?? 0) + 1 : 1) } else { sameOK = nil }
+        applyGPS()
+    }
+
+    /// The far GPS tier for this leg now (`RideGPS.far`).
+    private func rideFarNow() -> Bool {
+        guard gpsPhase == .riding, !demo, let l = leg else { return false }
+        let f = lastFix
+        let input = RideGPS.Input(enabled: RideGPS.enabled(), asleep: phase == .sleeping, confirmed: rideConfirmed,
+                                  metresToStop: metresToLegStop, accuracy: f?.horizontalAccuracy,
+                                  fixAge: f.map { -$0.timestamp.timeIntervalSinceNow }, wakeMetres: wakeKm * 1000,
+                                  isTrain: vehicle?.isTrain ?? (l.mode == .train), speed: currentSpeed,
+                                  secondsToStop: (legArrival ?? legTo).map { $0.timeIntervalSinceNow },
+                                  backstop: backstopHit, wasFar: rideFarOn)
+        return RideGPS.far(input)
+    }
+
     /// Fastest trip's rough GPS now: you leave more than 12 minutes from now, standing (`GoGPS`).
     private func goCoarseNow() -> Bool {
         guard going, phase == .idle, !demo, let b = GoStore.shared.best else { return false }
@@ -633,6 +680,31 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
 
     /// Fastest trip looked again: its GPS as it should be now (the time to leave comes nearer without a new fix).
     func goGPSCheck() { if phase == .idle { applyGPS() } }
+
+    /// The backstop for the far tier: a region around this leg's stop (its wake distance and 4 km more) while the far tier
+    /// is on, so it's the best GPS again well before the wake point even if the fixes say otherwise. Needs "Always".
+    private func updateBackstop(_ far: Bool) {
+        let key: String? = far ? leg.map { "\(index)|\($0.to.key)|\(Int(wakeKm * 1000))" } : nil
+        guard key != backstopKey else { return }
+        for r in location.monitoredRegions where r.identifier == Self.backstopId { location.stopMonitoring(for: r) }
+        backstopKey = nil
+        guard let key, let l = leg, location.authorizationStatus == .authorizedAlways,
+              CLLocationManager.isMonitoringAvailable(for: CLCircularRegion.self) else { return }
+        let radius = min(RideGPS.backstopRadius(wakeMetres: wakeKm * 1000), location.maximumRegionMonitoringDistance)
+        let r = CLCircularRegion(center: l.to.coordinate, radius: radius, identifier: Self.backstopId)
+        r.notifyOnEntry = true
+        r.notifyOnExit = false
+        location.startMonitoring(for: r)
+        backstopKey = key
+    }
+
+    /// The region around the leg's stop was entered: the best GPS for the rest of the leg.
+    private func backstopEntered() {
+        guard gpsPhase == .riding, !backstopHit else { return }
+        backstopHit = true
+        rideLog("gps · backstop entered: the best again (\(FieldFormat.metres(metresToLegStop)) from the stop)")
+        applyGPS()
+    }
 
     /// The next leg's departures as listed just now, live: the first after you got there is latched, and it and the
     /// planned one follow their live times while they're listed (`TransferPolicy.firstListed`).
@@ -722,6 +794,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     }
 
     nonisolated func locationManager(_ manager: CLLocationManager, didEnterRegion region: CLRegion) {
+        if region.identifier == Self.backstopId { Task { @MainActor in self.backstopEntered() }; return }
         guard region.identifier == "school" else { return }
         Task { @MainActor in self.maybeAutoHome(CLLocation(latitude: Place.buas.coordinate.latitude, longitude: Place.buas.coordinate.longitude)) }
     }
@@ -788,6 +861,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         } else if phase == .awake && d <= arriveM && loc.horizontalAccuracy <= 600 {
             if ringAtStop || forceArrival { arrive() } else { legDone(why: "by GPS, quietly") }
         }
+        applyGPS()                                        // (far from the stop, or the best again: `RideGPS`)
         if tick { refreshEta(force: false) }
         pushActivity(force: false)
         if tick, now.timeIntervalSince(lastWatchCheck) >= 59 { lastWatchCheck = now; Task { await WatchStore.shared.check() } }
@@ -1660,6 +1734,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             let w = t.position(now), at = t.coordinate(atMetres: w.metres)
             let far = w.done || last.distance(from: CLLocation(latitude: at.latitude, longitude: at.longitude)) > (v.isTrain ? 2500 : 1000)
             farLooks = far ? farLooks + 1 : 0
+            noteSameLook(v, passed: !far)
             if farLooks >= 3 {
                 farLooks = 0
                 let R = MatchRules.current()
@@ -1670,6 +1745,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             return
         }
         offRoad += 1
+        noteSameLook(v, passed: false)                        // (in doubt: the best GPS, at once)
         guard offRoad >= 2 else { return }                    // off its road twice, half a minute apart
         offRoad = 0
         if let found = await findBusYoureOn(not: v, at: last, limit: limit), vehicle == v {
@@ -1750,6 +1826,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
                 far = t.live && !w.done && last.distance(from: CLLocation(latitude: at.latitude, longitude: at.longitude)) > (v.isTrain ? 2500 : 1000)
             }
             farLooks = far ? farLooks + 1 : 0
+            noteSameLook(v, passed: verdict == .passes && !far)
             if farLooks >= 3 {
                 farLooks = 0
                 let R = MatchRules.current()
@@ -1762,6 +1839,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             return
         }
         offRoad += 1
+        noteSameLook(v, passed: false)                        // (in doubt: the best GPS, at once)
         let note = VehicleMatch.verdict(judged.first?.result, offRoad: false) != .fails ? " (off its road)" : ""
         FieldLog.shared.add(.match, FieldFormat.match("same bus", judged, outcome: (offRoad >= 2 ? "find another" : "keep \(shown), 1 miss") + note,
                                                       planned: v.tripId, count: judged.count))
@@ -1785,6 +1863,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         choosing = list
         candSince = Date(); candLead = nil; candSwitch = SwitchState(); candMisses = [:]
         candCheckAt = Date().addingTimeInterval(8)
+        applyGPS()                                            // (choosing: the best GPS, at once)
     }
 
     /// Every dozen seconds while choosing: how far you are from each one's road and from where its times put it. One
@@ -2362,13 +2441,14 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
                 }
             }
         }
-        let current: [RegionSpec] = location.monitoredRegions.map { r in
+        // (the far tier's backstop around a ride's stop is its own: `updateBackstop`)
+        let current: [RegionSpec] = location.monitoredRegions.filter { $0.identifier != Self.backstopId }.map { r in
             let c = r as? CLCircularRegion
             return RegionSpec(id: r.identifier, lat: c?.center.latitude ?? .nan, lon: c?.center.longitude ?? .nan,
                               radius: c?.radius ?? -1, entry: r.notifyOnEntry, exit: r.notifyOnExit)
         }
         if force || !RegionPlan.same(wanted: wanted, current: current) {
-            for r in location.monitoredRegions { location.stopMonitoring(for: r) }
+            for r in location.monitoredRegions where r.identifier != Self.backstopId { location.stopMonitoring(for: r) }
             for w in wanted {
                 let r = CLCircularRegion(center: CLLocationCoordinate2D(latitude: w.lat, longitude: w.lon), radius: w.radius, identifier: w.id)
                 r.notifyOnEntry = w.entry; r.notifyOnExit = w.exit
@@ -2611,7 +2691,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     func resetAll() {
         if isRiding { endTrip() }
         let d = UserDefaults.standard
-        for k in ["busKm", "trainKm", "ringAtStop", "announce", "movingStation", "autoStart", "sound", "pauseMusic", "autoHome", "kmMem", "dir", "dirAt", "autoHomeDay", "quietWhenInUse", "backupMinutes"] { d.removeObject(forKey: k) }
+        for k in ["busKm", "trainKm", "ringAtStop", "announce", "movingStation", "autoStart", "sound", "pauseMusic", "autoHome", "kmMem", "dir", "dirAt", "autoHomeDay", "quietWhenInUse", "backupMinutes", RideGPS.settingKey] { d.removeObject(forKey: k) }
         BatteryLog.shared.clear(); BatteryLog.shared.flush()          // (the battery and data log too)
         busKm = 2; trainKm = 5; ringAtStop = true; announce = true; movingStation = true; autoStart = true
         soundKind = .steam; pauseMusic = false; autoHome = true; quietWhenInUse = true; kmMem = [:]; lastScore = nil

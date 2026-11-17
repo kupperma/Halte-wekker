@@ -11,6 +11,7 @@ struct NewLookSettings: View {
     @AppStorage(NewLook.vehiclesKey) private var vehicles = true
     @AppStorage(RealPositions.settingKey) private var realPositions = true
     @AppStorage(HomeStyle.key) private var homeStyle = HomeStyle.live.rawValue
+    @AppStorage(RideGPS.settingKey) private var longRides = true
     @State private var showNotices = false
     @State private var showSteady = false
     @State private var liveStops = false
@@ -50,8 +51,9 @@ struct NewLookSettings: View {
         }
         Section {
             NavigationLink("Battery & data") { BatteryDataScreen() }
+            Toggle("Save battery on long rides", isOn: $longRides)
         } header: { Text("Battery") } footer: {
-            Text("What the app itself costs: GPS, mobile data, CPU and time behind the screen, today and per ride.")
+            Text("Uses less precise GPS far from your stop; switches back well before it wakes you.")
         }
         Section("Notifications") {
             Button("Notifications and what’s watched") { showNotices = true }
