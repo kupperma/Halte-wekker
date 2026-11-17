@@ -462,6 +462,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         sound.stop()
         setBackup(0)
         arrivedAt = leg?.to.short
+        if let l = leg { lastEnd = (l.to.key, Date()) }
         if index + 1 < legs.count {
             phase = .transfer
             changeSince = Date(); changeFirst = nil
@@ -2383,6 +2384,13 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
 
     private func leftRegion(_ key: String) {
         guard autoStart, phase == .idle, let place = Place.all.first(where: { $0.key == key }) else { return }
+        // right after a ride ended there: you're walking away from the bus you got off (unless at vehicle speed)
+        let fresh = lastFix.flatMap { -$0.timestamp.timeIntervalSinceNow < 60 && $0.speed >= 0 ? $0.speed : nil }
+        if RegionLook.skip(place: key, lastEnd: lastEnd, speed: fresh, now: Date()) {
+            rideLog("look · left \(key == "veghel" ? "the home station" : "a station") right after a ride ended there: not looking",
+                    once: "regionSkip|\(key)", every: 600)
+            return
+        }
         watchLeft = (place, Date())
         applyGPS()
         detectTask?.cancel()
