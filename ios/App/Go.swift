@@ -1417,6 +1417,7 @@ struct GoMap: View {
     let top: CGFloat            // the screen's top part that the buttons cover
     let bottom: CGFloat         // where the cards start
     var saved = false           // the ride is from the saved answer: its pin without the time
+    var newLook = false         // the new look (0.20): the plain map in the phone's light or dark, the new colours
     @State private var trip: LiveTrip?
     @State private var mine: Int?
     @State private var walk: MKRoute?
@@ -1429,15 +1430,17 @@ struct GoMap: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { tl in
             Map(position: $camera, interactionModes: []) { content(tl.date) }
-                .mapStyle(.standard(emphasis: .muted, pointsOfInterest: .excludingAll))
+                .mapStyle(newLook ? .standard(pointsOfInterest: .excludingAll) : .standard(emphasis: .muted, pointsOfInterest: .excludingAll))
         }
-        // a wash of the map's paper over it, and its wear
+        // a wash of the map's paper over it, and its wear (not in the new look)
         .overlay {
-            ZStack {
-                Color(hex: 0xEADCBB).opacity(0.22)
-                if let g = Paper.grime { Image(uiImage: g).resizable().opacity(0.3) }
+            if !newLook {
+                ZStack {
+                    Color(hex: 0xEADCBB).opacity(0.22)
+                    if let g = Paper.grime { Image(uiImage: g).resizable().opacity(0.3) }
+                }
+                .allowsHitTesting(false)
             }
-            .allowsHitTesting(false)
         }
         .background { GeometryReader { g in Color.clear.onAppear { size = g.size }.onChange(of: g.size) { _, s in size = s } } }
         .onAppear { hereNow = here }
@@ -1452,10 +1455,13 @@ struct GoMap: View {
         return .init(latitude: a, longitude: o)
     }
 
+    /// A line's colour: its own (the old look), or its mode's (the new look).
+    private func lineColor(_ r: Ride) -> Color { newLook ? DS.mode(train: r.isTrain) : Paper.line(r.line, train: r.isTrain) }
+
     @MapContentBuilder private func content(_ now: Date) -> some MapContent {
         UserAnnotation()
         if let walk {
-            MapPolyline(walk.polyline).stroke(Paper.ink, style: StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round, dash: [0.5, 10]))
+            MapPolyline(walk.polyline).stroke(newLook ? DS.accent : Paper.ink, style: StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round, dash: [0.5, 10]))
         }
         if let t = trip, let m = mine, let r = ride {
             let w = t.position(now)
@@ -1466,21 +1472,21 @@ struct GoMap: View {
             let rest = t.road(from: me, to: t.metres(ofStop: t.stops.count - 1))
             if rest.count > 1 {
                 MapPolyline(coordinates: rest)
-                    .stroke(Paper.line(r.line, train: r.isTrain).opacity(0.35), style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
+                    .stroke(lineColor(r).opacity(0.35), style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
             }
             if at < me - 5 {
                 MapPolyline(coordinates: t.road(from: at, to: me))
-                    .stroke(Paper.line(r.line, train: r.isTrain), style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
+                    .stroke(lineColor(r), style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
             }
             if !w.done && at <= me + 30 {
                 Annotation("", coordinate: t.coordinate(atMetres: at), anchor: .center) {
                     HStack(spacing: 4) {
                         Image(systemName: r.isTrain ? "tram.fill" : "bus.fill").font(.system(size: 12, weight: .bold))
-                        Text(r.line).font(BoardInk.sans(13))
+                        Text(r.line).font(newLook ? DS.footnoteStrong : BoardInk.sans(13))
                     }
                     .foregroundStyle(.white)
                     .padding(.horizontal, 8).padding(.vertical, 5)
-                    .background(Paper.line(r.line, train: r.isTrain), in: RoundedRectangle(cornerRadius: 7))
+                    .background(lineColor(r), in: RoundedRectangle(cornerRadius: 7))
                     .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.white, lineWidth: 2))
                     .shadow(color: .black.opacity(0.45), radius: 4, y: 2)
                 }
@@ -1491,12 +1497,12 @@ struct GoMap: View {
                 VStack(spacing: 0) {
                     HStack(spacing: 5) {
                         Image(systemName: r.isTrain ? "tram.fill" : "bus.fill").font(.system(size: 11, weight: .bold))
-                        Text(saved ? r.line : "\(r.line) · \(Fmt.hhmm(r.departure))").font(BoardInk.sans(12))
+                        Text(saved ? r.line : "\(r.line) · \(Fmt.hhmm(r.departure))").font(newLook ? DS.footnoteStrong : BoardInk.sans(12)).monospacedDigit()
                     }
                     .foregroundStyle(.white).padding(.horizontal, 8).padding(.vertical, 5)
-                    .background(Paper.navy, in: RoundedRectangle(cornerRadius: 4))
-                    Image(systemName: "triangle.fill").font(.system(size: 9)).foregroundStyle(Paper.navy).rotationEffect(.degrees(180)).offset(y: -2)
-                    Circle().fill(Color.white).frame(width: 14, height: 14).overlay(Circle().stroke(Paper.ink, lineWidth: 3.5))
+                    .background(newLook ? DS.mode(train: r.isTrain) : Paper.navy, in: RoundedRectangle(cornerRadius: newLook ? DS.pillRadius : 4))
+                    Image(systemName: "triangle.fill").font(.system(size: 9)).foregroundStyle(newLook ? DS.mode(train: r.isTrain) : Paper.navy).rotationEffect(.degrees(180)).offset(y: -2)
+                    Circle().fill(Color.white).frame(width: 14, height: 14).overlay(Circle().stroke(newLook ? DS.mode(train: r.isTrain) : Paper.ink, lineWidth: 3.5))
                 }
                 .shadow(color: .black.opacity(0.4), radius: 4, y: 2)
             }
@@ -1580,7 +1586,12 @@ struct TripLine: View {
     let trip: DoorTrip
     let others: [DoorTrip]
     let dest: String
+    var newLook = false         // the new look (0.20): its colours, pills and text styles
     var tap: (Ride) -> Void = { _ in }
+
+    private var ink: Color { newLook ? DS.text : Paper.ink }
+    private var muted: Color { newLook ? DS.secondary : Paper.muted }
+    private func color(_ r: Ride) -> Color { newLook ? DS.mode(train: r.isTrain) : Paper.line(r.line, train: r.isTrain) }
 
     private struct Stop { let name: String; let time: Date; let sub: String; var end = false }
     private struct Seg { let ride: Ride?; let height: CGFloat }
@@ -1647,7 +1658,7 @@ struct TripLine: View {
                 let onto = k < o.rides.count ? "same \(name(o.rides[k]))" : "there at the same time"
                 label = "or \(lines) at \(Fmt.hhmm(o.rides[d].departure)) · \(onto)" + (sooner > 0 ? " · on board \(sooner) min sooner" : "")
             }
-            out.append(Branch(from: from, to: join, color: Paper.line(o.rides[d].line, train: o.rides[d].isTrain), label: label))
+            out.append(Branch(from: from, to: join, color: color(o.rides[d]), label: label))
             if out.count == 2 { break }
         }
         return out
@@ -1676,17 +1687,17 @@ struct TripLine: View {
                 for (i, s) in l.segs.enumerated() where i + 1 < ys.count {
                     var p = Path(); p.move(to: CGPoint(x: lineX, y: ys[i])); p.addLine(to: CGPoint(x: lineX, y: ys[i + 1]))
                     if let r = s.ride {
-                        ctx.stroke(p, with: .color(Paper.line(r.line, train: r.isTrain)), style: StrokeStyle(lineWidth: 9, lineCap: .round))
+                        ctx.stroke(p, with: .color(color(r)), style: StrokeStyle(lineWidth: 9, lineCap: .round))
                     } else {
-                        ctx.stroke(p, with: .color(Paper.soft), style: StrokeStyle(lineWidth: 6, lineCap: .round, dash: [0.5, 9]))
+                        ctx.stroke(p, with: .color(newLook ? DS.legQuiet : Paper.soft), style: StrokeStyle(lineWidth: 6, lineCap: .round, dash: [0.5, 9]))
                     }
                 }
                 // the stations
                 for (i, s) in l.stops.enumerated() where i < ys.count {
                     let r: CGFloat = s.end ? 11 : 9
                     let c = CGRect(x: lineX - r, y: ys[i] - r, width: 2 * r, height: 2 * r)
-                    ctx.fill(Path(ellipseIn: c), with: .color(s.end ? Paper.yellow : .white))
-                    ctx.stroke(Path(ellipseIn: c), with: .color(Paper.ink), lineWidth: 4)
+                    ctx.fill(Path(ellipseIn: c), with: .color(s.end ? (newLook ? DS.accent : Paper.yellow) : .white))
+                    ctx.stroke(Path(ellipseIn: c), with: .color(newLook ? (s.end ? DS.accent : DS.text) : Paper.ink), lineWidth: 4)
                 }
             }
             .frame(height: height)
@@ -1695,11 +1706,11 @@ struct TripLine: View {
                 if i < ys.count {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         VStack(alignment: .leading, spacing: 1) {
-                            Text(s.name).font(.system(size: s.end ? 17 : 15.5, weight: .heavy)).foregroundStyle(Paper.ink).lineLimit(1).minimumScaleFactor(0.7)
-                            Text(s.sub).font(.system(size: 11)).foregroundStyle(Paper.muted).lineLimit(2).minimumScaleFactor(0.8)
+                            Text(s.name).font(.system(size: s.end ? 17 : 15.5, weight: newLook ? .bold : .heavy)).foregroundStyle(ink).lineLimit(1).minimumScaleFactor(0.7)
+                            Text(s.sub).font(.system(size: newLook ? 12 : 11)).foregroundStyle(muted).lineLimit(2).minimumScaleFactor(0.8)
                         }
                         Spacer(minLength: 4)
-                        Text(Fmt.hhmm(s.time)).font(.system(size: s.end ? 17 : 15.5, weight: .heavy)).foregroundStyle(Paper.ink).monospacedDigit()
+                        Text(Fmt.hhmm(s.time)).font(.system(size: s.end ? 17 : 15.5, weight: newLook ? .bold : .heavy)).foregroundStyle(ink).monospacedDigit()
                     }
                     .frame(height: stopH, alignment: .center)
                     .padding(.leading, lineX + 22)
@@ -1709,7 +1720,10 @@ struct TripLine: View {
             // each ride's bullet on its piece of line; tap it for where that bus or train is
             ForEach(Array(l.segs.enumerated()), id: \.offset) { i, s in
                 if let r = s.ride, i + 1 < ys.count {
-                    Button { tap(r) } label: { LineBullet(line: r.line, train: r.isTrain, height: 20, minWidth: 36, font: 11) }
+                    Button { tap(r) } label: {
+                        if newLook { DSLinePill(line: r.isTrain ? Transit.trainLabel(r.line) : r.line, train: r.isTrain).frame(minWidth: 44, minHeight: 32).contentShape(Rectangle()) }
+                        else { LineBullet(line: r.line, train: r.isTrain, height: 20, minWidth: 36, font: 11) }
+                    }
                         .buttonStyle(.plain)
                         .position(x: lineX, y: (ys[i] + ys[i + 1]) / 2)
                 }

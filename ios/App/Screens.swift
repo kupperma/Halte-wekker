@@ -12,13 +12,15 @@ struct RootView: View {
     /// The new home is on screen: it follows the phone's light or dark setting. Everything else (still the old look)
     /// stays dark, as before.
     private var newHomeShown: Bool { newLook && ((trip.phase == .idle && !go.isOpen) || (trip.phase == .transfer && browsing)) }
+    /// A screen in the new look is on screen (the home, and since 0.20 Fastest trip).
+    private var newShown: Bool { newHomeShown || (newLook && trip.phase == .idle && go.isOpen) }
     @AppStorage(HomeStyle.key) private var homeStyle = HomeStyle.live.rawValue
-    /// The home follows the phone's light or dark, as Live around you; Next trip first is dark (as its design).
-    private var followsPhone: Bool { newHomeShown && HomeStyle.of(homeStyle) == .live }
+    /// The new look follows the phone's light or dark, as Live around you; Next trip first is dark (as its design).
+    private var followsPhone: Bool { newShown && HomeStyle.of(homeStyle) == .live }
     var body: some View {
         Group {
             switch trip.phase {
-            case .idle where go.isOpen: GoView().transition(.opacity)
+            case .idle where go.isOpen: Group { if newLook { GoViewNew() } else { GoView() } }.transition(.opacity)
             case .idle: if newLook { NewHome() } else { HomeView() }
             case .alarm: AlarmView()
             case .transfer where browsing:
