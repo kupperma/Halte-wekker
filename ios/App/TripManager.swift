@@ -1435,7 +1435,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         var warning: String?
         if !goes {
             let then = plan.map { t in t.rides.dropFirst().map { "\(GoStore.what($0)) at \(Fmt.hhmm($0.departure))" } } ?? []
-            let end = plan.flatMap { t in legs.last.map { "\($0.short) at \(Fmt.hhmm(t.end))" } }
+            let end = plan.flatMap { t in legs.last.map { "\($0.to.short) at \(Fmt.hhmm(t.end))" } }
             warning = RidePick.doesntGo(v.title, to: l.to.short, getOff: plan.map { Fmt.place($0.first.toStop) }, then: then, end: end)
         }
         return HandPick(vehicle: v, stops: stops, route: plan.flatMap { RoutePlan.from($0) }, alternatives: alts, warning: warning,
