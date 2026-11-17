@@ -131,6 +131,8 @@ struct GoToCard: View {
                     HStack(spacing: 6) {
                         if let d = delay {
                             Text(d.text).font(DS.footnoteStrong).monospacedDigit().foregroundStyle(d.warn ? DS.warning : DS.accentText)
+                        } else if !ride.live && !saved {
+                            Text("timetable").font(DS.footnote).foregroundStyle(DS.secondary)      // (no live times for it)
                         }
                         if !saved && !cancelled && !here {
                             TimelineView(.periodic(from: .now, by: 15)) { tl in
