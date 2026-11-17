@@ -160,7 +160,7 @@ enum HomeActions {
     static func autoGo(trip: TripManager, planner: Planner, goStore: GoStore, near: NearMe) {
         guard trip.phase == .idle, !goStore.isOpen else { return }
         let now = Date()
-        if let n = SchoolAlarm.shared.next, GoStore.schoolWindowOpen(n, now: now) {
+        if let n = SchoolAlarm.shared.next, GoStore.schoolAutoOpen(n, now: now) {
             if trip.direction != .toSchool { trip.pick(.toSchool) }
             withAnimation(.easeInOut(duration: 0.35)) {
                 goStore.openForPlan(to: .buas, from: near.position, deadline: n.beThere, label: "your \(Fmt.hhmm(n.classStart)) class",
@@ -168,7 +168,7 @@ enum HomeActions {
             }
             return
         }
-        if let a = planner.arrive, let T = a.when, GoStore.arriveWindowOpen(a, chosen: planner.arriveChosen, now: now) {
+        if let a = planner.arrive, let T = a.when, GoStore.arriveAutoOpen(a, chosen: planner.arriveChosen, now: now) {
             if trip.direction != (a.out ? .toSchool : .home) { trip.pick(a.out ? .toSchool : .home) }
             withAnimation(.easeInOut(duration: 0.35)) {
                 goStore.openForPlan(to: a.out ? .buas : .veghel, from: near.position, deadline: a.leaving ? nil : T,

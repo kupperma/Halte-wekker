@@ -100,6 +100,17 @@ final class GoStore: ObservableObject {
         guard SchoolAlarm.shared.on, let l = n.leave, let t = n.trip else { return false }
         return now > min(l.addingTimeInterval(-45 * 60), n.alarm ?? l) && now < t.first.departure.addingTimeInterval(5 * 60)
     }
+    /// When it opens by itself (0.20.7, `autoGo`): from 20 minutes before you leave (not from the alarm: you'd watch for
+    /// an hour behind the morning screen) until just after the first bus has left. The window above stays for the card.
+    static func schoolAutoOpen(_ n: SchoolAlarm.Day, now: Date) -> Bool {
+        guard SchoolAlarm.shared.on, let l = n.leave, let t = n.trip else { return false }
+        return GoPace.autoOpen(leave: l, firstDeparture: t.first.departure, now: now)
+    }
+    /// …and for a Be there by plan from 20 minutes before you leave (a Leave at plan: a quarter of an hour).
+    static func arriveAutoOpen(_ a: PlannedTrip, chosen: DoorTrip?, now: Date) -> Bool {
+        guard a.when != nil, let t = chosen else { return false }
+        return GoPace.autoOpen(leave: t.start, firstDeparture: t.first.departure, now: now, lead: a.leaving ? 15 * 60 : GoPace.autoOpenLead)
+    }
     /// …and for a Be there by plan: from 45 minutes before you leave (a Leave at plan: a quarter of an hour) until just
     /// after its first bus has left.
     static func arriveWindowOpen(_ a: PlannedTrip, chosen: DoorTrip?, now: Date) -> Bool {
@@ -202,8 +213,10 @@ final class GoStore: ObservableObject {
                     // nothing on screen yet (or only the saved answer): look again soon (no position yet: sooner still)
                     wait = self.here == nil ? 1.5 : Net.nextBackoff(failures: self.emptyLooks - 1)
                 } else {
-                    // quicker when the one you're catching is close
-                    wait = (self.best?.first.departure.timeIntervalSinceNow ?? .infinity) < 12 * 60 ? 20 : 40
+                    // quicker when the one you're catching is close; slower behind the screen, but "Time to go" on time
+                    wait = GoPace.planWait(inFront: UIApplication.shared.applicationState == .active,
+                                           departureIn: self.best?.first.departure.timeIntervalSinceNow,
+                                           leaveIn: self.best?.start.timeIntervalSinceNow)
                 }
                 try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
             }
@@ -242,6 +255,17 @@ final class GoStore: ObservableObject {
     /// While it seems offline, one real look every this many seconds anyway (the phone can say offline when it isn't).
     static let offlineTry: TimeInterval = 30
 
+    /// The departure it watched first left 20 minutes ago, you haven't moved 300 m since it opened, and nothing else is
+    /// wanted (no deadline, or it has passed): the trip didn't happen. It stops by itself, and says so (0.20.7).
+    private func stopIfMissed(now: Date) -> Bool {
+        guard !demo, onBoard == nil, trip?.phase == .idle,
+              GoPace.autoStop(watched: watchedFirst, deadline: deadline, movedMetres: movedMax, now: now) else { return false }
+        stopWatching()
+        tell("Stopped watching", "The trip you were waiting for has gone and you stayed here · open Fastest trip again when you need it",
+             kind: "info", sound: false)
+        return true
+    }
+
     /// Watching for `maxHours`: it stops by itself, and says so.
     private func stopIfLong(now: Date) -> Bool {
         guard now.timeIntervalSince(since) > Self.maxHours * 3600 else { return false }
@@ -262,6 +286,9 @@ final class GoStore: ObservableObject {
         }
         here = loc
         Self.waitFrom = loc
+        // (how far you've been from where it opened: not at all, and the one it watched long gone, it stops by itself)
+        if openedFrom == nil, loc.horizontalAccuracy >= 0, loc.horizontalAccuracy < 200 { openedFrom = loc }
+        if let o = openedFrom, loc.horizontalAccuracy >= 0, loc.horizontalAccuracy < 200 { movedMax = max(movedMax, loc.distance(from: o)) }
         // The on-board look found the one you're on: its plan is on screen while it makes sure. Leave it.
         if onBoard != nil { return }
         // Going at train or bus speed (faster than a bike): a walk to a stop from here makes no sense. Find which one
@@ -274,7 +301,7 @@ final class GoStore: ObservableObject {
         }
         movingUnknown = false
         let now = Date()
-        if stopIfLong(now: now) { return }
+        if stopIfLong(now: now) || stopIfMissed(now: now) { return }
         let target = CLLocation(latitude: dest.coordinate.latitude, longitude: dest.coordinate.longitude)
         if loc.distance(from: target) < 400 && loc.horizontalAccuracy < 200 {
             arrived = true
@@ -329,10 +356,16 @@ final class GoStore: ObservableObject {
         // same arrival, but you'd leave earlier: the Sprinter that's in Breda before the Intercity and makes the same bus,
         // the earlier 306 that leaves room to change), and for a planned trip the latest that still get you there in time.
         // (Not onto a saved answer's trip: it waits for a live one.)
+        // Behind the screen (0.20.7) no new extras (more plans and boards per look): the last ones, while still to come.
         var more: [DoorTrip] = []
-        async let late: [DoorTrip] = latestInTime(from: c, to: d, now: now)
-        if asOf == nil, let top = best { more += await Transit.$urgent.withValue(true) { await Net.within(8) { await self.earlierWays(onto: top) } } ?? [] }
-        more += await late
+        if GoPace.extras(inFront: UIApplication.shared.applicationState == .active) {
+            async let late: [DoorTrip] = latestInTime(from: c, to: d, now: now)
+            if asOf == nil, let top = best { more += await Transit.$urgent.withValue(true) { await Net.within(8) { await self.earlierWays(onto: top) } } ?? [] }
+            more += await late
+            extrasKept = more
+        } else {
+            more = extrasKept.filter { $0.first.departure > Date() }
+        }
         var ids = Set(found.map(\.id))
         more = more.filter { ids.insert($0.id).inserted }
         guard !more.isEmpty, !Task.isCancelled, watching, dest == d, onBoard == nil, n >= shownLook else { return }
@@ -527,6 +560,7 @@ final class GoStore: ObservableObject {
         others = Array(ok.filter { $0.first.tripId != p.first.tripId }.sorted(by: Self.sooner).prefix(5))
         error = nil
         if quiet { return }
+        if watchedFirst == nil { watchedFirst = p.first.departure }
         updated = now
         if let prev, prev.first.tripId != p.first.tripId {
             await switched(from: prev, to: p, found: found)
@@ -1642,6 +1676,11 @@ struct GoMap: View {
         onWalk?(nil)
         var lastTrip = Date.distantPast
         while !Task.isCancelled {
+            // (not in front: no live times, no walking route, nothing to draw: 0.20.7)
+            if UIApplication.shared.applicationState != .active {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                continue
+            }
             let now = Date()
             if let r = ride, now.timeIntervalSince(lastTrip) >= 30 {
                 lastTrip = now

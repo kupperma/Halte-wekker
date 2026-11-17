@@ -332,8 +332,8 @@ struct HomeView: View {
     private func autoGo() {
         guard trip.phase == .idle, !goStore.isOpen else { return }
         let now = Date()
-        // from when the alarm rings (or 45 minutes before you leave) until just after the first bus has left
-        if let n = SchoolAlarm.shared.next, GoStore.schoolWindowOpen(n, now: now) {
+        // from 20 minutes before you leave (0.20.7; it was from the alarm) until just after the first bus has left
+        if let n = SchoolAlarm.shared.next, GoStore.schoolAutoOpen(n, now: now) {
             if trip.direction != .toSchool { trip.pick(.toSchool) }
             withAnimation(.easeInOut(duration: 0.35)) {
                 goStore.openForPlan(to: .buas, from: near.position, deadline: n.beThere, label: "your \(Fmt.hhmm(n.classStart)) class",
@@ -342,7 +342,7 @@ struct HomeView: View {
             return
         }
         // (leaving at a time: from a quarter of an hour before, the fastest way from then, no deadline to race)
-        if let a = planner.arrive, let T = a.when, GoStore.arriveWindowOpen(a, chosen: planner.arriveChosen, now: now) {
+        if let a = planner.arrive, let T = a.when, GoStore.arriveAutoOpen(a, chosen: planner.arriveChosen, now: now) {
             if trip.direction != (a.out ? .toSchool : .home) { trip.pick(a.out ? .toSchool : .home) }
             withAnimation(.easeInOut(duration: 0.35)) {
                 goStore.openForPlan(to: a.out ? .buas : .veghel, from: near.position, deadline: a.leaving ? nil : T,
