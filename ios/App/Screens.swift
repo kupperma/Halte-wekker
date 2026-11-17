@@ -14,6 +14,16 @@ struct RootView: View {
     /// the change and the arrival): they follow the phone's light or dark, as Live around you; Next trip first is dark
     /// (as its design). The old look stays dark.
     private var followsPhone: Bool { newLook && HomeStyle.of(homeStyle) == .live }
+    /// Morning screen › Go hands-free: Fastest trip to your first class.
+    private func morningGo(_ p: SchoolAlarm.Planned) {
+        withAnimation(.easeInOut(duration: 0.35)) { morning.showing = false }
+        if trip.phase == .idle {
+            if trip.direction != .toSchool { trip.pick(.toSchool) }
+            go.open(to: .buas, from: trip.lastFix, deadline: p.beThere, label: "your \(Fmt.hhmm(p.classStart)) class",
+                    planKey: GoStore.schoolKeyIfDue(p.classStart, now: Date()))
+        }
+    }
+
     var body: some View {
         Group {
             switch trip.phase {
@@ -39,24 +49,22 @@ struct RootView: View {
         .animation(.easeInOut(duration: 0.35), value: go.isOpen)
         .overlay {
             if let a = watch.alert {
-                PlatformAlertView(alert: a, pal: .of(home: trip.direction == .home)) { watch.dismiss() }.transition(.opacity)
-                    .environment(\.colorScheme, .dark)
+                if newLook {
+                    PlatformAlertViewNew(alert: a) { watch.dismiss() }.transition(.opacity)
+                } else {
+                    PlatformAlertView(alert: a, pal: .of(home: trip.direction == .home)) { watch.dismiss() }.transition(.opacity)
+                        .environment(\.colorScheme, .dark)
+                }
             }
         }
         .animation(.easeInOut(duration: 0.25), value: watch.alert)
         // after the school alarm: the morning screen, with your photo
         .overlay {
             if morning.showing {
-                MorningView(go: { p in
-                    withAnimation(.easeInOut(duration: 0.35)) { morning.showing = false }
-                    if trip.phase == .idle {
-                        if trip.direction != .toSchool { trip.pick(.toSchool) }
-                        go.open(to: .buas, from: trip.lastFix, deadline: p.beThere, label: "your \(Fmt.hhmm(p.classStart)) class",
-                                planKey: GoStore.schoolKeyIfDue(p.classStart, now: Date()))
-                    }
-                })
+                Group {
+                    if newLook { MorningViewNew(go: morningGo) } else { MorningView(go: morningGo).environment(\.colorScheme, .dark) }
+                }
                 .transition(.opacity)
-                .environment(\.colorScheme, .dark)
                 .zIndex(5)
             }
         }

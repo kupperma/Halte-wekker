@@ -50,7 +50,7 @@ struct GoViewNew: View {
         .background(DS.page.ignoresSafeArea())
         .dynamicTypeSize(...DynamicTypeSize.accessibility2)
         .sheet(item: $walkTo) { WalkMapSheet(target: $0).presentationDetents([.large]) }
-        .sheet(item: $liveTrack) { LiveBusSheet(target: $0).presentationDetents([.large]) }
+        .sheet(item: $liveTrack) { LiveBusSheet(target: $0, newLook: true).presentationDetents([.large]) }
         .sheet(isPresented: $showSteady) { SteadySheet().presentationDetents([.large]) }
         .sheet(isPresented: $choosing) {
             DestinationSheet { d in live.go(to: d); go.retarget(d.place) }

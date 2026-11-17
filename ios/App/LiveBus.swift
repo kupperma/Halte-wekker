@@ -102,6 +102,7 @@ struct LiveTrackTarget: Identifiable, Hashable {
 /// minutes after it should have left there; the times it prints are the answer's own (as on the board).
 struct LiveBusSheet: View {
     let target: LiveTrackTarget
+    var newLook = false         // the new look (0.20): its tokens, in the phone's light or dark
     @Environment(\.dismiss) private var dismiss
     @State private var trip: LiveTrip?          // drawn by: without catching up
     @State private var given: LiveTrip?         // as the answer gives it: the times it prints
@@ -117,37 +118,41 @@ struct LiveBusSheet: View {
             TimelineView(.periodic(from: .now, by: 1)) { tl in
                 VStack(spacing: 0) {
                     map(tl.date).frame(minHeight: 300)
-                    info(tl.date)
+                    if newLook { infoNew(tl.date) } else { info(tl.date) }
                 }
             }
-            .background(PaperFill().ignoresSafeArea())
+            .background { if newLook { DS.page.ignoresSafeArea() } else { PaperFill().ignoresSafeArea() } }
             .navigationTitle("\(target.rail ? "" : "Bus ")\(target.line) live")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
             .task { await run() }
         }
-        .preferredColorScheme(.light)
+        .tint(newLook ? DS.accentText : nil)
+        .preferredColorScheme(newLook ? nil : .light)
     }
+
+    /// Its colour on the map: its line's (the old look), or its mode's (the new look).
+    private var lineColor: Color { newLook ? DS.mode(train: target.rail, mode: trip?.mode ?? "") : Paper.line(target.line, train: target.rail) }
 
     @MapContentBuilder private func content(_ now: Date) -> some MapContent {
         UserAnnotation()
         if let trip {
-            MapPolyline(coordinates: trip.path).stroke(Paper.line(target.line, train: target.rail).opacity(0.9), style: StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round))
+            MapPolyline(coordinates: trip.path).stroke(lineColor.opacity(0.9), style: StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round))
             ForEach(Array(trip.stops.enumerated()), id: \.offset) { i, s in
                 Annotation(i == mine ? "Your stop" : "", coordinate: s.coordinate, anchor: .center) {
-                    Circle().fill(i == mine ? BoardInk.yellow : Color.white)
+                    Circle().fill(i == mine ? (newLook ? DS.accent : BoardInk.yellow) : Color.white)
                         .frame(width: i == mine ? 16 : 7, height: i == mine ? 16 : 7)
-                        .overlay(Circle().stroke(BoardInk.navy, lineWidth: 1.5))
+                        .overlay(Circle().stroke(newLook ? (i == mine ? Color.white : lineColor) : BoardInk.navy, lineWidth: i == mine && newLook ? 3 : 1.5))
                 }
             }
             Annotation(target.line, coordinate: trip.coordinate(atMetres: shownMetres(trip, now)), anchor: .center) {
                 HStack(spacing: 4) {
                     Image(systemName: target.rail ? "tram.fill" : "bus.fill").font(.system(size: 12, weight: .bold))
-                    Text(target.line).font(BoardInk.sans(13))
+                    Text(target.line).font(newLook ? DS.footnoteStrong : BoardInk.sans(13))
                 }
                 .foregroundStyle(.white)
                 .padding(.horizontal, 8).padding(.vertical, 5)
-                .background(Paper.line(target.line, train: target.rail), in: RoundedRectangle(cornerRadius: 6))
+                .background(lineColor, in: RoundedRectangle(cornerRadius: 6))
                 .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.white, lineWidth: 2))
                 .shadow(color: .black.opacity(0.4), radius: 4, y: 2)
             }
@@ -208,6 +213,62 @@ struct LiveBusSheet: View {
             }
         }
         .padding(14)
+    }
+
+    /// The new look's part under the map: the same words, big where it matters (how far from your stop), with Follow
+    /// and "It and your stop" as 44 pt buttons.
+    @ViewBuilder private func infoNew(_ now: Date) -> some View {
+        VStack(alignment: .leading, spacing: DS.s8) {
+            HStack(spacing: 10) {
+                DSLinePill(line: target.line, train: target.rail, mode: trip?.mode ?? "")
+                Text("to \(Fmt.place(target.headsign))").font(DS.headline).foregroundStyle(DS.text).lineLimit(2)
+            }
+            if let trip {
+                let w = trip.position(now), printed = given ?? trip
+                Text(status(trip, w, now)).font(DS.title).monospacedDigit().foregroundStyle(DS.text).fixedSize(horizontal: false, vertical: true)
+                if let m = mine, m < printed.stops.count, let a = printed.arrival(m), shownMetres(trip, now) <= trip.metres(ofStop: m) + 20,
+                   !w.done || !LiveTimes.hasLeft(trip.stops[m].times, now: now) {
+                    let mins = Int((a.timeIntervalSince(now) / 60).rounded())
+                    let late = printed.stops[m].scheduled.map { Int((a.timeIntervalSince($0) / 60).rounded()) } ?? 0
+                    Text("At \(Fmt.place(trip.stops[m].name)) \(Fmt.hhmm(a))\(mins > 0 ? " · in \(mins) min" : "")\(late >= 1 ? " · \(late) min late" : late <= -1 ? " · \(-late) min early" : " · on time")")
+                        .font(DS.calloutStrong).monospacedDigit().foregroundStyle(late >= 1 ? DS.warning : DS.accentText)
+                }
+                if w.started, !w.done, !w.atStop {
+                    Text("Next stop: \(Fmt.place(trip.stops[w.next].name))\((w.next < printed.stops.count ? printed.arrival(w.next) : nil).map { " · \(Fmt.hhmm($0))" } ?? "")")
+                        .font(DS.sub).monospacedDigit().foregroundStyle(DS.secondary)
+                }
+                Text(trip.live ? "Live times\(updated.map { ", updated \(Fmt.hhmm($0))" } ?? ""). Its position is worked out from them." : "No live times for this one: its position follows the timetable.")
+                    .font(DS.footnote).monospacedDigit().foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
+                if refreshFailed {
+                    Text("Couldn’t update just now.").font(DS.footnote).foregroundStyle(DS.warning)
+                }
+                HStack(spacing: DS.s8) {
+                    Button { follow.toggle(); if !follow { fit(trip, now) } } label: {
+                        Label(follow ? "Following it" : "Follow it", systemImage: follow ? "location.fill" : "location")
+                            .font(DS.subStrong).foregroundStyle(follow ? DS.onAccent : DS.accentText)
+                            .frame(maxWidth: .infinity, minHeight: DS.hit)
+                            .background(follow ? AnyShapeStyle(DS.accent) : AnyShapeStyle(DS.surface3), in: Capsule())
+                    }
+                    .buttonStyle(DSPressStyle())
+                    .accessibilityAddTraits(follow ? .isSelected : [])
+                    Button { follow = false; fit(trip, now) } label: {
+                        Label("It and your stop", systemImage: "arrow.up.left.and.arrow.down.right")
+                            .font(DS.subStrong).foregroundStyle(DS.accentText)
+                            .frame(maxWidth: .infinity, minHeight: DS.hit)
+                            .background(DS.surface3, in: Capsule())
+                    }
+                    .buttonStyle(DSPressStyle())
+                }
+            } else if failed {
+                Text("Couldn’t find where this one is right now.").font(DS.body).foregroundStyle(DS.secondary)
+            } else {
+                HStack(spacing: 8) { ProgressView(); Text("Finding it…").font(DS.body).foregroundStyle(DS.secondary) }
+            }
+        }
+        .padding(DS.s16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DS.surface)
+        .dynamicTypeSize(...DynamicTypeSize.accessibility2)
     }
 
     /// Where to draw it at `now` (metres along): by its times, but not past your stop before it has left there.

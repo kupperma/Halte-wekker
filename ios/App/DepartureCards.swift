@@ -215,6 +215,7 @@ struct DepartureDetailSheet: View {
     @EnvironmentObject var lines: LineWatchStore
     @EnvironmentObject var trains: WatchStore
     @EnvironmentObject var live: LiveStore
+    @EnvironmentObject var ns: NSStore
     @Environment(\.dismiss) private var dismiss
     @State private var liveTrack: LiveTrackTarget?
     @State private var walkTo: WalkTarget?
@@ -269,6 +270,7 @@ struct DepartureDetailSheet: View {
                     .background(DS.surface2, in: RoundedRectangle(cornerRadius: DS.fieldRadius, style: .continuous))
                     Text("Watching a line tells you when the next one runs late, leaves early or is cancelled, until you’re on it.")
                         .font(DS.footnote).foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
+                    details
                 }
                 .padding(DS.s20)
             }
@@ -277,8 +279,44 @@ struct DepartureDetailSheet: View {
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
         }
         .tint(DS.accentText)
-        .sheet(item: $liveTrack) { LiveBusSheet(target: $0).presentationDetents([.large]) }
+        .sheet(item: $liveTrack) { LiveBusSheet(target: $0, newLook: true).presentationDetents([.large]) }
         .sheet(item: $walkTo) { WalkMapSheet(target: $0).presentationDetents([.large]) }
+    }
+
+    /// The rest of the old train and bus pages (0.20): your ride, how steady the line is, its speed rank, and for a
+    /// train how it's made up and how busy.
+    @ViewBuilder private var details: some View {
+        let ride = live.boardRides["\(d.stopId)|\(d.tripId)"]
+        let known = trainTrip?.trip.first
+        VStack(alignment: .leading, spacing: DS.s20) {
+            if let r = ride, !d.cancelled {
+                VStack(alignment: .leading, spacing: DS.s8) {
+                    DSHeader(title: "Your ride")
+                    Text("\(Fmt.rideText(r.minutes)) ride to \(r.station) station, arrives \(Fmt.hhmm(r.arrival))").font(DS.sub).monospacedDigit().foregroundStyle(DS.text)
+                }
+            } else if let pt = trainTrip {
+                VStack(alignment: .leading, spacing: DS.s8) {
+                    DSHeader(title: "Your ride", sub: pt.trip.rideLabel)
+                    Text("Arrives \(pt.to.short) \(Fmt.hhmm(pt.trip.last.arrival))").font(DS.sub).monospacedDigit().foregroundStyle(DS.text)
+                }
+            }
+            DSSteadyInfo(line: d.line, train: d.train, stop: nil, at: d.leaves)
+            if let r = ride {
+                DSRankInfo(rank: RankInfo(grade: d.cancelled ? nil : r.grade, minutes: r.minutes, best: r.best,
+                                          stretch: "\(Fmt.place(d.stopName)) → \(r.station)"), cancelled: d.cancelled)
+            } else if let k = known {
+                DSRankInfo(rank: RankInfo.of(k), cancelled: d.cancelled)
+            }
+            if d.train {
+                DSTrainInfo(info: known.flatMap { ns.rail($0) }, nsMissing: ns.available == false)
+            } else {
+                VStack(alignment: .leading, spacing: DS.s8) {
+                    DSHeader(title: "How busy")
+                    Text("There’s no busyness forecast for buses.").font(DS.sub).foregroundStyle(DS.secondary)
+                }
+            }
+        }
+        .padding(.top, DS.s8)
     }
 
     /// This train as a one-ride trip between two of your stations, as the old train page watches it (`HomeView.trainTrip`):
