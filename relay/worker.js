@@ -3,6 +3,7 @@
 // 2. Gets NS departures with platforms:     /ns/departures?station=EHV
 // 3. Gets NS trips with crowd forecasts:    /ns/trips?from=EHV&to=BD&dateTime=...
 // 4. Gets one train from the Virtual Train API: /ns/train?num=1126&station=EHV
+// 5. Gets the positions of every train from the Virtual Train API: /ns/vehicles (no place of yours is sent)
 //    Needs a free NS API key saved as the secret NS_KEY (Settings → Variables and Secrets).
 export default {
   async fetch(request, env) {
@@ -50,6 +51,24 @@ export default {
         return new Response(await r.text(), {
           status: r.status,
           headers: { ...cors, "Content-Type": "application/json", "Cache-Control": "max-age=60" },
+        });
+      } catch (e) {
+        return new Response("NS didn't answer", { status: 502, headers: cors });
+      }
+    }
+
+    if (url.pathname === "/ns/vehicles") {
+      // Virtual Train API: where every train is now (all of them: the app never sends where you are). Takes no
+      // parameters; NS's answer is passed on as it is, and the app reads it defensively.
+      if ([...url.searchParams.keys()].length > 0) return new Response("Bad request", { status: 400, headers: cors });
+      if (!NS_KEY) return new Response("No NS key set", { status: 501, headers: cors });
+      try {
+        const headers = { "Ocp-Apim-Subscription-Key": NS_KEY };
+        let r = await fetch("https://gateway.apiportal.ns.nl/virtual-train-api/api/vehicle", { headers });
+        if (r.status === 404) r = await fetch("https://gateway.apiportal.ns.nl/virtual-train-api/vehicle", { headers });
+        return new Response(await r.text(), {
+          status: r.status,
+          headers: { ...cors, "Content-Type": "application/json", "Cache-Control": "max-age=20" },
         });
       } catch (e) {
         return new Response("NS didn't answer", { status: 502, headers: cors });
