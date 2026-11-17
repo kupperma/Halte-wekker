@@ -177,6 +177,14 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     private var heldPick: String?
     private var heldFromPlan = false                      // …made at a change from the planned one's road, not by you
     private var rideLogged: [String: Date] = [:]          // the field log's last ride line per thing, so a look doesn't repeat it
+    /// 0.20.5: you said during the ride which one you're on (the "I'm actually on…" sheet), or "none of these": the
+    /// matcher doesn't change the ride's vehicle by itself for the rest of this leg (`HandLock`).
+    @Published private(set) var handLock: HandLock?
+    /// The one you picked, off its road for 3 minutes: "Still on bus 306?" on the ride screen (nil: not asked now).
+    @Published private(set) var stillOnAsk: Vehicle?
+    /// "Pick again" (on the ride screen or the notification): the ride screen opens the sheet, and sets it back.
+    @Published var pickAgain = false
+    private var headsignOf: [String: String] = [:]        // where the sheet's vehicles go, by trip id
 
     var leg: Leg? { index < legs.count ? legs[index] : nil }
     var wakeKm: Double { leg.map(km(for:)) ?? busKm }
@@ -291,7 +299,13 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         AlarmControl.stop = { [weak self] in self?.stopAlarm() }
         // "Stop alarm" right on the alarm notification.
         let stop = UNNotificationAction(identifier: "STOP", title: "Stop alarm", options: [])
-        UNUserNotificationCenter.current().setNotificationCategories([UNNotificationCategory(identifier: "ALARM", actions: [stop], intentIdentifiers: [], options: [])])
+        // "Still on bus 306?" after a pick by hand (0.20.5): Yes, or Pick again (that one opens the app)
+        let yes = UNNotificationAction(identifier: "STILL_YES", title: "Yes", options: [])
+        let again = UNNotificationAction(identifier: "STILL_PICK", title: "Pick again", options: [.foreground])
+        UNUserNotificationCenter.current().setNotificationCategories([
+            UNNotificationCategory(identifier: "ALARM", actions: [stop], intentIdentifiers: [], options: []),
+            UNNotificationCategory(identifier: Self.stillOnCategory, actions: [yes, again], intentIdentifiers: [], options: []),
+        ])
         UNUserNotificationCenter.current().delegate = self
         sound.pauseMusic = pauseMusic
         WatchStore.shared.holdAlerts = { [weak self] in self?.phase == .sleeping }
@@ -352,6 +366,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         arrival = nil; next = nil; legArrival = nil; legFrom = nil; legTo = nil
         vehicle = v
         vehicleStops = []; matchMeters = nil; pickedByHand = false; byTimetable = false; startDistance = nil
+        handLock = nil; stillOnAsk = nil
         roadOf = nil; offRoad = 0; farLooks = 0; sameCheckAt = Date().addingTimeInterval(45)
         cands = []; choosing = []; candSince = nil; candLead = nil; candSwitch = SwitchState(); candMisses = [:]; candTimedOut = nil
         legClosest = nil; awayLooked = false
@@ -414,7 +429,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     }
 
     /// Still at the start of this leg (within 2 km) and not on board yet: show what leaves next.
-    var waitingToBoard: Bool { phase == .sleeping && vehicle == nil && (startDistance ?? 0) < 2000 }
+    /// (Not once you said "none of these" during the ride: then you're on board, going by your location.)
+    var waitingToBoard: Bool { phase == .sleeping && vehicle == nil && handLock == nil && (startDistance ?? 0) < 2000 }
 
     func stopAlarm() {
         sound.stop()
@@ -428,6 +444,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         rideLog(FieldFormat.rideArrive(why: why, metres: distance, accuracy: accuracy, legAge: Date().timeIntervalSince(legStart), started: legStartMetres))
         let gotOff = vehicle?.tripId
         if let v = vehicle, let l = leg, !demo { noteDelay(v, at: l.to) }
+        handLock = nil; stillOnAsk = nil                   // (a pick by hand holds for its leg only)
+        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [Self.stillOnId])
         sound.stop()
         setBackup(0)
         arrivedAt = leg?.to.short
@@ -523,6 +541,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         roadOf = nil; offRoad = 0; farLooks = 0; boardAlternatives = []
         cands = []; choosing = []; candSince = nil; candLead = nil; candSwitch = SwitchState(); candMisses = [:]; candTimedOut = nil
         legFrom = nil; legTo = nil; maxDistance = nil
+        handLock = nil; stillOnAsk = nil; pickAgain = false; headsignOf = [:]
         let a = activity, e = endedActivity; activity = nil; endedActivity = nil
         Task {
             await a?.end(nil, dismissalPolicy: .immediate)
@@ -686,7 +705,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         }
         guard let leg, phase == .sleeping || phase == .awake else { return }
         startDistance = loc.distance(from: CLLocation(latitude: leg.from.coordinate.latitude, longitude: leg.from.coordinate.longitude))
-        if vehicle == nil { Task { await loadUpcoming() } }
+        if vehicle == nil { if handLock == nil { Task { await loadUpcoming() } } }
         else if Date().timeIntervalSince(lastVehicleRefresh) > 60 { lastVehicleRefresh = Date(); Task { await refreshVehicle() } }
         if vehicle != nil, !cands.isEmpty, Date() >= candCheckAt { candCheckAt = Date().addingTimeInterval(12); Task { await resolveCandidates() } }
         else if vehicle != nil, cands.isEmpty, Date() >= sameCheckAt { sameCheckAt = Date().addingTimeInterval(30); Task { await checkSameBus() } }
@@ -698,7 +717,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         if loc.horizontalAccuracy >= 0 && loc.horizontalAccuracy < 150 {
             legClosest = min(legClosest ?? d, d)
             let gap: Double = (legClosest ?? d) < 3000 ? 800 : 2000
-            if !awayLooked, !demo, route?.single == nil, let c = legClosest, d > c + gap, LiveStore.movingFix(loc) {
+            if !awayLooked, !demo, route?.single == nil, HandLock.autoSwitch(handLock, leg: index), let c = legClosest, d > c + gap, LiveStore.movingFix(loc) {
                 awayLooked = true
                 Task { await self.wrongWay(loc) }
             }
@@ -818,6 +837,9 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         let id = response.notification.request.identifier, action = response.actionIdentifier
         Task { @MainActor in
             if action == "STOP" || (id == "alarm" && action == UNNotificationDefaultActionIdentifier) { self.stopAlarm() }
+            if id == Self.stillOnId, action == "STILL_YES" || action == "STILL_PICK" {
+                self.answerStillOn(yes: action == "STILL_YES", fromNotification: true)
+            }
             done()
         }
     }
@@ -1326,6 +1348,219 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         }
     }
 
+    // MARK: "I'm actually on…": picked by hand during the ride (0.20.5)
+
+    static let stillOnId = "still-on"
+    static let stillOnCategory = "STILLON"
+
+    /// What the sheet lists now (`RidePick.gather`): the one it shows and the ones it's choosing between, and the buses
+    /// and trains of the live map pieces around you that move with you or are within 600 m of you (by their own fresh
+    /// GPS fix, else by their times), each judged on your fixes as the matcher does; with where each one goes.
+    func handPickChoices() async -> [RidePick.Row] {
+        guard phase == .sleeping || phase == .awake, let here = lastFix, here.horizontalAccuracy >= 0 else { return [] }
+        let now = Date()
+        let segs = await Transit.$urgent.withValue(true) { await Transit.vehicles(near: here.coordinate, radiusDeg: 0.02, allTrips: true) }
+        var tracks = VehicleTrack.group(Transit.noCatchUp(segs, asOf: now).map { MapPiece($0) })
+        var modes: [String: String] = [:]
+        for s in segs where modes[s.tripId] == nil { modes[s.tripId] = s.mode }
+        // the one it shows and the ones it's choosing between, also when the map pieces around you don't have them
+        var known = cands.map(\.vehicle)
+        if let v = vehicle { known.insert(v, at: 0) }
+        var seen = Set(tracks.map(\.tripId))
+        let missing = known.filter { seen.insert($0.tripId).inserted }
+        let jobs: [@Sendable () async -> LiveTrip?] = missing.map(\.tripId).map { id in { @Sendable in await Transit.liveTrip(id) } }
+        let trips = await Progressive.all(jobs)
+        for (v, t) in zip(missing, trips) {
+            guard let t else { continue }
+            RealPositionsStore.shared.learn(v.tripId, trip: t)
+            if modes[v.tripId] == nil { modes[v.tripId] = t.mode }
+            if !t.headsign.isEmpty { headsignOf[v.tripId] = Fmt.place(t.headsign) }
+            if let k = VehicleTrack(tripId: v.tripId, line: v.line, isTrain: v.isTrain, trip: t.noCatchUp(asOf: now, isTrain: v.isTrain)) {
+                tracks.append(k)
+            }
+        }
+        tracks = await RealPositionsStore.shared.forMatcher(tracks)
+        let judged = VehicleMatch.judgeAll(recentFixes, tracks, strictTimes: false)
+        let here2 = lastFix ?? here
+        var rows = RidePick.gather(here: GeoPoint(here2.coordinate), now: Date(), tracks: tracks, judged: judged,
+                                   candidates: cands.map(\.vehicle.tripId), current: vehicle?.tripId, modes: modes)
+        // where each one goes (its trip, asked once a sheet)
+        let ask = rows.map(\.tripId).filter { headsignOf[$0] == nil }
+        let headJobs: [@Sendable () async -> String?] = ask.map { id in { @Sendable in await Transit.liveTrip(id)?.headsign } }
+        let heads = await Progressive.all(headJobs)
+        if headsignOf.count > 200 { headsignOf = [:] }
+        for (id, h) in zip(ask, heads) { if let h, !h.isEmpty { headsignOf[id] = Fmt.place(h) } }
+        for k in rows.indices { rows[k].headsign = headsignOf[rows[k].tripId] ?? "" }
+        return rows
+    }
+
+    /// A row picked in the sheet, looked at before the ride takes it.
+    struct HandPick: Identifiable {
+        let vehicle: Vehicle
+        let stops: [TripStop]
+        let route: RoutePlan?           // the rest planned again from it (nil: the route stays)
+        let alternatives: [DoorTrip]
+        let warning: String?            // it doesn't go to this leg's stop: what then (asked before switching)
+        let leg: Int
+        let routeId: String?
+        let metres: Double?             // how far from you it was in the sheet, and by what (for the field log)
+        let byGPS: Bool
+        var id: String { vehicle.tripId }
+    }
+
+    /// What picking `row` would do, as an automatic switch does it: its stops (does it still go to this leg's stop?), and
+    /// on a trip from Fastest trip the rest planned again from it (the way it was choosing between, or the planner's from
+    /// it: `switchVehicle`). On one of your own routes or a single stop it follows the station it goes to by itself
+    /// (`vehicleFound`); on your own routes one that goes to neither gets the rest planned from it too. One that doesn't go
+    /// to this leg's stop: what then, said before switching (`warning`). Nil: the ride moved on meanwhile.
+    func previewHandPick(_ row: RidePick.Row) async -> HandPick? {
+        guard phase == .sleeping || phase == .awake, let l = leg else { return nil }
+        let i = index, rid = route?.id
+        let v = Vehicle(tripId: row.tripId, line: row.line, isTrain: row.isTrain)
+        let stops = await Transit.$urgent.withValue(true) { await Transit.tripStops(v.tripId) }
+        guard phase == .sleeping || phase == .awake, index == i, route?.id == rid else { return nil }
+        let same = v.tripId == vehicle?.tripId
+        let goes = same || legDestinations.contains { goesAhead(stops, to: $0) }
+        var plan: DoorTrip?, alts: [DoorTrip] = []
+        if !same, let r = route, r.single == nil, !r.isFixed || !goes, let final = legs.last?.to {
+            if !r.isFixed, let alt = boardAlternatives.first(where: { $0.first.tripId == v.tripId }), RoutePlan.from(alt) != nil {
+                plan = alt; alts = boardAlternatives
+            } else if let here = samples.last,
+                      let ob = await Transit.$urgent.withValue(true, operation: { await LiveStore.onBoardTrips(here, to: final, tripId: v.tripId) }),
+                      let t = ob.1.first, RoutePlan.from(t) != nil {
+                plan = t; alts = ob.1
+            }
+            guard phase == .sleeping || phase == .awake, index == i, route?.id == rid else { return nil }
+        }
+        var warning: String?
+        if !goes {
+            let then = plan.map { t in t.rides.dropFirst().map { "\(GoStore.what($0)) at \(Fmt.hhmm($0.departure))" } } ?? []
+            let end = plan.flatMap { t in legs.last.map { "\($0.short) at \(Fmt.hhmm(t.end))" } }
+            warning = RidePick.doesntGo(v.title, to: l.to.short, getOff: plan.map { Fmt.place($0.first.toStop) }, then: then, end: end)
+        }
+        return HandPick(vehicle: v, stops: stops, route: plan.flatMap { RoutePlan.from($0) }, alternatives: alts, warning: warning,
+                        leg: i, routeId: rid, metres: row.metres, byGPS: row.byGPS)
+    }
+
+    /// You're on this one (picked in the sheet): the ride takes it the way an automatic switch does (the rest planned
+    /// again from it when `previewHandPick` did; its stops, its times, the alarm for its stop on this leg, the Live
+    /// Activity), and the matcher doesn't change it by itself for the rest of this leg (`HandLock`).
+    func applyHandPick(_ p: HandPick) async {
+        guard phase == .sleeping || phase == .awake, index == p.leg, route?.id == p.routeId else { return }
+        let old = vehicle
+        detectTask?.cancel(); detectTask = nil
+        cands = []; choosing = []; candSince = nil; candLead = nil; candSwitch = SwitchState(); candMisses = [:]
+        roadOf = nil; offRoad = 0; farLooks = 0; heldPick = nil; heldFromPlan = false
+        pickedByHand = true; byTimetable = false; matchMeters = nil
+        // (its own times come with its stops; until then the timetable's)
+        legArrival = nil; legFrom = nil; legTo = nil
+        if let nr = p.route {
+            boardAlternatives = p.alternatives
+            setRoute(nr)
+        }
+        handLock = HandLock(tripId: p.vehicle.tripId, leg: index)
+        stillOnAsk = nil
+        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [Self.stillOnId])
+        await vehicleFound(p.vehicle, stops: p.stops)
+        rideLog(FieldFormat.handPick(Self.logLabel(p.vehicle), was: old.map { FieldFormat.label($0.tripId, [$0.tripId: $0.line]) },
+                                     metres: p.metres, byGPS: p.metres == nil ? nil : p.byGPS))
+        if p.route != nil {
+            rideLog(FieldFormat.rideStart(how: "hand pick, planned again", vehicle: Self.logLabel(p.vehicle), stopMetres: metresToLegStop,
+                                          leg: index + 1, of: legs.count))
+            // planned again to a stop you're inside the wake distance of already: awake from now, without the alarm, as a
+            // leg that starts there (the announcement comes at the stop)
+            if !demo, phase == .sleeping, let f = startFix(tracked: true), let l = leg {
+                let d = f.distance(from: CLLocation(latitude: l.to.coordinate.latitude, longitude: l.to.coordinate.longitude))
+                legStartMetres = d
+                if RideGuards.wakeAtStart(targetMetres: d, wakeMetres: wakeKm * 1000) == .awakeSilently {
+                    phase = .awake; forceArrival = true
+                    rideLog(FieldFormat.rideWake(startedMetres: d))
+                }
+            }
+        }
+        sameCheckAt = Date().addingTimeInterval(30)
+        pushActivity(force: true)
+    }
+
+    /// "None of these: just use my location": the trip and the alarm go on without a vehicle (as a leg started with
+    /// "I'm on it" before it knows which one), by your GPS to this leg's stop, and the matcher takes none by itself for
+    /// the rest of this leg.
+    func noneOfThese() {
+        guard phase == .sleeping || phase == .awake, leg != nil else { return }
+        let old = vehicle
+        detectTask?.cancel(); detectTask = nil
+        cands = []; choosing = []; candSince = nil; candLead = nil; candSwitch = SwitchState(); candMisses = [:]
+        roadOf = nil; offRoad = 0; farLooks = 0; heldPick = nil; heldFromPlan = false
+        vehicle = nil; vehicleStops = []; matchMeters = nil; byTimetable = false; pickedByHand = true
+        legArrival = nil; legFrom = nil; legTo = nil
+        handLock = HandLock(tripId: nil, leg: index)
+        stillOnAsk = nil
+        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [Self.stillOnId])
+        rideLog(FieldFormat.handPick(nil, was: old.map { FieldFormat.label($0.tripId, [$0.tripId: $0.line]) }, metres: nil, byGPS: nil))
+        refreshEta(force: true)
+        pushActivity(force: true)
+    }
+
+    /// The answer to "Still on bus 306?": yes (not asked again for this pick), or pick again (the sheet opens).
+    func answerStillOn(yes: Bool, fromNotification: Bool = false) {
+        guard let v = stillOnAsk ?? (fromNotification && handLock?.tripId != nil ? vehicle : nil) else { return }
+        stillOnAsk = nil
+        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [Self.stillOnId])
+        rideLog(FieldFormat.stillOnAnswered(Self.logLabel(v), yes: yes, fromNotification: fromNotification))
+        if yes { handLock?.confirmed() } else { pickAgain = true }
+    }
+
+    /// The "same bus" look while you picked by hand: the matcher judges the one you picked as it always does (a line in
+    /// the field log), and your last fix's distance from its road goes to `HandLock.look`. It never switches, chooses or
+    /// plans again: off its road for 3 minutes, it asks you once.
+    private func watchHandPick() async {
+        guard let v = vehicle, handLock?.tripId == v.tripId, !demo, !checkingSame, phase == .sleeping || phase == .awake else { return }
+        let now = Date()
+        guard let last = samples.last(where: { $0.timestamp > now.addingTimeInterval(-45) && $0.horizontalAccuracy >= 0 && $0.horizontalAccuracy < 80 })
+        else { return }
+        checkingSame = true
+        defer { checkingSame = false }
+        if roadOf?.tripId != v.tripId || roadOf.map({ now.timeIntervalSince($0.at) > 60 }) ?? true {
+            let urgentAsk = isRiding || going
+            if let t = await Transit.$urgent.withValue(urgentAsk, operation: { await Transit.liveTrip(v.tripId) }), t.path.count >= 2 {
+                roadOf = (v.tripId, t, now)
+            }
+        }
+        guard vehicle == v, handLock?.tripId == v.tripId else { return }
+        let road = roadOf.flatMap { $0.tripId == v.tripId ? $0 : nil }
+        let metres = road.map { Self.metres(from: last.coordinate, to: $0.trip.path) }
+        var judged: [Judgement] = []
+        if let r = road, let plain = VehicleTrack(tripId: v.tripId, line: v.line, isTrain: v.isTrain, trip: r.trip.noCatchUp(asOf: r.at, isTrain: v.isTrain)) {
+            RealPositionsStore.shared.learn(v.tripId, trip: r.trip)
+            let tracks = await RealPositionsStore.shared.forMatcher([plain])
+            judged = VehicleMatch.judgeAll(recentFixes, tracks, strictTimes: false)
+        }
+        guard vehicle == v, var lock = handLock, lock.tripId == v.tripId else { return }
+        let at = Date()
+        let look = lock.look(metres: metres, isTrain: v.isTrain, now: at)
+        handLock = lock
+        let shown = FieldFormat.label(v.tripId, [v.tripId: v.line])
+        let off = metres.map { VehicleMatch.offRoad($0, isTrain: v.isTrain) } ?? false
+        let note = metres == nil ? " · its road not known" : off ? " · off its road \(Int(lock.offFor(now: at).rounded())) s" : ""
+        FieldLog.shared.add(.match, FieldFormat.match("same bus", judged, outcome: "keep \(shown) · picked by hand" + note,
+                                                      planned: v.tripId, count: judged.count))
+        if look == .ask { askStillOn(v, metres: metres, offFor: lock.offFor(now: at)) }
+    }
+
+    /// "Still on bus 306?": on the ride screen, and as a notification when the app isn't in front.
+    private func askStillOn(_ v: Vehicle, metres: Double?, offFor: TimeInterval) {
+        stillOnAsk = v
+        rideLog(FieldFormat.stillOnAsked(Self.logLabel(v), offFor: offFor, metres: metres))
+        guard UIApplication.shared.applicationState != .active else { return }
+        let c = UNMutableNotificationContent()
+        c.title = RidePick.stillOn(line: v.line, isTrain: v.isTrain)
+        c.body = "Your GPS has been off its route for a few minutes. On another one? Pick it, so it wakes you at the right stop."
+        c.sound = .default
+        c.categoryIdentifier = Self.stillOnCategory
+        c.userInfo = ["kind": "info"]
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: Self.stillOnId, content: c, trigger: nil)) { _ in }
+    }
+
     // MARK: still the same bus?
 
     /// Every half minute on board: are you still on its road, and about where its times say? Two buses that leave a stop
@@ -1333,6 +1568,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     /// same at first. Off its road: it finds the one you are on and switches to it (its stops, its times, and the rest of
     /// your trip). Far from where its times put it while another of the line is right with you: it looks at both again.
     private func checkSameBus() async {
+        // picked by hand during the ride: it only looks (and asks once when you're clearly off its road)
+        if !HandLock.autoSwitch(handLock, leg: index) { await watchHandPick(); return }
         guard let v = vehicle, let leg, !demo, !pickedByHand, !checkingSame, cands.isEmpty, phase == .sleeping || phase == .awake else { return }
         let now = Date()
         let recent = samples.filter { $0.timestamp > now.addingTimeInterval(-45) && $0.horizontalAccuracy >= 0 && $0.horizontalAccuracy < 80 }
@@ -1466,7 +1703,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     private func beginChoosing(_ vs: [Vehicle]) {
         var seen = Set<String>()
         let list = Array(vs.filter { seen.insert($0.tripId).inserted }.prefix(3))
-        guard list.count > 1, !demo, !pickedByHand else { cands = []; choosing = []; return }
+        guard list.count > 1, !demo, !pickedByHand, HandLock.autoSwitch(handLock, leg: index) else { cands = []; choosing = []; return }
         cands = list.map { Candidate(vehicle: $0) }
         choosing = list
         candSince = Date(); candLead = nil; candSwitch = SwitchState(); candMisses = [:]
@@ -1671,6 +1908,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
 
     /// Switch to the bus you're really on, and tell you.
     private func switchVehicle(from old: Vehicle, to v: Vehicle, stops: [TripStop]) async {
+        // (a pick by hand meanwhile holds: never switched away by itself)
+        guard HandLock.autoSwitch(handLock, leg: index) else { return }
         roadOf = nil
         // A trip from Fastest trip: the rest of it goes with this bus (the way it was choosing between, or planned again
         // from it), on any leg. Your own two routes follow the station it goes to by themselves.
@@ -1723,7 +1962,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         }
         if ob == nil { ob = await LiveStore.onBoardTrips(loc, to: final, wasMoving: true, history: { self.recentFixes }) }
         guard let ob, ob.0.vehicle.tripId != vehicle?.tripId, let t = ob.1.first, let nr = RoutePlan.from(t),
-              phase == .sleeping || phase == .awake else {
+              phase == .sleeping || phase == .awake, HandLock.autoSwitch(handLock, leg: index) else {
             legClosest = distance; awayLooked = false
             return
         }
@@ -2219,7 +2458,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     /// What the Live Activity draws on its track and puts on its pill: from the bus or train you're on (else the one
     /// this leg was planned with, else the leg's own mode), by its mode and its line.
     private var rideKind: (kind: VehicleKind, line: String) {
-        let planned = route?.planned?[safe: index]
+        // ("none of these" during the ride: not the planned one's line either)
+        let planned = handLock == nil ? route?.planned?[safe: index] : nil
         let line = vehicle?.line ?? planned?.line ?? ""
         let train = vehicle?.isTrain ?? planned?.isTrain ?? (leg?.mode == .train)
         return (VehicleKind.of(mode: train ? "RAIL" : "BUS", line: line, isTrain: train), line)
