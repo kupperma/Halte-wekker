@@ -388,9 +388,21 @@ extension LiveTrip {
         return out
     }
 
-    /// Where its GPS puts it at `now` (metres along), when the fix is on its road.
-    func gpsMetres(_ fix: GPSFix, now: Date) -> Double? {
-        RealPositions.place(fix, on: legs, now: now)?.metres
+    /// Where its GPS puts it (metres along), when the fix is on its road: `metres` moved on to `now`
+    /// (`RealPositions.place`), `raw` where the fix itself is, at its own time.
+    func gpsPlace(_ fix: GPSFix, now: Date) -> (raw: Double, metres: Double)? {
+        let l = legs
+        guard let s = RealPositions.snap(fix, on: l) else { return nil }
+        let moved = RealPositions.advance(s, from: fix.at, on: l, now: now)
+        return (l[s.leg].start + s.along, l[moved.leg].start + moved.along)
+    }
+
+    /// The soonest its GPS fix lets it be at stop `i` (`Approach.arrival`): nil when the fix isn't on its road, it has
+    /// passed the stop, or there are no times to go by.
+    func gpsArrival(_ fix: GPSFix, atStop i: Int, now: Date) -> Date? {
+        guard stops.indices.contains(i), let p = gpsPlace(fix, now: now) else { return nil }
+        return Approach.arrival(fixAt: fix.at, metres: p.raw, stopMetres: stops.indices.map { metres(ofStop: $0) },
+                                times: stops.map(\.times), mine: i)
     }
 
     /// `position` for a spot its GPS gave: at a stop when within 15 m of one (it hasn't started at its first, it's
@@ -409,17 +421,20 @@ extension LiveTrip {
 
 /// A trip you look at on its own (the live sheet, Fastest trip's map): where to draw it at `now`, by its GPS when
 /// there's a usable fix on its road, else by its times.
+/// `mine`: the stop you wait at (0.24.5): by its GPS it's drawn there only once its fix is (`Approach.drawn`), not as
+/// soon as moving it on from its fix gets it there.
 struct TripPlacement {
     let w: (metres: Double, next: Int, atStop: Bool, started: Bool, done: Bool)
     let fix: GPSFix?
     let timeMetres: Double
 
     @MainActor
-    init(_ t: LiveTrip, tripId: String, now: Date, hold: GPSHold) {
+    init(_ t: LiveTrip, tripId: String, now: Date, hold: GPSHold, mine: Int? = nil) {
         RealPositionsStore.shared.learn(tripId, trip: t)            // (a train: its number, for NS's position)
         let byTime = t.position(now)
         timeMetres = byTime.metres
-        if let f = RealPositionsStore.shared.fix(for: tripId, now: now), let m = t.gpsMetres(f, now: now) {
+        if let f = RealPositionsStore.shared.fix(for: tripId, now: now), let p = t.gpsPlace(f, now: now) {
+            let m = mine.flatMap { t.stops.indices.contains($0) ? Approach.drawn(advanced: p.metres, raw: p.raw, mine: t.metres(ofStop: $0)) : nil } ?? p.metres
             let held = hold.steady(tripId, m, now: now)
             w = t.position(metres: held); fix = f
         } else {

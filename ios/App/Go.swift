@@ -1543,6 +1543,10 @@ struct GoMap: View {
     var focus = 0
     /// The walk to the stop's length on foot (nil: none, you're there), each time it's found again.
     var onWalk: ((Double?) -> Void)? = nil
+    /// 0.24.5: the time its GPS says it can be at your stop at the soonest, while that's clearly later than the ride's
+    /// own (`Approach.Steady`; show the later of the two); nil: the ride's own. Each time it changes, with the ride's
+    /// trip id.
+    var onLater: ((String, Date?) -> Void)? = nil
     @State private var trip: LiveTrip?
     @State private var mine: Int?
     @State private var walk: MKRoute?
@@ -1556,6 +1560,7 @@ struct GoMap: View {
     @State private var auto = true
     @State private var lastFit: Date?
     @State private var hold = GPSHold()     // real positions (0.20.2)
+    @State private var later = Approach.Steady()    // its GPS's soonest time at your stop (0.24.5)
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { tl in
@@ -1629,7 +1634,7 @@ struct GoMap: View {
             MapPolyline(walk.polyline).stroke(newLook ? DS.accent : Paper.ink, style: StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round, dash: [0.5, 10]))
         }
         if let t = trip, let m = mine, let r = ride {
-            let w = TripPlacement(t, tripId: r.tripId, now: now, hold: hold).w      // by its GPS, else its times
+            let w = TripPlacement(t, tripId: r.tripId, now: now, hold: hold, mine: m).w      // by its GPS, else its times
             let me = t.metres(ofStop: m)
             // not past your stop before it has left there (two minutes after its time): a late one may still be coming
             let at = LiveTimes.shown(w.metres, mine: me, left: LiveTimes.hasLeft(t.stops[m].times, now: now))
@@ -1678,6 +1683,7 @@ struct GoMap: View {
     private func run() async {
         trip = nil; mine = nil; walk = nil; walkFrom = nil
         onWalk?(nil)
+        later = Approach.Steady(); onLater?(ride?.tripId ?? "", nil)
         var lastTrip = Date.distantPast
         while !Task.isCancelled {
             // (not in front: no live times, no walking route, nothing to draw: 0.20.7)
@@ -1693,7 +1699,7 @@ struct GoMap: View {
                     if mine == nil { mine = Self.findMine(t, r) }
                 }
             }
-            if let r = ride, let t = trip { noteGPS(t, r, now) }
+            if let r = ride, let t = trip { noteGPS(t, r, now); noteLater(t, r, now) }
             if let s = stop, let h = hereNow, walkFrom.map({ h.distance(from: $0) > 40 || now.timeIntervalSince($0.timestamp) > 60 }) ?? true {
                 walkFrom = h
                 let d = h.distance(from: CLLocation(latitude: s.latitude, longitude: s.longitude))
@@ -1707,10 +1713,22 @@ struct GoMap: View {
 
     /// The field log: how far its GPS put the bus you're catching from where its times have it (once per fix).
     private func noteGPS(_ t: LiveTrip, _ r: Ride, _ now: Date) {
-        let p = TripPlacement(t, tripId: r.tripId, now: now, hold: hold)
+        let p = TripPlacement(t, tripId: r.tripId, now: now, hold: hold, mine: mine)
         guard let f = p.fix, !p.w.done else { return }
         RealPositionsStore.shared.noteUsed(f, tripId: r.tripId, line: r.line, isTrain: r.isTrain, timeMetres: p.timeMetres,
                                            gpsMetres: p.w.metres, now: now)
+    }
+
+    /// Its GPS against the ride's time (0.24.5): the later one it can be at your stop by, told when it changes.
+    private func noteLater(_ t: LiveTrip, _ r: Ride, _ now: Date) {
+        let before = later.shown
+        var estimate: Date?, age: TimeInterval?
+        if let m = mine, !r.isTrain, let f = RealPositionsStore.shared.fix(for: r.tripId, now: now) {
+            estimate = t.gpsArrival(f, atStop: m, now: now)
+            age = now.timeIntervalSince(f.at)
+        }
+        _ = later.update(given: r.departure, estimate: estimate, fixAge: age)
+        if later.shown != before { onLater?(r.tripId, later.shown) }
     }
 
     private static func walkRoute(to s: CLLocationCoordinate2D) async -> MKRoute? {
@@ -1739,7 +1757,7 @@ struct GoMap: View {
         if let s = stop {
             pts.append(s)
             if !toStop, let t = trip, let m = mine, let r = ride {
-                let w = TripPlacement(t, tripId: r.tripId, now: now, hold: hold).w
+                let w = TripPlacement(t, tripId: r.tripId, now: now, hold: hold, mine: m).w
                 let at = LiveTimes.shown(w.metres, mine: t.metres(ofStop: m), left: LiveTimes.hasLeft(t.stops[m].times, now: now))
                 let bus = t.coordinate(atMetres: at)
                 let far = CLLocation(latitude: bus.latitude, longitude: bus.longitude).distance(from: CLLocation(latitude: s.latitude, longitude: s.longitude))

@@ -25,6 +25,9 @@ struct GoToCard: View {
     var footer: String? = nil
     /// At the stop: a quiet line under the wait.
     var hereNote: String? = nil
+    /// 0.24.5: the time its GPS says it can be at the stop at the soonest, when that's clearly later than the ride's own
+    /// (the map's `onLater`): the later of the two is shown, and its delay.
+    var later: Date? = nil
     var walk: (() -> Void)? = nil
     var onMap: (() -> Void)? = nil
     var route: (() -> Void)? = nil
@@ -41,9 +44,13 @@ struct GoToCard: View {
         StopLabel.ride(vehicle, toward: ride.headsign.isEmpty ? (toward ?? Fmt.place(ride.toStop)) : Fmt.place(ride.headsign))
     }
     private var cancelled: Bool { ride.cancelled || info?.cancelled == true }
-    private var time: String { Fmt.hhmm(cancelled ? ride.scheduledDeparture : ride.departure) }
+    /// When it leaves: the ride's time, or the later one its GPS allows.
+    private var departure: Date { later.map { max($0, ride.departure) } ?? ride.departure }
+    private var byGPS: Bool { departure > ride.departure }
+    private var time: String { Fmt.hhmm(cancelled ? ride.scheduledDeparture : departure) }
     private var delay: (text: String, spoken: String, warn: Bool)? {
-        guard let d = StopLabel.delay(ride.delay, live: ride.live, cancelled: cancelled) else { return nil }
+        let minutes = byGPS ? Int((departure.timeIntervalSince(ride.scheduledDeparture) / 60).rounded()) : ride.delay
+        guard let d = StopLabel.delay(minutes, live: ride.live || byGPS, cancelled: cancelled) else { return nil }
         return saved && !d.warn ? nil : d              // (the saved answer doesn't say "on time")
     }
     private var away: Double? {
@@ -136,7 +143,7 @@ struct GoToCard: View {
                         }
                         if !saved && !cancelled && !here {
                             TimelineView(.periodic(from: .now, by: 15)) { tl in
-                                let m = Int((ride.departure.timeIntervalSince(tl.date) / 60).rounded(.down))
+                                let m = Int((departure.timeIntervalSince(tl.date) / 60).rounded(.down))
                                 Text(m <= 0 ? "now" : "in \(m) min").font(DS.footnoteStrong).monospacedDigit()
                                     .foregroundStyle(m <= 2 ? DS.warning : DS.secondary)
                             }
@@ -154,7 +161,7 @@ struct GoToCard: View {
                                 .fixedSize(horizontal: false, vertical: true)
                         } else {
                             TimelineView(.periodic(from: .now, by: 15)) { tl in
-                                Text(StopLabel.waiting(vehicle, minutes: Int((ride.departure.timeIntervalSince(tl.date) / 60).rounded(.down))))
+                                Text(StopLabel.waiting(vehicle, minutes: Int((departure.timeIntervalSince(tl.date) / 60).rounded(.down))))
                                     .font(DS.calloutStrong).monospacedDigit().foregroundStyle(DS.text)
                                     .fixedSize(horizontal: false, vertical: true)
                             }

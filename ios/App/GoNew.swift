@@ -14,6 +14,7 @@ struct GoViewNew: View {
     @State private var choosing = false
     @State private var mapFocus = 0                 // the Go to card's On the map: the map shows the stop and the walk
     @State private var walkMetres: Double?          // the walk to the stop on foot, from the map
+    @State private var gpsLater: (trip: String, at: Date)?      // the later time its GPS allows at your stop, from the map (0.24.5)
     @ScaledMetric(relativeTo: .largeTitle) private var big: CGFloat = 52
 
     var body: some View {
@@ -24,7 +25,7 @@ struct GoViewNew: View {
             ZStack(alignment: .top) {
                 GoMap(ride: go.arrived ? nil : go.best?.first, here: go.here,
                       top: g.safeAreaInsets.top + bar, bottom: g.safeAreaInsets.top + bar + window, saved: go.asOf != nil, newLook: true,
-                      focus: mapFocus, onWalk: { walkMetres = $0 })
+                      focus: mapFocus, onWalk: { walkMetres = $0 }, onLater: { id, at in gpsLater = at.map { (id, $0) } })
                     .ignoresSafeArea()
                 // (the map takes your hand in its window (0.20.1): the cards scroll below it, not over it)
                 ScrollView(showsIndicators: false) {
@@ -316,6 +317,7 @@ struct GoViewNew: View {
         return GoToCard(ride: f, info: f.isTrain ? ns.rail(f) : nil, stop: stop, here: go.here, walkMetres: walkMetres,
                         leaveBy: f.walkBefore > 0 ? t.start : nil, saved: saved,
                         hereNote: "You can see it coming on the map. It notices by itself when you get on.",
+                        later: saved || gpsLater?.trip != f.tripId ? nil : gpsLater?.at,
                         walk: walk,
                         onMap: { mapFocus += 1 },
                         route: {

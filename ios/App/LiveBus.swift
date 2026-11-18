@@ -118,6 +118,7 @@ struct LiveBusSheet: View {
     @State private var camera: MapCameraPosition = .automatic
     @State private var follow = false
     @State private var hold = GPSHold()
+    @State private var later = Approach.Steady()    // its GPS's soonest time at your stop, when clearly later (0.24.5)
 
     var body: some View {
         NavigationStack {
@@ -187,7 +188,7 @@ struct LiveBusSheet: View {
             if let trip {
                 let placed = placement(trip, now), w = placed.w, printed = given ?? trip
                 Text(status(trip, w, now)).font(BoardInk.sans(15)).foregroundStyle(Paper.ink).fixedSize(horizontal: false, vertical: true)
-                if let m = mine, m < printed.stops.count, let a = printed.arrival(m), shownMetres(trip, now) <= trip.metres(ofStop: m) + 20,
+                if let m = mine, m < printed.stops.count, let a = atMine(printed.arrival(m)), shownMetres(trip, now) <= trip.metres(ofStop: m) + 20,
                    !w.done || !LiveTimes.hasLeft(trip.stops[m].times, now: now) {
                     let mins = Int((a.timeIntervalSince(now) / 60).rounded())
                     let late = printed.stops[m].scheduled.map { Int((a.timeIntervalSince($0) / 60).rounded()) } ?? 0
@@ -241,7 +242,7 @@ struct LiveBusSheet: View {
             if let trip {
                 let placed = placement(trip, now), w = placed.w, printed = given ?? trip
                 Text(status(trip, w, now)).font(DS.title).monospacedDigit().foregroundStyle(DS.text).fixedSize(horizontal: false, vertical: true)
-                if let m = mine, m < printed.stops.count, let a = printed.arrival(m), shownMetres(trip, now) <= trip.metres(ofStop: m) + 20,
+                if let m = mine, m < printed.stops.count, let a = atMine(printed.arrival(m)), shownMetres(trip, now) <= trip.metres(ofStop: m) + 20,
                    !w.done || !LiveTimes.hasLeft(trip.stops[m].times, now: now) {
                     let mins = Int((a.timeIntervalSince(now) / 60).rounded())
                     let late = printed.stops[m].scheduled.map { Int((a.timeIntervalSince($0) / 60).rounded()) } ?? 0
@@ -320,9 +321,30 @@ struct LiveBusSheet: View {
         }
     }
 
-    /// Where it is at `now`: by its GPS when there's a fresh fix on its road, else by its times.
+    /// Where it is at `now`: by its GPS when there's a fresh fix on its road, else by its times (at your stop only
+    /// once its GPS is: 0.24.5).
     private func placement(_ t: LiveTrip, _ now: Date) -> TripPlacement {
-        TripPlacement(t, tripId: target.tripId, now: now, hold: hold)
+        TripPlacement(t, tripId: target.tripId, now: now, hold: hold, mine: mine)
+    }
+
+    /// The time it's at your stop: the answer's, or the later one its GPS allows (0.24.5, `Approach.Steady`).
+    private func atMine(_ given: Date?) -> Date? {
+        guard let g = given else { return nil }
+        return later.shown.map { max($0, g) } ?? g
+    }
+
+    /// Its GPS against the answer's time at your stop (0.24.5), once a second.
+    private func noteLater(_ now: Date) {
+        guard let t = trip, let p = given ?? trip, let m = mine, m < t.stops.count, m < p.stops.count, let g = p.arrival(m) else {
+            if later.shown != nil { later = Approach.Steady() }
+            return
+        }
+        var estimate: Date?, age: TimeInterval?
+        if !target.rail, let f = RealPositionsStore.shared.fix(for: target.tripId, now: now) {
+            estimate = t.gpsArrival(f, atStop: m, now: now)
+            age = now.timeIntervalSince(f.at)
+        }
+        _ = later.update(given: g, estimate: estimate, fixAge: age)
     }
 
     /// Where to draw it at `now` (metres along): by its GPS or its times, but not past your stop before it has left there.
@@ -393,6 +415,7 @@ struct LiveBusSheet: View {
                     if first { fit(t, Date()) }
                 } else if trip == nil { failed = true } else { refreshFailed = true }
             }
+            noteLater(Date())
             if follow, let t = trip {
                 withAnimation(.linear(duration: 1)) {
                     camera = .camera(MapCamera(centerCoordinate: t.coordinate(atMetres: shownMetres(t, Date())), distance: 1800))
