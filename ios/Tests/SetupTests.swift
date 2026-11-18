@@ -52,7 +52,7 @@ final class ManualWeekLessonsTests: XCTestCase {
 }
 
 final class SchoolHintsTests: XCTestCase {
-    private func matches(_ title: String, _ source: String = "iCloud", events: [String] = [], _ h: SchoolHints) -> Bool {
+    private func matches(_ title: String, _ source: String = "iCloud", events: [String] = [], hints h: SchoolHints) -> Bool {
         SchoolHints.matches(title: title, source: source, eventText: { events }, hints: h)
     }
 
@@ -65,30 +65,30 @@ final class SchoolHintsTests: XCTestCase {
 
     func test_legacyCases() {
         let h = SchoolHints.legacy
-        XCTAssertTrue(matches("TimeEdit", h))
-        XCTAssertTrue(matches("Rooster BUas", h))
-        XCTAssertTrue(matches("Calendar", "Breda University", h))
-        XCTAssertTrue(matches("Lessen", events: ["https://cloud.timeedit.net/buas/web"], h))
-        XCTAssertTrue(matches("Lessen", events: ["Mgr. Hopmansstraat 2, Breda"], h))
-        XCTAssertFalse(matches("Home", events: ["Dinner at Ana’s"], h))
+        XCTAssertTrue(matches("TimeEdit", hints: h))
+        XCTAssertTrue(matches("Rooster BUas", hints: h))
+        XCTAssertTrue(matches("Calendar", "Breda University", hints: h))
+        XCTAssertTrue(matches("Lessen", events: ["https://cloud.timeedit.net/buas/web"], hints: h))
+        XCTAssertTrue(matches("Lessen", events: ["Mgr. Hopmansstraat 2, Breda"], hints: h))
+        XCTAssertFalse(matches("Home", events: ["Dinner at Ana’s"], hints: h))
         // (0.22's lists: other apps' names in an event don't count on this profile)
-        XCTAssertFalse(matches("Lessen", events: ["mytimetable.example.nl"], h))
+        XCTAssertFalse(matches("Lessen", events: ["mytimetable.example.nl"], hints: h))
     }
 
     func test_genericHintsIgnoreCaseAndAccents() {
         let h = SchoolHints.make(profileHints: ["fontys", "fontys university of applied sciences"], school: ["Fontys"])
-        XCTAssertTrue(matches("FONTYS rooster", h))
-        XCTAssertTrue(matches("Mijn Lesrooster", h))
-        XCTAssertTrue(matches("Planning", events: ["https://fontys.mytimetable.nl/schedule"], h))
-        XCTAssertTrue(matches("Planning", events: ["Fóntys R1"], h))
-        XCTAssertTrue(matches("XEDULE", h))
-        XCTAssertFalse(matches("Work", events: ["Meeting"], h))
+        XCTAssertTrue(matches("FONTYS rooster", hints: h))
+        XCTAssertTrue(matches("Mijn Lesrooster", hints: h))
+        XCTAssertTrue(matches("Planning", events: ["https://fontys.mytimetable.nl/schedule"], hints: h))
+        XCTAssertTrue(matches("Planning", events: ["Fóntys R1"], hints: h))
+        XCTAssertTrue(matches("XEDULE", hints: h))
+        XCTAssertFalse(matches("Work", events: ["Meeting"], hints: h))
     }
 
     func test_shortSchoolWordsDontMatchEverything() {
         let h = SchoolHints.make(profileHints: ["uu"], school: ["UU"])
         XCTAssertFalse(h.names.contains("uu"))
-        XCTAssertFalse(matches("Vacuum", h))
+        XCTAssertFalse(matches("Vacuum", hints: h))
     }
 
     func test_eventsAreOnlyReadWhenTheNameDoesntSay() {
