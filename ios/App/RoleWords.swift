@@ -65,4 +65,59 @@ struct RoleWords: Equatable, Sendable {
 
     /// The planner calls a trip's coordinate end "END" (or "START"): that's your school.
     func endpoint(_ name: String) -> String? { name == "END" || name == "START" ? school : nil }
+
+    // MARK: the made-up ride (Settings › Preview on the lock screen)
+
+    /// The lock screen preview's pretend ride: on the corridor today's bus 306 home and Intercity to Breda, to the
+    /// letter; off it a bus to Home or to your school.
+    struct PreviewRide: Equatable, Sendable {
+        var legTitle: String
+        var isTrain: Bool
+        var nextText: String?
+        var line: String
+        /// How far the stop is at the start, and when it's reached and the leg ends (minutes from now).
+        var metres: Double
+        var arrivalMinutes: Double
+        var legEndMinutes: Double
+    }
+
+    func previewRide(home: Bool) -> PreviewRide {
+        if onCorridor && !home {
+            return PreviewRide(legTitle: "Intercity to \(toSchoolWord)", isTrain: true, nextText: "Then bus 3 to \(school) from \(toSchoolWord)",
+                               line: "IC", metres: 9600, arrivalMinutes: 34, legEndMinutes: 18)
+        }
+        let line = onCorridor ? "306" : "12"
+        return PreviewRide(legTitle: "Bus \(line) to \(home ? homeName : school)", isTrain: false, nextText: nil, line: line,
+                           metres: 3800, arrivalMinutes: 9, legEndMinutes: 9)
+    }
+
+    // MARK: the pretend trip (Try it at home)
+
+    /// The pretend trip's names. On the corridor today's to the letter (the bus to Den Bosch, the Intercity to Breda,
+    /// the villages on the way); off it a made-up station and your school.
+    struct DemoNames: Equatable, Sendable {
+        /// Where the pretend bus goes, and its sign.
+        var busTo: String
+        var busHeadsign: String
+        /// The pretend train: where it leaves from, where you get off and its sign.
+        var trainFrom: String
+        var trainTo: String
+        var trainHeadsign: String
+        /// The pretend ride's stops, the first being yours, and where it ends (its name and short name).
+        var rideStops: [String]
+        var rideEnd: String
+        var rideEndShort: String
+    }
+
+    var demoNames: DemoNames {
+        if onCorridor {
+            return DemoNames(busTo: "’s-Hertogenbosch, Centraal Station", busHeadsign: "Den Bosch", trainFrom: "’s-Hertogenbosch",
+                             trainTo: toSchoolWord, trainHeadsign: "Roosendaal",
+                             rideStops: ["Your stop", "Zijtaart, Kerk", "Erp, Centrum", "Boerdonk, Kerk", "Keldonk, Dorp", "Den Bosch, Centraal Station"],
+                             rideEnd: "Den Bosch Centraal", rideEndShort: "Den Bosch")
+        }
+        return DemoNames(busTo: "Station", busHeadsign: "Station", trainFrom: "Station", trainTo: school, trainHeadsign: school,
+                         rideStops: ["Your stop", "Kerkstraat", "Marktplein", "Dorpsstraat", "Stationsweg", "Station"],
+                         rideEnd: "Station", rideEndShort: "Station")
+    }
 }
