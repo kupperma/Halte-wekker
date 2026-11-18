@@ -4,7 +4,7 @@
 places and timetable. Today it works for one commute, Veghel ⇄ BUas by bus and NS train. The current user keeps
 working with zero setup. Their data becomes their saved profile, and the setup screen never appears for them.
 
-**Status:** 0.22.0 and 0.23.0 built (see their "As built" notes); the rest is plan. Line numbers are at HEAD `6790c74` (0.20.9) and will move as steps land. Find each spot by the
+**Status:** 0.22.0, 0.23.0 and 0.24.0 built (see their "As built" notes); the rest is plan. Line numbers are at HEAD `6790c74` (0.20.9) and will move as steps land. Find each spot by the
 function named.
 
 **Verification:** there is no local Swift toolchain. As in the earlier plans, verify each step with a push to the work
@@ -415,6 +415,38 @@ of tests.
 - Live Activity preview text (`TripManager.swift:2709-2715`) and the demo use role names.
 
 **Size:** M. About 700–900 lines, plus the relay route and the tool.
+
+**As built (0.24.0, build 103).** Where the code made the plan above change:
+
+- **No relay route.** A public list already has every NS station's code, UIC number, names and coordinate: Rijden de
+  Treinen's open station list (CC BY 4.0, made from NS's own station data, `opendata.rijdendetreinen.nl/public/stations/`).
+  `ios/tools/ns-stations.js` turns it into `App/NSStations.json` (396 Dutch stations; nothing typed by hand). Oss is
+  left out: its code "O" is one letter, and the relay only passes 2–5 letter codes. `relay/worker.js` is unchanged.
+- **Names matter more than ids.** Transitous's NS platforms are OpenOV ids (`nl-OpenOV_4001924`), which carry no UIC, so
+  `NSCodes.code(forStopId:name:)` reads the UIC from a DELFI id when there is one and otherwise matches the stop's name
+  to one of NS's names (folded: case, accents, punctuation; "… Centraal"/"… station" after a name also matches; a
+  "Town, Stop" bus stop never does). `NSStore.code(_:)` keeps the corridor's three keys first, takes a station place's
+  key (`ns:UT`), never treats Home or School as a station, then asks `NSCodes`. `NSStore.enrich` asks about a trip's
+  **first train** (not only a trip whose first ride is a train) at its own station, so the home's trips, a door-to-door
+  ride's upcoming trains and a tapped train get NS's platform at any station. The corridor's lists ask exactly as before.
+- **Generic auto-start.** `RoleRegions.wanted(roles:homeStops:autoStart:autoHome:schoolRadius:)` takes the roles and
+  where the home stops are rather than the profile and places. Off the corridor the regions are `school` (entry for
+  auto-home, exit for auto-start) and one per home stop (`home.0`…, 350 m, stops within 150 m merged), or `home`
+  around Home when no stop has a position. `BoardStop` (and the setup's stop choices) now keep the stop's coordinate;
+  boards saved before 0.24 have none, so they fall back to Home. Leaving one looks for the vehicle as on the corridor,
+  then `TripManager.autoStartDoor` plans on from it (`LiveStore.onBoardTrips` → `RoutePlan.from`). The "just got off
+  here" skip uses where the last leg ended, as a door-to-door leg has no station key.
+- **The home's trips card**, not a panel: off the corridor the new look's swipeable cards end with `HomeTripsCard`
+  (the live store's `next`, up to 4, from your usual start only); a tap opens Fastest trip.
+- **Scoreboard.** `DoorScore.key(start:end:home:school:)` scores a door-to-door trip that started within 2.5 km of one
+  role and ended within 1.5 km of the other (`home→school`, `school→home`), against your own fastest (no ideal). The
+  Leaderboard link now shows off the corridor too, with "To <school>" and "Home → <school>".
+- **A train's time.** `NearestStation.pick`/`.pair` (5 km; the same station both sides also hides it) and
+  `TrainTimeWords` (the corridor's friend's-train words to the letter). `Planner` plans one train station pair off the
+  corridor, with bus, tram, metro or ferry to and from the stations; "Wake me on this trip" then follows the whole trip
+  (`PlanOption.route`). "Be there by" and "Leave at" already used role names (0.22).
+- **Preview and demo.** `RoleWords.previewRide(home:)` and `RoleWords.demoNames` (corridor: today's literals, tested).
+  Off the corridor the pretend Intercity goes from a made-up station to your school.
 
 ### 3.4 Optional later: a corridor for others
 
