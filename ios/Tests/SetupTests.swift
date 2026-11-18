@@ -374,7 +374,7 @@ final class SetupBackupTests: XCTestCase {
         XCTAssertTrue(SetupBackup.keys.contains(ProfileLogic.storageKey))
         XCTAssertTrue(SetupBackup.keys.contains(PlacesLogic.storageKey))
         for k in ["boardStops", "boardLines", "school.on", "school.cals", "school.early", "school.wake", "kmMem", "lastMode",
-                  "school.homeLat", "school.homeLon"] { XCTAssertTrue(SetupBackup.keys.contains(k), k) }
+                  "school.homeLat", "school.homeLon", "ui.homeStyle"] { XCTAssertTrue(SetupBackup.keys.contains(k), k) }
         XCTAssertFalse(SetupBackup.keys.contains(SetupBackup.storageKey))
     }
 }

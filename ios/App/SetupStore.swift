@@ -98,6 +98,8 @@ final class SetupStore: ObservableObject {
         }
         PlacesStore.shared.replaceAll(SetupLogic.places(dr))
         SchoolAlarm.shared.apply(calendarIds: SetupLogic.calendarIds(dr), early: dr.earlyMinutes, wake: dr.wakeMinutes, on: dr.wakeOn)
+        // a new student (and the test of one) lands on Next trip first; Set up again keeps the home you picked
+        if m != .again { d.set(HomeStyle.nextTrip.rawValue, forKey: HomeStyle.key) }
         if m == .test {
             // what was learnt for your own Home and School isn't the test's (it comes back with your own)
             ProfileStore.shared.rolesSwitched(clearingLearnt: true)

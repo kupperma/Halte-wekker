@@ -17,6 +17,7 @@ struct SetupBackup {
         ProfileLogic.storageKey, PlacesLogic.storageKey, "boardStops", "boardLines",
         "school.on", "school.cals", "school.early", "school.wake",
         "kmMem", "lastMode", "school.homeLat", "school.homeLon",
+        "ui.homeStyle",                                   // HomeStyle.key: a finished setup picks Next trip first
     ]
 
     /// When it was taken.
