@@ -21,8 +21,8 @@ Apple ID). Friends may live in different towns (e.g. Veghel and Tilburg) and go 
    who will board see it, with which end of the platform to wait at when that can be known.
 4. **Send a trip.** Send a friend a ride ("take the 07:41 with me?") or a planned trip for a date ("Thursday: be at
    BUas by 09:00, this way"). They tap it and it becomes their plan, adjusted to their own start where needed.
-5. **Messages.** Short messages between friends, with quick replies ("On the 305", "Running 5 min late", "Save me a
-   seat"). One-to-one only.
+5. **Messages.** Short messages between friends and in groups, with quick replies ("On the 305", "Running 5 min late", "Save me a
+   seat"). One-to-one and groups (see Added by the user).
 6. **Compare timetables.** Friends share their **full class timetable** (classes, rooms, start and end times; the
    user chose this over sharing travel times only). The app shows, per day this week and next, both timetables side by
    side and the days and times you can travel together, to school and home.
@@ -36,7 +36,6 @@ Apple ID). Friends may live in different towns (e.g. Veghel and Tilburg) and go 
   it's awake during a trip, or at a background refresh. The UI must say this plainly (e.g. "Arrives when Sam opens
   the app").
 - No Sign in with Apple, no email, no phone numbers, no searching for people by name, no public profiles.
-- No group chats in this project (one-to-one only). A group ride can come later.
 - No Android, no web app.
 
 ## Anti-goals (a failure even if it works)
@@ -163,6 +162,19 @@ Apple ID). Friends may live in different towns (e.g. Veghel and Tilburg) and go 
   when, never contents. No sealed-sender / anonymous mailboxes in this project.
 - **Start area (recommended pick):** friends see home's nearest stops and station plus the school, never the home
   address.
+
+## Added by the user (2026-11-18, late)
+
+- **Names and profile pictures:** you pick your display name and a profile picture (from Photos, cropped square,
+  sent small, e.g. 256 px JPEG, as an encrypted box to each friend; updated when you change it). Friends see them in
+  the list, chat, map and compare views. (0.25)
+- **Group chats:** groups of friends (everyone in a group must be friends with the creator; members see each other's
+  names and pictures in the group). Each message is encrypted separately for every member (fan-out), so the relay
+  still sees only boxes. Group name and picture; add/remove members; leave. Quick replies and trip cards work in
+  groups too ("take the 07:41 with us?"). (0.27)
+- **Compare timetables with more people:** compare 3 (or more) friends at once, e.g. from a group: the week view shows
+  every timetable side by side and the rides all of you (or most of you) can share; meet halfway works for 3 starts.
+  (0.28)
 
 ## Releases (proposed split)
 
