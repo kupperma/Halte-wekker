@@ -5,5 +5,10 @@
   "main": "worker.js",
   "compatibility_date": "2025-01-01",
   // Keep variables set in the Cloudflare dashboard when deploying from GitHub.
-  "keep_vars": true
+  "keep_vars": true,
+  // Friends (0.25): one Durable Object per account, with SQLite storage (works on the free plan, nothing to set up).
+  "durable_objects": {
+    "bindings": [{ "name": "FRIENDS", "class_name": "Friends" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Friends"] }]
 }
