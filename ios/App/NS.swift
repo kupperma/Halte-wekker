@@ -254,8 +254,9 @@ final class NSStore: ObservableObject {
     /// Platform, cancellations, crowding and size for the trains in these trips. `from`/`to`: the places they were planned between.
     /// (0.24: at any NS station, and for a trip whose train isn't its first ride: the first train's.)
     func enrich(_ items: [(trip: DoorTrip, from: Place, to: Place)]) async {
-        let rail: [(trip: DoorTrip, ride: Ride, code: String, to: String?)] = items.compactMap { i in
-            Self.railEnds(i.trip, from: i.from, to: i.to).map { (i.trip, $0.ride, $0.from, $0.to) }
+        var rail: [(trip: DoorTrip, ride: Ride, code: String, to: String?)] = []
+        for i in items {
+            if let e = Self.railEnds(i.trip, from: i.from, to: i.to) { rail.append((trip: i.trip, ride: e.ride, code: e.from, to: e.to)) }
         }
         guard !rail.isEmpty else { return }
         let codes = Array(Set(rail.map(\.code)))
