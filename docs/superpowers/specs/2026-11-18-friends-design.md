@@ -198,60 +198,117 @@ Each release ships on its own and leaves trips/alarms untouched.
 
 ## As built (0.25)
 
-What 0.25.0 (build 109) actually ships, so 0.26–0.28 can build on it.
+What 0.25.0 (build 109) ships, written so 0.26–0.28 and an Android app can build on it byte for byte. Everything is
+standard: Ed25519 (RFC 8032), X25519 (RFC 7748), HKDF-SHA256 (RFC 5869), ChaCha20-Poly1305 (RFC 8439, 12-byte nonce,
+16-byte tag), SHA-256, BIP-39 English, UTF-8 JSON. No Apple-only format anywhere.
 
-### Relay (`relay/friends.js`, live since 2026-11-18)
-- Storage: one Durable Object per account (class `Friends`, SQLite storage, binding `FRIENDS`, migration `v1`
-  `new_sqlite_classes`), addressed `idFromName("a:" + account)`. Tables: `meta` (signKey, device, lastSeen, vault),
-  `boxes` (id, sender, slot, at, exp, size, data), `seen` (nonces), `rate`, `blocked`. An alarm deletes expired boxes,
-  and the whole account after 400 days unused. No logs of anything.
-- Account id: first 16 bytes of SHA-256("haltewekker-account-v1" ‖ Ed25519 public key), hex (32). The relay checks
-  the id against the key at register, so ids can't be squatted.
-- Every route but `GET /f/v1/status` and `GET /add` is a signed POST with JSON. Headers `X-HW-Account`,
-  `X-HW-Device` (32 hex, random per phone), `X-HW-Time` (unix s, ±300 s), `X-HW-Nonce` (16–64 of `[A-Za-z0-9_-]`,
-  never reused), `X-HW-Signature` (base64url Ed25519) over
-  `"HW1\nPOST\n" + path + "\n" + account + "\n" + device + "\n" + time + "\n" + nonce + "\n" + hex(SHA-256(body))`.
-- Routes: `register {signKey}` (same key, another device = the account moves; the old device then gets 409
-  `signed_out`), `send {boxes:[{to, data, slot?, ttl?}]}` (≤ 20 boxes per request to any mix of mailboxes, each ≤ 64 KB
-  decoded, ttl 60 s–30 days, default 30 days; a `slot` replaces the sender's previous box in that slot),
-  `inbox {after, limit}` → `{boxes:[{id, from, slot, at, exp, data}], cursor, more}` (ids only grow; a replaced slot
-  box gets a new id), `ack {ids}`, `drop {peer}` (boxes between two accounts, both ways), `block {peer, on}` (quietly
-  refused), `vault/put {data}` (≤ 128 KB) / `vault/get`, `leave`.
-- Limits: 1 MB per request, 60 requests/min and 600 boxes/hour per account, inbox ≤ 1000 boxes / 8 MB and ≤ 200 per
-  sender, 20 registers/hour per network address (hashed). `relay/test-friends.mjs` tests all of it locally
-  (node:sqlite) or against a running relay (`node relay/test-friends.mjs <url>`; it makes and deletes two accounts).
-- `/add#v=1&k=…&n=…`: a page that opens `haltewekker://friend?…` (the fields stay after the #).
+### Encodings
+- **b64u** = base64url (RFC 4648 §5) **without** padding (decoders should accept padding too). **hex** = lowercase.
+- **JSON**: UTF-8, any key order and whitespace on reading. Binary values are b64u strings; dates are unix seconds
+  as a JSON number (may have a fraction). Unknown keys must be ignored; an optional key may be absent or `null`. Signatures are always over the exact bytes received, never over re-encoded JSON.
 
-### Keys (`FriendKeys.swift`)
-- Backup code: 12 BIP-39 English words for 16 random bytes (checksum in the last word; four letters per word are
-  enough). From the seed, HKDF-SHA256 (salt "haltewekker-seed-v1") with info "sign" → Ed25519, "agree" → X25519,
-  "vault" → ChaChaPoly key. Seed and device id in the Keychain (`nl.haltewekker.friends`,
-  AfterFirstUnlockThisDeviceOnly); the list in Application Support/Friends (excluded from backup).
-- Friend card = both public keys; links carry `k` = base64url(sign ‖ agree) and `n` = name.
+### Seed, keys and account id (`FriendKeys.swift`)
+1. **Seed**: 16 random bytes. **Backup code**: the BIP-39 English mnemonic of the seed (12 words): the 128 bits,
+   then the first 4 bits of SHA-256(seed), read as twelve 11-bit big-endian numbers indexing the standard 2048-word
+   list. The app accepts any case, any separators, and the first four letters of a word.
+2. `sign_seed  = HKDF-SHA256(ikm = seed, salt = "haltewekker-seed-v1", info = "sign",  L = 32)` → the Ed25519 private
+   key seed (RFC 8032 32-byte secret). Its public key = **signKey** (32 bytes).
+3. `agree_priv = HKDF-SHA256(seed, "haltewekker-seed-v1", "agree", 32)` → the X25519 private scalar (clamped as RFC
+   7748 does). Its public key = **agreeKey** (32 bytes).
+4. `vault_key  = HKDF-SHA256(seed, "haltewekker-seed-v1", "vault", 32)` → a ChaCha20-Poly1305 key.
+5. **Account id** = hex(first 16 bytes of SHA-256("haltewekker-account-v1" ‖ signKey)) — 32 hex characters.
+6. **Device id**: 16 random bytes in hex, made on each phone at create/restore (one phone at a time per account).
+- On iOS the seed and device id are in the Keychain (service `nl.haltewekker.friends`, AfterFirstUnlockThisDeviceOnly);
+  the list in Application Support/Friends (excluded from backups).
+
+### Friend card, link and QR
+- **Card** = {signKey, agreeKey}. In JSON: `{"s": b64u(signKey), "a": b64u(agreeKey)}`. Packed (links): `k` =
+  b64u(signKey ‖ agreeKey) (64 bytes → 86 characters). The account id is always computed from signKey, never sent.
+- **App link**: `haltewekker://friend?v=1&k=<k>&n=<name>`. **Share link and QR content**:
+  `https://haltewekker-relay.tsfaw1.workers.dev/add#v=1&k=<k>&n=<name>` (the fields after `#` never reach the server;
+  the page turns them into the app link). `n` is the UTF-8 name, percent-encoded except `A–Z a–z 0–9 - . _ ~`; readers
+  also take `+` as a space. `v` other than 1: not understood. QR: error correction M, byte mode, the share link as text.
+- **Names**: control characters removed, whitespace runs → one space, trimmed, at most 40 characters.
+
+### Signed relay requests
+- Base `https://haltewekker-relay.tsfaw1.workers.dev`. All routes below are `POST` with a JSON body and these headers:
+  `X-HW-Account` (account id), `X-HW-Device` (device id), `X-HW-Time` (unix seconds, within ±300 s of the relay's
+  clock), `X-HW-Nonce` (16–64 characters of `[A-Za-z0-9_-]`, never reused: the app uses b64u of 16 random bytes),
+  `X-HW-Signature` (b64u of the 64-byte Ed25519 signature by the account's signing key) over the UTF-8 string
+  `"HW1\n" + "POST" + "\n" + path + "\n" + account + "\n" + device + "\n" + time + "\n" + nonce + "\n" + hex(SHA-256(body bytes))`
+  (`path` like `/f/v1/inbox`, no query). A nonce works once: a signed request must not be retried as is.
+- Errors come as `{"error": code}`: 400 (bad input), 401 `clock` / `bad_signature` / `replay`, 404 `unknown_account`,
+  409 `signed_out` (the account moved to another device: forget the keys locally and say so), 413, 429 `slow_down`,
+  507 `inbox_full`.
+- Routes (relay `relay/friends.js`, Durable Object per account with SQLite storage):
+  - `/f/v1/register {"signKey": b64u}` → `{"account","created","moved"}`. Signed with that key; the id must match it.
+    Another device id moves the account there (that's restore; the old device then gets 409).
+  - `/f/v1/send {"boxes":[{"to": account, "data": b64u(box), "slot"?: [a-z0-9._-]{1,32}, "ttl"?: seconds}]}` →
+    `{"results":[{"to","ok","id"?,"error"?}]}`. 1–20 boxes per request, to any mix of mailboxes (that's how a group
+    message is fanned out); each box ≤ 64 KB decoded; ttl 60 s–30 days (default 30 days). A box with a slot replaces
+    the sender's previous box in that slot in that mailbox.
+  - `/f/v1/inbox {"after": id, "limit": 1–100}` → `{"boxes":[{"id","from","slot","at","exp","data"}],"cursor","more"}`,
+    oldest first. Ids only grow (a replaced slot box gets a new id), so keep `cursor` and pass it as `after`.
+  - `/f/v1/ack {"ids":[id]}` → `{"deleted"}`: boxes read go. `/f/v1/drop {"peer"}`: the boxes between you and peer, both
+    ways. `/f/v1/block {"peer","on"}`: that account's boxes are refused quietly (sender still sees ok).
+  - `/f/v1/vault/put {"data": b64u}` (≤ 128 KB) and `/f/v1/vault/get {}` → `{"data"|null,"at"}`. `/f/v1/leave {}`: the
+    account and everything in it deleted. `GET /f/v1/status` → `{"ok":true,"v":1,"storage":true}` (unsigned).
+- Limits: 1 MB per request; 60 requests/min and 600 boxes/hour per account; an inbox holds ≤ 1000 boxes / 8 MB, ≤ 200
+  from one sender; 20 registers/hour per network address (hashed, kept an hour). Everything expires; an account
+  unused for 400 days is deleted. The relay logs nothing of the contents. `node relay/test-friends.mjs [url]` checks it.
 
 ### Boxes (`FriendBox.swift`)
-- Bytes: `0x01 | ephemeral X25519 pub (32) | ChaChaPoly combined`; key = HKDF-SHA256(X25519(eph, recipient agree),
-  salt "haltewekker-box-v1", info eph ‖ recipient pub); AAD = recipient account id. Inside: Ed25519 signature (64) over
-  `"HWBOX1\n" + recipient account + "\n" + payload`, then the payload JSON
-  `{"v":1,"k":kind,"f":sender,"t":unix s,"n":random id,"g":group id (optional),"b":body}`.
-- Kinds in 0.25: `request` and `accept` ({card, name, note?}: the only kinds a stranger may send; the card must match
-  the sender), `unfriend`, `profile` ({name}), `picture` ({jpeg}: 256 px square, ≤ 40 KB, sent in slot `picture`).
-- Adding a kind: a `FriendMessage` case, a body struct, a line in `payload`/`parse`, `FriendMessage.known`, and bump
-  `FriendMessage.kindsVersion`. Older apps leave unknown kinds unacknowledged on the relay (until they expire), and an
-  app with a higher kindsVersion reads its mailbox from the start once, so nothing sent early is lost.
-- Groups (0.27): put the group id in `g` and post one box per member in a single `/f/v1/send` (≤ 20 per request).
-  Latest-state kinds (0.26 `travel`, 0.28 `timetable`/`area`) use a slot and a short ttl.
-- Vault: `0x01 | ChaChaPoly(vault key, AAD "hw-vault-v1\n" + account)` of `FriendVaultContents {book, picture}`.
+- **Payload** (JSON): `{"v":1, "k": kind, "f": sender account, "t": unix seconds, "n": random id (dedupe), "g"?: group
+  id, "b": body}`. A `v` above 1: leave the box on the relay (a newer app will read it).
+- **Inside** = `signature (64) ‖ payload bytes`, the Ed25519 signature by the sender over
+  `"HWBOX1\n" + recipient account + "\n" + payload bytes`.
+- **Box** = `0x01 ‖ ephPub (32) ‖ nonce (12) ‖ ChaCha20-Poly1305 ciphertext of the inside ‖ tag (16)`, where `ephPub`
+  is a fresh X25519 key per box, the nonce is random, the AAD is the recipient's account id (ASCII), and the key is
+  `HKDF-SHA256(ikm = X25519(eph_priv, recipient agreeKey), salt = "haltewekker-box-v1", info = ephPub ‖ recipient agreeKey, 32)`.
+- **Opening**: decrypt; parse the payload; `f` must equal the relay's `from`; the signing key is the friend's known
+  card — except for `request` and `accept`, which carry the sender's card (its account id must equal `f`); verify the
+  signature; drop anything that fails (and ack it).
+- **Kinds** (0.25): `request` and `accept` — `b = {"card": card, "name": string, "note"?: string}`; `unfriend` —
+  `b = {}` (also takes back a request); `profile` — `b = {"name"}`; `picture` — `b = {"jpeg": b64u(JPEG)}`, a plain
+  baseline JPEG, 256×256, ≤ 40 KB, sent with slot `picture` and ttl 30 days, to friends and along with a request or
+  accept. A kind you don't know: don't ack it (it stays until it expires).
+- **Flow**: scanning/opening a code sends `request` (+ `picture`). The other side accepts → `accept` (+ `picture`); both
+  asking → friends. Decline is silent (optionally block). Remove = `drop`, then `unfriend`. A new name → `profile` to
+  every friend.
+- **Adding kinds** (0.26 `travel` with slot `travel` and a short ttl; 0.27 `message`, `trip`, groups with `g` and one
+  box per member in one send; 0.28 `timetable`/`area` in slots): a case and body in `FriendMessage`, add it to
+  `FriendMessage.known` and raise `FriendMessage.kindsVersion` (the app then reads its mailbox from the start once, so
+  boxes an older version left unacked are read).
+- **Vault** (your own backup on the relay) = `0x01 ‖ nonce (12) ‖ ChaCha20-Poly1305(vault_key, AAD = "hw-vault-v1\n" +
+  account)(JSON) ‖ tag`, JSON `{"v":1, "book": {"v":1, "myName", "friends":[{"card","name","since"}],
+  "incoming":[{"card","name","at"}], "outgoing":[…same…]}, "picture"?: b64u(JPEG)}`.
 
-### App
+### Test vectors (made with Node's crypto from this text; checked in `ios/Tests/FriendVectorTests.swift`)
+- Sam: seed `000102030405060708090a0b0c0d0e0f` → backup code `abandon amount liar amount expire adjust cage candy arch
+  gather drum buyer`; signKey `3e299fe695cc0d9c74ddf561942c1a7d8f62ea29783f5caa3414644025b420c2`; agreeKey
+  `e0191e9cfb5e4b2ccc859180133c42543b4f6ec6007e4b5c50608563f7fac134`; vault key `66cd8d6137776253f8c7b0e625a6fcfb23d7ce0498f85e22f5a2fd51a229e819`;
+  account `3c157621a97cf055f5804a9826c6d1e1`; k `Pimf5pXMDZx03fVhlCwafY9i6il4P1yqNBRkQCW0IMLgGR6c-15LLMyFkYATPEJUO09uxgB-S1xQYIVj9_rBNA`.
+- Lou: seed `101112131415161718191a1b1c1d1e1f`; signKey `8e8bd8b8e2fe90d2a870daf99b6646c8b744598a3ca840b12d19959bce0743ff`; agreeKey
+  `98973049022a31db881258005785a2350c8d5ab34ef695e9726bb2feba3e1f5e`; account `65392c81aa86e697083b0960bf107afb`.
+- A request box from Sam to Lou: payload (exact bytes)
+  `{"b":{"card":{"a":"4BkenPteSyzMhZGAEzxCVDtPbsYAfktcUGCFY_f6wTQ","s":"Pimf5pXMDZx03fVhlCwafY9i6il4P1yqNBRkQCW0IMI"},"name":"Sam"},"f":"3c157621a97cf055f5804a9826c6d1e1","k":"request","n":"vector-1","t":1800000000,"v":1}`; signature (b64u)
+  `u7Zi2kaNq4eocGLTn5-8SvBDPzZpGq5HGqBOkGUVcvp7CdJWlP4ErXRiHUwz_a2QR8WyOHLWD-q2c0ASirOVDw`; eph_priv `202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f` (ephPub
+  `358072d6365880d1aeea329adf9121383851ed21a28e3b75e965d0d2cd166254`); nonce `404142434445464748494a4b`; box key
+  `391a5671a72c601c6dd34c849fc36070762b75c4199b0c4b7181414b6f3b4c8f`; box (b64u):
+  `ATWActY2WIDRruoymt-RITg4Ue0hoo47dell0NLNFmJUQEFCQ0RFRkdISUpLhNjroAbjjIoeYOMe5kdazUPO6vUbw6CWi8bBVyPDycUHH100hP5LwyHNKs7M9kvkxy5hOoexAJL6GOvZ9Oi1kVwqOxYRggbgy-5ifJcMbXtaSibw7_JrtYzH1z5XYVbg3qcSmAAdHPDaeO01RZ4vBuq5t8w1bTo7Uaj1oh4xKD1WA1dPJ1VJJNELVrkBVcAbnYjQvG7p7x7x5uIYeGGvGPc-d5Ut9FdPapHC3Xp1lcrVPHA1F29V5tfYLzkOeQbGknEvQp6BCs150iuFeRBoI9x5WqtARgmWuN2de5qaKISfCyOpu-4knj48qm1aviXL97LBUkjJgLQ3d98wnug_TFK4O05Ns9nS8Ss6gJYLL5IT4tcPTiQOvf8Yw_5frIVF3-c187FoofV24Q`
+- A signed request by Sam: body `{"after":0,"limit":100}`, device `00112233445566778899aabbccddeeff`, time `1800000000`,
+  nonce `vector-nonce-0001` → signature (b64u, deterministic Ed25519)
+  `Al3g11GCpgqXzYqJAH61A3JX_sSHiXIGqlOz5l_8bjR_VQe4R-VUQqXc5Q08xmJ_kGsRYmklpNUdKHXMRJbBBg`.
+- Sam's vault: plain `{"book":{"friends":[],"incoming":[],"myName":"Sam","outgoing":[],"v":1},"v":1}`, nonce `505152535455565758595a5b` → (b64u)
+  `AVBRUlNUVVZXWFlaW53946SaBXtO59uYSRBJF1zTgHIUdVubOEKiCPQ5MEnqVJhxImhJYxfVnyjS4w0TLI9xA_AKoX6RlIIvJ7G5PfhNK7konHLAQ40zqQx-Qhj8QDR6WwPW0HRNmTwNp40`.
+- Ed25519 signing in CryptoKit is randomized (still standard); verifiers must not expect deterministic signatures.
+
+### App (0.25)
 - `FriendBook` (list, incoming, outgoing; each change returns effects: send / drop / block), `FriendInbox.process`
-  (a batch of relay boxes → book, acks, kept boxes, pictures, news), `FriendStore` (keychain, file, pending queue that
-  survives restarts, sync), `FriendRelay` (signed requests through `Net`, no retries: a nonce is single-use).
-- Decline is silent (optionally "Decline and block"). Both sides asking = friends. Removing drops the relay boxes
-  both ways, then sends `unfriend` so the other app forgets you.
+  (relay boxes → book, acks, kept boxes, pictures, news), `FriendStore` (keychain, file, a pending queue that survives
+  restarts, sync), `FriendRelay` (signed requests through `Net`, no retries).
 - Checks: app to the front (≤ every 20 s), every 30 s while the Friends screen is open, at the school alarm's
   background refresh. No other loop.
 - Entry: Next trip first's bottom bar (Friends replaced Search; the top field still opens Plan), a round button under
-  Your week on Live around you, Settings › Friends. Badges count waiting requests. The Friends screen follows the
-  phone's light or dark.
+  Your week on Live around you, Settings › Friends; badges count requests waiting. Follows the phone's light or dark.
 - Not yet: friends' pictures aren't in the vault (after a restore they come back when a friend changes theirs).

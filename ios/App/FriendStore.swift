@@ -91,7 +91,7 @@ final class FriendStore: ObservableObject {
            let dev = FriendKeychain.get("device").flatMap({ String(data: $0, encoding: .utf8) }) {
             identity = me
             device = dev
-            if let f = Self.file, let d = try? Data(contentsOf: f), let s = try? JSONDecoder().decode(Saved.self, from: d) { state = s }
+            if let f = Self.file, let d = try? Data(contentsOf: f), let s = try? FriendJSON.decoder.decode(Saved.self, from: d) { state = s }
             book = state.book ?? FriendBook(myName: "")
             myPicture = Self.readPicture("me")
             for id in Self.ids(state.book) { if let p = Self.readPicture(id) { pictures[id] = p } }
@@ -175,7 +175,7 @@ final class FriendStore: ObservableObject {
         _ = try await relay.register()
         var restored: FriendVaultContents?
         if let v = try? await relay.vaultGet(), let plain = try? FriendVault.open(v, me: me) {
-            restored = try? JSONDecoder().decode(FriendVaultContents.self, from: plain)
+            restored = try? FriendJSON.decoder.decode(FriendVaultContents.self, from: plain)
         }
         let b = restored?.book ?? FriendBook(myName: name)
         adopt(me, device: dev, book: b)
@@ -296,7 +296,7 @@ final class FriendStore: ObservableObject {
     }
 
     private func save() {
-        guard let f = Self.file, let d = try? JSONEncoder().encode(state) else { return }
+        guard let f = Self.file, let d = try? FriendJSON.encoder.encode(state) else { return }
         try? d.write(to: f, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
     }
 
@@ -344,7 +344,7 @@ final class FriendStore: ObservableObject {
                 if !inbox.more { break }
             }
             try await flush(relay)
-            if state.vaultDirty, let b = book, let plain = try? JSONEncoder().encode(FriendVaultContents(book: b, picture: myPicture)) {
+            if state.vaultDirty, let b = book, let plain = try? FriendJSON.encoder.encode(FriendVaultContents(book: b, picture: myPicture)) {
                 let sealed = try FriendVault.seal(plain, me: me)
                 try await relay.vaultPut(sealed)
                 state.vaultDirty = false

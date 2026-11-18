@@ -62,6 +62,7 @@ struct FriendProfile: Codable, Equatable {
 /// 64 KB).
 struct FriendPicture: Codable, Equatable {
     static let maxBytes = 40 * 1024
+    /// A plain JPEG (base64url in the JSON, through FriendJSON).
     var jpeg: Data
 }
 
@@ -105,8 +106,7 @@ enum FriendBox {
     // MARK: payload
 
     static func payload(_ m: FriendMessage, from: String, at: Date, id: String) throws -> Data {
-        let e = JSONEncoder()
-        e.outputFormatting = [.sortedKeys]
+        let e = FriendJSON.encoder
         let t = Int(at.timeIntervalSince1970)
         switch m {
         case .request(let b), .accept(let b):
@@ -121,7 +121,7 @@ enum FriendBox {
     }
 
     static func parse(_ data: Data) throws -> (BoxHeader, FriendMessage) {
-        let d = JSONDecoder()
+        let d = FriendJSON.decoder
         guard let h = try? d.decode(BoxHeader.self, from: data) else { throw FriendBoxError.badFormat }
         guard h.v <= payloadVersion else { throw FriendBoxError.newerVersion }
         do {
@@ -145,12 +145,23 @@ enum FriendBox {
     /// Locks `m` for the friend with `card`.
     static func seal(_ m: FriendMessage, from me: FriendIdentity, to card: FriendCard, at: Date = Date(),
                      id: String = RelaySign.nonce()) throws -> Data {
-        guard let theirs = card.agreementPublic else { throw FriendBoxError.badFormat }
-        let p = try payload(m, from: me.account, at: at, id: id)
+        try seal(payload: payload(m, from: me.account, at: at, id: id), from: me, to: card)
+    }
+
+    /// Locks a payload already written (the test vectors pass the ephemeral key and the nonce).
+    static func seal(payload p: Data, from me: FriendIdentity, to card: FriendCard,
+                     eph: Curve25519.KeyAgreement.PrivateKey = .init(), nonce: ChaChaPoly.Nonce = .init()) throws -> Data {
         let sig = try me.signing.signature(for: signed(p, to: card.account))
-        let eph = Curve25519.KeyAgreement.PrivateKey()
+        return try lock(sig + p, to: card, eph: eph, nonce: nonce)
+    }
+
+    /// The box around a signed inside (signature ‖ payload): no randomness of its own, so it can be checked byte for
+    /// byte against the test vectors.
+    static func lock(_ inner: Data, to card: FriendCard, eph: Curve25519.KeyAgreement.PrivateKey,
+                     nonce: ChaChaPoly.Nonce) throws -> Data {
+        guard let theirs = card.agreementPublic else { throw FriendBoxError.badFormat }
         let key = try boxKey(eph.sharedSecretFromKeyAgreement(with: theirs), eph: eph.publicKey.rawRepresentation, recipient: card.agreeKey)
-        let box = try ChaChaPoly.seal(sig + p, using: key, authenticating: Data(card.account.utf8))
+        let box = try ChaChaPoly.seal(inner, using: key, nonce: nonce, authenticating: Data(card.account.utf8))
         return Data([version]) + eph.publicKey.rawRepresentation + box.combined
     }
 
@@ -196,8 +207,8 @@ enum FriendBox {
 /// Your friend list kept on the relay, locked with the vault key (only your backup code opens it).
 ///   0x01 | ChaChaPoly combined, AAD "hw-vault-v1\n" + account
 enum FriendVault {
-    static func seal(_ plain: Data, me: FriendIdentity) throws -> Data {
-        let box = try ChaChaPoly.seal(plain, using: me.vaultKey, authenticating: aad(me))
+    static func seal(_ plain: Data, me: FriendIdentity, nonce: ChaChaPoly.Nonce = .init()) throws -> Data {
+        let box = try ChaChaPoly.seal(plain, using: me.vaultKey, nonce: nonce, authenticating: aad(me))
         return Data([1]) + box.combined
     }
 

@@ -24,6 +24,33 @@ enum B64URL {
     }
 }
 
+/// The JSON every Friends value is written in (boxes, the vault, the list on this phone), the same on any platform:
+/// keys sorted, binary data as base64url without padding, dates as unix seconds (a number, may have a fraction).
+enum FriendJSON {
+    static var encoder: JSONEncoder {
+        let e = JSONEncoder()
+        e.outputFormatting = [.sortedKeys]
+        e.dateEncodingStrategy = .secondsSince1970
+        e.dataEncodingStrategy = .custom { d, enc in
+            var c = enc.singleValueContainer()
+            try c.encode(B64URL.encode(d))
+        }
+        return e
+    }
+    static var decoder: JSONDecoder {
+        let d = JSONDecoder()
+        d.dateDecodingStrategy = .secondsSince1970
+        d.dataDecodingStrategy = .custom { dec in
+            let c = try dec.singleValueContainer()
+            guard let v = B64URL.decode(try c.decode(String.self)) else {
+                throw DecodingError.dataCorruptedError(in: c, debugDescription: "not base64url")
+            }
+            return v
+        }
+        return d
+    }
+}
+
 extension Data {
     /// Lowercase hex.
     var hexString: String { map { String(format: "%02x", $0) }.joined() }
