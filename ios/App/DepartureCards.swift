@@ -356,9 +356,18 @@ struct DepartureDetailSheet: View {
         guard d.train else { return nil }
         let known = (live.trains.map(\.trip) + live.next).flatMap(\.rides).first { $0.tripId == d.tripId && $0.isTrain }
         guard let r = known, !r.num.isEmpty,
-              let from = Place.all.first(where: { $0.short == Fmt.place(r.fromStop) }), NSStore.code(from) != nil,
-              let to = Place.all.first(where: { $0.short == Fmt.place(r.toStop) }) else { return nil }
+              let from = Place.all.first(where: { $0.short == Fmt.place(r.fromStop) }) ?? Self.station(r.fromStop, id: r.fromId, lat: r.fromLat, lon: r.fromLon),
+              NSStore.code(from) != nil,
+              let to = Place.all.first(where: { $0.short == Fmt.place(r.toStop) }) ?? Self.station(r.toStop, id: "", lat: r.toLat, lon: r.toLon)
+        else { return nil }
         return PanelTrip(trip: DoorTrip(rides: [r], start: r.departure, end: r.arrival), from: from, to: to)
+    }
+
+    /// Any NS station a train leaves from or gets to, as a place (0.24: not only your corridor's stations).
+    private static func station(_ name: String, id: String, lat: Double?, lon: Double?) -> Place? {
+        guard let lat, let lon, NSStore.code(stopId: id, name: name) != nil else { return nil }
+        return Place(key: "s:\(id.isEmpty ? name : id)", name: name, short: Fmt.place(name), ids: id.isEmpty ? ["\(lat),\(lon)"] : [id],
+                     coordinate: .init(latitude: lat, longitude: lon), spoken: Fmt.place(name))
     }
 
     private var fromText: String {
