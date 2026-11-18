@@ -18,6 +18,9 @@ struct SavedStop: Codable, Identifiable, Hashable {
 struct BoardStop: Codable, Identifiable, Hashable {
     var id: String
     var name: String
+    /// Where it is (0.24: set by the setup, for the auto-start's regions around your home stops; older boards have none).
+    var lat: Double? = nil
+    var lon: Double? = nil
     var short: String { name.range(of: ", ").map { String(name[$0.upperBound...]) } ?? name }
 }
 

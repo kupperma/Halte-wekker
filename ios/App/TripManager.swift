@@ -148,6 +148,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     private var backstopKey: String?                       // the leg the backstop region is up for
     private var farTask: Task<Void, Never>?                // while far: a look every minute (time can bring the stop near)
     private var lastEnd: (place: String, at: Date)?        // where a leg last ended (no station look right after)
+    private var lastEndSpot: (spot: CLLocationCoordinate2D, at: Date)?     // and where that was (off the corridor, 0.24)
+    private var tripStartSpot: CLLocationCoordinate2D?    // where you were when the trip started (its score, off the corridor)
     private var activityLater: Task<Void, Never>?          // a Live Activity change held back for the 30 s
     private var gpsWhy: GPSReason?                         // why GPS is on, as the battery log has it
     private var sameOK: (tripId: String, looks: Int)?      // "still the same bus?" looks in a row that passed, for this one
@@ -362,7 +364,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             for (l, k) in zip(legs, kms) { kmMem["\(l.mode.rawValue):\(l.to.key)"] = k }
             UserDefaults.standard.set(kmMem, forKey: "kmMem")
         }
-        tripStart = Date(); startedAtLeg = index; lastScore = nil
+        tripStart = Date(); startedAtLeg = index; lastScore = nil; tripStartSpot = lastFix?.coordinate
         setBackup(backup ?? backupMinutes)
         sound.startTrip()
         music.start()
@@ -474,7 +476,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         sound.stop()
         setBackup(0)
         arrivedAt = leg?.to.short
-        if let l = leg { lastEnd = (l.to.key, Date()) }
+        if let l = leg { lastEnd = (l.to.key, Date()); lastEndSpot = (l.to.coordinate, Date()) }
         if index + 1 < legs.count {
             phase = .transfer
             changeSince = Date(); changeFirst = nil
@@ -490,6 +492,14 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             finishedAt = Date()
             if let r = route, r.isFixed, startedAtLeg == 0, let s = tripStart {
                 lastScore = ScoreBook.shared.log(route: r, home: direction == .home, start: s)
+            } else if RoleSnapshot.corridor == nil, !demo, let r = route, r.custom != nil, startedAtLeg == 0, let s = tripStart,
+                      let a = tripStartSpot ?? r.custom?.first?.from.coordinate, let b = legs.last?.to.coordinate {
+                // off the corridor (0.24): a door-to-door trip between Home and School is scored too
+                let home = Place.home.coordinate, school = Place.school.coordinate
+                if let k = DoorScore.key(start: GeoPoint(lat: a.latitude, lon: a.longitude), end: GeoPoint(lat: b.latitude, lon: b.longitude),
+                                         home: GeoPoint(lat: home.latitude, lon: home.longitude), school: GeoPoint(lat: school.latitude, lon: school.longitude)) {
+                    lastScore = ScoreBook.shared.log(door: k.route, home: k.home, start: s)
+                }
             }
         }
         applyGPS()                  // a change: as on the ride, until you stand still a while; the end: off
@@ -792,7 +802,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     }
 
     nonisolated func locationManager(_ manager: CLLocationManager, didExitRegion region: CLRegion) {
-        Task { @MainActor in self.leftRegion(region.identifier) }
+        let center = (region as? CLCircularRegion)?.center
+        Task { @MainActor in self.leftRegion(region.identifier, center: center) }
     }
 
     /// A region iOS couldn't watch (it says so once): register them all again, at most every 10 minutes.
@@ -806,7 +817,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
 
     nonisolated func locationManager(_ manager: CLLocationManager, didEnterRegion region: CLRegion) {
         if region.identifier == Self.backstopId { Task { @MainActor in self.backstopEntered() }; return }
-        guard region.identifier == "school" else { return }
+        guard region.identifier == RoleRegions.schoolId else { return }
         Task { @MainActor in self.maybeAutoHome(CLLocation(latitude: Place.school.coordinate.latitude, longitude: Place.school.coordinate.longitude)) }
     }
 
@@ -944,14 +955,15 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         let k = cos(a.latitude * .pi / 180)
         let total = 4600.0, secs = 150.0
         func along(_ m: Double) -> CLLocationCoordinate2D { .init(latitude: a.latitude + m * 0.3 / 110_540, longitude: a.longitude + m * 0.95 / (111_320 * k)) }
-        let names = ["Your stop", "Zijtaart, Kerk", "Erp, Centrum", "Boerdonk, Kerk", "Keldonk, Dorp", "Den Bosch, Centraal Station"]
+        let dn = RoleWords.current.demoNames          // (the corridor's villages to Den Bosch; off it made-up stops, 0.24)
+        let names = dn.rideStops
         let now = Date()
         let stops = names.enumerated().map { i, n in
             TripStop(name: n, coordinate: along(total * Double(i) / Double(names.count - 1)), arrival: now.addingTimeInterval(secs * Double(i) / Double(names.count - 1)))
         }
         let end = along(total)
         let from = Place(key: "demo-from", name: "Your stop", short: "Your stop", ids: ["\(a.latitude),\(a.longitude)"], coordinate: a, spoken: "your stop")
-        let to = Place(key: "demo-to", name: "Den Bosch Centraal", short: "Den Bosch", ids: ["\(end.latitude),\(end.longitude)"], coordinate: end, spoken: "Den Bosch")
+        let to = Place(key: "demo-to", name: dn.rideEnd, short: dn.rideEndShort, ids: ["\(end.latitude),\(end.longitude)"], coordinate: end, spoken: dn.rideEndShort)
         demo = true
         start(RoutePlan(id: "demo", name: "Demo ride", station: to, custom: [Leg(mode: .bus, from: from, to: to)]),
               vehicle: Vehicle(tripId: "demo-\(line)", line: line, isTrain: false), backup: 0, stops: stops, how: "demo")
@@ -2439,20 +2451,13 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     /// starting all of them at every launch and every authorization callback.
     /// `force`: register them again even when they look the same (one of them failed).
     private func updateWatching(force: Bool = false) {
-        var wanted: [RegionSpec] = []
-        if (autoStart || autoHome) && location.authorizationStatus == .authorizedAlways {
-            if autoHome {
-                wanted.append(RegionSpec(id: "school", lat: Place.school.coordinate.latitude, lon: Place.school.coordinate.longitude,
-                                         radius: NearMe.schoolRadius, entry: true, exit: false))
-            }
-            // (the stations' regions start your fixed routes: only on the corridor, 0.22)
-            if autoStart && RoleSnapshot.corridor != nil {
-                for p in Place.all where p != .school {
-                    wanted.append(RegionSpec(id: p.key, lat: p.coordinate.latitude, lon: p.coordinate.longitude,
-                                             radius: p == .home ? 350 : 300, entry: false, exit: true))
-                }
-            }
-        }
+        // On the corridor its stations' regions start your fixed routes (0.21's list exactly); off it, your home stops
+        // and School start a door-to-door trip (0.24: `RoleRegions`).
+        let homeStops = StopsStore.shared.boardStops.compactMap { b in b.lat.flatMap { la in b.lon.map { GeoPoint(lat: la, lon: $0) } } }
+        let wanted: [RegionSpec] = location.authorizationStatus == .authorizedAlways
+            ? RoleRegions.wanted(roles: RoleSnapshot.current, homeStops: homeStops, autoStart: autoStart, autoHome: autoHome,
+                                 schoolRadius: NearMe.schoolRadius)
+            : []
         // (the far tier's backstop around a ride's stop is its own: `updateBackstop`)
         let current: [RegionSpec] = location.monitoredRegions.filter { $0.identifier != Self.backstopId }.map { r in
             let c = r as? CLCircularRegion
@@ -2474,12 +2479,27 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
 
     func askForAlways() { location.requestAlwaysAuthorization() }
 
-    private func leftRegion(_ key: String) {
-        guard autoStart, phase == .idle, RoleSnapshot.corridor != nil, let place = Place.all.first(where: { $0.key == key }) else { return }
+    private func leftRegion(_ key: String, center: CLLocationCoordinate2D? = nil) {
+        guard autoStart, phase == .idle else { return }
+        let place: Place
+        var ended = lastEnd
+        if RoleSnapshot.corridor != nil {
+            guard let p = Place.all.first(where: { $0.key == key }) else { return }
+            place = p
+        } else {
+            // off the corridor (0.24): a home stop's region or School's
+            guard let role = RoleRegions.role(ofRegion: key) else { return }
+            place = role == .home ? .home : .school
+            // (a door-to-door trip's last stop has its own key: it ended "here" when it ended inside this region)
+            if let e = lastEndSpot, let c = center,
+               CLLocation(latitude: e.spot.latitude, longitude: e.spot.longitude).distance(from: CLLocation(latitude: c.latitude, longitude: c.longitude)) < RoleRegions.homeRadius + 150 {
+                ended = (key, e.at)
+            }
+        }
         // right after a ride ended there: you're walking away from the bus you got off (unless at vehicle speed)
         let fresh = lastFix.flatMap { -$0.timestamp.timeIntervalSinceNow < 60 && $0.speed >= 0 ? $0.speed : nil }
-        if RegionLook.skip(place: key, lastEnd: lastEnd, speed: fresh, now: Date()) {
-            rideLog("look · left \(key == "veghel" ? "the home station" : "a station") right after a ride ended there: not looking",
+        if RegionLook.skip(place: key, lastEnd: ended, speed: fresh, now: Date()) {
+            rideLog("look · left \(key == "veghel" || place == .home ? "the home station" : place == .school ? "school" : "a station") right after a ride ended there: not looking",
                     once: "regionSkip|\(key)", every: 600)
             return
         }
@@ -2503,7 +2523,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
 
     /// Works out which of your routes this bus or train belongs to, then starts the trip at that leg.
     private func autoStartTrip(from place: Place, on v: Vehicle) async -> Bool {
-        guard RoleSnapshot.corridor != nil else { return false }        // (by the corridor's station names only)
+        // (by the corridor's station names; off it, door to door)
+        guard RoleSnapshot.corridor != nil else { return await autoStartDoor(from: place, on: v) }
         let stops = await Transit.tripStops(v.tripId)
         let names = stops.map { $0.name.lowercased() }
         func goes(_ p: Place) -> Bool {
@@ -2531,6 +2552,29 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         c.title = "Trip started by itself"
         // (a leg that started inside its wake distance has no alarm: it tells you at the stop)
         c.body = "\(v.title) to \(legs[safe: i]?.to.short ?? "your stop"). "
+            + (phase == .awake ? "It tells you when you’re there." : "It rings \(Fmt.distance(wakeKm * 1000)) before your stop.")
+        c.sound = .default
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "autostart", content: c, trigger: nil)) { _ in }
+        return true
+    }
+
+    /// Off the corridor (0.24): you left your home stop (or School) on this bus or train. The trip to the other one is
+    /// planned on from it, the same way Fastest trip starts one when it sees you on board (`LiveStore.onBoardTrips` →
+    /// `RoutePlan.from`), and starts.
+    private func autoStartDoor(from place: Place, on v: Vehicle) async -> Bool {
+        let home = place == .home
+        let dest: Place = home ? .school : .home
+        guard let here = lastFix,
+              let ob = await LiveStore.onBoardTrips(here, to: dest, tripId: v.tripId), ob.0.vehicle.tripId == v.tripId,
+              let t = ob.1.first, let r = RoutePlan.from(t), phase == .idle else { return false }
+        let dir: Direction = home ? .toSchool : .home
+        guard !refusesAtItsStop(r, direction: dir, what: "auto-start on", vehicle: v) else { return false }
+        direction = dir
+        start(r, vehicle: v, auto: true, alternatives: ob.1, how: "auto (stop left)")
+        let c = UNMutableNotificationContent()
+        c.title = "Trip started by itself"
+        // (a leg that started inside its wake distance has no alarm: it tells you at the stop)
+        c.body = "\(v.title) to \(legs.first?.to.short ?? "your stop"), on your way to \(home ? RoleWords.current.school : "home"). "
             + (phase == .awake ? "It tells you when you’re there." : "It rings \(Fmt.distance(wakeKm * 1000)) before your stop.")
         c.sound = .default
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "autostart", content: c, trigger: nil)) { _ in }
@@ -2718,21 +2762,24 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         guard ActivityAuthorizationInfo().areActivitiesEnabled, activity == nil else { return }
         let now = Date(), home = direction == .home
         let song = music.song
+        // (on the corridor today's bus 306 home and Intercity to Breda; off it a bus to Home or your school: 0.24)
+        let ride = RoleWords.current.previewRide(home: home)
+        let stop = home ? Place.home.spoken : RoleSnapshot.corridor != nil ? Place.breda.spoken : Place.school.spoken
         let s = TripAttributes.ContentState(
-            legTitle: home ? "Bus 306 to Veghel" : "Intercity to Breda", isTrain: !home, distanceText: home ? "3.8 km" : "9.6 km",
-            arrival: now.addingTimeInterval(home ? 9 * 60 : 34 * 60), finalName: finalName,
-            nextText: home ? nil : "Then bus 3 to BUas from Breda", awake: false, goingHome: home,
-            kicker: "NOW RIDING", stopName: home ? Place.home.spoken : Place.breda.spoken, progress: 0.15,
-            legFrom: now.addingTimeInterval(-4 * 60), legTo: now.addingTimeInterval(home ? 9 * 60 : 18 * 60),
+            legTitle: ride.legTitle, isTrain: ride.isTrain, distanceText: Fmt.distance(ride.metres),
+            arrival: now.addingTimeInterval(ride.arrivalMinutes * 60), finalName: finalName,
+            nextText: ride.nextText, awake: false, goingHome: home,
+            kicker: "NOW RIDING", stopName: stop, progress: 0.15,
+            legFrom: now.addingTimeInterval(-4 * 60), legTo: now.addingTimeInterval(ride.legEndMinutes * 60),
             song: song?.title ?? "Your song", artist: song?.artist ?? "The artist", songPlaying: true, musicApp: song?.app ?? "Spotify",
-            vehicle: home ? VehicleKind.bus.rawValue : VehicleKind.ic.rawValue, line: home ? "306" : "IC")
+            vehicle: ride.isTrain ? VehicleKind.ic.rawValue : VehicleKind.bus.rawValue, line: ride.line)
         guard let a = try? Activity.request(attributes: TripAttributes(routeName: "Preview"), content: ActivityContent(state: s, staleDate: nil), pushType: nil) else { return }
         Task {
             // the vehicle drives along, so you can see it move
             for p in [0.35, 0.55, 0.75, 0.95] {
                 try? await Task.sleep(nanoseconds: 12_000_000_000)
                 var n = s; n.progress = p
-                n.distanceText = Fmt.distance((home ? 3800 : 9600) * (1 - p))
+                n.distanceText = Fmt.distance(ride.metres * (1 - p))
                 await a.update(ActivityContent(state: n, staleDate: nil))
             }
             try? await Task.sleep(nanoseconds: 15_000_000_000)

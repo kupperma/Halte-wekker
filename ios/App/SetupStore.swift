@@ -41,7 +41,7 @@ final class SetupStore: ObservableObject {
         dr.keptHints = profile.calendarHints
         dr.home = places.home
         dr.homeLabel = "As it is now"
-        dr.board = StopsStore.shared.boardStops.map { SetupStop(id: $0.id, name: $0.name) }
+        dr.board = StopsStore.shared.boardStops.map { SetupStop(id: $0.id, name: $0.name, lat: $0.lat, lon: $0.lon) }
         dr.boardChosen = false
         dr.others = places.list.filter { $0.kind == .custom }
         switch profile.schedule {
@@ -94,7 +94,7 @@ final class SetupStore: ObservableObject {
         // the profile first: the corridor decides the board's defaults and the roles
         ProfileStore.shared.replace(SetupLogic.profile(dr))
         if let b = SetupLogic.board(dr) {
-            StopsStore.shared.setBoard(b.stops.map { BoardStop(id: $0.id, name: $0.name) }, lines: b.lines)
+            StopsStore.shared.setBoard(b.stops.map { BoardStop(id: $0.id, name: $0.name, lat: $0.lat, lon: $0.lon) }, lines: b.lines)
         }
         PlacesStore.shared.replaceAll(SetupLogic.places(dr))
         SchoolAlarm.shared.apply(calendarIds: SetupLogic.calendarIds(dr), early: dr.earlyMinutes, wake: dr.wakeMinutes, on: dr.wakeOn)

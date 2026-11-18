@@ -61,9 +61,8 @@ struct NewLookSettings: View {
                 .sheet(isPresented: $showNotices) { NotificationsSheetNew().presentationDetents([.medium, .large]) }
         }
         Section("More") {
-            if profile.profile.corridor != nil {        // (it scores the corridor's two routes)
-                NavigationLink("Leaderboard") { LeaderboardScreenNew() }
-            }
+            // (on the corridor it scores its two routes; off it your door-to-door trips between Home and School, 0.24)
+            NavigationLink("Leaderboard") { LeaderboardScreenNew() }
             Button("How steady are they now?") { showSteady = true }
                 .sheet(isPresented: $showSteady) { SteadySheetNew().presentationDetents([.large]) }
             if let tryDemo, trip.phase == .idle {

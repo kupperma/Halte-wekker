@@ -284,7 +284,8 @@ enum Transit {
             guard let id = m["stopId"] as? String, let name = m["name"] as? String, let la = m["lat"] as? Double, let lo = m["lon"] as? Double else { return nil }
             let modes = (m["modes"] as? [String]) ?? []
             let rail = modes.contains { $0.contains("RAIL") || $0 == "LONG_DISTANCE" || $0 == "HIGHSPEED" }
-            return SetupStopRaw(id: id, name: name, parentId: m["parentId"] as? String, metres: Geo.metres(here, GeoPoint(lat: la, lon: lo)), rail: rail)
+            return SetupStopRaw(id: id, name: name, parentId: m["parentId"] as? String, metres: Geo.metres(here, GeoPoint(lat: la, lon: lo)), rail: rail,
+                                lat: la, lon: lo)
         }
         return SetupLogic.stopChoices(raw)
     }

@@ -71,7 +71,8 @@ struct DemoSheetNew: View {
     }
 }
 
-/// Settings › Leaderboard: your trips by score, home or to Breda, this week or all time.
+/// Settings › Leaderboard: your trips by score, home or to Breda, this week or all time. (Off the corridor, 0.24: your
+/// door-to-door trips between Home and School.)
 struct LeaderboardScreenNew: View {
     @EnvironmentObject var scores: ScoreBook
     @State private var home = true
@@ -84,7 +85,7 @@ struct LeaderboardScreenNew: View {
         ScrollView {
             VStack(alignment: .leading, spacing: DS.s12) {
                 VStack(spacing: DS.s8) {
-                    Picker("Direction", selection: $home) { Text("Home").tag(true); Text("To Breda").tag(false) }.pickerStyle(.segmented)
+                    Picker("Direction", selection: $home) { Text("Home").tag(true); Text("To \(RoleWords.current.toSchoolWord)").tag(false) }.pickerStyle(.segmented)
                     Picker("When", selection: $week) { Text("This week").tag(true); Text("All time").tag(false) }.pickerStyle(.segmented)
                 }
                 VStack(alignment: .leading, spacing: DS.s12) {
@@ -98,7 +99,9 @@ struct LeaderboardScreenNew: View {
                     }
                 }
                 .dsPanel()
-                Text("Time from starting the alarm until you reach your last stop, so waiting at the change counts. 500 means as fast as that route gets.")
+                Text(RoleWords.current.onCorridor
+                     ? "Time from starting the alarm until you reach your last stop, so waiting at the change counts. 500 means as fast as that route gets."
+                     : "Trips between home and \(RoleWords.current.school), from starting the alarm until your last stop, so waiting at a change counts. 500 means as fast as your fastest one so far.")
                     .font(DS.footnote).foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, DS.s4)
             }
@@ -116,7 +119,7 @@ struct LeaderboardScreenNew: View {
             DSGrade(grade: t.grade, size: 30)
             VStack(alignment: .leading, spacing: 2) {
                 Text("\(Int(t.mins.rounded())) min · \(t.score)/500").font(DS.bodyStrong).monospacedDigit().foregroundStyle(DS.text)
-                Text("\(Fmt.when(t.at)) · \(t.route)").font(DS.footnote).monospacedDigit().foregroundStyle(DS.secondary)
+                Text("\(Fmt.when(t.at)) · \(DoorScore.label(t.route, school: RoleWords.current.school))").font(DS.footnote).monospacedDigit().foregroundStyle(DS.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .accessibilityElement(children: .combine)

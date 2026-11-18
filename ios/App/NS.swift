@@ -69,7 +69,30 @@ struct NSDeparture {
 final class NSStore: ObservableObject {
     static let shared = NSStore()
     nonisolated static let relay = "https://haltewekker-relay.tsfaw1.workers.dev"
-    nonisolated static func code(_ p: Place) -> String? { ["ehv": "EHV", "ht": "HT", "bd": "BD"][p.key] }
+    /// The NS station a place is: the corridor's three by their keys (as before 0.24), a station picked for "A train's
+    /// time" by its key ("ns:UT"), else any station by its stop ids or name (`NSCodes`). Nil: not an NS station.
+    nonisolated static func code(_ p: Place) -> String? {
+        if let c = ["ehv": "EHV", "ht": "HT", "bd": "BD"][p.key] { return c }
+        if p.key.hasPrefix("ns:") { return String(p.key.dropFirst(3)) }
+        // (Home and School are places, not stations: a school called "Utrecht" isn't Utrecht's platforms)
+        if p.key == RoleLogic.homeKey || p.key == RoleLogic.schoolKey || p.key == "here" { return nil }
+        return NSCodes.code(forStopIds: p.ids, name: p.name)
+    }
+
+    /// The station a train leaves from or arrives at, by its stop (any NS station, 0.24).
+    nonisolated static func code(stopId: String, name: String) -> String? { NSCodes.code(forStopId: stopId, name: name) }
+
+    /// Where NS is asked about a trip in a list: its first train, the station it leaves from and the one its last train
+    /// gets to. The places it was planned between when they're stations (the corridor's lists: as before 0.24), else
+    /// the trains' own stops.
+    nonisolated static func railEnds(_ t: DoorTrip, from: Place, to: Place) -> (ride: Ride, from: String, to: String?)? {
+        guard let f = t.rides.first(where: \.isTrain) else { return nil }
+        let a = (f.id == t.first.id ? code(from) : nil) ?? code(stopId: f.fromId, name: f.fromStop)
+        guard let a else { return nil }
+        let last = t.rides.last(where: \.isTrain) ?? f
+        let b = (last.id == t.last.id ? code(to) : nil) ?? code(stopId: "", name: last.toStop)
+        return (f, a, b)
+    }
 
     @Published private(set) var info: [String: RailInfo] = [:]      // by the first ride's id
     @Published private(set) var available: Bool?                     // false: the relay has no NS key
@@ -229,17 +252,20 @@ final class NSStore: ObservableObject {
     // MARK: filling in the trains on screen
 
     /// Platform, cancellations, crowding and size for the trains in these trips. `from`/`to`: the places they were planned between.
+    /// (0.24: at any NS station, and for a trip whose train isn't its first ride: the first train's.)
     func enrich(_ items: [(trip: DoorTrip, from: Place, to: Place)]) async {
-        let rail = items.filter { $0.trip.first.isTrain && Self.code($0.from) != nil }
+        let rail: [(trip: DoorTrip, ride: Ride, code: String, to: String?)] = items.compactMap { i in
+            Self.railEnds(i.trip, from: i.from, to: i.to).map { (i.trip, $0.ride, $0.from, $0.to) }
+        }
         guard !rail.isEmpty else { return }
-        let codes = Array(Set(rail.compactMap { Self.code($0.from) }))
+        let codes = Array(Set(rail.map(\.code)))
         let boardJobs: [@Sendable () async -> Void] = codes.map { c in { @Sendable in _ = await self.board(c) } }
         _ = await Progressive.all(boardJobs)
         var got: [String: TrainSize?] = [:]
         // Platform and cancellations first: they're in once the boards are. Crowding and size follow.
         func fill() {
             for r in rail {
-                let f = r.trip.first, code = Self.code(r.from)!
+                let f = r.ride, code = r.code
                 var i = info[f.id] ?? RailInfo(track: f.platform, plannedTrack: f.plannedPlatform ?? f.platform, cancelled: f.cancelled)
                 if let m = match(code, num: f.num, planned: f.scheduledDeparture) {
                     if !m.plannedTrack.isEmpty { i.plannedTrack = m.plannedTrack }
@@ -254,8 +280,8 @@ final class NSStore: ObservableObject {
         fill()
         var groups: [String: Date] = [:]
         for r in rail {
-            guard let a = Self.code(r.from), let b = Self.code(r.to) else { continue }
-            let k = "\(a)>\(b)", t = r.trip.first.scheduledDeparture
+            guard let b = r.to, b != r.code else { continue }
+            let k = "\(r.code)>\(b)", t = r.ride.scheduledDeparture
             if groups[k].map({ t < $0 }) ?? true { groups[k] = t }
         }
         let crowdJobs: [@Sendable () async -> Void] = groups.map { k, at in
@@ -267,12 +293,12 @@ final class NSStore: ObservableObject {
         _ = await Progressive.all(crowdJobs)
         // The sizes of the rides that will be shown, all at once.
         let sized = rail.filter { r in
-            let f = r.trip.first
+            let f = r.ride
             return !f.num.isEmpty && f.scheduledDeparture > Date().addingTimeInterval(-600) && f.scheduledDeparture.timeIntervalSinceNow < 6 * 3600
         }
         // One request per ride, however many rows share it.
         var unique: [String: (num: String, code: String)] = [:]
-        for r in sized { let c = Self.code(r.from)!; unique["\(r.trip.first.num)@\(c)"] = (r.trip.first.num, c) }
+        for r in sized { unique["\(r.ride.num)@\(r.code)"] = (r.ride.num, r.code) }
         let keys = Array(unique.keys)
         let sizeJobs: [@Sendable () async -> (String, TrainSize?)] = keys.map { k in
             let u = unique[k]!
@@ -281,7 +307,7 @@ final class NSStore: ObservableObject {
         var byKey: [String: TrainSize?] = [:]
         for (k, s) in await Progressive.all(sizeJobs) { byKey[k] = .some(s) }
         for r in sized {
-            if let v = byKey["\(r.trip.first.num)@\(Self.code(r.from)!)"] { got[r.trip.first.id] = .some(v) }
+            if let v = byKey["\(r.ride.num)@\(r.code)"] { got[r.ride.id] = .some(v) }
         }
         fill()
     }

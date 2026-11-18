@@ -34,7 +34,7 @@ enum Demo {
             LiveTrip.Stop(name: b.stopName, coordinate: b.stop, arrival: b.departure.addingTimeInterval(-5), departure: b.departure, scheduled: b.planned),
             LiveTrip.Stop(name: "Next stop", coordinate: past, arrival: b.departure.addingTimeInterval(90), departure: b.departure.addingTimeInterval(90), scheduled: nil),
         ]
-        return LiveTrip(line: b.line, headsign: "Den Bosch", live: true, stops: stops, path: path)
+        return LiveTrip(line: b.line, headsign: RoleWords.current.demoNames.busHeadsign, live: true, stops: stops, path: path)
     }
 
     /// The road a car would take between two points (for the pretend bus).

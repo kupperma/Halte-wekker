@@ -495,7 +495,7 @@ private struct SetupHomeStep: View {
         let stop = h.kind == .stop
         draft.home = SavedPlace(id: "home", name: "Home", kind: .home, lat: h.lat, lon: h.lon, stopIds: stop ? [h.id] : [])
         draft.homeLabel = h.town.isEmpty || h.name.contains(h.town) ? h.name : "\(h.name), \(h.town)"
-        draft.board = stop ? [SetupStop(id: h.id, name: h.name)] : []
+        draft.board = stop ? [SetupStop(id: h.id, name: h.name, lat: h.lat, lon: h.lon)] : []
         draft.boardChosen = true
         choices = nil
     }

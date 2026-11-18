@@ -37,6 +37,9 @@ struct SetupStop: Equatable, Hashable, Identifiable, Sendable {
     var name: String
     var metres: Double = 0
     var rail = false
+    /// Where it is (for the auto-start's region around it, 0.24).
+    var lat: Double? = nil
+    var lon: Double? = nil
 }
 
 /// One of the stops `/v1/map/stops` lists, as the setup reads it.
@@ -46,6 +49,8 @@ struct SetupStopRaw: Equatable, Sendable {
     var parentId: String?
     var metres: Double
     var rail: Bool
+    var lat: Double? = nil
+    var lon: Double? = nil
 }
 
 /// A calendar on the phone, as the setup sees it.
@@ -144,7 +149,7 @@ enum SetupLogic {
         for r in raw.sorted(by: { $0.metres < $1.metres }) {
             let key = r.parentId.map { "p:\($0)" } ?? "n:\(r.name.lowercased())"
             guard seen.insert(key).inserted else { continue }
-            out.append(SetupStop(id: r.parentId ?? r.id, name: r.name, metres: r.metres, rail: r.rail))
+            out.append(SetupStop(id: r.parentId ?? r.id, name: r.name, metres: r.metres, rail: r.rail, lat: r.lat, lon: r.lon))
             if out.count == limit { break }
         }
         return out

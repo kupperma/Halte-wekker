@@ -19,7 +19,7 @@ struct ScoreResult: Equatable {
     let fastestEver: Bool
     let firstWeek: Bool
     var flag: String? {
-        let w = entry.home ? "home" : "to Breda"
+        let w = entry.home ? "home" : "to \(RoleWords.current.toSchoolWord)"
         if fastestEver { return "🏆 Your fastest trip \(w) ever!" }
         if fastestWeek { return "🏆 Fastest trip \(w) this week!" }
         if firstWeek { return "First trip \(w) this week" }
@@ -57,13 +57,21 @@ final class ScoreBook: ObservableObject {
 
     /// At the end of a trip from your first stop: score it and put it on the board.
     func log(route r: RoutePlan, home: Bool, start: Date, end: Date = Date()) -> ScoreResult? {
+        log(name: r.name, ideal: ideal(r, home: home), home: home, start: start, end: end)
+    }
+
+    /// A door-to-door trip between Home and School (off the corridor, 0.24: `DoorScore`), against your own fastest.
+    func log(door key: String, home: Bool, start: Date, end: Date = Date()) -> ScoreResult? {
+        log(name: key, ideal: nil, home: home, start: start, end: end)
+    }
+
+    private func log(name: String, ideal: Double?, home: Bool, start: Date, end: Date) -> ScoreResult? {
         let mins = (end.timeIntervalSince(start) / 6).rounded() / 10
         guard mins >= 5 else { return nil }
-        let same = trips.filter { $0.home == home && $0.route == r.name }
-        let ideal = ideal(r, home: home)
+        let same = trips.filter { $0.home == home && $0.route == name }
         let ref = ideal ?? same.map(\.mins).min() ?? mins
         let score = Int((500 * min(1, ref / mins)).rounded())
-        let e = TripScore(id: "t" + String(Int(end.timeIntervalSince1970), radix: 36), at: end, home: home, route: r.name, mins: mins,
+        let e = TripScore(id: "t" + String(Int(end.timeIntervalSince1970), radix: 36), at: end, home: home, route: name, mins: mins,
                           score: score, grade: Self.letter(score), ref: Int(ref.rounded()), est: ideal == nil)
         let mine = trips.filter { $0.home == home }
         let week = mine.filter { $0.at >= Self.weekStart }

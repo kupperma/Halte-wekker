@@ -851,7 +851,7 @@ final class GoStore: ObservableObject {
         close()
         demo = true
         isOpen = true
-        dest = .breda
+        dest = RoleSnapshot.corridor != nil ? .breda : .school     // (off the corridor: your school, 0.24)
         asOf = nil
         best = nil; others = []; error = nil; updated = nil; notes = []; arrived = false; seen = nil; overdue = false; onBoard = nil; movingUnknown = false; slow = false; hurry = nil
         here = loc ?? trip?.lastFix
@@ -868,20 +868,23 @@ final class GoStore: ObservableObject {
         let metres = CLLocation(latitude: c.latitude, longitude: c.longitude).distance(from: CLLocation(latitude: s.latitude, longitude: s.longitude))
         let walk = max(1, Int((metres / 80).rounded()))
         let t0 = Date()
-        let ht = Place.denBosch.coordinate, bd = Place.breda.coordinate
+        // the corridor's Den Bosch and Breda; off it a made-up station a few km on and your school (0.24)
+        let corridor = RoleSnapshot.corridor != nil, dn = RoleWords.current.demoNames
+        let ht = corridor ? Place.denBosch.coordinate : CLLocationCoordinate2D(latitude: c.latitude + 0.012, longitude: c.longitude + 0.038)
+        let bd = corridor ? Place.breda.coordinate : Place.school.coordinate
         func bus(_ id: String, _ line: String, _ dep: TimeInterval, planned: TimeInterval? = nil, ride: TimeInterval = 20 * 60) -> Ride {
             let d = t0.addingTimeInterval(dep), p = t0.addingTimeInterval(planned ?? dep)
             return Ride(tripId: id, line: line, name: line, isTrain: false, departure: d, scheduledDeparture: p,
                         arrival: d.addingTimeInterval(ride), scheduledArrival: p.addingTimeInterval(ride), fromStop: name, fromId: "demo-stop",
-                        toStop: "’s-Hertogenbosch, Centraal Station", platform: nil, live: true, cancelled: false, walkBefore: walk,
-                        headsign: "Den Bosch", fromLat: s.latitude, fromLon: s.longitude, toLat: ht.latitude, toLon: ht.longitude)
+                        toStop: dn.busTo, platform: nil, live: true, cancelled: false, walkBefore: walk,
+                        headsign: dn.busHeadsign, fromLat: s.latitude, fromLon: s.longitude, toLat: ht.latitude, toLon: ht.longitude)
         }
         func intercity(_ dep: TimeInterval) -> Ride {
             let d = t0.addingTimeInterval(dep)
             return Ride(tripId: "demo-ic-\(Int(dep))", line: "IC", name: "Intercity", isTrain: true, departure: d, scheduledDeparture: d,
-                        arrival: d.addingTimeInterval(30 * 60), scheduledArrival: d.addingTimeInterval(30 * 60), fromStop: "’s-Hertogenbosch",
-                        fromId: "demo-ht", toStop: "Breda", platform: "3", live: true, cancelled: false, walkBefore: 0,
-                        headsign: "Roosendaal", fromLat: ht.latitude, fromLon: ht.longitude, toLat: bd.latitude, toLon: bd.longitude)
+                        arrival: d.addingTimeInterval(30 * 60), scheduledArrival: d.addingTimeInterval(30 * 60), fromStop: dn.trainFrom,
+                        fromId: "demo-ht", toStop: dn.trainTo, platform: "3", live: true, cancelled: false, walkBefore: 0,
+                        headsign: dn.trainHeadsign, fromLat: ht.latitude, fromLon: ht.longitude, toLat: bd.latitude, toLon: bd.longitude)
         }
         func door(_ b: Ride, _ t: Ride) -> DoorTrip { DoorTrip(rides: [b, t], start: b.departure.addingTimeInterval(Double(-walk * 60)), end: t.arrival) }
         func show(_ b: Ride) { Demo.buses[b.tripId] = Demo.Bus(line: b.line, stopName: name, stop: s, departure: b.departure, planned: b.scheduledDeparture) }
@@ -904,14 +907,14 @@ final class GoStore: ObservableObject {
         let late = bus("demo-306", "306", 150 + 180, planned: 150)
         show(late)
         best = door(late, ic2); updated = Date()
-        tell("Bus 306 is 3 min late", "Leaves \(Fmt.hhmm(late.departure)) instead of \(Fmt.hhmm(late.scheduledDeparture)) · still your fastest, Breda \(Fmt.hhmm(ic2.arrival))", kind: "late")
+        tell("Bus 306 is 3 min late", "Leaves \(Fmt.hhmm(late.departure)) instead of \(Fmt.hhmm(late.scheduledDeparture)) · still your fastest, \(dn.trainTo) \(Fmt.hhmm(ic2.arrival))", kind: "late")
         // then something faster: it switches by itself
         guard await at(42) else { return }
         let b300 = bus("demo-300", "300", 105, ride: 16 * 60), ic1 = intercity(105 + 22 * 60)
         show(b300)
         let fast = door(b300, ic1)
         best = fast; others = [door(late, ic2)] + later; updated = Date()
-        tell("Faster: Bus 300 at \(Fmt.hhmm(b300.departure))", "Breda \(Fmt.hhmm(fast.end)), \(Fmt.mins(ic2.arrival.timeIntervalSince(fast.end))) min sooner · leave by \(Fmt.hhmm(fast.start)) · from \(stop)", kind: "faster")
+        tell("Faster: Bus 300 at \(Fmt.hhmm(b300.departure))", "\(dn.trainTo) \(Fmt.hhmm(fast.end)), \(Fmt.mins(ic2.arrival.timeIntervalSince(fast.end))) min sooner · leave by \(Fmt.hhmm(fast.start)) · from \(stop)", kind: "faster")
         // the bus is at your stop: it sees you get on, and the ride starts
         guard await at(106) else { return }
         seen = Vehicle(tripId: "demo-300", line: "300", isTrain: false)
