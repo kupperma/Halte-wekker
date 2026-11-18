@@ -1906,8 +1906,14 @@ struct StopLabels: View {
     private static func rows(_ marks: [StopMark], _ w: CGFloat) -> [Int] {
         var last: [CGFloat] = [-.infinity, -.infinity, -.infinity], out: [Int] = []
         for m in marks {
-            let px = Self.x(m, w), half = width(m) / 2
-            let row = (0..<3).first { px - half >= last[$0] + 6 } ?? (0..<3).min { last[$0] < last[$1] } ?? 0
+            let px: CGFloat = Self.x(m, w)
+            let half: CGFloat = width(m) / 2
+            var row = 0
+            if let free = (0..<3).first(where: { (r: Int) -> Bool in px - half >= last[r] + 6 }) {
+                row = free
+            } else if let oldest = (0..<3).min(by: { (a: Int, b: Int) -> Bool in last[a] < last[b] }) {
+                row = oldest
+            }
             last[row] = px + half
             out.append(row)
         }
