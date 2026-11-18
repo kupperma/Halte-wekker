@@ -195,3 +195,63 @@ Each release ships on its own and leaves trips/alarms untouched.
 - How the coach position maps to the platform, given what NS data offers (if no platform position, show "coach 3
   from the front").
 - How received trips map onto the existing plan types.
+
+## As built (0.25)
+
+What 0.25.0 (build 109) actually ships, so 0.26–0.28 can build on it.
+
+### Relay (`relay/friends.js`, live since 2026-11-18)
+- Storage: one Durable Object per account (class `Friends`, SQLite storage, binding `FRIENDS`, migration `v1`
+  `new_sqlite_classes`), addressed `idFromName("a:" + account)`. Tables: `meta` (signKey, device, lastSeen, vault),
+  `boxes` (id, sender, slot, at, exp, size, data), `seen` (nonces), `rate`, `blocked`. An alarm deletes expired boxes,
+  and the whole account after 400 days unused. No logs of anything.
+- Account id: first 16 bytes of SHA-256("haltewekker-account-v1" ‖ Ed25519 public key), hex (32). The relay checks
+  the id against the key at register, so ids can't be squatted.
+- Every route but `GET /f/v1/status` and `GET /add` is a signed POST with JSON. Headers `X-HW-Account`,
+  `X-HW-Device` (32 hex, random per phone), `X-HW-Time` (unix s, ±300 s), `X-HW-Nonce` (16–64 of `[A-Za-z0-9_-]`,
+  never reused), `X-HW-Signature` (base64url Ed25519) over
+  `"HW1\nPOST\n" + path + "\n" + account + "\n" + device + "\n" + time + "\n" + nonce + "\n" + hex(SHA-256(body))`.
+- Routes: `register {signKey}` (same key, another device = the account moves; the old device then gets 409
+  `signed_out`), `send {boxes:[{to, data, slot?, ttl?}]}` (≤ 20 boxes per request to any mix of mailboxes, each ≤ 64 KB
+  decoded, ttl 60 s–30 days, default 30 days; a `slot` replaces the sender's previous box in that slot),
+  `inbox {after, limit}` → `{boxes:[{id, from, slot, at, exp, data}], cursor, more}` (ids only grow; a replaced slot
+  box gets a new id), `ack {ids}`, `drop {peer}` (boxes between two accounts, both ways), `block {peer, on}` (quietly
+  refused), `vault/put {data}` (≤ 128 KB) / `vault/get`, `leave`.
+- Limits: 1 MB per request, 60 requests/min and 600 boxes/hour per account, inbox ≤ 1000 boxes / 8 MB and ≤ 200 per
+  sender, 20 registers/hour per network address (hashed). `relay/test-friends.mjs` tests all of it locally
+  (node:sqlite) or against a running relay (`node relay/test-friends.mjs <url>`; it makes and deletes two accounts).
+- `/add#v=1&k=…&n=…`: a page that opens `haltewekker://friend?…` (the fields stay after the #).
+
+### Keys (`FriendKeys.swift`)
+- Backup code: 12 BIP-39 English words for 16 random bytes (checksum in the last word; four letters per word are
+  enough). From the seed, HKDF-SHA256 (salt "haltewekker-seed-v1") with info "sign" → Ed25519, "agree" → X25519,
+  "vault" → ChaChaPoly key. Seed and device id in the Keychain (`nl.haltewekker.friends`,
+  AfterFirstUnlockThisDeviceOnly); the list in Application Support/Friends (excluded from backup).
+- Friend card = both public keys; links carry `k` = base64url(sign ‖ agree) and `n` = name.
+
+### Boxes (`FriendBox.swift`)
+- Bytes: `0x01 | ephemeral X25519 pub (32) | ChaChaPoly combined`; key = HKDF-SHA256(X25519(eph, recipient agree),
+  salt "haltewekker-box-v1", info eph ‖ recipient pub); AAD = recipient account id. Inside: Ed25519 signature (64) over
+  `"HWBOX1\n" + recipient account + "\n" + payload`, then the payload JSON
+  `{"v":1,"k":kind,"f":sender,"t":unix s,"n":random id,"g":group id (optional),"b":body}`.
+- Kinds in 0.25: `request` and `accept` ({card, name, note?}: the only kinds a stranger may send; the card must match
+  the sender), `unfriend`, `profile` ({name}), `picture` ({jpeg}: 256 px square, ≤ 40 KB, sent in slot `picture`).
+- Adding a kind: a `FriendMessage` case, a body struct, a line in `payload`/`parse`, `FriendMessage.known`, and bump
+  `FriendMessage.kindsVersion`. Older apps leave unknown kinds unacknowledged on the relay (until they expire), and an
+  app with a higher kindsVersion reads its mailbox from the start once, so nothing sent early is lost.
+- Groups (0.27): put the group id in `g` and post one box per member in a single `/f/v1/send` (≤ 20 per request).
+  Latest-state kinds (0.26 `travel`, 0.28 `timetable`/`area`) use a slot and a short ttl.
+- Vault: `0x01 | ChaChaPoly(vault key, AAD "hw-vault-v1\n" + account)` of `FriendVaultContents {book, picture}`.
+
+### App
+- `FriendBook` (list, incoming, outgoing; each change returns effects: send / drop / block), `FriendInbox.process`
+  (a batch of relay boxes → book, acks, kept boxes, pictures, news), `FriendStore` (keychain, file, pending queue that
+  survives restarts, sync), `FriendRelay` (signed requests through `Net`, no retries: a nonce is single-use).
+- Decline is silent (optionally "Decline and block"). Both sides asking = friends. Removing drops the relay boxes
+  both ways, then sends `unfriend` so the other app forgets you.
+- Checks: app to the front (≤ every 20 s), every 30 s while the Friends screen is open, at the school alarm's
+  background refresh. No other loop.
+- Entry: Next trip first's bottom bar (Friends replaced Search; the top field still opens Plan), a round button under
+  Your week on Live around you, Settings › Friends. Badges count waiting requests. The Friends screen follows the
+  phone's light or dark.
+- Not yet: friends' pictures aren't in the vault (after a restore they come back when a friend changes theirs).
