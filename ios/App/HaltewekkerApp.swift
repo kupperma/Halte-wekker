@@ -7,6 +7,7 @@ struct HaltewekkerApp: App {
     @StateObject private var live = LiveStore()
     @StateObject private var planner = Planner()
     @StateObject private var near = NearMe()
+    @Environment(\.scenePhase) private var scenePhase
     init() {
         // The profile first (before anything saves a key, so a new install is told from an earlier version's user),
         // then your places and stops: the roles (`Place.home`, `.school`) are yours from the first thing that plans,
@@ -35,7 +36,16 @@ struct HaltewekkerApp: App {
                 .environmentObject(NSStore.shared).environmentObject(WatchStore.shared)
                 .environmentObject(ScoreBook.shared).environmentObject(StopsStore.shared).environmentObject(LineWatchStore.shared)
                 .environmentObject(GoStore.shared)
-                .onOpenURL { url in Task { await trip.music.finish(url) } }      // back from the Spotify sign-in page
+                .onOpenURL { url in
+                    // a friend's code (haltewekker://friend?…, 0.25), else back from the Spotify sign-in page
+                    if FriendStore.shared.handle(url) { return }
+                    Task { await trip.music.finish(url) }
+                }
+                // Friends (0.25): requests are fetched when the app comes to the front (only with an account; no push)
+                .onChange(of: scenePhase) { _, phase in
+                    guard phase == .active else { return }
+                    Task { await FriendStore.shared.sync(.auto) }
+                }
                 .onAppear {
                     Watchdog.shared.mark("drawing the first screen")
                     let t = trip

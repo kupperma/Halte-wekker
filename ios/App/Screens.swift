@@ -11,6 +11,7 @@ struct RootView: View {
     @AppStorage(NewLook.key) private var newLookSetting = true      // the map-first home (0.19); off: the station home
     @ObservedObject private var profile = ProfileStore.shared
     @ObservedObject private var setup = SetupStore.shared
+    @ObservedObject private var friends = FriendStore.shared
     /// A new install before its setup (0.23): nothing behind the setup plans for a home and school not chosen yet.
     private var firstRun: Bool { !profile.profile.setupDone && setup.mode == nil }
     /// The first-run setup: a new install's by itself (not over a trip), or opened from Settings.
@@ -69,6 +70,8 @@ struct RootView: View {
             SetupFlow(mode: m, draft: setup.draft(for: m))
         }
         .sheet(isPresented: $setup.demoAfter) { DemoSheetNew().presentationDetents([.large]) }
+        // Friends (0.25): from the home's Friends button, or a friend's link
+        .sheet(isPresented: $friends.showing) { FriendsScreen() }
         .overlay {
             if let a = watch.alert, !alarming {          // (not over the alarm: after it)
                 if newLook {
@@ -2245,6 +2248,7 @@ struct SettingsView: View {
                         }
                     } footer: { Text("Fastest trip with the map and notifications, being recognised on the bus, the ride ring, the alarm and arriving, all pretend.") }
                 }
+                FriendsSettingsSection()
                 SetupSettingsSection(dismissSettings: { dismissSettings() })
                 SchoolAlarmSection()
                 MorningSection(preview: { look in

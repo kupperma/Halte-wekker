@@ -228,6 +228,7 @@ struct NewHome: View {
     @State private var sheet: HomeSheet?
     @ObservedObject private var nearDeps = NearDeparturesModel.shared
     @ObservedObject private var school = SchoolAlarm.shared
+    @ObservedObject private var friends = FriendStore.shared
     @EnvironmentObject var stopsStore: StopsStore
     @State private var focusedCard: String?
     @State private var tapped: DepartureTap?
@@ -278,7 +279,7 @@ struct NewHome: View {
     /// The map is on screen: not under Your day, Fastest trip or the ride, and the app in front.
     private var visible: Bool {
         shown && !dayOpen && !planOpen && !weekOpen && sheet == nil && tapped == nil && stopTap == nil && vehicleTap == nil && wakeAt == nil
-            && scene == .active && !goStore.isOpen
+            && scene == .active && !goStore.isOpen && !friends.showing
     }
     /// Settings › Home style: Next trip first (concept B) instead of Live around you (concept C).
     private var nextFirst: Bool { HomeStyle.of(homeStyleRaw) == .nextTrip }
@@ -552,7 +553,23 @@ struct NewHome: View {
             weatherChip()
             followButton
             weekButton
+            friendsButton
         }
+    }
+
+    /// Friends (0.25): the list, requests and adding someone; a badge with the requests waiting.
+    private var friendsButton: some View {
+        Button { friends.showing = true } label: {
+            Image(systemName: friends.waiting > 0 ? "person.2.fill" : "person.2")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(friends.waiting > 0 ? DS.accentText : DS.secondary)
+                .frame(width: DS.hit, height: DS.hit)
+                .background(DS.surface, in: Circle())
+                .overlay(alignment: .topTrailing) { if friends.waiting > 0 { FriendsBadge(count: friends.waiting).offset(x: 4, y: -4) } }
+                .dsFloat()
+        }
+        .buttonStyle(DSPressStyle())
+        .accessibilityLabel(friends.waiting > 0 ? "Friends, \(friends.waiting) waiting" : "Friends")
     }
 
     /// `inline`: inside the search field (Next trip first), without its own shadow.
@@ -875,7 +892,7 @@ struct NewHome: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             // (not while a trip runs: at a change the bar to your trip takes its place)
             if trip.phase == .idle {
-                NextTripBar(weekOpen: weekOpen, search: { openSearch() },
+                NextTripBar(weekOpen: weekOpen, friendsWaiting: friends.waiting, friends: { friends.showing = true },
                             week: { withAnimation(DS.quick) { weekOpen.toggle() } },
                             settings: { weekOpen = false; sheet = .settings })
             }

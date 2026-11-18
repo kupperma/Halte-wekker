@@ -438,6 +438,8 @@ final class SchoolAlarm: ObservableObject {
         NoticeSweep.soon()
         scheduleBackground()
         await shared.refresh(force: false)
+        // Friends (0.25): requests come in at this same wake-up too (nothing without an account)
+        await FriendStore.shared.sync(.auto)
     }
 
     /// "today", "tomorrow", "Monday"

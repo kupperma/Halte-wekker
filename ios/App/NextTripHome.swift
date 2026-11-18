@@ -192,16 +192,20 @@ struct NextTripCard: View {
     }
 }
 
-/// The bar at the bottom (0.20.1): Search (Plan, to pick where to), Your week, and Settings. Where you go is the card's.
+/// The bar at the bottom (0.20.1): Friends (0.25: in place of Search, which the field at the top already is), Your
+/// week, and Settings. Where you go is the card's.
 struct NextTripBar: View {
     let weekOpen: Bool
-    let search: () -> Void
+    /// Friend requests waiting (a badge on Friends).
+    var friendsWaiting = 0
+    let friends: () -> Void
     let week: () -> Void
     let settings: () -> Void
 
     var body: some View {
         HStack(spacing: 0) {
-            item("Search", icon: "magnifyingglass", label: "Search a stop or place", action: search)
+            item("Friends", icon: friendsWaiting > 0 ? "person.2.fill" : "person.2",
+                 label: friendsWaiting > 0 ? "Friends, \(friendsWaiting) waiting" : "Friends", badge: friendsWaiting, action: friends)
             item("Week", icon: "calendar", label: "Your week", selected: weekOpen, action: week)
             item("Settings", icon: "gearshape", label: "Settings", action: settings)
         }
@@ -210,10 +214,12 @@ struct NextTripBar: View {
         .overlay(alignment: .top) { Rectangle().fill(DS.divider).frame(height: 1) }
     }
 
-    private func item(_ title: String, icon: String, label: String, selected: Bool = false, action: @escaping () -> Void) -> some View {
+    private func item(_ title: String, icon: String, label: String, selected: Bool = false, badge: Int = 0,
+                      action: @escaping () -> Void) -> some View {
         Button(action: action) {
             VStack(spacing: 4) {
                 Image(systemName: icon).font(.title3.weight(.semibold))
+                    .overlay(alignment: .topTrailing) { if badge > 0 { FriendsBadge(count: badge).offset(x: 10, y: -6) } }
                 Text(title).font(DS.footnoteStrong).lineLimit(1).minimumScaleFactor(0.7)
             }
             .foregroundStyle(selected ? DS.accentText : DS.text)
