@@ -2311,7 +2311,9 @@ struct SettingsView: View {
                 NewLookSwitch()
                 Section {
                     Button("Reset everything", role: .destructive) { confirmReset = true }
-                } footer: { Text("Haltewekker \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")") }
+                } footer: {
+                    Text("Haltewekker \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")\n\nOpen data: trips by Transitous (© OpenStreetMap contributors and open transit data), bus positions by OVapi, trains by NS, weather by Open-Meteo, NS station list by Rijden de Treinen (CC BY 4.0).")
+                }
             }
             .scrollContentBackground(newLook ? .automatic : .hidden)
             .background(PaperFill().ignoresSafeArea().opacity(newLook ? 0 : 1)).preferredColorScheme(newLook ? nil : .light)
