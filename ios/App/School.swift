@@ -435,6 +435,7 @@ final class SchoolAlarm: ObservableObject {
     /// Woken in the background: plan again what's due (0.20.7: not every class day each time; a near day after 14
     /// minutes, a far one after 6 hours, a moved class at once, as in front), and ask to be woken again.
     static func backgroundRefresh() async {
+        NoticeSweep.soon()
         scheduleBackground()
         await shared.refresh(force: false)
     }

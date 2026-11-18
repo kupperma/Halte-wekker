@@ -789,6 +789,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
 
     nonisolated func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let loc = locations.last else { return }
+        NoticeSweep.soon()                                         // old notifications off the lock screen (once a minute)
         Task { @MainActor in if !self.demo { self.handle(loc) } }
     }
 
@@ -803,6 +804,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
 
     nonisolated func locationManager(_ manager: CLLocationManager, didExitRegion region: CLRegion) {
         let center = (region as? CLCircularRegion)?.center
+        NoticeSweep.soon()
         Task { @MainActor in self.leftRegion(region.identifier, center: center) }
     }
 
@@ -816,6 +818,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     }
 
     nonisolated func locationManager(_ manager: CLLocationManager, didEnterRegion region: CLRegion) {
+        NoticeSweep.soon()
         if region.identifier == Self.backstopId { Task { @MainActor in self.backstopEntered() }; return }
         guard region.identifier == RoleRegions.schoolId else { return }
         Task { @MainActor in self.maybeAutoHome(CLLocation(latitude: Place.school.coordinate.latitude, longitude: Place.school.coordinate.longitude)) }

@@ -1,5 +1,6 @@
 import SwiftUI
 import UserNotifications
+import os
 
 /// A notification shown inside the app while it's open: the same headline and line as on the lock screen, as a paper
 /// banner at the top. One at a time; the next waits its turn.
@@ -309,5 +310,25 @@ struct NotificationsSheet: View {
     private static func dayName(_ d: Date) -> String {
         let f = DateFormatter(); f.locale = Locale(identifier: "en_GB"); f.dateFormat = "EEEE d MMMM"
         return f.string(from: d)
+    }
+}
+
+/// Takes old notifications off the lock screen while the app is awake in the background (a ride's GPS, a region, a
+/// background refresh): what's old is `NoticeExpiry`'s rule per kind. At most once a minute (0.24.2).
+enum NoticeSweep {
+    private static let last = OSAllocatedUnfairLock<Date>(initialState: .distantPast)
+
+    static func soon(now: Date = Date()) {
+        let go = last.withLock { (t: inout Date) -> Bool in
+            guard now.timeIntervalSince(t) >= 60 else { return false }
+            t = now; return true
+        }
+        guard go else { return }
+        Task.detached(priority: .utility) {
+            let c = UNUserNotificationCenter.current()
+            let delivered = await c.deliveredNotifications().map { (id: $0.request.identifier, at: $0.date) }
+            let old = NoticeExpiry.due(delivered, now: Date())
+            if !old.isEmpty { c.removeDeliveredNotifications(withIdentifiers: old) }
+        }
     }
 }

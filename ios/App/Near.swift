@@ -92,6 +92,7 @@ final class NearMe: NSObject, ObservableObject, CLLocationManagerDelegate {
 
     nonisolated func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let l = locations.last else { return }
+        NoticeSweep.soon()
         Task { @MainActor in self.position = l; self.error = nil; self.onPosition(l) }
     }
     nonisolated func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
