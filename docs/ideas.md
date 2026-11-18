@@ -13,6 +13,22 @@ Travel comes first. These wait until the travel part is great.
   the same relay and encrypted boxes. Likely a native Kotlin (Jetpack Compose) app; free to share as an APK from the
   GitHub releases, built on Linux CI (no Mac needed). The Friends box format is kept platform-neutral for this.
 
+- **Friends extras (after the Android version, on both apps):**
+  1. "Wait for me": a friend sees how far you are from the stop and can wait or take the next ride with you.
+  2. Delay alarm for shared rides: everyone on a shared ride hears about a delay or cancellation, with the next ride
+     you can all take.
+  3. Wake-up buddy: "Lisa isn't moving yet" when a friend hasn't left by their planned time (opt-in by that friend).
+  4. Who's on campus (opt-in): which friends are at school now.
+  5. Free hours together, from the shared timetables.
+  6. Live link for people without the app (e.g. parents): a web page with your trip's live ETA, ending on arrival.
+  7. Friends leaderboard (fastest trips, rides together).
+  8. Ride history ("you rode together 14 times this month").
+
+## Order (decided 2026-11-18)
+
+Friends 0.25 to 0.28, then the Android version, then the Friends extras on both. Build without asking the user;
+they review afterwards.
+
 ## Travel (now)
 
 - Trip screen: make clear which stop or platform to go to and how to walk there (concepts S1–S3 on the design canvas).
