@@ -228,7 +228,7 @@ enum Transit {
     /// Stop search, closest to Veghel first.
     static func findStops(_ q: String) async -> [StopHit] {
         let items: [URLQueryItem] = [.init(name: "text", value: q), .init(name: "type", value: "STOP"), .init(name: "numResults", value: "12"),
-                                     .init(name: "place", value: "\(Place.veghel.coordinate.latitude),\(Place.veghel.coordinate.longitude)")]
+                                     .init(name: "place", value: "\(Place.home.coordinate.latitude),\(Place.home.coordinate.longitude)")]
         // (someone is typing and waiting for it)
         let answer = try? await Transit.$urgent.withValue(true) { () async throws -> Any in try await get("/v1/geocode", items) }
         guard let list = answer as? [[String: Any]] else { return [] }
@@ -558,7 +558,7 @@ enum Transit {
 
     /// Next door-to-door trips, without the ones a later trip beats.
     static func nextTrips(_ dir: Direction) async -> [DoorTrip] {
-        let from: Place = dir == .toSchool ? .veghel : .buas, to: Place = dir == .toSchool ? .buas : .veghel
+        let from: Place = dir == .toSchool ? .home : .school, to: Place = dir == .toSchool ? .school : .home
         let now = Date()
         let all = await plan(from: from, to: to, modes: nil, at: now.addingTimeInterval(-120), count: 4, maxTransfers: 3)
             .filter { $0.first.departure >= now.addingTimeInterval(-60) }

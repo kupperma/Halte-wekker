@@ -13,7 +13,8 @@ struct Place: Hashable, Codable {
     static func == (a: Place, b: Place) -> Bool { a.key == b.key }
     func hash(into h: inout Hasher) { h.combine(key) }
 
-    static let veghel = Place(key: "veghel", name: "Veghel, Busstation", short: "Veghel",
+    /// Today's (0.21) home and school, exactly. `home` and `school` are these on the Veghel ⇄ BUas corridor.
+    static let legacyVeghel = Place(key: "veghel", name: "Veghel, Busstation", short: "Veghel",
                               ids: ["nl-OpenOV_NL:S:64553000", "nl-OpenOV_4219829"],
                               coordinate: .init(latitude: 51.6137, longitude: 5.5474), spoken: "Veghel")
     static let denBosch = Place(key: "ht", name: "’s-Hertogenbosch Centraal", short: "Den Bosch",
@@ -25,10 +26,13 @@ struct Place: Hashable, Codable {
     static let breda = Place(key: "bd", name: "Breda station", short: "Breda",
                              ids: ["nl-OpenOV_stoparea:17911"],
                              coordinate: .init(latitude: 51.5955, longitude: 4.7797), spoken: "Breda station")
-    static let buas = Place(key: "buas", name: "Breda University (BUas)", short: "BUas",
+    static let legacyBuas = Place(key: "buas", name: "Breda University (BUas)", short: "BUas",
                             ids: ["51.5907,4.7932"],
                             coordinate: .init(latitude: 51.5907, longitude: 4.7932), spoken: "Breda University")
-    static let all: [Place] = [.veghel, .denBosch, .eindhoven, .breda, .buas]
+    /// Your Home (key "veghel") and School (key "buas").
+    static var home: Place { legacyVeghel }
+    static var school: Place { legacyBuas }
+    static var all: [Place] { [.home, .denBosch, .eindhoven, .breda, .school] }
     /// Where you are now, as a place to plan from.
     static func here(_ c: CLLocationCoordinate2D) -> Place {
         Place(key: "here", name: "Where you are", short: "Here", ids: ["\(c.latitude),\(c.longitude)"], coordinate: c, spoken: "here")
@@ -144,9 +148,9 @@ struct RoutePlan: Identifiable, Hashable {
         if let single { return [single] }
         switch dir {
         case .toSchool:
-            return [Leg(mode: .bus, from: .veghel, to: station), Leg(mode: .train, from: station, to: .breda)]
+            return [Leg(mode: .bus, from: .home, to: station), Leg(mode: .train, from: station, to: .breda)]
         case .home:
-            return [Leg(mode: .train, from: .breda, to: station), Leg(mode: .bus, from: station, to: .veghel)]
+            return [Leg(mode: .train, from: .breda, to: station), Leg(mode: .bus, from: station, to: .home)]
         }
     }
 }

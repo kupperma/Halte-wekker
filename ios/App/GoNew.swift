@@ -70,7 +70,7 @@ struct GoViewNew: View {
         return "Fastest way \(to)"
     }
     /// Home is Veghel, unless you picked somewhere yourself.
-    private var goingHome: Bool { go.dest == .veghel && live.custom == nil }
+    private var goingHome: Bool { go.dest == .home && live.custom == nil }
 
     // MARK: top
 
@@ -118,7 +118,7 @@ struct GoViewNew: View {
     private func to(_ d: Direction) {
         live.go(to: nil)
         if trip.direction != d { withAnimation(.easeInOut(duration: 0.6)) { trip.pick(d) } }
-        go.retarget(d == .toSchool ? .buas : .veghel)
+        go.retarget(d == .toSchool ? .school : .home)
     }
 
     // MARK: what's on it

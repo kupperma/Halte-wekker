@@ -336,7 +336,7 @@ struct PlanTripOverlay: View {
         return c.dateComponents([.day], from: c.startOfDay(for: Date()), to: c.startOfDay(for: d)).day ?? 9
     }
 
-    /// Home and School, today's places (`.veghel` and `.buas` keys), one each way. Your location counts as one of
+    /// Home and School, today's places (`.home` and `.school` keys), one each way. Your location counts as one of
     /// them within about 800 m of it.
     private var homeSchoolOut: Bool? {
         guard case .place(let b, _)? = model.to else { return nil }
@@ -347,8 +347,8 @@ struct PlanTripOverlay: View {
             guard let h = near.position, let p = nearHomeOrSchool(h) else { return nil }
             a = p
         }
-        if a.key == Place.veghel.key && b.key == Place.buas.key { return true }
-        if a.key == Place.buas.key && b.key == Place.veghel.key { return false }
+        if a.key == Place.home.key && b.key == Place.school.key { return true }
+        if a.key == Place.school.key && b.key == Place.home.key { return false }
         return nil
     }
 
@@ -356,7 +356,7 @@ struct PlanTripOverlay: View {
         let places = PlacesStore.shared
         for sp in [places.home, places.school].compactMap({ $0 }) {
             let p = places.place(sp)
-            guard p.key == Place.veghel.key || p.key == Place.buas.key else { continue }
+            guard p.key == Place.home.key || p.key == Place.school.key else { continue }
             if l.distance(from: CLLocation(latitude: sp.lat, longitude: sp.lon)) < 800 { return p }
         }
         return nil
@@ -375,8 +375,8 @@ struct PlanTripOverlay: View {
 
     private func go(_ dest: Place) {
         guard trip.phase == .idle else { return }
-        if dest.key == Place.buas.key, trip.direction != .toSchool { trip.pick(.toSchool) }
-        if dest.key == Place.veghel.key, trip.direction != .home { trip.pick(.home) }
+        if dest.key == Place.school.key, trip.direction != .toSchool { trip.pick(.toSchool) }
+        if dest.key == Place.home.key, trip.direction != .home { trip.pick(.home) }
         // The option you moved to is your trip there (Plan's options on screen at once); on the one Plan put first,
         // Fastest trip picks the fastest as before.
         let chosen = ChosenRide.pinned(focused: model.focused, suggested: model.suggested).flatMap { id in model.options.first { $0.id == id } }
@@ -397,8 +397,8 @@ struct PlanTripOverlay: View {
     /// doesn't turn your direction). Nothing else uses it: school alarms and planned trips keep going to school.
     private func makeHome(_ e: PlanTripModel.End) {
         guard trip.phase == .idle, case .place(let p, let name) = e else { return }
-        if p.key == Place.veghel.key || p.key == Place.buas.key {
-            guard live.custom != nil, p.key == (trip.direction == .toSchool ? Place.buas.key : Place.veghel.key) else { return }
+        if p.key == Place.home.key || p.key == Place.school.key {
+            guard live.custom != nil, p.key == (trip.direction == .toSchool ? Place.school.key : Place.home.key) else { return }
             live.go(to: nil)
         } else {
             let d = Destination(id: p.ids.first ?? "\(p.coordinate.latitude),\(p.coordinate.longitude)", name: name ?? p.name,

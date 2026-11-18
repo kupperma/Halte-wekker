@@ -25,7 +25,7 @@ struct BoardStop: Codable, Identifiable, Hashable {
 final class StopsStore: ObservableObject {
     static let shared = StopsStore()
     static let maxBoardStops = 3
-    static let defaultBoard = [BoardStop(id: Place.veghel.ids[0], name: "Veghel, Busstation"), BoardStop(id: Place.veghel.ids[1], name: "Veghel, Bolkenplein")]
+    static let defaultBoard = [BoardStop(id: Place.home.ids[0], name: "Veghel, Busstation"), BoardStop(id: Place.home.ids[1], name: "Veghel, Bolkenplein")]
     static let defaultLines = ["305", "306", "158"]
 
     @Published private(set) var saved: [SavedStop]
@@ -50,10 +50,10 @@ final class StopsStore: ObservableObject {
     }
 
     /// Veghel as the live board sees it: your board stops (the alarm still aims at the bus station).
-    var veghel: Place {
+    var homePlace: Place {
         let ids = boardStops.map(\.id)
-        return Place(key: "veghel", name: Place.veghel.name, short: "Veghel", ids: ids.isEmpty ? Place.veghel.ids : ids,
-                     coordinate: Place.veghel.coordinate, spoken: "Veghel")
+        return Place(key: "veghel", name: Place.home.name, short: "Veghel", ids: ids.isEmpty ? Place.home.ids : ids,
+                     coordinate: Place.home.coordinate, spoken: "Veghel")
     }
 
     /// "Veghel: Busstation and Bolkenplein"
@@ -74,7 +74,7 @@ final class StopsStore: ObservableObject {
     func update(_ s: SavedStop) { if let i = saved.firstIndex(where: { $0.id == s.id }) { saved[i] = s; persist() } }
     func delete(_ id: String) { saved.removeAll { $0.id == id }; persist() }
 
-    func mode(for p: Place) -> Mode { Mode(rawValue: lastMode[p.key] ?? "") ?? (p == .veghel || p == .buas ? .bus : .train) }
+    func mode(for p: Place) -> Mode { Mode(rawValue: lastMode[p.key] ?? "") ?? (p == .home || p == .school ? .bus : .train) }
     func setMode(_ m: Mode, for p: Place) { lastMode[p.key] = m.rawValue; persist() }
 
     func reset() {

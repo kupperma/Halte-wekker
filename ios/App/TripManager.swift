@@ -249,7 +249,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         guessDirection = false
         if let at = UserDefaults.standard.object(forKey: "dirPickedAt") as? Date, Date().timeIntervalSince(at) < 20 * 60 { return }
         func near(_ p: Place, _ m: Double) -> Bool { l.distance(from: CLLocation(latitude: p.coordinate.latitude, longitude: p.coordinate.longitude)) < m }
-        let d: Direction? = near(.veghel, 5000) ? .toSchool : (near(.breda, 6000) || near(.buas, 6000)) ? .home : nil
+        let d: Direction? = near(.home, 5000) ? .toSchool : (near(.breda, 6000) || near(.school, 6000)) ? .home : nil
         guard let d, d != direction else { return }
         direction = d
         UserDefaults.standard.set(d.rawValue, forKey: "dir"); UserDefaults.standard.set(Date(), forKey: "dirAt")
@@ -796,7 +796,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     nonisolated func locationManager(_ manager: CLLocationManager, didEnterRegion region: CLRegion) {
         if region.identifier == Self.backstopId { Task { @MainActor in self.backstopEntered() }; return }
         guard region.identifier == "school" else { return }
-        Task { @MainActor in self.maybeAutoHome(CLLocation(latitude: Place.buas.coordinate.latitude, longitude: Place.buas.coordinate.longitude)) }
+        Task { @MainActor in self.maybeAutoHome(CLLocation(latitude: Place.school.coordinate.latitude, longitude: Place.school.coordinate.longitude)) }
     }
 
     private func handle(_ loc: CLLocation) {
@@ -929,7 +929,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     /// the stops, the speed, your song, the alarm at the wake distance and again at the stop, and arriving.
     func startDemo(from c: CLLocationCoordinate2D?, line: String = "300") {
         guard phase == .idle else { return }
-        let a = c ?? here ?? Place.veghel.coordinate
+        let a = c ?? here ?? Place.home.coordinate
         let k = cos(a.latitude * .pi / 180)
         let total = 4600.0, secs = 150.0
         func along(_ m: Double) -> CLLocationCoordinate2D { .init(latitude: a.latitude + m * 0.3 / 110_540, longitude: a.longitude + m * 0.95 / (111_320 * k)) }
@@ -2358,7 +2358,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         defer { upcomingBusy = false }
         let asked = Date()          // (what comes in is at least this new: it's saved as of then)
         let rail = t.mode == .train
-        let from = t.from.key == "veghel" ? StopsStore.shared.veghel : t.from
+        let from = t.from.key == "veghel" ? StopsStore.shared.homePlace : t.from
         // For buses also the stop's own board (asked first, so it runs beside the plans): it shows cancelled buses
         // (the planner leaves them out) and the ones that left.
         async let boardAsk: [BoardDeparture] = rail ? [] : Transit.board(stopIds: from.ids, from: Date().addingTimeInterval(-30 * 60), n: 40)
@@ -2431,13 +2431,13 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         var wanted: [RegionSpec] = []
         if (autoStart || autoHome) && location.authorizationStatus == .authorizedAlways {
             if autoHome {
-                wanted.append(RegionSpec(id: "school", lat: Place.buas.coordinate.latitude, lon: Place.buas.coordinate.longitude,
+                wanted.append(RegionSpec(id: "school", lat: Place.school.coordinate.latitude, lon: Place.school.coordinate.longitude,
                                          radius: NearMe.schoolRadius, entry: true, exit: false))
             }
             if autoStart {
-                for p in Place.all where p != .buas {
+                for p in Place.all where p != .school {
                     wanted.append(RegionSpec(id: p.key, lat: p.coordinate.latitude, lon: p.coordinate.longitude,
-                                             radius: p == .veghel ? 350 : 300, entry: false, exit: true))
+                                             radius: p == .home ? 350 : 300, entry: false, exit: true))
                 }
             }
         }
@@ -2499,13 +2499,13 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         }
         var pick: (Direction, RoutePlan, Int)?
         switch place {
-        case .veghel where !v.isTrain:
+        case .home where !v.isTrain:
             if goes(.denBosch) { pick = (.toSchool, RoutePlan.via(.denBosch)!, 0) } else if goes(.eindhoven) { pick = (.toSchool, RoutePlan.via(.eindhoven)!, 0) }
         case .breda where v.isTrain:
             if goes(.denBosch) { pick = (.home, RoutePlan.via(.denBosch)!, 0) } else if goes(.eindhoven) { pick = (.home, RoutePlan.via(.eindhoven)!, 0) }
         case .denBosch, .eindhoven:
             if v.isTrain && goes(.breda) { pick = (.toSchool, RoutePlan.via(place)!, 1) }
-            else if !v.isTrain && goes(.veghel) { pick = (.home, RoutePlan.via(place)!, 1) }
+            else if !v.isTrain && goes(.home) { pick = (.home, RoutePlan.via(place)!, 1) }
         default: break
         }
         guard let chosen = pick else { return false }
@@ -2709,7 +2709,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             legTitle: home ? "Bus 306 to Veghel" : "Intercity to Breda", isTrain: !home, distanceText: home ? "3.8 km" : "9.6 km",
             arrival: now.addingTimeInterval(home ? 9 * 60 : 34 * 60), finalName: finalName,
             nextText: home ? nil : "Then bus 3 to BUas from Breda", awake: false, goingHome: home,
-            kicker: "NOW RIDING", stopName: home ? Place.veghel.spoken : Place.breda.spoken, progress: 0.15,
+            kicker: "NOW RIDING", stopName: home ? Place.home.spoken : Place.breda.spoken, progress: 0.15,
             legFrom: now.addingTimeInterval(-4 * 60), legTo: now.addingTimeInterval(home ? 9 * 60 : 18 * 60),
             song: song?.title ?? "Your song", artist: song?.artist ?? "The artist", songPlaying: true, musicApp: song?.app ?? "Spotify",
             vehicle: home ? VehicleKind.bus.rawValue : VehicleKind.ic.rawValue, line: home ? "306" : "IC")

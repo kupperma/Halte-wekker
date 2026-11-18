@@ -262,7 +262,7 @@ struct NewHome: View {
     }
 
     /// Where the map starts before your location is known: where the phone last was, or home.
-    private static let startRegion = MKCoordinateRegion(center: CLLocationManager().location?.coordinate ?? Place.veghel.coordinate,
+    private static let startRegion = MKCoordinateRegion(center: CLLocationManager().location?.coordinate ?? Place.home.coordinate,
                                                         latitudinalMeters: 1400, longitudinalMeters: 1400)
     init() {
         // back from Fastest trip or the ride: the map as you left it (following you, or where you had moved it)
@@ -899,8 +899,8 @@ struct NewHome: View {
 
     /// What your places call a place (Home and School as you named them).
     private func placeName(_ p: Place) -> String {
-        if p.key == Place.veghel.key { return places.home?.name ?? "Home" }
-        if p.key == Place.buas.key { return places.school?.name ?? p.short }
+        if p.key == Place.home.key { return places.home?.name ?? "Home" }
+        if p.key == Place.school.key { return places.school?.name ?? p.short }
         return p.short
     }
 
@@ -942,7 +942,7 @@ struct NewHome: View {
     private var destinationChip: some View {
         let dest = live.destination(trip.direction)
         let current = places.list.first(where: isCurrentDest)
-        let scheduled: Place = trip.direction == .toSchool ? .buas : .veghel
+        let scheduled: Place = trip.direction == .toSchool ? .school : .home
         let ids = HomeDest.recents(live.recents.map { (id: $0.id, lat: $0.lat, lon: $0.lon) }, saved: places.list.map { (lat: $0.lat, lon: $0.lon) })
         let recent = ids.compactMap { id in live.recents.first { $0.id == id } }
         return DestinationChip(title: NextTrip.destTitle(current?.name ?? placeName(dest)),
@@ -968,7 +968,7 @@ struct NewHome: View {
 
     private func isCurrentDest(_ p: SavedPlace) -> Bool {
         let key = places.place(p).key
-        if key == Place.veghel.key || key == Place.buas.key { return live.custom == nil && live.destination(trip.direction).key == key }
+        if key == Place.home.key || key == Place.school.key { return live.custom == nil && live.destination(trip.direction).key == key }
         guard let c = live.custom else { return false }
         return abs(c.lat - p.lat) < 1e-6 && abs(c.lon - p.lon) < 1e-6
     }
@@ -978,10 +978,10 @@ struct NewHome: View {
     private func chooseDest(_ p: SavedPlace) {
         guard trip.phase == .idle, !isCurrentDest(p) else { return }
         let key = places.place(p).key
-        if key == Place.buas.key {
+        if key == Place.school.key {
             live.go(to: nil)
             if trip.direction != .toSchool { trip.pick(.toSchool) }
-        } else if key == Place.veghel.key {
+        } else if key == Place.home.key {
             live.go(to: nil)
             if trip.direction != .home { trip.pick(.home) }
         } else {

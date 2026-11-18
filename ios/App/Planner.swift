@@ -110,8 +110,8 @@ final class Planner: ObservableObject {
         guard !arriveBusy, force || arriveUpdated.map({ Date().timeIntervalSince($0) >= 120 }) ?? true else { return }
         arriveBusy = true
         defer { arriveBusy = false }
-        let from: Place = a.out ? StopsStore.shared.veghel : .buas
-        let to: Place = a.out ? .buas : .veghel
+        let from: Place = a.out ? StopsStore.shared.homePlace : .school
+        let to: Place = a.out ? .school : .home
         if a.leaving {
             // head off at a time: the ones that leave then or after, the one that gets you there first (and safely, and
             // with the least standing outside) on top
@@ -257,17 +257,17 @@ final class Planner: ObservableObject {
         let dep = train.first.departure, arr = train.last.arrival
         let before: [DoorTrip], after: [DoorTrip]
         if out {
-            async let b = Transit.plan(from: .veghel, to: station, modes: "BUS", at: dep.addingTimeInterval(-90 * 60), count: 8, maxTransfers: 0)
-            async let a = Transit.plan(from: .breda, to: .buas, modes: "BUS", at: arr, count: 4, maxTransfers: 0)
+            async let b = Transit.plan(from: .home, to: station, modes: "BUS", at: dep.addingTimeInterval(-90 * 60), count: 8, maxTransfers: 0)
+            async let a = Transit.plan(from: .breda, to: .school, modes: "BUS", at: arr, count: 4, maxTransfers: 0)
             let (x, y) = await (b, a)
             before = x; after = y
-            Ratings.shared.learn(.veghel, station, before)
+            Ratings.shared.learn(.home, station, before)
         } else {
-            async let b = Transit.plan(from: .buas, to: .breda, modes: "BUS", at: dep.addingTimeInterval(-60 * 60), count: 8, maxTransfers: 0)
-            async let a = Transit.plan(from: station, to: .veghel, modes: "BUS", at: arr, count: 3, maxTransfers: 0)
+            async let b = Transit.plan(from: .school, to: .breda, modes: "BUS", at: dep.addingTimeInterval(-60 * 60), count: 8, maxTransfers: 0)
+            async let a = Transit.plan(from: station, to: .home, modes: "BUS", at: arr, count: 3, maxTransfers: 0)
             let (x, y) = await (b, a)
             before = x; after = y
-            Ratings.shared.learn(station, .veghel, after)
+            Ratings.shared.learn(station, .home, after)
         }
         // The same bus can come up from both Veghel stops. Keep it once, from the stop with the least walking.
         func once(_ l: [DoorTrip]) -> [DoorTrip] {

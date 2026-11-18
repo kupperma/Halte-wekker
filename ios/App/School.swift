@@ -257,7 +257,7 @@ final class SchoolAlarm: ObservableObject {
             let soon = e.startDate.timeIntervalSince(now) < 36 * 3600
             let moved = old.map { $0.classStart != e.startDate || $0.beThere != beThere } ?? true
             if !force && !moved, let old, now.timeIntervalSince(old.checked) < (soon ? 14 * 60 : 6 * 3600) { continue }
-            let all = await Transit.plan(from: homeStart(), to: .buas, modes: nil, at: beThere, count: 6, maxTransfers: 4, arriveBy: true)
+            let all = await Transit.plan(from: homeStart(), to: .school, modes: nil, at: beThere, count: 6, maxTransfers: 4, arriveBy: true)
             guard on else { return }
             var seen = Set<String>()
             let inTime = all.filter { $0.end <= beThere.addingTimeInterval(60) && $0.first.departure > now && seen.insert($0.id).inserted }
@@ -347,7 +347,7 @@ final class SchoolAlarm: ObservableObject {
     /// From home: where you are now if that's in Veghel (and it remembers it), else where it last saw you there, else your
     /// Veghel stops.
     private func homeStart() -> Place {
-        let veghel = CLLocation(latitude: Place.veghel.coordinate.latitude, longitude: Place.veghel.coordinate.longitude)
+        let veghel = CLLocation(latitude: Place.home.coordinate.latitude, longitude: Place.home.coordinate.longitude)
         if let l = trip?.lastFix, l.timestamp.timeIntervalSinceNow > -2 * 3600, l.horizontalAccuracy < 200, l.distance(from: veghel) < 6000 {
             d.set(l.coordinate.latitude, forKey: "school.homeLat"); d.set(l.coordinate.longitude, forKey: "school.homeLon")
             return .here(l.coordinate)
@@ -355,7 +355,7 @@ final class SchoolAlarm: ObservableObject {
         if let a = d.object(forKey: "school.homeLat") as? Double, let o = d.object(forKey: "school.homeLon") as? Double {
             return .here(.init(latitude: a, longitude: o))
         }
-        return StopsStore.shared.veghel
+        return StopsStore.shared.homePlace
     }
 
     static let backgroundId = "nl.haltewekker.app.plan"

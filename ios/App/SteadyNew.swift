@@ -58,7 +58,7 @@ struct SteadySheetNew: View {
     /// The live times at your places and around you, so "right now" is right now.
     private func load() async {
         loading = true
-        var ids = Place.veghel.ids + Place.denBosch.ids + Place.eindhoven.ids + Place.breda.ids
+        var ids = Place.home.ids + Place.denBosch.ids + Place.eindhoven.ids + Place.breda.ids
         ids += live.nearStops.map(\.id)
         _ = await Transit.board(stopIds: Array(Set(ids)), from: Date().addingTimeInterval(-10 * 60), n: 30)
         updated = Date()

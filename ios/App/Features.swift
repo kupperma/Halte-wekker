@@ -587,7 +587,7 @@ struct StopsList: View {
             }
             .padding(.vertical, 8)
             ForEach(Place.all, id: \.key) { p in
-                row(p.name, sub: p == .veghel ? "Your home stop" : p == .breda ? "Your school stop" : nil, editable: nil) { start(p) }
+                row(p.name, sub: p == .home ? "Your home stop" : p == .breda ? "Your school stop" : nil, editable: nil) { start(p) }
             }
             ForEach(stops.saved) { s in row(s.name, sub: nil, editable: s) { start(s.place) } }
         }

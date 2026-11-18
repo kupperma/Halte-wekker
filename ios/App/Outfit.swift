@@ -232,12 +232,12 @@ final class OutfitStore: ObservableObject {
         // (whichever you're not at). The home screen fills in your trip's times as soon as it has them.
         if context == nil {
             let l = CLLocationManager().location.flatMap { Date().timeIntervalSince($0.timestamp) < 3 * 3600 ? $0 : nil }
-            let atHome = l.map { $0.distance(from: CLLocation(latitude: Place.veghel.coordinate.latitude, longitude: Place.veghel.coordinate.longitude)) < 5000 } ?? true
-            context = (l, atHome ? Place.buas : Place.veghel, nil, nil)
+            let atHome = l.map { $0.distance(from: CLLocation(latitude: Place.home.coordinate.latitude, longitude: Place.home.coordinate.longitude)) < 5000 } ?? true
+            context = (l, atHome ? Place.school : Place.home, nil, nil)
         }
         guard let c = context else { return }
         let now = Date()
-        let hereC = c.here?.coordinate ?? (c.dest == .veghel ? Place.buas.coordinate : Place.veghel.coordinate)
+        let hereC = c.here?.coordinate ?? (c.dest == .home ? Place.school.coordinate : Place.home.coordinate)
         let tomorrow = Calendar.current.component(.hour, from: now) >= 19
         let key = "\(Int(hereC.latitude * 100)),\(Int(hereC.longitude * 100))>\(c.dest.key)|\(tomorrow)|\(c.leave.map { Int($0.timeIntervalSince1970 / 900) } ?? 0)"
         if !force, let l = last, l.key == key, now.timeIntervalSince(l.at) < 20 * 60 { return }

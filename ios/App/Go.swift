@@ -16,7 +16,7 @@ final class GoStore: ObservableObject {
 
     @Published private(set) var isOpen = false
     @Published private(set) var watching = false
-    @Published private(set) var dest: Place = .veghel
+    @Published private(set) var dest: Place = .home
     @Published private(set) var best: DoorTrip?             // the one it's watching: the fastest you can still catch
     @Published private(set) var others: [DoorTrip] = []
     /// The ride you chose in Plan (0.20.2): shown and watched as your trip instead of the fastest, found again in each
@@ -860,7 +860,7 @@ final class GoStore: ObservableObject {
     }
 
     private func runDemo() async {
-        let c = here?.coordinate ?? trip?.here ?? Place.veghel.coordinate
+        let c = here?.coordinate ?? trip?.here ?? Place.home.coordinate
         var name = "Your nearest stop"
         var s = CLLocationCoordinate2D(latitude: c.latitude + 0.0016, longitude: c.longitude + 0.0022)
         if let n = await Transit.nearStops(c).first(where: { !$0.rail }) { name = n.name; s = .init(latitude: n.lat, longitude: n.lon) }
@@ -1030,7 +1030,7 @@ struct GoView: View {
 
     private var destWord: String { go.dest.short }
     /// Home is Veghel, unless you picked somewhere yourself.
-    private var goingHome: Bool { go.dest == .veghel && live.custom == nil }
+    private var goingHome: Bool { go.dest == .home && live.custom == nil }
 
     // MARK: top
 
@@ -1080,7 +1080,7 @@ struct GoView: View {
     private func to(_ d: Direction) {
         live.go(to: nil)
         if trip.direction != d { withAnimation(.easeInOut(duration: 0.6)) { trip.pick(d) } }
-        go.retarget(d == .toSchool ? .buas : .veghel)
+        go.retarget(d == .toSchool ? .school : .home)
     }
 
     // MARK: what's on it

@@ -374,7 +374,7 @@ final class LiveStore: ObservableObject {
     }
 
     /// Where you're going: your pick, or school or home.
-    func destination(_ dir: Direction) -> Place { custom?.place ?? (dir == .toSchool ? .buas : .veghel) }
+    func destination(_ dir: Direction) -> Place { custom?.place ?? (dir == .toSchool ? .school : .home) }
 
     private func loadNearIfAny(_ h: CLLocation?) async { if let h { await loadNear(h) } }
 
@@ -469,7 +469,7 @@ final class LiveStore: ObservableObject {
         // Away from your usual start (or going somewhere you picked): trips start from where you are.
         // Going to school, anywhere in Veghel counts as home (your Veghel bus board); going home, only the BUas campus
         // counts as school, so anywhere else in Breda the trip starts from where you are.
-        let usual: Place = dir == .toSchool ? .veghel : .buas
+        let usual: Place = dir == .toSchool ? .home : .school
         let radius = dir == .toSchool ? 2500.0 : 500.0
         let away = lastSeen.map { $0.distance(from: CLLocation(latitude: usual.coordinate.latitude, longitude: usual.coordinate.longitude)) > radius } ?? false
         let from: CLLocation? = (away || custom != nil) ? lastSeen : nil
@@ -622,7 +622,7 @@ final class LiveStore: ObservableObject {
         guard force || Date().timeIntervalSince(lastPanels) > 120 else { return }
         lastPanels = Date()
         let now = Date().addingTimeInterval(-30 * 60)          // from half an hour ago, for "Show earlier"
-        let veghel = stops.veghel
+        let veghel = stops.homePlace
         var empty = false, got = false
         if need == .board {
             // the new look: only your home board, going to school (with the ride times, every 10 minutes)
@@ -638,13 +638,13 @@ final class LiveStore: ObservableObject {
             async let g: Void = loadBoardRides(veghel, key: key)
             async let t = loadList(.trains, [PanelJob(from: .eindhoven, to: .breda, modes: "RAIL", count: 8, maxTransfers: 1),
                                              PanelJob(from: .denBosch, to: .breda, modes: "RAIL", count: 8, maxTransfers: 1)], at: now, key: key)
-            async let u = loadList(.buas, [PanelJob(from: .breda, to: .buas, modes: "BUS", count: 12, maxTransfers: 0)], at: now, key: key)
+            async let u = loadList(.buas, [PanelJob(from: .breda, to: .school, modes: "BUS", count: 12, maxTransfers: 0)], at: now, key: key)
             let (bb, tt, uu) = await (b, t, u)
             await g
             empty = bb.isEmpty || tt.isEmpty || uu.isEmpty
             got = !bb.isEmpty || !tt.isEmpty || !uu.isEmpty
         } else {
-            async let u = loadList(.buas, [PanelJob(from: .buas, to: .breda, modes: "BUS", count: 12, maxTransfers: 0)], at: now, key: key)
+            async let u = loadList(.buas, [PanelJob(from: .school, to: .breda, modes: "BUS", count: 12, maxTransfers: 0)], at: now, key: key)
             async let t = loadList(.trains, [PanelJob(from: .breda, to: .eindhoven, modes: "RAIL", count: 8, maxTransfers: 1),
                                              PanelJob(from: .breda, to: .denBosch, modes: "RAIL", count: 8, maxTransfers: 1)], at: now, key: key)
             async let v = loadList(.toVeghel, [PanelJob(from: .denBosch, to: veghel, modes: "BUS", count: 8, maxTransfers: 0),

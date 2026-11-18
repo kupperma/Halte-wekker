@@ -22,7 +22,7 @@ struct RootView: View {
         withAnimation(.easeInOut(duration: 0.35)) { morning.showing = false }
         if trip.phase == .idle {
             if trip.direction != .toSchool { trip.pick(.toSchool) }
-            go.open(to: .buas, from: trip.lastFix, deadline: p.beThere, label: "your \(Fmt.hhmm(p.classStart)) class",
+            go.open(to: .school, from: trip.lastFix, deadline: p.beThere, label: "your \(Fmt.hhmm(p.classStart)) class",
                     planKey: GoStore.schoolKeyIfDue(p.classStart, now: Date()))
         }
     }
@@ -338,7 +338,7 @@ struct HomeView: View {
         if let n = SchoolAlarm.shared.next, GoStore.schoolAutoOpen(n, now: now) {
             if trip.direction != .toSchool { trip.pick(.toSchool) }
             withAnimation(.easeInOut(duration: 0.35)) {
-                goStore.openForPlan(to: .buas, from: near.position, deadline: n.beThere, label: "your \(Fmt.hhmm(n.classStart)) class",
+                goStore.openForPlan(to: .school, from: near.position, deadline: n.beThere, label: "your \(Fmt.hhmm(n.classStart)) class",
                                     key: GoStore.schoolKey(n.classStart))
             }
             return
@@ -347,7 +347,7 @@ struct HomeView: View {
         if let a = planner.arrive, let T = a.when, GoStore.arriveAutoOpen(a, chosen: planner.arriveChosen, now: now) {
             if trip.direction != (a.out ? .toSchool : .home) { trip.pick(a.out ? .toSchool : .home) }
             withAnimation(.easeInOut(duration: 0.35)) {
-                goStore.openForPlan(to: a.out ? .buas : .veghel, from: near.position, deadline: a.leaving ? nil : T,
+                goStore.openForPlan(to: a.out ? .school : .home, from: near.position, deadline: a.leaving ? nil : T,
                                     label: a.leaving ? nil : "\(a.out ? "BUas" : "home") by \(a.time)",
                                     key: GoStore.arriveKey(a))
             }
@@ -364,13 +364,13 @@ struct HomeView: View {
         if school, let n = SchoolAlarm.shared.next {
             if trip.direction != .toSchool { trip.pick(.toSchool) }
             withAnimation(.easeInOut(duration: 0.35)) {
-                goStore.open(to: .buas, from: near.position, deadline: n.beThere, label: "your \(Fmt.hhmm(n.classStart)) class",
+                goStore.open(to: .school, from: near.position, deadline: n.beThere, label: "your \(Fmt.hhmm(n.classStart)) class",
                              planKey: GoStore.schoolWindowOpen(n, now: now) ? GoStore.schoolKey(n.classStart) : nil)
             }
         } else if let a = planner.arrive, let T = a.when {
             if trip.direction != (a.out ? .toSchool : .home) { trip.pick(a.out ? .toSchool : .home) }
             withAnimation(.easeInOut(duration: 0.35)) {
-                goStore.open(to: a.out ? .buas : .veghel, from: near.position, deadline: a.leaving ? nil : T,
+                goStore.open(to: a.out ? .school : .home, from: near.position, deadline: a.leaving ? nil : T,
                              label: a.leaving ? nil : "\(a.out ? "BUas" : "home") by \(a.time)",
                              planKey: GoStore.arriveWindowOpen(a, chosen: planner.arriveChosen, now: now) ? GoStore.arriveKey(a) : nil)
             }

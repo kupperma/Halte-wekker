@@ -15,7 +15,7 @@ final class PlacesStore: ObservableObject {
 
     /// Today's defaults: Home is your Veghel board stops, School is BUas.
     private static func seed() -> [SavedPlace] {
-        let v = StopsStore.shared.veghel, b = Place.buas
+        let v = StopsStore.shared.homePlace, b = Place.school
         return PlacesLogic.seed(
             home: SavedPlace(id: "home", name: "Home", kind: .home, lat: v.coordinate.latitude, lon: v.coordinate.longitude, stopIds: v.ids),
             school: SavedPlace(id: "school", name: b.short, kind: .school, lat: b.coordinate.latitude, lon: b.coordinate.longitude, stopIds: b.ids))
@@ -46,8 +46,8 @@ final class PlacesStore: ObservableObject {
     func place(_ p: SavedPlace) -> Place {
         let here = CLLocation(latitude: p.lat, longitude: p.lon)
         func near(_ q: Place) -> Bool { here.distance(from: CLLocation(latitude: q.coordinate.latitude, longitude: q.coordinate.longitude)) < 400 }
-        if p.kind == .home, near(.veghel) { return StopsStore.shared.veghel }
-        if p.kind == .school, near(.buas) { return .buas }
+        if p.kind == .home, near(.home) { return StopsStore.shared.homePlace }
+        if p.kind == .school, near(.school) { return .school }
         return Place(key: "p:\(p.id)", name: p.name, short: p.name, ids: p.stopIds.isEmpty ? ["\(p.lat),\(p.lon)"] : p.stopIds,
                      coordinate: .init(latitude: p.lat, longitude: p.lon), spoken: p.name)
     }
@@ -55,8 +55,8 @@ final class PlacesStore: ObservableObject {
     /// Is this place today's Home or School (the trips the planned-trip reminders know)?
     func direction(of p: SavedPlace) -> Direction? {
         let pl = place(p)
-        if pl.key == Place.veghel.key { return .home }
-        if pl.key == Place.buas.key { return .toSchool }
+        if pl.key == Place.home.key { return .home }
+        if pl.key == Place.school.key { return .toSchool }
         return nil
     }
 }
