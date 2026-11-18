@@ -82,9 +82,14 @@ final class LiveTimesTests: XCTestCase {
     }
 
     func test_onTimeAndEarlyUnchanged() {
-        for delay in [-2.0, 0, 0.5, 59.0 / 60] {
-            let s = (0..<6).map { k in StopTimes(arrival: at(Double(k) * 2 + delay), departure: at(Double(k) * 2 + delay),
-                                                 scheduledArrival: at(Double(k) * 2), scheduledDeparture: at(Double(k) * 2)) }
+        let delays: [Double] = [-2.0, 0, 0.5, 59.0 / 60]
+        for delay in delays {
+            var s: [StopTimes] = []
+            for k in 0..<6 {
+                let planned: Double = Double(k) * 2
+                let live: Double = planned + delay
+                s.append(StopTimes(arrival: at(live), departure: at(live), scheduledArrival: at(planned), scheduledDeparture: at(planned)))
+            }
             XCTAssertEqual(LiveTimes.noCatchUp(s, asOf: at(0.5 + delay)), s)
         }
     }
