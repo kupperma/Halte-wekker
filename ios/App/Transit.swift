@@ -244,6 +244,51 @@ enum Transit {
         }
     }
 
+    /// A search hit that can also be an address or a named place (the setup's School and Home, 0.23).
+    struct PlaceHit: Identifiable, Hashable, Sendable {
+        enum Kind: String, Sendable { case stop, address, place }
+        let id: String
+        let name: String
+        let town: String
+        let lat: Double
+        let lon: Double
+        let kind: Kind
+    }
+
+    /// Search for an address, a named place, a stop or a station (Transitous's geocoder, any type), nearest to `near`
+    /// first when given; only results in the Netherlands and its neighbours' border towns.
+    static func findPlaces(_ q: String, near: CLLocationCoordinate2D?) async -> [PlaceHit] {
+        var items: [URLQueryItem] = [.init(name: "text", value: q), .init(name: "numResults", value: "12")]
+        if let c = near { items.append(.init(name: "place", value: "\(c.latitude),\(c.longitude)")) }
+        let answer = try? await Transit.$urgent.withValue(true) { () async throws -> Any in try await get("/v1/geocode", items) }
+        guard let list = answer as? [[String: Any]] else { return [] }
+        return list.compactMap { m in
+            guard let name = m["name"] as? String, let la = m["lat"] as? Double, let lo = m["lon"] as? Double,
+                  ["NL", "BE", "DE", nil].contains(m["country"] as? String) else { return nil }
+            let areas = (m["areas"] as? [[String: Any]]) ?? []
+            let a = areas.first { ($0["default"] as? Bool) == true } ?? areas.first { ($0["matched"] as? Bool) == true } ?? areas.first
+            let kind: PlaceHit.Kind = (m["type"] as? String) == "STOP" ? .stop : (m["type"] as? String) == "ADDRESS" ? .address : .place
+            return PlaceHit(id: (m["id"] as? String) ?? "\(la),\(lo)", name: name, town: (a?["name"] as? String) ?? "", lat: la, lon: lo, kind: kind)
+        }
+    }
+
+    /// The stops around a spot for the setup's home board: one per stop area or name, nearest first (nil: no answer).
+    static func nearStopChoices(_ c: CLLocationCoordinate2D) async -> [SetupStop]? {
+        let dLat = 0.008, dLon = 0.012
+        let q: [URLQueryItem] = [.init(name: "min", value: "\(c.latitude - dLat),\(c.longitude - dLon)"),
+                                 .init(name: "max", value: "\(c.latitude + dLat),\(c.longitude + dLon)")]
+        guard let list = try? await Transit.$urgent.withValue(true, operation: { () async throws -> Any in try await get("/v1/map/stops", q) }) as? [[String: Any]]
+        else { return nil }
+        let here = GeoPoint(lat: c.latitude, lon: c.longitude)
+        let raw = list.compactMap { m -> SetupStopRaw? in
+            guard let id = m["stopId"] as? String, let name = m["name"] as? String, let la = m["lat"] as? Double, let lo = m["lon"] as? Double else { return nil }
+            let modes = (m["modes"] as? [String]) ?? []
+            let rail = modes.contains { $0.contains("RAIL") || $0 == "LONG_DISTANCE" || $0 == "HIGHSPEED" }
+            return SetupStopRaw(id: id, name: name, parentId: m["parentId"] as? String, metres: Geo.metres(here, GeoPoint(lat: la, lon: lo)), rail: rail)
+        }
+        return SetupLogic.stopChoices(raw)
+    }
+
     static func trainLabel(_ n: String) -> String {
         let l = n.lowercased()
         if l.contains("intercity direct") { return "ICD" }

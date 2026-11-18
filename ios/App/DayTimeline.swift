@@ -136,6 +136,8 @@ enum ComingUp {
         let end: Date
         let allDay: Bool
         let cancelled: Bool
+        /// Only a start (your week's first class, 0.23): no end of the day's classes, and not a timetable's dates.
+        var startOnly = false
     }
 
     enum Kind: String { case free, event }

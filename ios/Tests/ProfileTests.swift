@@ -34,13 +34,14 @@ final class ProfileTests: XCTestCase {
         XCTAssertNil(p.schoolCatalogId)
     }
 
-    /// 0.22: a new install still rides today's defaults; only the flag says it wasn't set up.
-    func test_newInstallGetsTodaysDefaultsNotSetUp() {
+    /// 0.23: a new install starts from the fresh profile (not set up, no corridor): the first-run setup opens.
+    func test_newInstallStartsFresh() {
         let p = ProfileLogic.load(data: nil, existing: false)
+        XCTAssertEqual(p, ProfileLogic.fresh)
         XCTAssertFalse(p.setupDone)
-        XCTAssertEqual(p.corridor, .veghelBreda)
-        XCTAssertFalse(ProfileLogic.fresh.setupDone)
-        XCTAssertNil(ProfileLogic.fresh.corridor)
+        XCTAssertNil(p.corridor)
+        XCTAssertEqual(p.schedule, ScheduleSource.none)
+        XCTAssertEqual(p.calendarHints, [])
     }
 
     func test_legacyCorridorFollowsTheSavedPlaces() {

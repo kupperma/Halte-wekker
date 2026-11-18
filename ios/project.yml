@@ -5,8 +5,8 @@ options:
     iOS: "17.0"
 settings:
   base:
-    MARKETING_VERSION: "0.22.0"
-    CURRENT_PROJECT_VERSION: "101"
+    MARKETING_VERSION: "0.23.0"
+    CURRENT_PROJECT_VERSION: "102"
     SWIFT_VERSION: "5.0"
     CODE_SIGNING_ALLOWED: "NO"
     CODE_SIGNING_REQUIRED: "NO"
@@ -65,7 +65,7 @@ targets:
   HaltewekkerTests:
     type: bundle.unit-test
     platform: iOS
-    sources: [Tests, App/RecompMath.swift, App/RecompModel.swift, App/RecompCheck.swift, App/OpenFoodFacts.swift, App/RecompStore.swift, App/Net.swift, App/Memo.swift, App/Snapshots.swift, App/Geo.swift, App/VehicleMatch.swift, App/FieldLog.swift, App/NearPick.swift, App/RideGuards.swift, App/LiveTimes.swift, App/Power.swift, App/ChangeRoom.swift, App/Places.swift, App/MapLogic.swift, App/VehiclePick.swift, App/DepartureGroups.swift, App/DayTimeline.swift, App/PlanCompare.swift, App/NextTrip.swift, App/RideAhead.swift, App/MapTap.swift, App/RealPositions.swift, App/PlanChoice.swift, App/RidePick.swift, Shared/VehicleKind.swift, Shared/TripAttributes.swift, App/StopLabel.swift, App/BatteryLog.swift, App/Thrift.swift, App/OutfitWords.swift, App/Profile.swift, App/ManualWeek.swift, App/RoleLogic.swift, App/RoleWords.swift, App/RoleMove.swift]
+    sources: [Tests, App/RecompMath.swift, App/RecompModel.swift, App/RecompCheck.swift, App/OpenFoodFacts.swift, App/RecompStore.swift, App/Net.swift, App/Memo.swift, App/Snapshots.swift, App/Geo.swift, App/VehicleMatch.swift, App/FieldLog.swift, App/NearPick.swift, App/RideGuards.swift, App/LiveTimes.swift, App/Power.swift, App/ChangeRoom.swift, App/Places.swift, App/MapLogic.swift, App/VehiclePick.swift, App/DepartureGroups.swift, App/DayTimeline.swift, App/PlanCompare.swift, App/NextTrip.swift, App/RideAhead.swift, App/MapTap.swift, App/RealPositions.swift, App/PlanChoice.swift, App/RidePick.swift, Shared/VehicleKind.swift, Shared/TripAttributes.swift, App/StopLabel.swift, App/BatteryLog.swift, App/Thrift.swift, App/OutfitWords.swift, App/Profile.swift, App/ManualWeek.swift, App/RoleLogic.swift, App/RoleWords.swift, App/RoleMove.swift, App/SchoolHints.swift, App/SchoolCatalog.swift, App/SetupLogic.swift, App/SetupBackup.swift, App/Schools.json]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: nl.haltewekker.tests

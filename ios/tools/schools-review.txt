@@ -1,0 +1,120 @@
+Schools.json, made by tools/schools.js on 2026-11-18 from Transitous /v1/geocode.
+78 schools, 117 campuses. Check each line; fix the seed's queries, not the output.
+
+ok   uva / Roeterseiland: "Roeterseilandcampus" → PLACE "Roeterseilandcampus" 52.36423,4.91114 · 1.6 km from Amsterdam
+ok   uva / Science Park: "Science Park 904" → ADDRESS "Science Park 904" 52.35449,4.95576 · 4.8 km from Amsterdam
+ok   uva / Binnenstad: "Oudemanhuispoort" → PLACE "Oudemanhuispoort" 52.36923,4.89665 · 0.5 km from Amsterdam
+ok   uva / AMC: "Amsterdam UMC locatie AMC" → PLACE "Amsterdam UMC locatie AMC" 52.29386,4.9497 · 9.6 km from Amsterdam
+ok   vu / Zuidas: "Vrije Universiteit Amsterdam" → PLACE "Vrije Universiteit Amsterdam" 52.33668,4.85991 · 4.6 km from Amsterdam
+ok   leiden / Leiden: "Lipsius" → PLACE "Lipsius" 52.15813,4.48253 · 0.6 km from Leiden
+ok   leiden / The Hague (Wijnhaven): "Wijnhaven Universiteit Leiden" → PLACE "Universiteit Leiden Locatie Wijnhaven" 52.0786,4.32029 · 0.6 km from Den Haag
+ok   uu / Utrecht Science Park: "Heidelberglaan 8" → ADDRESS "Heidelberglaan 8" 52.08518,5.17545 · 3.7 km from Utrecht
+ok   uu / City centre: "Universiteitsbibliotheek Binnenstad" → PLACE "Universiteitsbibliotheek Binnenstad" 52.09461,5.12358 · 0.5 km from Utrecht
+ok   rug / Zernike: "Zernike Campus" → PLACE "Zernike Campus" 53.2389,6.5288 · 3.4 km from Groningen
+ok   rug / City centre: "Academiegebouw" → PLACE "Academiegebouw" 53.22002,6.56315 · 0.3 km from Groningen
+ok   ru / Nijmegen: "Radboud Universiteit" → PLACE "Radboud Universiteit" 51.82611,5.85752 · 2.4 km from Nijmegen
+ok   eur / Woudestein: "Erasmus Universiteit Rotterdam" → PLACE "Erasmus Universiteit Rotterdam" 51.91592,4.52185 · 3.2 km from Rotterdam
+ok   tilburg / Tilburg: "Tilburg University" → PLACE "Tilburg University" 51.5637,5.04186 · 3.3 km from Tilburg
+ok   um / City centre: "Minderbroedersberg 4" → ADDRESS "Minderbroedersberg 4" 50.84713,5.68642 · 0.6 km from Maastricht
+ok   um / Randwyck: "Universiteitssingel 40" → PLACE "Universiteitssingel 40" 50.8369,5.71679 · 2.4 km from Maastricht
+ok   tud / Delft: "Technische Universiteit Delft" → PLACE "Technische Universiteit Delft" 52.00715,4.37052 · 1.0 km from Delft
+ok   tue / Eindhoven: "Technische Universiteit Eindhoven" → PLACE "Technische Universiteit Eindhoven" 51.45105,5.49623 · 1.8 km from Eindhoven
+ok   utwente / Enschede: "University of Twente" → PLACE "University of Twente Sign" 52.23835,6.85067 · 3.5 km from Enschede
+ok   wur / Wageningen Campus: "Forum Wageningen" → PLACE "Forum" 51.98547,5.66405 · 2.1 km from Wageningen
+ok   ou / Heerlen: "Open Universiteit" → PLACE "Open Universiteit" 50.8789,5.95726 · 1.7 km from Heerlen
+ok   uvh / Utrecht: "Universiteit voor Humanistiek" → PLACE "Universiteit voor Humanistiek" 52.0918,5.12564 · 0.3 km from Utrecht
+ok   hva / Amstelcampus: "Wibauthuis" → PLACE "Wibauthuis" 52.35929,4.91026 · 2.0 km from Amsterdam
+ok   hva / Leeuwenburg: "Leeuwenburg" → PLACE "Leeuwenburg" 52.34551,4.91703 · 3.5 km from Amsterdam
+ok   hva / Fraijlemaborg (Zuidoost): "Fraijlemaborg" → PLACE "Fraijlemaborg" 52.31546,4.94578 · 7.4 km from Amsterdam
+ok   hr / Museumpark: "Hogeschool Rotterdam Museumpark" → PLACE "Hogeschool Rotterdam, Museumpark" 51.91262,4.46676 · 1.5 km from Rotterdam
+ok   hr / Kralingse Zoom: "Hogeschool Rotterdam Kralingse Zoom" → PLACE "Hogeschool Rotterdam, Kralingse Zoom" 51.91465,4.52815 · 3.6 km from Rotterdam
+ok   hr / Academieplein: "G.J. de Jonghweg 4" → ADDRESS "G.J. de Jonghweg 4" 51.9101,4.4626 · 1.9 km from Rotterdam
+ok   hr / Wijnhaven: "Hogeschool Rotterdam Wijnhaven" → PLACE "Hogeschool Rotterdam, Wijnhaven" 51.91726,4.48421 · 0.9 km from Rotterdam
+ok   hu / Utrecht Science Park: "Heidelberglaan 15" → ADDRESS "Heidelberglaan 15" 52.08419,5.1756 · 3.8 km from Utrecht
+ok   hu / Amersfoort: "Hogeschool Utrecht Amersfoort" → PLACE "Hogeschool Utrecht" 52.15921,5.37995 · 0.7 km from Amersfoort
+ok   hhs / The Hague: "De Haagse Hogeschool" → PLACE "De Haagse Hogeschool Bibliotheek" 52.06686,4.32428 · 1.7 km from Den Haag
+ok   hhs / Delft: "De Haagse Hogeschool Delft" → PLACE "De Haagse Hogeschool" 52.00122,4.36891 · 1.3 km from Delft
+ok   hhs / Zoetermeer: "De Haagse Hogeschool Zoetermeer" → PLACE "de Haagse Hogeschool vestiging Zoetermeer" 52.04667,4.51506 · 2.4 km from Zoetermeer
+ok   fontys / Eindhoven, Rachelsmolen: "Rachelsmolen 1" → ADDRESS "Rachelsmolen 1-R10" 51.45117,5.4796 · 1.3 km from Eindhoven
+ok   fontys / Eindhoven, De Lismortel: "De Lismortel 25" → ADDRESS "De Lismortel 25" 51.44991,5.49325 · 1.6 km from Eindhoven
+ok   fontys / Tilburg: "Professor Goossenslaan 1" → ADDRESS "Professor Goossenslaan 1-02" 51.53958,5.07914 · 2.0 km from Tilburg
+ok   fontys / Venlo: "Fontys Venlo" → PLACE "Fontys Hogescholen" 51.35143,6.15465 · 2.3 km from Venlo
+ok   avans / Breda: "Avans Hogeschool" → PLACE "Avans Hogeschool" 51.58562,4.79499 · 1.4 km from Breda
+ok   avans / ’s-Hertogenbosch: "Avans Hogeschool" → PLACE "Avans Hogeschool" 51.68935,5.29414 · 0.6 km from 's-Hertogenbosch
+ok   avans / Tilburg: "Avans Hogeschool" → PLACE "Avans Hogeschool" 51.56142,5.05758 · 2.2 km from Tilburg
+ok   buas / Breda: "Mgr. Hopmansstraat 2" → ADDRESS "Mgr. Hopmansstraat 2" 51.59019,4.79427 · 1.3 km from Breda
+ok   hanze / Zernike, Groningen: "Hanzehogeschool" → PLACE "Hanzehogeschool" 53.24394,6.53342 · 3.6 km from Groningen
+ok   saxion / Enschede: "Saxion" → PLACE "Saxion" 52.22094,6.88353 · 0.7 km from Enschede
+ok   saxion / Deventer: "Saxion" → PLACE "Saxion" 52.25464,6.16617 · 0.5 km from Deventer
+ok   saxion / Apeldoorn: "Saxion" → PLACE "Saxion" 52.20955,5.97322 · 0.9 km from Apeldoorn
+ok   windesheim / Zwolle: "Hogeschool Windesheim" → PLACE "Hogeschool Windesheim" 52.50155,6.07843 · 1.4 km from Zwolle
+ok   windesheim / Almere: "Windesheim Almere" → PLACE "Windesheim Almere" 52.37038,5.22213 · 0.2 km from Almere
+ok   han / Arnhem: "Ruitenberglaan 26" → ADDRESS "Ruitenberglaan 26" 51.98784,5.95011 · 2.7 km from Arnhem
+ok   han / Nijmegen: "Hogeschool van Arnhem en Nijmegen" → PLACE "Hogeschool van Arnhem en Nijmegen" 51.82915,5.8621 · 2.0 km from Nijmegen
+ok   inholland / Haarlem: "Hogeschool Inholland" → PLACE "Hogeschool Inholland Haarlem" 52.38803,4.61387 · 1.7 km from Haarlem
+ok   inholland / Amsterdam: "Hogeschool Inholland" → PLACE "Hogeschool Inholland" 52.3347,4.86503 · 4.7 km from Amsterdam
+ok   inholland / Rotterdam: "Hogeschool Inholland" → PLACE "Hogeschool Inholland" 51.90617,4.49473 · 2.3 km from Rotterdam
+ok   inholland / Den Haag: "Hogeschool Inholland" → PLACE "Hogeschool Inholland" 52.08365,4.32952 · 1.3 km from Den Haag
+ok   inholland / Alkmaar: "Hogeschool Inholland" → PLACE "Hogeschool Inholland" 52.64186,4.72649 · 2.0 km from Alkmaar
+ok   inholland / Delft: "Hogeschool Inholland" → PLACE "Hogeschool Inholland" 51.99983,4.36847 · 1.5 km from Delft
+ok   zuyd / Heerlen: "Zuyd Hogeschool" → PLACE "Zuyd Hogeschool" 50.88068,5.96035 · 1.4 km from Heerlen
+ok   zuyd / Maastricht: "Zuyd Hogeschool" → PLACE "Hogeschool Zuyd" 50.8545,5.67265 · 1.3 km from Maastricht
+ok   nhlstenden / Leeuwarden: "NHL Stenden Hogeschool" → PLACE "NHL Stenden Hogeschool" 53.212,5.79462 · 1.3 km from Leeuwarden
+ok   nhlstenden / Emmen: "NHL Stenden Hogeschool" → PLACE "NHL Stenden Hogeschool" 52.77795,6.91048 · 1.7 km from Emmen
+ok   nhlstenden / Meppel: "NHL Stenden Hogeschool" → PLACE "NHL Stenden Hogeschool" 52.70301,6.19898 · 1.0 km from Meppel
+ok   hz / Vlissingen: "HZ University of Applied Sciences" → PLACE "HZ University of Applied Sciences" 51.44878,3.59079 · 1.5 km from Vlissingen
+ok   hsleiden / Leiden: "Hogeschool Leiden" → PLACE "Hogeschool Leiden" 52.16813,4.47126 · 1.6 km from Leiden
+ok   has / ’s-Hertogenbosch: "HAS green academy" → PLACE "HAS green academy" 51.68618,5.28573 · 1.2 km from 's-Hertogenbosch
+ok   aeres / Wageningen: "Aeres Hogeschool" → PLACE "Aeres Hogeschool" 51.98614,5.67119 · 2.2 km from Wageningen
+ok   aeres / Dronten: "Aeres Hogeschool" → PLACE "Aeres Hogeschool" 52.52757,5.69476 · 1.5 km from Dronten
+ok   hku / Utrecht: "HKU" → PLACE "HKU" 52.09282,5.12114 · 0.2 km from Utrecht
+ok   artez / Arnhem: "ArtEZ University of the Arts" → PLACE "ArtEZ University of the Arts" 51.98449,5.89253 · 1.3 km from Arnhem
+ok   artez / Zwolle: "ArtEZ hogeschool voor de kunsten" → PLACE "ArtEZ hogeschool voor de Kunsten" 52.51424,6.10726 · 1.0 km from Zwolle
+ok   artez / Enschede: "ArtEZ" → PLACE "ArtEz" 52.22199,6.89643 · 0.2 km from Enschede
+ok   ahk / Amsterdam: "Conservatorium van Amsterdam" → PLACE "Conservatorium van Amsterdam" 52.37596,4.9089 · 1.2 km from Amsterdam
+ok   rietveld / Amsterdam: "Gerrit Rietveld Academie" → PLACE "Gerrit Rietveld Academie" 52.34208,4.85921 · 4.1 km from Amsterdam
+ok   dae / Eindhoven: "Design Academy Eindhoven" → PLACE "Design Academy Eindhoven" 51.43972,5.4749 · 0.3 km from Eindhoven
+ok   codarts / Rotterdam: "Kruisplein 26" → ADDRESS "Kruisplein 21D-26" 51.92204,4.47049 · 0.6 km from Rotterdam
+ok   kabk / Den Haag: "Koninklijke Academie van Beeldende Kunsten" → PLACE "Koninklijke Academie van Beeldende Kunsten" 52.08202,4.31906 · 0.6 km from Den Haag
+ok   che / Ede: "Christelijke Hogeschool Ede" → PLACE "Christelijke Hogeschool Ede" 52.02027,5.66483 · 2.9 km from Ede
+ok   viaa / Zwolle: "Hogeschool Viaa" → PLACE "Hogeschool Viaa" 52.50878,6.10248 · 0.5 km from Zwolle
+ok   marnix / Utrecht: "Marnix Academie" → PLACE "Marnix Academie (Pabo)" 52.10319,5.13345 · 1.6 km from Utrecht
+ok   ipabo / Amsterdam: "iPabo" → PLACE "IPABO" 52.36749,4.83689 · 3.8 km from Amsterdam
+ok   thomasmore / Rotterdam: "Hogeschool Thomas More" → PLACE "Thomas More Hogeschool" 51.92552,4.46404 · 0.9 km from Rotterdam
+ok   driestar / Gouda: "Driestar hogeschool" → PLACE "Driestar Hogeschool" 52.01877,4.69908 · 1.1 km from Gouda
+ok   iselinge / Doetinchem: "Iselinge Hogeschool" → PLACE "Iselinge Hogeschool" 51.96689,6.30235 · 0.9 km from Doetinchem
+ok   wittenborg / Apeldoorn: "Wittenborg" → PLACE "Wittenborg" 52.21101,5.95967 · 0.6 km from Apeldoorn
+ok   rocva / Amsterdam: "ROC van Amsterdam" → PLACE "ROC van Amsterdam" 52.34667,4.84246 · 4.5 km from Amsterdam
+ok   mondriaan / Den Haag: "ROC Mondriaan" → PLACE "ROC Mondriaan" 52.07303,4.30619 · 0.8 km from Den Haag
+ok   albeda / Rotterdam: "Albeda" → PLACE "Albeda" 51.9265,4.47432 · 0.3 km from Rotterdam
+ok   zadkine / Rotterdam: "Zadkine" → PLACE "Zadkine" 51.92851,4.4765 · 0.5 km from Rotterdam
+ok   rocmn / Utrecht: "ROC Midden Nederland" → PLACE "ROC Midden Nederland" 52.07891,5.119 · 1.3 km from Utrecht
+ok   mboutrecht / Utrecht: "MBO Utrecht" → PLACE "MBO Utrecht" 52.07997,5.09989 · 1.9 km from Utrecht
+ok   summa / Eindhoven: "Summa College" → PLACE "Summa College" 51.43515,5.46254 · 1.2 km from Eindhoven
+ok   roctilburg / Tilburg: "ROC Tilburg" → PLACE "ROC Tilburg" 51.57178,5.07862 · 1.9 km from Tilburg
+ok   curio / Breda: "Curio Breda" → PLACE "Curio" 51.60277,4.78836 · 1.8 km from Breda
+ok   kw1c / ’s-Hertogenbosch: "Koning Willem I College" → PLACE "Koning Willem I College" 51.69894,5.31307 · 1.3 km from 's-Hertogenbosch
+ok   leijgraaf / Veghel: "ROC de Leijgraaf" → PLACE "ROC de Leijgraaf" 51.62176,5.56368 · 1.6 km from Veghel
+ok   rocnijmegen / Nijmegen: "ROC Nijmegen" → PLACE "ROC Nijmegen" 51.8412,5.85251 · 1.0 km from Nijmegen
+ok   rijnijssel / Arnhem: "Rijn IJssel" → PLACE "Rijn IJssel" 51.98891,5.93189 · 1.5 km from Arnhem
+ok   roctwente / Hengelo: "ROC van Twente" → PLACE "ROC van Twente" 52.26016,6.78751 · 0.7 km from Hengelo
+ok   roctwente / Enschede: "ROC van Twente" → PLACE "ROC van Twente" 52.21992,6.88906 · 0.4 km from Enschede
+ok   deltion / Zwolle: "Deltion College" → PLACE "Deltion College" 52.52094,6.08009 · 1.6 km from Zwolle
+ok   landstede / Zwolle: "Landstede MBO" → PLACE "Landstede MBO" 52.50392,6.11377 · 1.4 km from Zwolle
+ok   noorderpoort / Groningen: "Noorderpoort" → PLACE "Noorderpoort" 53.21738,6.55592 · 0.8 km from Groningen
+ok   alfa / Groningen: "Alfa-college" → PLACE "Alfa-college" 53.21394,6.547 · 1.5 km from Groningen
+ok   firda / Leeuwarden: "Firda" → PLACE "Firda" 53.19667,5.79837 · 0.6 km from Leeuwarden
+ok   gilde / Roermond: "Gilde Opleidingen" → PLACE "Gilde Opleidingen" 51.19249,6.01645 · 2.0 km from Roermond
+ok   gilde / Venlo: "Gilde Opleidingen" → PLACE "Gilde Opleidingen" 51.36206,6.18016 · 1.2 km from Venlo
+ok   vista / Heerlen: "Vista college" → PLACE "VISTA College" 50.88011,5.95582 · 1.7 km from Heerlen
+ok   vista / Maastricht: "Vista college" → PLACE "VISTA college" 50.84707,5.71662 · 1.9 km from Maastricht
+ok   nova / Haarlem: "Nova College" → PLACE "Nova College" 52.38381,4.63279 · 0.7 km from Haarlem
+ok   mborijnland / Leiden: "mboRijnland" → PLACE "mboRijnland" 52.14617,4.49283 · 1.5 km from Leiden
+ok   scalda / Vlissingen: "Scalda" → PLACE "Scalda" 51.44854,3.57093 · 0.1 km from Vlissingen
+ok   scalda / Middelburg: "ROC Scalda" → PLACE "ROC Scalda" 51.48004,3.6345 · 2.6 km from Middelburg
+ok   davinci / Dordrecht: "Da Vinci College" → PLACE "ROC Da Vinci College" 51.79786,4.67942 · 2.0 km from Dordrecht
+ok   aventus / Apeldoorn: "Aventus" → PLACE "ROC Aventus" 52.20738,5.97298 · 1.1 km from Apeldoorn
+ok   drenthecollege / Assen: "Drenthe College" → PLACE "Drenthe College" 53.00362,6.57426 · 1.3 km from Assen
+ok   roca12 / Ede: "ROC A12" → PLACE "ROC A12" 52.01896,5.66449 · 3.0 km from Ede
+ok   graafschap / Doetinchem: "Graafschap College" → PLACE "Graafschap College" 51.9698,6.27462 · 1.1 km from Doetinchem
+ok   mboamersfoort / Amersfoort: "MBO Amersfoort" → PLACE "MBO Amersfoort" 52.14684,5.38445 · 1.1 km from Amersfoort

@@ -1,0 +1,1538 @@
+[
+ {
+  "id": "uva",
+  "name": "University of Amsterdam",
+  "short": "UvA",
+  "aliases": [
+   "universiteit van amsterdam",
+   "uva"
+  ],
+  "campuses": [
+   {
+    "name": "Roeterseiland",
+    "city": "Amsterdam",
+    "lat": 52.36423,
+    "lon": 4.91114
+   },
+   {
+    "name": "Science Park",
+    "city": "Amsterdam",
+    "lat": 52.35449,
+    "lon": 4.95576
+   },
+   {
+    "name": "Binnenstad",
+    "city": "Amsterdam",
+    "lat": 52.36923,
+    "lon": 4.89665
+   },
+   {
+    "name": "AMC",
+    "city": "Amsterdam",
+    "lat": 52.29386,
+    "lon": 4.9497
+   }
+  ]
+ },
+ {
+  "id": "vu",
+  "name": "Vrije Universiteit Amsterdam",
+  "short": "VU",
+  "aliases": [
+   "vrije universiteit",
+   "vu amsterdam",
+   "free university"
+  ],
+  "campuses": [
+   {
+    "name": "Zuidas",
+    "city": "Amsterdam",
+    "lat": 52.33668,
+    "lon": 4.85991
+   }
+  ]
+ },
+ {
+  "id": "leiden",
+  "name": "Leiden University",
+  "short": "Leiden University",
+  "aliases": [
+   "universiteit leiden",
+   "leiden"
+  ],
+  "campuses": [
+   {
+    "name": "Leiden",
+    "city": "Leiden",
+    "lat": 52.15813,
+    "lon": 4.48253
+   },
+   {
+    "name": "The Hague (Wijnhaven)",
+    "city": "Den Haag",
+    "lat": 52.0786,
+    "lon": 4.32029
+   }
+  ]
+ },
+ {
+  "id": "uu",
+  "name": "Utrecht University",
+  "short": "UU",
+  "aliases": [
+   "universiteit utrecht",
+   "utrecht university"
+  ],
+  "campuses": [
+   {
+    "name": "Utrecht Science Park",
+    "city": "Utrecht",
+    "lat": 52.08518,
+    "lon": 5.17545
+   },
+   {
+    "name": "City centre",
+    "city": "Utrecht",
+    "lat": 52.09461,
+    "lon": 5.12358
+   }
+  ]
+ },
+ {
+  "id": "rug",
+  "name": "University of Groningen",
+  "short": "RUG",
+  "aliases": [
+   "rijksuniversiteit groningen",
+   "university of groningen",
+   "rug"
+  ],
+  "campuses": [
+   {
+    "name": "Zernike",
+    "city": "Groningen",
+    "lat": 53.2389,
+    "lon": 6.5288
+   },
+   {
+    "name": "City centre",
+    "city": "Groningen",
+    "lat": 53.22002,
+    "lon": 6.56315
+   }
+  ]
+ },
+ {
+  "id": "ru",
+  "name": "Radboud University",
+  "short": "Radboud",
+  "aliases": [
+   "radboud universiteit",
+   "radboud university nijmegen",
+   "ru"
+  ],
+  "campuses": [
+   {
+    "name": "Nijmegen",
+    "city": "Nijmegen",
+    "lat": 51.82611,
+    "lon": 5.85752
+   }
+  ]
+ },
+ {
+  "id": "eur",
+  "name": "Erasmus University Rotterdam",
+  "short": "EUR",
+  "aliases": [
+   "erasmus universiteit",
+   "erasmus",
+   "eur"
+  ],
+  "campuses": [
+   {
+    "name": "Woudestein",
+    "city": "Rotterdam",
+    "lat": 51.91592,
+    "lon": 4.52185
+   }
+  ]
+ },
+ {
+  "id": "tilburg",
+  "name": "Tilburg University",
+  "short": "Tilburg University",
+  "aliases": [
+   "universiteit van tilburg",
+   "tilburg university",
+   "uvt"
+  ],
+  "campuses": [
+   {
+    "name": "Tilburg",
+    "city": "Tilburg",
+    "lat": 51.5637,
+    "lon": 5.04186
+   }
+  ]
+ },
+ {
+  "id": "um",
+  "name": "Maastricht University",
+  "short": "UM",
+  "aliases": [
+   "universiteit maastricht",
+   "maastricht university"
+  ],
+  "campuses": [
+   {
+    "name": "City centre",
+    "city": "Maastricht",
+    "lat": 50.84713,
+    "lon": 5.68642
+   },
+   {
+    "name": "Randwyck",
+    "city": "Maastricht",
+    "lat": 50.8369,
+    "lon": 5.71679
+   }
+  ]
+ },
+ {
+  "id": "tud",
+  "name": "Delft University of Technology",
+  "short": "TU Delft",
+  "aliases": [
+   "technische universiteit delft",
+   "tu delft",
+   "tud"
+  ],
+  "campuses": [
+   {
+    "name": "Delft",
+    "city": "Delft",
+    "lat": 52.00715,
+    "lon": 4.37052
+   }
+  ]
+ },
+ {
+  "id": "tue",
+  "name": "Eindhoven University of Technology",
+  "short": "TU/e",
+  "aliases": [
+   "technische universiteit eindhoven",
+   "tue",
+   "tu eindhoven"
+  ],
+  "campuses": [
+   {
+    "name": "Eindhoven",
+    "city": "Eindhoven",
+    "lat": 51.45105,
+    "lon": 5.49623
+   }
+  ]
+ },
+ {
+  "id": "utwente",
+  "name": "University of Twente",
+  "short": "UT",
+  "aliases": [
+   "universiteit twente",
+   "utwente",
+   "twente"
+  ],
+  "campuses": [
+   {
+    "name": "Enschede",
+    "city": "Enschede",
+    "lat": 52.23835,
+    "lon": 6.85067
+   }
+  ]
+ },
+ {
+  "id": "wur",
+  "name": "Wageningen University & Research",
+  "short": "WUR",
+  "aliases": [
+   "wageningen university",
+   "wageningen universiteit",
+   "wur"
+  ],
+  "campuses": [
+   {
+    "name": "Wageningen Campus",
+    "city": "Wageningen",
+    "lat": 51.98547,
+    "lon": 5.66405
+   }
+  ]
+ },
+ {
+  "id": "ou",
+  "name": "Open Universiteit",
+  "short": "Open Universiteit",
+  "aliases": [
+   "open university",
+   "ou"
+  ],
+  "campuses": [
+   {
+    "name": "Heerlen",
+    "city": "Heerlen",
+    "lat": 50.8789,
+    "lon": 5.95726
+   }
+  ]
+ },
+ {
+  "id": "uvh",
+  "name": "University of Humanistic Studies",
+  "short": "UvH",
+  "aliases": [
+   "universiteit voor humanistiek",
+   "uvh"
+  ],
+  "campuses": [
+   {
+    "name": "Utrecht",
+    "city": "Utrecht",
+    "lat": 52.0918,
+    "lon": 5.12564
+   }
+  ]
+ },
+ {
+  "id": "hva",
+  "name": "Amsterdam University of Applied Sciences",
+  "short": "HvA",
+  "aliases": [
+   "hogeschool van amsterdam",
+   "hva"
+  ],
+  "campuses": [
+   {
+    "name": "Amstelcampus",
+    "city": "Amsterdam",
+    "lat": 52.35929,
+    "lon": 4.91026
+   },
+   {
+    "name": "Leeuwenburg",
+    "city": "Amsterdam",
+    "lat": 52.34551,
+    "lon": 4.91703
+   },
+   {
+    "name": "Fraijlemaborg (Zuidoost)",
+    "city": "Amsterdam",
+    "lat": 52.31546,
+    "lon": 4.94578
+   }
+  ]
+ },
+ {
+  "id": "hr",
+  "name": "Rotterdam University of Applied Sciences",
+  "short": "Hogeschool Rotterdam",
+  "aliases": [
+   "hogeschool rotterdam",
+   "hr",
+   "willem de kooning academie"
+  ],
+  "campuses": [
+   {
+    "name": "Museumpark",
+    "city": "Rotterdam",
+    "lat": 51.91262,
+    "lon": 4.46676
+   },
+   {
+    "name": "Kralingse Zoom",
+    "city": "Rotterdam",
+    "lat": 51.91465,
+    "lon": 4.52815
+   },
+   {
+    "name": "Academieplein",
+    "city": "Rotterdam",
+    "lat": 51.9101,
+    "lon": 4.4626
+   },
+   {
+    "name": "Wijnhaven",
+    "city": "Rotterdam",
+    "lat": 51.91726,
+    "lon": 4.48421
+   }
+  ]
+ },
+ {
+  "id": "hu",
+  "name": "HU University of Applied Sciences Utrecht",
+  "short": "HU",
+  "aliases": [
+   "hogeschool utrecht",
+   "hu"
+  ],
+  "campuses": [
+   {
+    "name": "Utrecht Science Park",
+    "city": "Utrecht",
+    "lat": 52.08419,
+    "lon": 5.1756
+   },
+   {
+    "name": "Amersfoort",
+    "city": "Amersfoort",
+    "lat": 52.15921,
+    "lon": 5.37995
+   }
+  ]
+ },
+ {
+  "id": "hhs",
+  "name": "The Hague University of Applied Sciences",
+  "short": "De Haagse",
+  "aliases": [
+   "haagse hogeschool",
+   "de haagse hogeschool",
+   "hhs",
+   "thuas"
+  ],
+  "campuses": [
+   {
+    "name": "The Hague",
+    "city": "Den Haag",
+    "lat": 52.06686,
+    "lon": 4.32428
+   },
+   {
+    "name": "Delft",
+    "city": "Delft",
+    "lat": 52.00122,
+    "lon": 4.36891
+   },
+   {
+    "name": "Zoetermeer",
+    "city": "Zoetermeer",
+    "lat": 52.04667,
+    "lon": 4.51506
+   }
+  ]
+ },
+ {
+  "id": "fontys",
+  "name": "Fontys University of Applied Sciences",
+  "short": "Fontys",
+  "aliases": [
+   "fontys hogescholen",
+   "fontys hogeschool"
+  ],
+  "campuses": [
+   {
+    "name": "Eindhoven, Rachelsmolen",
+    "city": "Eindhoven",
+    "lat": 51.45117,
+    "lon": 5.4796
+   },
+   {
+    "name": "Eindhoven, De Lismortel",
+    "city": "Eindhoven",
+    "lat": 51.44991,
+    "lon": 5.49325
+   },
+   {
+    "name": "Tilburg",
+    "city": "Tilburg",
+    "lat": 51.53958,
+    "lon": 5.07914
+   },
+   {
+    "name": "Venlo",
+    "city": "Venlo",
+    "lat": 51.35143,
+    "lon": 6.15465
+   }
+  ]
+ },
+ {
+  "id": "avans",
+  "name": "Avans University of Applied Sciences",
+  "short": "Avans",
+  "aliases": [
+   "avans hogeschool"
+  ],
+  "campuses": [
+   {
+    "name": "Breda",
+    "city": "Breda",
+    "lat": 51.58562,
+    "lon": 4.79499
+   },
+   {
+    "name": "’s-Hertogenbosch",
+    "city": "’s-Hertogenbosch",
+    "lat": 51.68935,
+    "lon": 5.29414
+   },
+   {
+    "name": "Tilburg",
+    "city": "Tilburg",
+    "lat": 51.56142,
+    "lon": 5.05758
+   }
+  ]
+ },
+ {
+  "id": "buas",
+  "name": "Breda University of Applied Sciences",
+  "short": "BUas",
+  "aliases": [
+   "breda university",
+   "nhtv",
+   "buas"
+  ],
+  "campuses": [
+   {
+    "name": "Breda",
+    "city": "Breda",
+    "lat": 51.59019,
+    "lon": 4.79427
+   }
+  ]
+ },
+ {
+  "id": "hanze",
+  "name": "Hanze University of Applied Sciences",
+  "short": "Hanze",
+  "aliases": [
+   "hanzehogeschool",
+   "hanze hogeschool"
+  ],
+  "campuses": [
+   {
+    "name": "Zernike, Groningen",
+    "city": "Groningen",
+    "lat": 53.24394,
+    "lon": 6.53342
+   }
+  ]
+ },
+ {
+  "id": "saxion",
+  "name": "Saxion University of Applied Sciences",
+  "short": "Saxion",
+  "aliases": [
+   "saxion hogeschool",
+   "saxion hogescholen"
+  ],
+  "campuses": [
+   {
+    "name": "Enschede",
+    "city": "Enschede",
+    "lat": 52.22094,
+    "lon": 6.88353
+   },
+   {
+    "name": "Deventer",
+    "city": "Deventer",
+    "lat": 52.25464,
+    "lon": 6.16617
+   },
+   {
+    "name": "Apeldoorn",
+    "city": "Apeldoorn",
+    "lat": 52.20955,
+    "lon": 5.97322
+   }
+  ]
+ },
+ {
+  "id": "windesheim",
+  "name": "Windesheim University of Applied Sciences",
+  "short": "Windesheim",
+  "aliases": [
+   "hogeschool windesheim"
+  ],
+  "campuses": [
+   {
+    "name": "Zwolle",
+    "city": "Zwolle",
+    "lat": 52.50155,
+    "lon": 6.07843
+   },
+   {
+    "name": "Almere",
+    "city": "Almere",
+    "lat": 52.37038,
+    "lon": 5.22213
+   }
+  ]
+ },
+ {
+  "id": "han",
+  "name": "HAN University of Applied Sciences",
+  "short": "HAN",
+  "aliases": [
+   "hogeschool van arnhem en nijmegen",
+   "han"
+  ],
+  "campuses": [
+   {
+    "name": "Arnhem",
+    "city": "Arnhem",
+    "lat": 51.98784,
+    "lon": 5.95011
+   },
+   {
+    "name": "Nijmegen",
+    "city": "Nijmegen",
+    "lat": 51.82915,
+    "lon": 5.8621
+   }
+  ]
+ },
+ {
+  "id": "inholland",
+  "name": "Hogeschool Inholland",
+  "short": "Inholland",
+  "aliases": [
+   "inholland university of applied sciences"
+  ],
+  "campuses": [
+   {
+    "name": "Haarlem",
+    "city": "Haarlem",
+    "lat": 52.38803,
+    "lon": 4.61387
+   },
+   {
+    "name": "Amsterdam",
+    "city": "Amsterdam",
+    "lat": 52.3347,
+    "lon": 4.86503
+   },
+   {
+    "name": "Rotterdam",
+    "city": "Rotterdam",
+    "lat": 51.90617,
+    "lon": 4.49473
+   },
+   {
+    "name": "Den Haag",
+    "city": "Den Haag",
+    "lat": 52.08365,
+    "lon": 4.32952
+   },
+   {
+    "name": "Alkmaar",
+    "city": "Alkmaar",
+    "lat": 52.64186,
+    "lon": 4.72649
+   },
+   {
+    "name": "Delft",
+    "city": "Delft",
+    "lat": 51.99983,
+    "lon": 4.36847
+   }
+  ]
+ },
+ {
+  "id": "zuyd",
+  "name": "Zuyd University of Applied Sciences",
+  "short": "Zuyd",
+  "aliases": [
+   "zuyd hogeschool"
+  ],
+  "campuses": [
+   {
+    "name": "Heerlen",
+    "city": "Heerlen",
+    "lat": 50.88068,
+    "lon": 5.96035
+   },
+   {
+    "name": "Maastricht",
+    "city": "Maastricht",
+    "lat": 50.8545,
+    "lon": 5.67265
+   }
+  ]
+ },
+ {
+  "id": "nhlstenden",
+  "name": "NHL Stenden University of Applied Sciences",
+  "short": "NHL Stenden",
+  "aliases": [
+   "nhl stenden hogeschool",
+   "nhl",
+   "stenden"
+  ],
+  "campuses": [
+   {
+    "name": "Leeuwarden",
+    "city": "Leeuwarden",
+    "lat": 53.212,
+    "lon": 5.79462
+   },
+   {
+    "name": "Emmen",
+    "city": "Emmen",
+    "lat": 52.77795,
+    "lon": 6.91048
+   },
+   {
+    "name": "Meppel",
+    "city": "Meppel",
+    "lat": 52.70301,
+    "lon": 6.19898
+   }
+  ]
+ },
+ {
+  "id": "hz",
+  "name": "HZ University of Applied Sciences",
+  "short": "HZ",
+  "aliases": [
+   "hogeschool zeeland",
+   "hz"
+  ],
+  "campuses": [
+   {
+    "name": "Vlissingen",
+    "city": "Vlissingen",
+    "lat": 51.44878,
+    "lon": 3.59079
+   }
+  ]
+ },
+ {
+  "id": "hsleiden",
+  "name": "Hogeschool Leiden",
+  "short": "Hogeschool Leiden",
+  "aliases": [
+   "leiden university of applied sciences"
+  ],
+  "campuses": [
+   {
+    "name": "Leiden",
+    "city": "Leiden",
+    "lat": 52.16813,
+    "lon": 4.47126
+   }
+  ]
+ },
+ {
+  "id": "has",
+  "name": "HAS green academy",
+  "short": "HAS",
+  "aliases": [
+   "has hogeschool",
+   "has den bosch"
+  ],
+  "campuses": [
+   {
+    "name": "’s-Hertogenbosch",
+    "city": "’s-Hertogenbosch",
+    "lat": 51.68618,
+    "lon": 5.28573
+   }
+  ]
+ },
+ {
+  "id": "aeres",
+  "name": "Aeres University of Applied Sciences",
+  "short": "Aeres",
+  "aliases": [
+   "aeres hogeschool"
+  ],
+  "campuses": [
+   {
+    "name": "Wageningen",
+    "city": "Wageningen",
+    "lat": 51.98614,
+    "lon": 5.67119
+   },
+   {
+    "name": "Dronten",
+    "city": "Dronten",
+    "lat": 52.52757,
+    "lon": 5.69476
+   }
+  ]
+ },
+ {
+  "id": "hku",
+  "name": "HKU University of the Arts Utrecht",
+  "short": "HKU",
+  "aliases": [
+   "hogeschool voor de kunsten utrecht",
+   "hku"
+  ],
+  "campuses": [
+   {
+    "name": "Utrecht",
+    "city": "Utrecht",
+    "lat": 52.09282,
+    "lon": 5.12114
+   }
+  ]
+ },
+ {
+  "id": "artez",
+  "name": "ArtEZ University of the Arts",
+  "short": "ArtEZ",
+  "aliases": [
+   "artez hogeschool voor de kunsten"
+  ],
+  "campuses": [
+   {
+    "name": "Arnhem",
+    "city": "Arnhem",
+    "lat": 51.98449,
+    "lon": 5.89253
+   },
+   {
+    "name": "Zwolle",
+    "city": "Zwolle",
+    "lat": 52.51424,
+    "lon": 6.10726
+   },
+   {
+    "name": "Enschede",
+    "city": "Enschede",
+    "lat": 52.22199,
+    "lon": 6.89643
+   }
+  ]
+ },
+ {
+  "id": "ahk",
+  "name": "Amsterdam University of the Arts",
+  "short": "AHK",
+  "aliases": [
+   "amsterdamse hogeschool voor de kunsten",
+   "ahk",
+   "conservatorium van amsterdam"
+  ],
+  "campuses": [
+   {
+    "name": "Amsterdam",
+    "city": "Amsterdam",
+    "lat": 52.37596,
+    "lon": 4.9089
+   }
+  ]
+ },
+ {
+  "id": "rietveld",
+  "name": "Gerrit Rietveld Academie",
+  "short": "Rietveld",
+  "aliases": [
+   "rietveld academie"
+  ],
+  "campuses": [
+   {
+    "name": "Amsterdam",
+    "city": "Amsterdam",
+    "lat": 52.34208,
+    "lon": 4.85921
+   }
+  ]
+ },
+ {
+  "id": "dae",
+  "name": "Design Academy Eindhoven",
+  "short": "Design Academy",
+  "aliases": [
+   "dae"
+  ],
+  "campuses": [
+   {
+    "name": "Eindhoven",
+    "city": "Eindhoven",
+    "lat": 51.43972,
+    "lon": 5.4749
+   }
+  ]
+ },
+ {
+  "id": "codarts",
+  "name": "Codarts Rotterdam",
+  "short": "Codarts",
+  "aliases": [
+   "codarts university for the arts"
+  ],
+  "campuses": [
+   {
+    "name": "Rotterdam",
+    "city": "Rotterdam",
+    "lat": 51.92204,
+    "lon": 4.47049
+   }
+  ]
+ },
+ {
+  "id": "kabk",
+  "name": "Royal Academy of Art, The Hague",
+  "short": "KABK",
+  "aliases": [
+   "koninklijke academie van beeldende kunsten",
+   "kabk",
+   "koninklijk conservatorium"
+  ],
+  "campuses": [
+   {
+    "name": "Den Haag",
+    "city": "Den Haag",
+    "lat": 52.08202,
+    "lon": 4.31906
+   }
+  ]
+ },
+ {
+  "id": "che",
+  "name": "Christelijke Hogeschool Ede",
+  "short": "CHE",
+  "aliases": [
+   "che",
+   "christian university of applied sciences"
+  ],
+  "campuses": [
+   {
+    "name": "Ede",
+    "city": "Ede",
+    "lat": 52.02027,
+    "lon": 5.66483
+   }
+  ]
+ },
+ {
+  "id": "viaa",
+  "name": "Hogeschool Viaa",
+  "short": "Viaa",
+  "aliases": [
+   "viaa"
+  ],
+  "campuses": [
+   {
+    "name": "Zwolle",
+    "city": "Zwolle",
+    "lat": 52.50878,
+    "lon": 6.10248
+   }
+  ]
+ },
+ {
+  "id": "marnix",
+  "name": "Marnix Academie",
+  "short": "Marnix Academie",
+  "aliases": [
+   "marnix"
+  ],
+  "campuses": [
+   {
+    "name": "Utrecht",
+    "city": "Utrecht",
+    "lat": 52.10319,
+    "lon": 5.13345
+   }
+  ]
+ },
+ {
+  "id": "ipabo",
+  "name": "iPabo",
+  "short": "iPabo",
+  "aliases": [
+   "ipabo amsterdam"
+  ],
+  "campuses": [
+   {
+    "name": "Amsterdam",
+    "city": "Amsterdam",
+    "lat": 52.36749,
+    "lon": 4.83689
+   }
+  ]
+ },
+ {
+  "id": "thomasmore",
+  "name": "Hogeschool Thomas More",
+  "short": "Thomas More",
+  "aliases": [
+   "thomas more hogeschool"
+  ],
+  "campuses": [
+   {
+    "name": "Rotterdam",
+    "city": "Rotterdam",
+    "lat": 51.92552,
+    "lon": 4.46404
+   }
+  ]
+ },
+ {
+  "id": "driestar",
+  "name": "Driestar hogeschool",
+  "short": "Driestar",
+  "aliases": [
+   "driestar educatief"
+  ],
+  "campuses": [
+   {
+    "name": "Gouda",
+    "city": "Gouda",
+    "lat": 52.01877,
+    "lon": 4.69908
+   }
+  ]
+ },
+ {
+  "id": "iselinge",
+  "name": "Iselinge Hogeschool",
+  "short": "Iselinge",
+  "aliases": [
+   "iselinge"
+  ],
+  "campuses": [
+   {
+    "name": "Doetinchem",
+    "city": "Doetinchem",
+    "lat": 51.96689,
+    "lon": 6.30235
+   }
+  ]
+ },
+ {
+  "id": "wittenborg",
+  "name": "Wittenborg University of Applied Sciences",
+  "short": "Wittenborg",
+  "aliases": [
+   "wittenborg"
+  ],
+  "campuses": [
+   {
+    "name": "Apeldoorn",
+    "city": "Apeldoorn",
+    "lat": 52.21101,
+    "lon": 5.95967
+   }
+  ]
+ },
+ {
+  "id": "rocva",
+  "name": "ROC van Amsterdam",
+  "short": "ROC van Amsterdam",
+  "aliases": [
+   "roc amsterdam",
+   "rocva",
+   "mbo college amsterdam"
+  ],
+  "campuses": [
+   {
+    "name": "Amsterdam",
+    "city": "Amsterdam",
+    "lat": 52.34667,
+    "lon": 4.84246
+   }
+  ]
+ },
+ {
+  "id": "mondriaan",
+  "name": "ROC Mondriaan",
+  "short": "Mondriaan",
+  "aliases": [
+   "roc mondriaan"
+  ],
+  "campuses": [
+   {
+    "name": "Den Haag",
+    "city": "Den Haag",
+    "lat": 52.07303,
+    "lon": 4.30619
+   }
+  ]
+ },
+ {
+  "id": "albeda",
+  "name": "Albeda",
+  "short": "Albeda",
+  "aliases": [
+   "albeda college"
+  ],
+  "campuses": [
+   {
+    "name": "Rotterdam",
+    "city": "Rotterdam",
+    "lat": 51.9265,
+    "lon": 4.47432
+   }
+  ]
+ },
+ {
+  "id": "zadkine",
+  "name": "Zadkine",
+  "short": "Zadkine",
+  "aliases": [
+   "zadkine mbo"
+  ],
+  "campuses": [
+   {
+    "name": "Rotterdam",
+    "city": "Rotterdam",
+    "lat": 51.92851,
+    "lon": 4.4765
+   }
+  ]
+ },
+ {
+  "id": "rocmn",
+  "name": "ROC Midden Nederland",
+  "short": "ROC Midden Nederland",
+  "aliases": [
+   "roc mn",
+   "rocmn"
+  ],
+  "campuses": [
+   {
+    "name": "Utrecht",
+    "city": "Utrecht",
+    "lat": 52.07891,
+    "lon": 5.119
+   }
+  ]
+ },
+ {
+  "id": "mboutrecht",
+  "name": "MBO Utrecht",
+  "short": "MBO Utrecht",
+  "aliases": [
+   "mbo utrecht"
+  ],
+  "campuses": [
+   {
+    "name": "Utrecht",
+    "city": "Utrecht",
+    "lat": 52.07997,
+    "lon": 5.09989
+   }
+  ]
+ },
+ {
+  "id": "summa",
+  "name": "Summa College",
+  "short": "Summa",
+  "aliases": [
+   "summa college"
+  ],
+  "campuses": [
+   {
+    "name": "Eindhoven",
+    "city": "Eindhoven",
+    "lat": 51.43515,
+    "lon": 5.46254
+   }
+  ]
+ },
+ {
+  "id": "roctilburg",
+  "name": "ROC Tilburg",
+  "short": "ROC Tilburg",
+  "aliases": [
+   "roc tilburg"
+  ],
+  "campuses": [
+   {
+    "name": "Tilburg",
+    "city": "Tilburg",
+    "lat": 51.57178,
+    "lon": 5.07862
+   }
+  ]
+ },
+ {
+  "id": "curio",
+  "name": "Curio",
+  "short": "Curio",
+  "aliases": [
+   "roc west-brabant",
+   "curio mbo"
+  ],
+  "campuses": [
+   {
+    "name": "Breda",
+    "city": "Breda",
+    "lat": 51.60277,
+    "lon": 4.78836
+   }
+  ]
+ },
+ {
+  "id": "kw1c",
+  "name": "Koning Willem I College",
+  "short": "KW1C",
+  "aliases": [
+   "koning willem 1 college",
+   "kw1c"
+  ],
+  "campuses": [
+   {
+    "name": "’s-Hertogenbosch",
+    "city": "’s-Hertogenbosch",
+    "lat": 51.69894,
+    "lon": 5.31307
+   }
+  ]
+ },
+ {
+  "id": "leijgraaf",
+  "name": "ROC de Leijgraaf",
+  "short": "De Leijgraaf",
+  "aliases": [
+   "roc de leijgraaf",
+   "leijgraaf"
+  ],
+  "campuses": [
+   {
+    "name": "Veghel",
+    "city": "Veghel",
+    "lat": 51.62176,
+    "lon": 5.56368
+   }
+  ]
+ },
+ {
+  "id": "rocnijmegen",
+  "name": "ROC Nijmegen",
+  "short": "ROC Nijmegen",
+  "aliases": [
+   "roc nijmegen"
+  ],
+  "campuses": [
+   {
+    "name": "Nijmegen",
+    "city": "Nijmegen",
+    "lat": 51.8412,
+    "lon": 5.85251
+   }
+  ]
+ },
+ {
+  "id": "rijnijssel",
+  "name": "Rijn IJssel",
+  "short": "Rijn IJssel",
+  "aliases": [
+   "rijn ijssel"
+  ],
+  "campuses": [
+   {
+    "name": "Arnhem",
+    "city": "Arnhem",
+    "lat": 51.98891,
+    "lon": 5.93189
+   }
+  ]
+ },
+ {
+  "id": "roctwente",
+  "name": "ROC van Twente",
+  "short": "ROC van Twente",
+  "aliases": [
+   "roc twente"
+  ],
+  "campuses": [
+   {
+    "name": "Hengelo",
+    "city": "Hengelo",
+    "lat": 52.26016,
+    "lon": 6.78751
+   },
+   {
+    "name": "Enschede",
+    "city": "Enschede",
+    "lat": 52.21992,
+    "lon": 6.88906
+   }
+  ]
+ },
+ {
+  "id": "deltion",
+  "name": "Deltion College",
+  "short": "Deltion",
+  "aliases": [
+   "deltion college"
+  ],
+  "campuses": [
+   {
+    "name": "Zwolle",
+    "city": "Zwolle",
+    "lat": 52.52094,
+    "lon": 6.08009
+   }
+  ]
+ },
+ {
+  "id": "landstede",
+  "name": "Landstede MBO",
+  "short": "Landstede",
+  "aliases": [
+   "landstede"
+  ],
+  "campuses": [
+   {
+    "name": "Zwolle",
+    "city": "Zwolle",
+    "lat": 52.50392,
+    "lon": 6.11377
+   }
+  ]
+ },
+ {
+  "id": "noorderpoort",
+  "name": "Noorderpoort",
+  "short": "Noorderpoort",
+  "aliases": [
+   "noorderpoort college"
+  ],
+  "campuses": [
+   {
+    "name": "Groningen",
+    "city": "Groningen",
+    "lat": 53.21738,
+    "lon": 6.55592
+   }
+  ]
+ },
+ {
+  "id": "alfa",
+  "name": "Alfa-college",
+  "short": "Alfa-college",
+  "aliases": [
+   "alfa college"
+  ],
+  "campuses": [
+   {
+    "name": "Groningen",
+    "city": "Groningen",
+    "lat": 53.21394,
+    "lon": 6.547
+   }
+  ]
+ },
+ {
+  "id": "firda",
+  "name": "Firda",
+  "short": "Firda",
+  "aliases": [
+   "roc friesland college",
+   "friesland college"
+  ],
+  "campuses": [
+   {
+    "name": "Leeuwarden",
+    "city": "Leeuwarden",
+    "lat": 53.19667,
+    "lon": 5.79837
+   }
+  ]
+ },
+ {
+  "id": "gilde",
+  "name": "Gilde Opleidingen",
+  "short": "Gilde",
+  "aliases": [
+   "gilde opleidingen"
+  ],
+  "campuses": [
+   {
+    "name": "Roermond",
+    "city": "Roermond",
+    "lat": 51.19249,
+    "lon": 6.01645
+   },
+   {
+    "name": "Venlo",
+    "city": "Venlo",
+    "lat": 51.36206,
+    "lon": 6.18016
+   }
+  ]
+ },
+ {
+  "id": "vista",
+  "name": "Vista college",
+  "short": "Vista",
+  "aliases": [
+   "vista college"
+  ],
+  "campuses": [
+   {
+    "name": "Heerlen",
+    "city": "Heerlen",
+    "lat": 50.88011,
+    "lon": 5.95582
+   },
+   {
+    "name": "Maastricht",
+    "city": "Maastricht",
+    "lat": 50.84707,
+    "lon": 5.71662
+   }
+  ]
+ },
+ {
+  "id": "nova",
+  "name": "Nova College",
+  "short": "Nova College",
+  "aliases": [
+   "roc nova college"
+  ],
+  "campuses": [
+   {
+    "name": "Haarlem",
+    "city": "Haarlem",
+    "lat": 52.38381,
+    "lon": 4.63279
+   }
+  ]
+ },
+ {
+  "id": "mborijnland",
+  "name": "MBO Rijnland",
+  "short": "MBO Rijnland",
+  "aliases": [
+   "mbo rijnland"
+  ],
+  "campuses": [
+   {
+    "name": "Leiden",
+    "city": "Leiden",
+    "lat": 52.14617,
+    "lon": 4.49283
+   }
+  ]
+ },
+ {
+  "id": "scalda",
+  "name": "Scalda",
+  "short": "Scalda",
+  "aliases": [
+   "scalda mbo"
+  ],
+  "campuses": [
+   {
+    "name": "Vlissingen",
+    "city": "Vlissingen",
+    "lat": 51.44854,
+    "lon": 3.57093
+   },
+   {
+    "name": "Middelburg",
+    "city": "Middelburg",
+    "lat": 51.48004,
+    "lon": 3.6345
+   }
+  ]
+ },
+ {
+  "id": "davinci",
+  "name": "Da Vinci College",
+  "short": "Da Vinci College",
+  "aliases": [
+   "davinci college"
+  ],
+  "campuses": [
+   {
+    "name": "Dordrecht",
+    "city": "Dordrecht",
+    "lat": 51.79786,
+    "lon": 4.67942
+   }
+  ]
+ },
+ {
+  "id": "aventus",
+  "name": "Aventus",
+  "short": "Aventus",
+  "aliases": [
+   "roc aventus"
+  ],
+  "campuses": [
+   {
+    "name": "Apeldoorn",
+    "city": "Apeldoorn",
+    "lat": 52.20738,
+    "lon": 5.97298
+   }
+  ]
+ },
+ {
+  "id": "drenthecollege",
+  "name": "Drenthe College",
+  "short": "Drenthe College",
+  "aliases": [
+   "drenthe college"
+  ],
+  "campuses": [
+   {
+    "name": "Assen",
+    "city": "Assen",
+    "lat": 53.00362,
+    "lon": 6.57426
+   }
+  ]
+ },
+ {
+  "id": "roca12",
+  "name": "ROC A12",
+  "short": "ROC A12",
+  "aliases": [
+   "roc a12"
+  ],
+  "campuses": [
+   {
+    "name": "Ede",
+    "city": "Ede",
+    "lat": 52.01896,
+    "lon": 5.66449
+   }
+  ]
+ },
+ {
+  "id": "graafschap",
+  "name": "Graafschap College",
+  "short": "Graafschap College",
+  "aliases": [
+   "graafschap college"
+  ],
+  "campuses": [
+   {
+    "name": "Doetinchem",
+    "city": "Doetinchem",
+    "lat": 51.9698,
+    "lon": 6.27462
+   }
+  ]
+ },
+ {
+  "id": "mboamersfoort",
+  "name": "MBO Amersfoort",
+  "short": "MBO Amersfoort",
+  "aliases": [
+   "mbo amersfoort"
+  ],
+  "campuses": [
+   {
+    "name": "Amersfoort",
+    "city": "Amersfoort",
+    "lat": 52.14684,
+    "lon": 5.38445
+   }
+  ]
+ }
+]

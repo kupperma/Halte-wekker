@@ -111,11 +111,17 @@ final class SchoolAlarm: ObservableObject {
     /// The calendars that look like your timetable (worked out in the background).
     @Published private(set) var schoolLike: Set<String> = []
     func findSchoolLike() async {
-        let st = await calendarStore()
+        let st = await calendarStore(), hints = Self.hints
         let ids = await Task.detached { () -> Set<String> in
-            return Set(st.calendars(for: .event).filter { SchoolAlarm.looksLikeSchool($0, in: st) }.map(\.calendarIdentifier))
+            return Set(st.calendars(for: .event).filter { SchoolAlarm.looksLikeSchool($0, in: st, hints: hints) }.map(\.calendarIdentifier))
         }.value
         schoolLike = ids
+    }
+
+    /// The words that mark your timetable calendar: 0.22's on the Veghel ⇄ BUas profile, else the timetable apps and
+    /// your school's names (`SchoolHints`).
+    static var hints: SchoolHints {
+        SchoolHints.make(profileHints: ProfileStore.shared.profile.calendarHints, school: [RoleWords.current.school])
     }
 
     /// The next school day (whose class is still ahead), for the screens.
@@ -127,13 +133,56 @@ final class SchoolAlarm: ObservableObject {
 
     /// Turned on: ask for the calendar and the alarm, pick the school calendar, plan.
     func start() async {
+        // (a week of your own, or none yet, needs no calendar: 0.23)
+        if Self.schedule == .calendars {
+            if !allowed {
+                allowed = (try? await calendarStore().requestFullAccessToEvents()) ?? false
+            }
+            guard allowed else { note = "Allow calendar access to read your timetable."; return }
+            if calendarIds.isEmpty { calendarIds = await suggested() }
+        }
+        realAlarm = await WakeAlarm.requestPermission()
+        await refresh(force: true)
+    }
+
+    /// Where your first classes come from (the profile's; 0.22 and before: the calendars).
+    static var schedule: ScheduleSource { ProfileStore.shared.profile.schedule }
+
+    /// The setup's timetable step: ask for the calendar (in context), and load the calendars to show.
+    func askCalendarAccess() async -> Bool {
         if !allowed {
             allowed = (try? await calendarStore().requestFullAccessToEvents()) ?? false
         }
-        guard allowed else { note = "Allow calendar access to read your timetable."; return }
-        if calendarIds.isEmpty { calendarIds = await suggested() }
-        realAlarm = await WakeAlarm.requestPermission()
-        await refresh(force: true)
+        if allowed { await findSchoolLike() }
+        return allowed
+    }
+
+    /// Your calendars as the setup shows them (none without access). `hints` marks the ones that look like a timetable.
+    func setupCalendars(hints: SchoolHints) async -> (all: [SetupCalendar], school: Set<String>) {
+        guard EKEventStore.authorizationStatus(for: .event) == .fullAccess else { return ([], []) }
+        allowed = true
+        let st = await calendarStore()
+        return await Task.detached { () -> ([SetupCalendar], Set<String>) in
+            st.refreshSourcesIfNecessary()
+            let cals = st.calendars(for: .event).sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+            let all = cals.map { SetupCalendar(id: $0.calendarIdentifier, title: $0.title, source: $0.source.title, subscribed: $0.type == .subscription) }
+            let school = Set(cals.filter { SchoolAlarm.looksLikeSchool($0, in: st, hints: hints) }.map(\.calendarIdentifier))
+            return (all, school)
+        }.value
+    }
+
+    /// The setup's Done (or putting your own back after a test): the calendars, the times and on or off, at once.
+    func apply(calendarIds ids: Set<String>, early: Int, wake: Int, on turnOn: Bool) {
+        if calendarIds != ids { calendarIds = ids }
+        if earlyMinutes != early { earlyMinutes = early }
+        if wakeMinutes != wake { wakeMinutes = wake }
+        if on != turnOn { on = turnOn } else if turnOn { Task { await refresh(force: true, now: true) } }
+    }
+
+    /// Back to the saved values (after a test's backup was put back): the calendars, the times, on or off.
+    func reloadSaved() {
+        apply(calendarIds: Set(d.stringArray(forKey: "school.cals") ?? []), early: d.object(forKey: "school.early") as? Int ?? 10,
+              wake: d.object(forKey: "school.wake") as? Int ?? 60, on: d.bool(forKey: "school.on"))
     }
 
     /// Turned off: every alarm that hasn't rung goes.
@@ -152,15 +201,12 @@ final class SchoolAlarm: ObservableObject {
     /// Does this look like the school timetable? Its name (TimeEdit, BUas, rooster), or its events (TimeEdit links, BUas rooms).
     func looksLikeSchool(_ c: EKCalendar) -> Bool { schoolLike.contains(c.calendarIdentifier) }
 
-    nonisolated static func looksLikeSchool(_ c: EKCalendar, in store: EKEventStore) -> Bool {
-        let name = (c.title + " " + c.source.title).lowercased()
-        if ["timeedit", "buas", "rooster", "breda university", "school", "timetable"].contains(where: { name.contains($0) }) { return true }
-        let now = Date()
-        let evs = store.events(matching: store.predicateForEvents(withStart: now.addingTimeInterval(-7 * 86400), end: now.addingTimeInterval(14 * 86400), calendars: [c]))
-        return evs.prefix(60).contains { e in
-            let s = [e.url?.absoluteString ?? "", e.notes ?? "", e.location ?? ""].joined(separator: " ").lowercased()
-            return s.contains("timeedit") || s.contains("buas") || s.contains("hopmansstraat")
-        }
+    nonisolated static func looksLikeSchool(_ c: EKCalendar, in store: EKEventStore, hints: SchoolHints) -> Bool {
+        SchoolHints.matches(title: c.title, source: c.source.title, eventText: {
+            let now = Date()
+            let evs = store.events(matching: store.predicateForEvents(withStart: now.addingTimeInterval(-7 * 86400), end: now.addingTimeInterval(14 * 86400), calendars: [c]))
+            return evs.prefix(60).map { e in [e.url?.absoluteString ?? "", e.notes ?? "", e.location ?? ""].joined(separator: " ") }
+        }, hints: hints)
     }
 
     func suggested() async -> Set<String> { await findSchoolLike(); return schoolLike }
@@ -170,6 +216,19 @@ final class SchoolAlarm: ObservableObject {
     struct Lesson: Sendable { let title: String?; let location: String?; let startDate: Date }
 
     private func firstClasses() async -> [String: Lesson] {
+        switch Self.schedule {
+        case .calendars: return await calendarFirstClasses()
+        case .manual(let w):
+            // the same times every week (0.23): the next eight days' first classes, from the week
+            let tz = TimeZone(identifier: "Europe/Amsterdam") ?? .current
+            var out: [String: Lesson] = [:]
+            for l in w.lessons(from: Date(), days: 8, tz: tz) { out[l.day] = Lesson(title: "Class", location: nil, startDate: l.start) }
+            return out
+        case .none: return [:]
+        }
+    }
+
+    private func calendarFirstClasses() async -> [String: Lesson] {
         let st = await calendarStore(), ids = calendarIds
         return await Task.detached { () -> [String: Lesson] in
             let cals = st.calendars(for: .event).filter { ids.contains($0.calendarIdentifier) }
@@ -237,7 +296,8 @@ final class SchoolAlarm: ObservableObject {
     private func plan(force: Bool) async {
         await restoreTurnedOn()
         allowed = EKEventStore.authorizationStatus(for: .event) == .fullAccess
-        guard allowed else { note = "Allow calendar access to read your timetable."; return }
+        let schedule = Self.schedule
+        guard allowed || schedule != .calendars else { note = "Allow calendar access to read your timetable."; return }
         let classes = await firstClasses()
         let now = Date()
         let oldNext = next
@@ -322,7 +382,11 @@ final class SchoolAlarm: ObservableObject {
         week.sort { $0.classStart < $1.classStart }
         save()
         updateNext()
-        note = classes.isEmpty ? (calendarIds.isEmpty ? "Pick your school calendar." : "No classes found in the next week.") : nil
+        switch schedule {
+        case .calendars: note = classes.isEmpty ? (calendarIds.isEmpty ? "Pick your school calendar." : "No classes found in the next week.") : nil
+        case .manual: note = classes.isEmpty ? "No school days in your week." : nil
+        case .none: note = "Your timetable isn’t set up yet."
+        }
         if changed { tell(added: added, oldNext: oldNext) }
         Self.scheduleBackground()
     }
@@ -846,6 +910,17 @@ extension SchoolAlarm {
     /// Read only: the events of the calendars you picked, from the start of today to `days` ahead (for the end of a
     /// day's classes and Coming up). Empty without calendar access or a picked calendar.
     func schoolEvents(days: Int) async -> [ComingUp.Event] {
+        switch Self.schedule {
+        case .calendars: break
+        case .manual(let w):
+            // your week's first classes, two weeks ahead (as far as Your day steps): a start only, no end and no breaks
+            let tz = TimeZone(identifier: "Europe/Amsterdam") ?? .current
+            let start = Calendar.current.startOfDay(for: Date())
+            return w.lessons(from: start, days: min(days, 14), tz: tz).map {
+                ComingUp.Event(title: "Class", start: $0.start, end: $0.start, allDay: false, cancelled: false, startOnly: true)
+            }
+        case .none: return []
+        }
         guard EKEventStore.authorizationStatus(for: .event) == .fullAccess, !calendarIds.isEmpty else { return [] }
         let st = await calendarStore(), ids = calendarIds
         return await Task.detached { () -> [ComingUp.Event] in
@@ -862,6 +937,6 @@ extension SchoolAlarm {
 
     /// When a day's last class ends (from `events`), if it has classes.
     nonisolated static func classesEnd(_ events: [ComingUp.Event], on day: Date) -> Date? {
-        events.filter { !$0.allDay && !$0.cancelled && Calendar.current.isDate($0.start, inSameDayAs: day) }.map(\.end).max()
+        events.filter { !$0.allDay && !$0.cancelled && !$0.startOnly && Calendar.current.isDate($0.start, inSameDayAs: day) }.map(\.end).max()
     }
 }

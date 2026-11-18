@@ -30,6 +30,26 @@ final class ProfileStore: ObservableObject {
         RoleSnapshot.setProfile(corridor: profile.corridor, hints: profile.calendarHints)
     }
 
+    /// The setup's Done (0.23): its profile, as a whole.
+    func replace(_ p: Profile) {
+        profile = p
+        persist()
+    }
+
+    /// Where the school alarm finds your first classes (Settings › School alarm, or the setup).
+    func setSchedule(_ s: ScheduleSource) {
+        guard s != profile.schedule else { return }
+        profile.schedule = s
+        persist()
+        Task { await SchoolAlarm.shared.refresh(force: true, now: true) }
+    }
+
+    /// The saved profile again (your own put back after "Test the setup as a new user").
+    func reload() {
+        profile = ProfileLogic.decode(UserDefaults.standard.data(forKey: ProfileLogic.storageKey)) ?? profile
+        RoleSnapshot.setProfile(corridor: profile.corridor, hints: profile.calendarHints)
+    }
+
     /// Today's (0.21) Home and School, as places, to tell whether yours are still there.
     private static var legacyPlaces: [SavedPlace] {
         let h = RoleLogic.legacyHome, s = RoleLogic.legacySchool

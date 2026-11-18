@@ -132,13 +132,10 @@ enum ProfileLogic {
 
     static func encode(_ p: Profile) -> Data? { try? JSONEncoder().encode(p) }
 
-    /// The profile at launch: the saved one; none saved, an earlier version's user gets the legacy profile, set up.
-    /// A new install (0.22) still gets today's defaults (the places are seeded as BUas and Veghel), only not set up:
-    /// from 0.23 a new install starts from `fresh` and the setup.
+    /// The profile at launch: the saved one; none saved, an earlier version's user gets the legacy profile, set up,
+    /// and a new install (0.23) starts from `fresh`: the first-run setup opens.
     static func load(data: Data?, existing: Bool, places: [SavedPlace]? = nil) -> Profile {
         if let p = decode(data) { return p }
-        var p = legacy(places: places)
-        p.setupDone = existing
-        return p
+        return existing ? legacy(places: places) : fresh
     }
 }

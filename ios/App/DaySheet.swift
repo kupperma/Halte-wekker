@@ -366,11 +366,13 @@ struct DaySheet: View {
     // MARK: coming up
 
     @ViewBuilder private var comingUp: some View {
-        let r = ComingUp.build(model.events, now: Date(), cal: cal, limit: 5)
+        // (your week's first classes are only starts: no timetable dates, breaks or exams in them)
+        let r = ComingUp.build(model.events.filter { !$0.startOnly }, now: Date(), cal: cal, limit: 5)
+        let ownWeek = model.events.contains { $0.startOnly }
         VStack(alignment: .leading, spacing: 10) {
             Text("Coming up").font(DS.title).foregroundStyle(DS.text).accessibilityAddTraits(.isHeader)
             if r.items.isEmpty {
-                Text(model.loaded ? (r.knownUntil == nil ? "No dates known" : "Nothing special: classes every weekday.") : "Reading your timetable…")
+                Text(model.loaded ? (ownWeek ? "Your week has the same times every week: no dates from a timetable." : r.knownUntil == nil ? "No dates known" : "Nothing special: classes every weekday.") : "Reading your timetable…")
                     .font(DS.sub).foregroundStyle(DS.secondary)
             } else {
                 LazyVGrid(columns: [GridItem(.flexible(), spacing: 10, alignment: .top), GridItem(.flexible(), spacing: 10, alignment: .top)], alignment: .leading, spacing: 10) {

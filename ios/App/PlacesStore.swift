@@ -57,6 +57,19 @@ final class PlacesStore: ObservableObject {
         ProfileStore.shared.placesChanged(from: old, to: list)
     }
     func remove(_ id: String) { list = PlacesLogic.remove(list, id: id); persist() }
+    /// The setup's Done (0.23): all your places at once. Home or School somewhere else: what was learnt for the old
+    /// one goes, as for any move.
+    func replaceAll(_ new: [SavedPlace]) {
+        let old = list
+        list = PlacesLogic.load(PlacesLogic.encode(new), seed: old)
+        persist()
+        ProfileStore.shared.placesChanged(from: old, to: list)
+    }
+    /// The saved list again (your own put back after a test; the caller clears what was learnt).
+    func reload() {
+        list = PlacesLogic.load(UserDefaults.standard.data(forKey: PlacesLogic.storageKey), seed: Self.seed())
+        pushRoles()
+    }
     func move(from: Int, to: Int) { list = PlacesLogic.move(list, from: from, to: to); persist() }
 
     /// The place to plan to: Home and School are always the roles (Home as trips from it start, your board stops on

@@ -98,4 +98,23 @@ final class StopsStore: ObservableObject {
         saved = []; boardStops = Self.defaultBoard; lines = Self.defaultLines; lastMode = [:]
         persist()
     }
+
+    /// The setup's Done (0.23): the home board's stops, and its lines (none: every line).
+    func setBoard(_ stops: [BoardStop], lines l: [String]) {
+        if boardStops != stops { boardStops = Array(stops.prefix(Self.maxBoardStops)) }
+        if lines != l { lines = l }
+    }
+
+    /// The saved board, lines and modes again (your own put back after a test).
+    func reload() {
+        // (all read first: setting the board saves everything, the modes too)
+        let d = UserDefaults.standard
+        let board = d.data(forKey: "boardStops").flatMap { try? JSONDecoder().decode([BoardStop].self, from: $0) } ?? Self.defaultBoard
+        let l = d.stringArray(forKey: "boardLines") ?? Self.defaultLines
+        let modes = d.dictionary(forKey: "lastMode") as? [String: String] ?? [:]
+        lastMode = modes
+        boardStops = board
+        lines = l
+        persist()
+    }
 }
