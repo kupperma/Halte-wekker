@@ -6,14 +6,20 @@ import Foundation
 final class NearMe: NSObject, ObservableObject, CLLocationManagerDelegate {
     static let radius = 2000.0
     static let schoolRadius = 350.0
-    /// Where each list leaves from.
-    static let places: [String: (CLLocationCoordinate2D, String)] = [
-        "veghel": (.init(latitude: 51.6137, longitude: 5.5474), "Veghel"),
-        "ehv": (.init(latitude: 51.4430, longitude: 5.4796), "Eindhoven station"),
-        "ht": (.init(latitude: 51.6905, longitude: 5.2936), "Den Bosch station"),
-        "bd": (.init(latitude: 51.5950, longitude: 4.7799), "Breda station"),
-        "buas": (.init(latitude: 51.5907, longitude: 4.7932), "BUas"),
-    ]
+    /// Where each list leaves from: Home and School (by their role keys), and on the corridor its stations.
+    static var places: [String: (CLLocationCoordinate2D, String)] {
+        let r = RoleSnapshot.current
+        var out: [String: (CLLocationCoordinate2D, String)] = [
+            "veghel": (Place.home.coordinate, r.corridor != nil ? r.words.homeTown : Place.home.short),
+            "buas": (Place.school.coordinate, r.words.school),
+        ]
+        if r.corridor != nil {
+            out["ehv"] = (.init(latitude: 51.4430, longitude: 5.4796), "Eindhoven station")
+            out["ht"] = (.init(latitude: 51.6905, longitude: 5.2936), "Den Bosch station")
+            out["bd"] = (.init(latitude: 51.5950, longitude: 4.7799), "Breda station")
+        }
+        return out
+    }
 
     @Published var on: Bool = UserDefaults.standard.bool(forKey: "nearMe") {
         didSet { UserDefaults.standard.set(on, forKey: "nearMe"); if on { locate(force: true) } }
@@ -96,7 +102,7 @@ final class NearMe: NSObject, ObservableObject, CLLocationManagerDelegate {
     }
 
     static func atSchool(_ l: CLLocation) -> Bool {
-        let b = places["buas"]!.0
+        let b = Place.school.coordinate
         return l.distance(from: CLLocation(latitude: b.latitude, longitude: b.longitude)) <= schoolRadius
     }
 }

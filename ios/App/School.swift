@@ -26,7 +26,7 @@ final class SchoolAlarm: ObservableObject {
 
     @Published var on: Bool { didSet { d.set(on, forKey: "school.on"); if on { Task { await self.start() } } else { stop() } } }
     @Published var calendarIds: Set<String> { didSet { d.set(Array(calendarIds), forKey: "school.cals"); settingsChanged() } }
-    /// How early you want to be at BUas before class.
+    /// How early you want to be at school before class.
     @Published var earlyMinutes: Int { didSet { d.set(earlyMinutes, forKey: "school.early"); settingsChanged() } }
     /// How long before you have to leave it wakes you.
     @Published var wakeMinutes: Int { didSet { d.set(wakeMinutes, forKey: "school.wake"); settingsChanged() } }
@@ -344,11 +344,11 @@ final class SchoolAlarm: ObservableObject {
         }
     }
 
-    /// From home: where you are now if that's in Veghel (and it remembers it), else where it last saw you there, else your
-    /// Veghel stops.
+    /// From home: where you are now if that's within 6 km of Home (in Veghel; and it remembers it), else where it last saw
+    /// you there, else your home stops.
     private func homeStart() -> Place {
-        let veghel = CLLocation(latitude: Place.home.coordinate.latitude, longitude: Place.home.coordinate.longitude)
-        if let l = trip?.lastFix, l.timestamp.timeIntervalSinceNow > -2 * 3600, l.horizontalAccuracy < 200, l.distance(from: veghel) < 6000 {
+        let home = CLLocation(latitude: Place.home.coordinate.latitude, longitude: Place.home.coordinate.longitude)
+        if let l = trip?.lastFix, l.timestamp.timeIntervalSinceNow > -2 * 3600, l.horizontalAccuracy < 200, l.distance(from: home) < 6000 {
             d.set(l.coordinate.latitude, forKey: "school.homeLat"); d.set(l.coordinate.longitude, forKey: "school.homeLon")
             return .here(l.coordinate)
         }
@@ -516,7 +516,7 @@ struct SchoolAlarmSection: View {
             Toggle(isOn: $school.on) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Wake me for school")
-                    Text("From your TimeEdit timetable: the first class of the next school day, the trip there, and an alarm before you have to leave.")
+                    Text("\(RoleWords.current.fromTimetable): the first class of the next school day, the trip there, and an alarm before you have to leave.")
                         .font(ink.note(12)).foregroundStyle(ink.muted)
                 }
             }
@@ -533,13 +533,13 @@ struct SchoolAlarmSection: View {
                             Text(school.calendarIds.isEmpty ? "Pick one" : "\(school.calendarIds.count) picked").foregroundStyle(ink.muted)
                         }
                     }
-                    Stepper("At BUas \(school.earlyMinutes) min before class", value: $school.earlyMinutes, in: 0...45, step: 5)
+                    Stepper("At \(RoleWords.current.school) \(school.earlyMinutes) min before class", value: $school.earlyMinutes, in: 0...45, step: 5)
                     Stepper("Wake me \(school.wakeMinutes) min before I leave", value: $school.wakeMinutes, in: 15...150, step: 5)
                     if let n = school.next {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("\(SchoolAlarm.dayWord(n.classStart).capitalizedFirst): \(n.title) at \(Fmt.hhmm(n.classStart))").font(ink.strong(13))
                             if let a = n.alarm, let l = n.leave {
-                                Text("Alarm \(Fmt.hhmm(a)) · leave \(Fmt.hhmm(l)) · at BUas \(Fmt.hhmm(n.trip?.end ?? n.beThere))").font(ink.note(12)).foregroundStyle(ink.muted)
+                                Text("Alarm \(Fmt.hhmm(a)) · leave \(Fmt.hhmm(l)) · \(RoleWords.current.atSchoolLower(Fmt.hhmm(n.trip?.end ?? n.beThere)))").font(ink.note(12)).foregroundStyle(ink.muted)
                             }
                         }
                     }
@@ -583,7 +583,7 @@ struct SchoolCalendarsView: View {
                     }
                 }
             } footer: {
-                Text("Pick only the calendar TimeEdit fills. The first class of each day in it sets the alarm; nothing else is read.")
+                Text("\(RoleWords.current.pickCalendar) The first class of each day in it sets the alarm; nothing else is read.")
             }
         }
         .scrollContentBackground(newLook ? .automatic : .hidden)
@@ -616,7 +616,7 @@ struct SchoolAlarmCard: View {
                         Spacer()
                         stat("LEAVE", Fmt.hhmm(l), big: false)
                         Spacer()
-                        stat("AT BUAS", Fmt.hhmm(n.trip?.end ?? n.beThere), big: false)
+                        stat("AT \(RoleWords.current.school.uppercased())", Fmt.hhmm(n.trip?.end ?? n.beThere), big: false)
                     }
                     if a < Date() {
                         Text("The alarm time has passed: leave by \(Fmt.hhmm(l)).").font(BoardInk.sans(12)).foregroundStyle(Paper.late)
@@ -626,7 +626,7 @@ struct SchoolAlarmCard: View {
                     }
                     if let t = n.trip {
                         Rectangle().fill(Paper.rule).frame(height: 1)
-                        TripLine(trip: t, others: [], dest: "BUas")
+                        TripLine(trip: t, others: [], dest: RoleWords.current.school)
                         PlanButtons(go: go, wake: { wake(t) })
                     }
                 } else {
@@ -650,7 +650,7 @@ struct SchoolAlarmCard: View {
                         .frame(width: 32, height: 32).background(Paper.yellow, in: RoundedRectangle(cornerRadius: 6))
                     VStack(alignment: .leading, spacing: 3) {
                         Text(school.on ? "School alarm" : "Wake me for school").font(HWFont.display(17)).foregroundStyle(Paper.ink)
-                        Text(school.on ? (school.note ?? "Looking at your timetable…") : "From your TimeEdit timetable: the trip to your first class, and an alarm an hour before you have to leave.")
+                        Text(school.on ? (school.note ?? "Looking at your timetable…") : "\(RoleWords.current.fromTimetable): the trip to your first class, and an alarm an hour before you have to leave.")
                             .font(HWFont.body(12)).foregroundStyle(Paper.muted)
                     }
                     Spacer(minLength: 0)

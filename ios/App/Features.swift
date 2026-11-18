@@ -204,23 +204,29 @@ struct PlanSheet: View {
     @State private var time = Date()
     @State private var tomorrow = false
     @State private var error: String?
+    private var w: RoleWords { RoleWords.current }
+    /// The friend's train is the corridor's (Breda and the two hubs): off it, only Be there by and Leave at.
+    private var corridor: Bool { RoleSnapshot.corridor != nil }
     var body: some View {
         let pal = HWPalette.of(home: !out)
         NavigationStack {
             Form {
                 Section {
-                    Picker("Plan by", selection: $mode) { Text("Be there by").tag(0); Text("Leave at").tag(1); Text("Friend’s train").tag(2) }.pickerStyle(.segmented)
+                    Picker("Plan by", selection: $mode) {
+                        Text("Be there by").tag(0); Text("Leave at").tag(1)
+                        if corridor { Text("Friend’s train").tag(2) }
+                    }.pickerStyle(.segmented)
                 }
                 Section {
                     Picker("Direction", selection: $out) { Text(arriveMode ? "To school" : "To Breda").tag(true); Text("Home").tag(false) }.pickerStyle(.segmented)
-                    DatePicker(leaveMode ? (out ? "Leave Veghel at" : "Head home at") : arriveMode ? (out ? "Be at BUas by" : "Be home by") : (out ? "Arrive in Breda at" : "Leave Breda at"),
+                    DatePicker(leaveMode ? (out ? "Leave \(w.homeTown) at" : "Head home at") : arriveMode ? (out ? "Be at \(w.school) by" : "Be home by") : (out ? "Arrive in Breda at" : "Leave Breda at"),
                                selection: $time, displayedComponents: .hourAndMinute)
                     Picker("Day", selection: $tomorrow) { Text("Today").tag(false); Text("Tomorrow").tag(true) }.pickerStyle(.segmented)
                 } footer: {
                     if leaveMode {
-                        Text("The app finds the trip that gets you \(out ? "to BUas" : "home to Veghel") the soonest when you head off at that time from \(out ? "your Veghel stops" : "BUas"), with changes you’ll make and live times. You get a reminder ten minutes before you have to leave, and Fastest trip opens by itself around then.")
+                        Text("The app finds the trip that gets you \(out ? "to \(w.school)" : w.homeToTown) the soonest when you head off at that time from \(out ? w.homeStops : w.school), with changes you’ll make and live times. You get a reminder ten minutes before you have to leave, and Fastest trip opens by itself around then.")
                     } else if arriveMode {
-                        Text("The app finds the trip that leaves the latest and still gets you \(out ? "to BUas" : "home to Veghel") in time, from \(out ? "your Veghel stops" : "BUas"), with live times. You get a reminder ten minutes before you have to leave.")
+                        Text("The app finds the trip that leaves the latest and still gets you \(out ? "to \(w.school)" : w.homeToTown) in time, from \(out ? w.homeStops : w.school), with live times. You get a reminder ten minutes before you have to leave.")
                     } else {
                         Text("Use the time of your friend’s train. The app finds that train, \(out ? "the bus from Veghel that gets you there in time and the bus to BUas after it" : "the bus from BUas to catch it and the bus to Veghel after it").")
                     }
@@ -256,7 +262,7 @@ struct PlanSheet: View {
             }
         }
         .onAppear {
-            mode = byArrival ? (planner.arrive?.leaving == true ? 1 : 0) : 2
+            mode = byArrival || !corridor ? (planner.arrive?.leaving == true ? 1 : 0) : 2
             if byArrival {
                 if let a = planner.arrive, let w = a.when {
                     out = a.out; time = w; tomorrow = !Calendar.current.isDateInToday(w)
@@ -587,7 +593,9 @@ struct StopsList: View {
             }
             .padding(.vertical, 8)
             ForEach(Place.all, id: \.key) { p in
-                row(p.name, sub: p == .home ? "Your home stop" : p == .breda ? "Your school stop" : nil, editable: nil) { start(p) }
+                // (on the corridor your school stop is Breda station; off it, School itself)
+                let schoolStop: Place = RoleSnapshot.corridor != nil ? .breda : .school
+                row(p.name, sub: p == .home ? "Your home stop" : p == schoolStop ? "Your school stop" : nil, editable: nil) { start(p) }
             }
             ForEach(stops.saved) { s in row(s.name, sub: nil, editable: s) { start(s.place) } }
         }
@@ -634,7 +642,7 @@ struct StopSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Name") { TextField("Like Grandma’s or Breda Nassausingel", text: $name) }
+                Section("Name") { TextField(RoleSnapshot.corridor != nil ? "Like Grandma’s or Breda Nassausingel" : "Like Grandma’s or the gym", text: $name) }
                 Section {
                     HStack {
                         TextField("Search a stop", text: $query).onSubmit { search() }.autocorrectionDisabled()
@@ -713,7 +721,7 @@ struct LiveSettingsSheet: View {
                 if stops.boardStops.count < StopsStore.maxBoardStops {
                     Section("Add a stop") {
                         HStack {
-                            TextField("Search, like Veghel Bolkenplein", text: $query).onSubmit { search() }.autocorrectionDisabled()
+                            TextField(RoleSnapshot.corridor != nil ? "Search, like Veghel Bolkenplein" : "Search a stop near home", text: $query).onSubmit { search() }.autocorrectionDisabled()
                             Button(searching ? "…" : "Search") { search() }.disabled(query.count < 2 || searching)
                         }
                         ForEach(hits) { h in
@@ -730,11 +738,13 @@ struct LiveSettingsSheet: View {
                     }
                 }
                 Section {
-                    TextField("305, 306, 158", text: $lines).keyboardType(.numbersAndPunctuation).autocorrectionDisabled()
+                    TextField(RoleSnapshot.corridor != nil ? "305, 306, 158" : "Line numbers, like 1, 2", text: $lines).keyboardType(.numbersAndPunctuation).autocorrectionDisabled()
                 } header: { Text("Your lines") } footer: { Text("“My lines” shows only these. Leave it empty to show every bus.") }
-                Section {
-                    Button("Back to Veghel Busstation and Bolkenplein") {
-                        stops.boardStops = StopsStore.defaultBoard; stops.lines = StopsStore.defaultLines; lines = StopsStore.defaultLines.joined(separator: ", ")
+                if RoleSnapshot.corridor != nil {           // (today's defaults are the corridor's)
+                    Section {
+                        Button("Back to Veghel Busstation and Bolkenplein") {
+                            stops.boardStops = StopsStore.defaultBoard; stops.lines = StopsStore.defaultLines; lines = StopsStore.defaultLines.joined(separator: ", ")
+                        }
                     }
                 }
             }
@@ -997,13 +1007,13 @@ struct ArrivePass: View {
     let wake: (DoorTrip) -> Void
     var body: some View {
         if let a = planner.arrive {
-            let dest = a.out ? "BUas" : "Veghel"
+            let w = RoleWords.current, dest = a.out ? w.school : w.homeName
             VStack(alignment: .leading, spacing: 10) {
                 PaperBand(home: !a.out) {
                     HStack(alignment: .bottom) {
                         VStack(alignment: .leading, spacing: 1) {
                             Text("\(a.leaving ? "LEAVE AT" : "BE THERE BY") · \(a.dayLabel.uppercased())").font(BoardInk.sans(10)).tracking(1.6).opacity(0.85)
-                            Text(a.leaving ? "\(a.out ? "To BUas" : "Home") · leave \(a.time)" : "\(dest) by \(a.time)").font(HWFont.display(24)).lineLimit(1).minimumScaleFactor(0.7)
+                            Text(a.leaving ? "\(a.out ? "To \(w.school)" : "Home") · leave \(a.time)" : "\(dest) by \(a.time)").font(HWFont.display(24)).lineLimit(1).minimumScaleFactor(0.7)
                         }
                         Spacer(minLength: 6)
                         Button(action: edit) {

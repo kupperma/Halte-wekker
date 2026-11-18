@@ -608,7 +608,7 @@ struct ArrivalViewNew: View {
             .padding(.top, DS.s24)
             .accessibilityHidden(true)
         VStack(alignment: .leading, spacing: 4) {
-            Text(trip.route?.isFixed == false ? "You’re at \(trip.arrivedAt ?? trip.route?.station.short ?? "your stop")" : trip.direction == .home ? "You’re home" : "You’re in Breda")
+            Text(trip.route?.isFixed == false ? "You’re at \(trip.arrivedAt ?? trip.route?.station.short ?? "your stop")" : trip.direction == .home ? "You’re home" : "You’re in \(RoleWords.current.toSchoolWord)")
                 .font(DS.hero(min(big, 64))).foregroundStyle(DS.text).lineLimit(3).minimumScaleFactor(0.6)
                 .accessibilityAddTraits(.isHeader)
             Text("Trip finished.").font(DS.body).foregroundStyle(DS.secondary)
@@ -646,7 +646,7 @@ struct ArrivalViewNew: View {
             .dsPanel()
         }
         DSTransferList(all: trip.upcoming, updated: trip.upcomingAt, error: trip.upcomingError, mode: n.mode,
-                       dest: n.mode == .train ? n.to.short : "Veghel", asOf: trip.upcomingAsOf)
+                       dest: n.mode == .train || !RoleWords.current.onCorridor ? n.to.short : "Veghel", asOf: trip.upcomingAsOf)
             .dsPanel()
     }
 

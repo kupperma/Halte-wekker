@@ -254,6 +254,39 @@ Global rules:
 **Size:** M–L. About 25 files touched, mostly mechanical. Roughly 700–900 changed lines, 2 new files and about 150
 lines of tests.
 
+**As built (0.22.0, build 101).** Where the code made the plan above change:
+
+- **Files.** `Place` lives in `Model.swift`, which the test target can't compile, so the pure part of the roles is
+  `App/RoleLogic.swift` (`RolePlace`, `RoleInputs`, `Roles`, `RoleLogic`, and `Corridor.veghelBreda.stations`/`hubs`)
+  and the lock is `App/RoleSnapshot.swift` (app only; it also bridges `RolePlace` → `Place`). `Place.legacyVeghel`,
+  `.legacyBuas`, `.denBosch`, `.eindhoven` and `.breda` are built from those constants, which the tests check field
+  by field. The store is `App/ProfileStore.swift`. `Profile.schedule` needs a type, so a minimal
+  `App/ManualWeek.swift` (one first-class time per weekday, Postel) exists now; `lessons(from:days:tz:)` is 0.23.
+- **The snapshot never reads a store.** `PlacesStore`, `StopsStore` and `ProfileStore` hand it their part on load and
+  on every save (`setPlaces`, `setBoard`, `setProfile`), so no store's init waits on another's. `HaltewekkerApp.init`
+  touches `ProfileStore`, then `PlacesStore` and `StopsStore`, so a background wake-up for the school alarm plans
+  with your roles too.
+- **Home's ids.** `Place.homeBoard` (and `StopsStore.homePlace`, 0.21's `StopsStore.veghel`) puts the board's stops in
+  place of Home's ids only for the legacy Home. A Home of your own plans from its own stops, because after a move the
+  board may still be in Veghel. The live board shows `StopsStore.boardIds` (the board's stops, or Home's when there
+  are none). `defaultBoard`/`defaultLines` are today's on the corridor and empty off it.
+- **`Place.all` keeps 0.21's order** on the corridor (`home, ht, ehv, bd, school`), as the stop lists show it; off it,
+  `[home, school]`.
+- **Stop search stays biased to Home**, not the last fix: a last-fix bias would change the current user's results.
+- **Migration also clears.** The first launch with profiles compares an earlier version's Home and School with
+  today's; one already moved in 0.21's Your places (which nothing used then) gets the same `RoleMove` clearing as a
+  move. `ProfileLogic.load(data:existing:places:)` takes the places, so the legacy corridor is the one they are on.
+- **`RoleMove`** clears `school.homeLat`/`homeLon` only when Home moves (they are where it last saw you at home). The
+  live copies follow a `rolesMoved` notification (`TripManager.kmMem` and the regions, `LiveStore`'s lists);
+  `StopsStore.forgetModes` and `SchoolAlarm.refresh(force:now:)` are called directly.
+- **Reset everything**: on the corridor back to today's seed (from the constants, never the roles); off it Home and
+  School stay and only the pinned places go.
+- **Strings.** The old station look, the metro map and the scoreboard are only reachable on the corridor (the switch
+  is hidden and `RootView` forces the new look off it), so their copy is unchanged. Shared and new-look copy reads
+  `RoleWords.current` (school alarm, Plan sheet, Be there by passes, destination menus, toasts, notification bodies).
+  Also gated: the Leaderboard link and "Back to Veghel Busstation and Bolkenplein".
+- A saved profile with no `setupDone` reads as set up.
+
 ### 3.2 Release 0.23.0: first-run setup
 
 The new look throughout: `DS` tokens, `DSPrimaryButton`, `DSQuietButton`, `DSHeader`, `DSNote`, and grouped forms as

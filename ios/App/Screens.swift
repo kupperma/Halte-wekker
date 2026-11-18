@@ -8,7 +8,10 @@ struct RootView: View {
     @ObservedObject private var notices = Notices.shared
     @ObservedObject private var morning = Morning.shared
     @State private var browsing = false         // at a change: looking at the map and the boards for a bit
-    @AppStorage(NewLook.key) private var newLook = true      // the map-first home (0.19); off: the station home
+    @AppStorage(NewLook.key) private var newLookSetting = true      // the map-first home (0.19); off: the station home
+    @ObservedObject private var profile = ProfileStore.shared
+    /// The station home is drawn for the Veghel ⇄ BUas corridor: off it, always the new look.
+    private var newLook: Bool { newLookSetting || profile.profile.corridor == nil }
     @AppStorage(HomeStyle.key) private var homeStyle = HomeStyle.live.rawValue
     /// With New look on, every screen is in the new look (the home, and since 0.20 Fastest trip, the ride, the alarm,
     /// the change and the arrival): they follow the phone's light or dark, as Live around you; Next trip first is dark
@@ -348,7 +351,7 @@ struct HomeView: View {
             if trip.direction != (a.out ? .toSchool : .home) { trip.pick(a.out ? .toSchool : .home) }
             withAnimation(.easeInOut(duration: 0.35)) {
                 goStore.openForPlan(to: a.out ? .school : .home, from: near.position, deadline: a.leaving ? nil : T,
-                                    label: a.leaving ? nil : "\(a.out ? "BUas" : "home") by \(a.time)",
+                                    label: a.leaving ? nil : "\(a.out ? RoleWords.current.school : "home") by \(a.time)",
                                     key: GoStore.arriveKey(a))
             }
         }
@@ -371,7 +374,7 @@ struct HomeView: View {
             if trip.direction != (a.out ? .toSchool : .home) { trip.pick(a.out ? .toSchool : .home) }
             withAnimation(.easeInOut(duration: 0.35)) {
                 goStore.open(to: a.out ? .school : .home, from: near.position, deadline: a.leaving ? nil : T,
-                             label: a.leaving ? nil : "\(a.out ? "BUas" : "home") by \(a.time)",
+                             label: a.leaving ? nil : "\(a.out ? RoleWords.current.school : "home") by \(a.time)",
                              planKey: GoStore.arriveWindowOpen(a, chosen: planner.arriveChosen, now: now) ? GoStore.arriveKey(a) : nil)
             }
         }
@@ -2238,7 +2241,7 @@ struct SettingsView: View {
                     Toggle(isOn: $trip.announce) { label("Station announcement", "A jingle and a voice that names your stop, before the alarm.") }
                     Toggle(isOn: $trip.quietWhenInUse) { label("Just a notification when I’m on my phone", "If your phone is unlocked and in use when it would ring, you’re awake: you get one notification instead of the alarm. Locked, it rings as usual. (Only with a passcode on your phone.)") }
                     Toggle(isOn: $trip.ringAtStop) { label("Chime at the stop", "The station jingle, the announcement and a notification when you arrive. No second alarm to stop: the leg ends by itself.") }
-                    Toggle(isOn: $trip.autoHome) { label("Switch to Home at school", "When you reach BUas, the app switches to going home once that day. Switch back whenever you like.") }
+                    Toggle(isOn: $trip.autoHome) { label("Switch to Home at school", "When you reach \(RoleWords.current.school), the app switches to going home once that day. Switch back whenever you like.") }
                     Toggle(isOn: $trip.movingStation) { label("Moving station", "The station and train behind the home and ride screens. It pauses when the screen is off. Off shows a still picture.") }
                 } header: { Text("Trips") }
                 Section {

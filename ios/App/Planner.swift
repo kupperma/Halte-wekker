@@ -123,7 +123,7 @@ final class Planner: ObservableObject {
             arriveUpdated = Date()
             if after.isEmpty {
                 arriveError = all.isEmpty ? "No trips found for that time yet. It tries again in a couple of minutes."
-                                          : "Nothing leaves \(a.out ? "your Veghel stops" : "BUas") after \(a.time)."
+                                          : "Nothing leaves \(a.out ? RoleWords.current.homeStops : RoleWords.current.school) after \(a.time)."
                 if !all.isEmpty { arriveOptions = [] }
                 return
             }
@@ -164,7 +164,7 @@ final class Planner: ObservableObject {
         let f = t.first
         let n = UNMutableNotificationContent()
         n.title = "Leave in 10 min"
-        n.body = "\(f.isTrain ? f.name : "Bus \(f.line)") at \(Fmt.hhmm(f.departure)) from \(Fmt.place(f.fromStop)) · \(a.out ? "BUas" : "home") "
+        n.body = "\(f.isTrain ? f.name : "Bus \(f.line)") at \(Fmt.hhmm(f.departure)) from \(Fmt.place(f.fromStop)) · \(a.out ? RoleWords.current.school : "home") "
             + (a.leaving ? "at \(Fmt.hhmm(t.end))" : "by \(a.time)")
         n.sound = .default
         n.interruptionLevel = .timeSensitive

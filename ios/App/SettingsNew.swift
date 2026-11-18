@@ -15,6 +15,7 @@ struct NewLookSettings: View {
     @State private var showNotices = false
     @State private var showSteady = false
     @State private var liveStops = false
+    @ObservedObject private var profile = ProfileStore.shared
 
     var body: some View {
         Section {
@@ -60,7 +61,9 @@ struct NewLookSettings: View {
                 .sheet(isPresented: $showNotices) { NotificationsSheetNew().presentationDetents([.medium, .large]) }
         }
         Section("More") {
-            NavigationLink("Leaderboard") { LeaderboardScreenNew() }
+            if profile.profile.corridor != nil {        // (it scores the corridor's two routes)
+                NavigationLink("Leaderboard") { LeaderboardScreenNew() }
+            }
             Button("How steady are they now?") { showSteady = true }
                 .sheet(isPresented: $showSteady) { SteadySheetNew().presentationDetents([.large]) }
             if let tryDemo, trip.phase == .idle {
@@ -71,14 +74,18 @@ struct NewLookSettings: View {
     }
 }
 
-/// The "New look" switch, in both looks' Settings.
+/// The "New look" switch, in both looks' Settings: only on the Veghel ⇄ BUas corridor (the station look is drawn for
+/// it; off it the new look is all there is).
 struct NewLookSwitch: View {
     @AppStorage(NewLook.key) private var newLook = true
+    @ObservedObject private var profile = ProfileStore.shared
     var body: some View {
-        Section {
-            Toggle("New look", isOn: $newLook)
-        } footer: {
-            Text("The map-first home with your day and Plan a trip, and the trip screens with it: Fastest trip, the ride, the alarm and the change. Off brings back the station look of 0.18 for now.")
+        if profile.profile.corridor != nil {
+            Section {
+                Toggle("New look", isOn: $newLook)
+            } footer: {
+                Text("The map-first home with your day and Plan a trip, and the trip screens with it: Fastest trip, the ride, the alarm and the change. Off brings back the station look of 0.18 for now.")
+            }
         }
     }
 }
@@ -98,7 +105,7 @@ struct PlacesSettingsView: View {
                 }
                 .onMove { from, to in if let f = from.first { places.move(from: f, to: to) } }
                 .onDelete { set in for i in set { if let p = places.list[safe: i] { places.remove(p.id) } } }
-            } footer: { Text("The chips under the search field show them in this order: tap Edit to move them. Your trip direction and the school alarm still use today’s home and school.") }
+            } footer: { Text("The chips under the search field show them in this order: tap Edit to move them.") }
             Section { Button("Add a place") { adding = true } }
         }
         .navigationTitle("Your places")

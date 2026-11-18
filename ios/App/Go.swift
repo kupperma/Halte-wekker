@@ -1047,8 +1047,8 @@ struct GoView: View {
             .buttonStyle(.plain).accessibilityLabel("Back to the map. This stops the watching.")
             Spacer(minLength: 4)
             Menu {
-                Button { to(.toSchool) } label: { Label("To school (BUas)", systemImage: "graduationcap.fill") }
-                Button { to(.home) } label: { Label("Home (Veghel)", systemImage: "house.fill") }
+                Button { to(.toSchool) } label: { Label(RoleWords.current.toSchoolMenu, systemImage: "graduationcap.fill") }
+                Button { to(.home) } label: { Label(RoleWords.current.homeMenu, systemImage: "house.fill") }
                 if !live.recents.isEmpty {
                     Section("Recent") {
                         ForEach(live.recents) { d in

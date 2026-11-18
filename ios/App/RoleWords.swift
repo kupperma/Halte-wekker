@@ -43,6 +43,8 @@ struct RoleWords: Equatable, Sendable {
     var homeMenu: String { onCorridor ? "Home (\(homeTown))" : "Home" }
     /// Where a trip home or to school starts: "your Veghel stops", "your home stops".
     var homeStops: String { onCorridor ? "your \(homeTown) stops" : "your home stops" }
+    /// Home as a destination's name: "Veghel", "Home".
+    var homeName: String { onCorridor ? homeTown : "Home" }
     /// "home to Veghel", "home"
     var homeToTown: String { onCorridor ? "home to \(homeTown)" : "home" }
     /// The direction you're set to, as it guesses from where you are.

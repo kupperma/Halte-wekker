@@ -92,12 +92,12 @@ struct ArrivePassNew: View {
 
     var body: some View {
         if let a = planner.arrive {
-            let dest = a.out ? "BUas" : "Veghel"
+            let w = RoleWords.current, dest = a.out ? w.school : w.homeName
             VStack(alignment: .leading, spacing: DS.s12) {
                 HStack(alignment: .top, spacing: DS.s8) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("\(a.leaving ? "Leave at" : "Be there by") · \(a.dayLabel)").font(DS.footnoteStrong).foregroundStyle(DS.accentText)
-                        Text(a.leaving ? "\(a.out ? "To BUas" : "Home") · leave \(a.time)" : "\(dest) by \(a.time)")
+                        Text(a.leaving ? "\(a.out ? "To \(w.school)" : "Home") · leave \(a.time)" : "\(dest) by \(a.time)")
                             .font(DS.title).monospacedDigit().foregroundStyle(DS.text).fixedSize(horizontal: false, vertical: true)
                     }
                     .accessibilityElement(children: .combine)

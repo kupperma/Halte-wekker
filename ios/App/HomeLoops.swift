@@ -172,7 +172,7 @@ enum HomeActions {
             if trip.direction != (a.out ? .toSchool : .home) { trip.pick(a.out ? .toSchool : .home) }
             withAnimation(.easeInOut(duration: 0.35)) {
                 goStore.openForPlan(to: a.out ? .school : .home, from: near.position, deadline: a.leaving ? nil : T,
-                                    label: a.leaving ? nil : "\(a.out ? "BUas" : "home") by \(a.time)",
+                                    label: a.leaving ? nil : "\(a.out ? RoleWords.current.school : "home") by \(a.time)",
                                     key: GoStore.arriveKey(a))
             }
         }
@@ -192,7 +192,7 @@ enum HomeActions {
             if trip.direction != (a.out ? .toSchool : .home) { trip.pick(a.out ? .toSchool : .home) }
             withAnimation(.easeInOut(duration: 0.35)) {
                 goStore.open(to: a.out ? .school : .home, from: near.position, deadline: a.leaving ? nil : T,
-                             label: a.leaving ? nil : "\(a.out ? "BUas" : "home") by \(a.time)",
+                             label: a.leaving ? nil : "\(a.out ? RoleWords.current.school : "home") by \(a.time)",
                              planKey: GoStore.arriveWindowOpen(a, chosen: planner.arriveChosen, now: now) ? GoStore.arriveKey(a) : nil)
             }
         }

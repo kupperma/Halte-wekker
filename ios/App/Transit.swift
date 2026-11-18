@@ -61,7 +61,11 @@ struct DoorTrip: Identifiable, Hashable, Codable {
     var walkAfter: Int { max(0, Fmt.mins(end.timeIntervalSince(last.arrival))) }
     /// "24 min ride", "1 h 05 min incl. change"
     var rideLabel: String { "\(Fmt.rideText(rideMinutes)) \(rides.count > 1 ? "incl. change" : "ride")" }
-    var via: String? { rides.map { Fmt.place($0.toStop) }.first { $0 == "Den Bosch" || $0 == "Eindhoven" } }
+    /// The corridor's hub this trip changes at ("Den Bosch", "Eindhoven"); none off the corridor.
+    var via: String? {
+        guard let hubs = RoleSnapshot.corridor?.hubs.map(\.short) else { return nil }
+        return rides.map { Fmt.place($0.toStop) }.first { hubs.contains($0) }
+    }
 }
 
 // (the planner's answers are kept in a `Memo`, 0.20.7)
@@ -225,7 +229,7 @@ enum Transit {
 
     struct StopHit: Identifiable, Hashable { let id: String; let name: String; let town: String; let lat: Double; let lon: Double }
 
-    /// Stop search, closest to Veghel first.
+    /// Stop search, closest to Home first.
     static func findStops(_ q: String) async -> [StopHit] {
         let items: [URLQueryItem] = [.init(name: "text", value: q), .init(name: "type", value: "STOP"), .init(name: "numResults", value: "12"),
                                      .init(name: "place", value: "\(Place.home.coordinate.latitude),\(Place.home.coordinate.longitude)")]

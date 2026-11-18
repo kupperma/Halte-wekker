@@ -253,7 +253,7 @@ struct MorningViewNew: View {
                     Spacer()
                     if let a = p.arrive {
                         VStack(alignment: .trailing, spacing: 0) {
-                            Text("At BUas").font(DS.footnoteStrong).foregroundStyle(DS.secondary)
+                            Text("At \(RoleWords.current.school)").font(DS.footnoteStrong).foregroundStyle(DS.secondary)
                             Text(Fmt.hhmm(a)).font(DS.bigNumber).monospacedDigit().foregroundStyle(DS.text)
                             if let lines = p.lines { Text(lines).font(DS.footnote).foregroundStyle(DS.secondary) }
                         }
