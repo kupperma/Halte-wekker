@@ -13,26 +13,23 @@ struct Place: Hashable, Codable {
     static func == (a: Place, b: Place) -> Bool { a.key == b.key }
     func hash(into h: inout Hasher) { h.combine(key) }
 
-    /// Today's (0.21) home and school, exactly. `home` and `school` are these on the Veghel ⇄ BUas corridor.
-    static let legacyVeghel = Place(key: "veghel", name: "Veghel, Busstation", short: "Veghel",
-                              ids: ["nl-OpenOV_NL:S:64553000", "nl-OpenOV_4219829"],
-                              coordinate: .init(latitude: 51.6137, longitude: 5.5474), spoken: "Veghel")
-    static let denBosch = Place(key: "ht", name: "’s-Hertogenbosch Centraal", short: "Den Bosch",
-                                ids: ["de-DELFI_000008400319"],
-                                coordinate: .init(latitude: 51.6905, longitude: 5.2936), spoken: "Den Bosch")
-    static let eindhoven = Place(key: "ehv", name: "Eindhoven Centraal", short: "Eindhoven",
-                                 ids: ["de-DELFI_000008400206"],
-                                 coordinate: .init(latitude: 51.4432, longitude: 5.4812), spoken: "Eindhoven Central")
-    static let breda = Place(key: "bd", name: "Breda station", short: "Breda",
-                             ids: ["nl-OpenOV_stoparea:17911"],
-                             coordinate: .init(latitude: 51.5955, longitude: 4.7797), spoken: "Breda station")
-    static let legacyBuas = Place(key: "buas", name: "Breda University (BUas)", short: "BUas",
-                            ids: ["51.5907,4.7932"],
-                            coordinate: .init(latitude: 51.5907, longitude: 4.7932), spoken: "Breda University")
-    /// Your Home (key "veghel") and School (key "buas").
-    static var home: Place { legacyVeghel }
-    static var school: Place { legacyBuas }
-    static var all: [Place] { [.home, .denBosch, .eindhoven, .breda, .school] }
+    /// Today's (0.21) home and school, exactly (`RoleLogic` has them, tested field by field). On the Veghel ⇄ BUas
+    /// corridor, and still within 400 m of them, `home` and `school` are these.
+    static let legacyVeghel = Place(RoleLogic.legacyHome)
+    static let legacyBuas = Place(RoleLogic.legacySchool)
+    /// The corridor's stations: the hubs and the school's station (only used on the corridor).
+    static let denBosch = Place(Corridor.denBosch)
+    static let eindhoven = Place(Corridor.eindhoven)
+    static let breda = Place(Corridor.breda)
+    /// Your Home (key "veghel") and School (key "buas"), from your places (`RoleSnapshot`: safe on any thread).
+    static var home: Place { let r = RoleSnapshot.current; return r.homeIsLegacy ? legacyVeghel : Place(r.home) }
+    static var school: Place { let r = RoleSnapshot.current; return r.schoolIsLegacy ? legacyBuas : Place(r.school) }
+    /// Home as trips from it start: your board stops on the corridor (0.21's `StopsStore.veghel`).
+    static var homeBoard: Place { Place(RoleSnapshot.current.homeBoard) }
+    /// The places the stop lists and the auto-start know: on the corridor its stations too, in 0.21's order.
+    static var all: [Place] {
+        RoleSnapshot.corridor == nil ? [.home, .school] : [.home, .denBosch, .eindhoven, .breda, .school]
+    }
     /// Where you are now, as a place to plan from.
     static func here(_ c: CLLocationCoordinate2D) -> Place {
         Place(key: "here", name: "Where you are", short: "Here", ids: ["\(c.latitude),\(c.longitude)"], coordinate: c, spoken: "here")
@@ -73,7 +70,7 @@ enum Mode: String, Codable {
 
 enum Direction: String {
     case toSchool, home
-    var word: String { self == .toSchool ? "BREDA" : "HOME" }
+    var word: String { self == .toSchool ? RoleWords.current.directionWord : "HOME" }
     var kicker: String { self == .toSchool ? "Going to" : "Going" }
 }
 
@@ -137,7 +134,9 @@ struct RoutePlan: Identifiable, Hashable {
         RoutePlan(id: "stop-\(p.key)", name: p.name, station: p, single: Leg(mode: mode, from: from, to: p))
     }
 
-    static let all = [
+    /// Your two routes, on the corridor (none off it: trips are door to door).
+    static var all: [RoutePlan] { RoleSnapshot.corridor == nil ? [] : fixed }
+    private static let fixed = [
         RoutePlan(id: "via-denbosch", name: "Via Den Bosch", station: .denBosch),
         RoutePlan(id: "via-eindhoven", name: "Via Eindhoven", station: .eindhoven),
     ]
@@ -210,7 +209,7 @@ enum Fmt {
         if l.contains("hertogenbosch") { return "Den Bosch" }
         if l.contains("eindhoven") { return "Eindhoven" }
         if l.contains("veghel") { return "Veghel" }
-        if n == "END" || n == "START" { return "BUas" }
+        if let s = RoleWords.current.endpoint(n) { return s }        // (a trip's coordinate end: your school)
         if l == "breda" || l.hasPrefix("breda (") || l.hasPrefix("breda, centraal") { return "Breda" }
         if let r = n.range(of: ", ") { return String(n[r.upperBound...]) }
         return n

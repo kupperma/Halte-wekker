@@ -8,6 +8,14 @@ struct HaltewekkerApp: App {
     @StateObject private var planner = Planner()
     @StateObject private var near = NearMe()
     init() {
+        // The profile first (before anything saves a key, so a new install is told from an earlier version's user),
+        // then your places and stops: the roles (`Place.home`, `.school`) are yours from the first thing that plans,
+        // a background wake-up for the school alarm too.
+        MainActor.assumeIsolated {
+            _ = ProfileStore.shared
+            _ = PlacesStore.shared
+            _ = StopsStore.shared
+        }
         Watchdog.shared.start()
         Net.startWatchingConnection()
         // the map on the wall and the station, read and decoded off the main thread while the rest starts

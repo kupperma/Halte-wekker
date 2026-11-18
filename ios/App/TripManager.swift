@@ -201,7 +201,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     var wakeKm: Double { leg.map(km(for:)) ?? busKm }
     var finalName: String {
         if let r = route, !r.isFixed { return r.custom != nil ? r.station.short : (leg?.to.short ?? "") }
-        return direction == .home ? "Home" : "Breda"
+        // (a fixed route ends at Breda station; off the corridor there are none: your school)
+        return direction == .home ? "Home" : RoleWords.current.toSchoolWord
     }
     func km(for l: Leg) -> Double { kmMem["\(l.mode.rawValue):\(l.to.key)"] ?? (l.mode == .bus ? busKm : trainKm) }
     var here: CLLocationCoordinate2D? { location.location?.coordinate }
@@ -249,11 +250,12 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         guessDirection = false
         if let at = UserDefaults.standard.object(forKey: "dirPickedAt") as? Date, Date().timeIntervalSince(at) < 20 * 60 { return }
         func near(_ p: Place, _ m: Double) -> Bool { l.distance(from: CLLocation(latitude: p.coordinate.latitude, longitude: p.coordinate.longitude)) < m }
-        let d: Direction? = near(.home, 5000) ? .toSchool : (near(.breda, 6000) || near(.school, 6000)) ? .home : nil
+        let corridor = RoleSnapshot.corridor != nil
+        let d: Direction? = near(.home, 5000) ? .toSchool : ((corridor && near(.breda, 6000)) || near(.school, 6000)) ? .home : nil
         guard let d, d != direction else { return }
         direction = d
         UserDefaults.standard.set(d.rawValue, forKey: "dir"); UserDefaults.standard.set(Date(), forKey: "dirAt")
-        toast = d == .toSchool ? "You’re in Veghel, so it’s set to going to Breda." : "You’re in Breda, so it’s set to going home."
+        toast = d == .toSchool ? RoleWords.current.atHomeToast : RoleWords.current.atSchoolTownToast
     }
     /// After 3 hours the direction follows the clock again.
     private func followClock() {
@@ -268,7 +270,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         guard autoHome, direction == .toSchool, !isRiding, UserDefaults.standard.string(forKey: "autoHomeDay") != today, NearMe.atSchool(l) else { return }
         UserDefaults.standard.set(today, forKey: "autoHomeDay")
         pick(.home)
-        toast = "You’re at BUas, so it switched to Home. Tap the big button to switch back."
+        toast = RoleWords.current.autoHomeToast
     }
     var isRiding: Bool { phase != .idle }
 
@@ -306,6 +308,15 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
                     // (a trip that ended in the background may have asked for GPS for a line watch from there)
                     if self.gpsApplied?.on == true { self.applyGPS(restart: true) }
                 }
+            }
+        }
+        // Home or School moved (Your places): the wake distances for the old one are gone (`ProfileStore` cleared them
+        // in the saved copy), and the regions go where they are now
+        NotificationCenter.default.addObserver(forName: .rolesMoved, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                self.kmMem = UserDefaults.standard.dictionary(forKey: "kmMem") as? [String: Double] ?? [:]
+                self.updateWatching(force: true)
             }
         }
         AlarmControl.stop = { [weak self] in self?.stopAlarm() }
@@ -1371,7 +1382,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     /// Where this leg can take you: on the first leg of a route either station (it follows the one you take).
     private var legDestinations: [Place] {
         guard let l = leg else { return [] }
-        return index == 0 && route?.isFixed == true ? RoutePlan.all.map { $0.legs(direction)[0].to } : [l.to]
+        return index == 0 && route?.isFixed == true && !RoutePlan.all.isEmpty ? RoutePlan.all.map { $0.legs(direction)[0].to } : [l.to]
     }
 
     /// Does this bus or train still reach `dest` from where you are now?
@@ -2331,7 +2342,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         var target: (from: Place, to: [Place], mode: Mode)?
         if phase == .transfer, let n = legs[safe: index + 1] { target = (n.from, [n.to], n.mode) }
         else if (phase == .sleeping || phase == .awake) && vehicle == nil, let l = leg {
-            let both = index == 0 && route?.isFixed == true
+            let both = index == 0 && route?.isFixed == true && !RoutePlan.all.isEmpty
             target = (l.from, both ? RoutePlan.all.map { $0.legs(direction)[0].to } : [l.to], l.mode)
         }
         guard let t = target else { return }
@@ -2434,7 +2445,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
                 wanted.append(RegionSpec(id: "school", lat: Place.school.coordinate.latitude, lon: Place.school.coordinate.longitude,
                                          radius: NearMe.schoolRadius, entry: true, exit: false))
             }
-            if autoStart {
+            // (the stations' regions start your fixed routes: only on the corridor, 0.22)
+            if autoStart && RoleSnapshot.corridor != nil {
                 for p in Place.all where p != .school {
                     wanted.append(RegionSpec(id: p.key, lat: p.coordinate.latitude, lon: p.coordinate.longitude,
                                              radius: p == .home ? 350 : 300, entry: false, exit: true))
@@ -2463,7 +2475,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     func askForAlways() { location.requestAlwaysAuthorization() }
 
     private func leftRegion(_ key: String) {
-        guard autoStart, phase == .idle, let place = Place.all.first(where: { $0.key == key }) else { return }
+        guard autoStart, phase == .idle, RoleSnapshot.corridor != nil, let place = Place.all.first(where: { $0.key == key }) else { return }
         // right after a ride ended there: you're walking away from the bus you got off (unless at vehicle speed)
         let fresh = lastFix.flatMap { -$0.timestamp.timeIntervalSinceNow < 60 && $0.speed >= 0 ? $0.speed : nil }
         if RegionLook.skip(place: key, lastEnd: lastEnd, speed: fresh, now: Date()) {
@@ -2491,6 +2503,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
 
     /// Works out which of your routes this bus or train belongs to, then starts the trip at that leg.
     private func autoStartTrip(from place: Place, on v: Vehicle) async -> Bool {
+        guard RoleSnapshot.corridor != nil else { return false }        // (by the corridor's station names only)
         let stops = await Transit.tripStops(v.tripId)
         let names = stops.map { $0.name.lowercased() }
         func goes(_ p: Place) -> Bool {

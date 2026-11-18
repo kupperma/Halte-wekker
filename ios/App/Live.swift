@@ -98,6 +98,19 @@ final class LiveStore: ObservableObject {
     /// Trips from where you are, not one of your two routes (so the boards show what's around you).
     var anywhere: Bool { here != nil || custom != nil }
 
+    init() {
+        // Home or School moved (Your places): what's shown was for the old place; the next refresh asks again
+        NotificationCenter.default.addObserver(forName: .rolesMoved, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.forgetForMove() }
+        }
+    }
+
+    private func forgetForMove() {
+        next = []; nextAsOf = nil; nextError = nil; updated = nil; loadedFor = nil; loadedKey = nil
+        trains = []; buas = []; toVeghel = []; boardRides = [:]; panelsAsOf = nil
+        lastPanels = .distantPast; lastGrades = .distantPast
+    }
+
     nonisolated private static func saved<T: Decodable>(_ k: String) -> T? { UserDefaults.standard.data(forKey: k).flatMap { try? JSONDecoder().decode(T.self, from: $0) } }
 
     /// Go somewhere you picked (nil: back to school or home).
@@ -622,19 +635,20 @@ final class LiveStore: ObservableObject {
         guard force || Date().timeIntervalSince(lastPanels) > 120 else { return }
         lastPanels = Date()
         let now = Date().addingTimeInterval(-30 * 60)          // from half an hour ago, for "Show earlier"
-        let veghel = stops.homePlace
+        let veghel = stops.homePlace, boardIds = stops.boardIds
+        // (off the corridor there are no lists per leg: only your home board, as the new look shows)
+        let corridor = RoleSnapshot.corridor != nil
         var empty = false, got = false
-        if need == .board {
-            // the new look: only your home board, going to school (with the ride times, every 10 minutes)
+        if need == .board || !corridor {
+            // the new look: only your home board, going to school (with the ride times to the hubs, every 10 minutes)
             guard dir == .toSchool else { return }
-            async let b = loadBoard(veghel.ids, from: now, key: key)
-            async let g: Void = loadBoardRides(veghel, key: key)
+            async let b = loadBoard(boardIds, from: now, key: key)
+            if corridor { await loadBoardRides(veghel, key: key) }
             let bb = await b
-            await g
             empty = bb.isEmpty
             got = !bb.isEmpty
         } else if dir == .toSchool {
-            async let b = loadBoard(veghel.ids, from: now, key: key)
+            async let b = loadBoard(boardIds, from: now, key: key)
             async let g: Void = loadBoardRides(veghel, key: key)
             async let t = loadList(.trains, [PanelJob(from: .eindhoven, to: .breda, modes: "RAIL", count: 8, maxTransfers: 1),
                                              PanelJob(from: .denBosch, to: .breda, modes: "RAIL", count: 8, maxTransfers: 1)], at: now, key: key)

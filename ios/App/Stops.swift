@@ -25,8 +25,14 @@ struct BoardStop: Codable, Identifiable, Hashable {
 final class StopsStore: ObservableObject {
     static let shared = StopsStore()
     static let maxBoardStops = 3
-    static let defaultBoard = [BoardStop(id: Place.home.ids[0], name: "Veghel, Busstation"), BoardStop(id: Place.home.ids[1], name: "Veghel, Bolkenplein")]
-    static let defaultLines = ["305", "306", "158"]
+    /// The board and lines you start with (and get back on Reset everything): on the corridor today's Veghel bus
+    /// station and Bolkenplein with the 305, 306 and 158; else none (the board is Home's stops, every line).
+    static var defaultBoard: [BoardStop] {
+        guard RoleSnapshot.corridor != nil else { return [] }
+        let v = Place.legacyVeghel.ids
+        return [BoardStop(id: v[0], name: "Veghel, Busstation"), BoardStop(id: v[1], name: "Veghel, Bolkenplein")]
+    }
+    static var defaultLines: [String] { RoleSnapshot.corridor != nil ? ["305", "306", "158"] : [] }
 
     @Published private(set) var saved: [SavedStop]
     @Published var boardStops: [BoardStop] { didSet { persist() } }
@@ -39,6 +45,7 @@ final class StopsStore: ObservableObject {
         boardStops = d.data(forKey: "boardStops").flatMap { try? JSONDecoder().decode([BoardStop].self, from: $0) } ?? Self.defaultBoard
         lines = d.stringArray(forKey: "boardLines") ?? Self.defaultLines
         lastMode = d.dictionary(forKey: "lastMode") as? [String: String] ?? [:]
+        RoleSnapshot.setBoard(boardStops.map(\.id))
     }
 
     private func persist() {
@@ -47,13 +54,17 @@ final class StopsStore: ObservableObject {
         d.set(try? JSONEncoder().encode(boardStops), forKey: "boardStops")
         d.set(lines, forKey: "boardLines")
         d.set(lastMode, forKey: "lastMode")
+        RoleSnapshot.setBoard(boardStops.map(\.id))
     }
 
-    /// Veghel as the live board sees it: your board stops (the alarm still aims at the bus station).
-    var homePlace: Place {
+    /// Home as trips from it start: on the corridor your board stops (the alarm still aims at the bus station), else
+    /// Home's own stops (`RoleLogic.homeBoard`).
+    var homePlace: Place { Place.homeBoard }
+
+    /// The stops the live board shows: yours, or Home's when you have none.
+    var boardIds: [String] {
         let ids = boardStops.map(\.id)
-        return Place(key: "veghel", name: Place.home.name, short: "Veghel", ids: ids.isEmpty ? Place.home.ids : ids,
-                     coordinate: Place.home.coordinate, spoken: "Veghel")
+        return ids.isEmpty ? Place.home.ids : ids
     }
 
     /// "Veghel: Busstation and Bolkenplein"
@@ -76,6 +87,12 @@ final class StopsStore: ObservableObject {
 
     func mode(for p: Place) -> Mode { Mode(rawValue: lastMode[p.key] ?? "") ?? (p == .home || p == .school ? .bus : .train) }
     func setMode(_ m: Mode, for p: Place) { lastMode[p.key] = m.rawValue; persist() }
+    /// Home or School moved: the mode last picked for it goes (`RoleMove`).
+    func forgetModes(_ roles: Set<RoleMove.Role>) {
+        let kept = RoleMove.keepModes(lastMode, clearing: roles)
+        guard kept != lastMode else { return }
+        lastMode = kept; persist()
+    }
 
     func reset() {
         saved = []; boardStops = Self.defaultBoard; lines = Self.defaultLines; lastMode = [:]
