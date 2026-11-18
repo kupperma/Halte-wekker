@@ -182,7 +182,11 @@ enum SetupLogic {
             if d.boardChosen, !d.board.isEmpty { h.stopIds = d.board.map(\.id) }
             out.append(h)
         }
-        if var s = d.school { s.id = "school"; s.kind = .school; out.append(s) }
+        if var s = d.school {
+            s.id = "school"; s.kind = .school
+            if s.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { s.name = "School" }
+            out.append(s)
+        }
         var ids = Set(out.map(\.id))
         for var p in d.others {
             p.kind = .custom

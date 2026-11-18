@@ -10,6 +10,11 @@ struct RootView: View {
     @State private var browsing = false         // at a change: looking at the map and the boards for a bit
     @AppStorage(NewLook.key) private var newLookSetting = true      // the map-first home (0.19); off: the station home
     @ObservedObject private var profile = ProfileStore.shared
+    @ObservedObject private var setup = SetupStore.shared
+    /// A new install before its setup (0.23): nothing behind the setup plans for a home and school not chosen yet.
+    private var firstRun: Bool { !profile.profile.setupDone && setup.mode == nil }
+    /// The first-run setup: a new install's by itself (not over a trip), or opened from Settings.
+    private var setupShown: Bool { setup.mode != nil || (!profile.profile.setupDone && trip.phase == .idle) }
     /// The station home is drawn for the Veghel ⇄ BUas corridor: off it, always the new look.
     private var newLook: Bool { newLookSetting || profile.profile.corridor == nil }
     @AppStorage(HomeStyle.key) private var homeStyle = HomeStyle.live.rawValue
@@ -33,6 +38,7 @@ struct RootView: View {
     var body: some View {
         Group {
             switch trip.phase {
+            case .idle where firstRun: DS.page.ignoresSafeArea()
             case .idle where go.isOpen: Group { if newLook { GoViewNew() } else { GoView() } }.transition(.opacity)
             case .idle: if newLook { NewHome() } else { HomeView() }
             case .alarm: if newLook { AlarmViewNew() } else { AlarmView() }
@@ -53,6 +59,16 @@ struct RootView: View {
             if p != .idle && go.isOpen { go.close() }        // a trip started: the ride screen takes over
         }
         .animation(.easeInOut(duration: 0.35), value: go.isOpen)
+        // a test setup in use (Settings › Your school and home › Test the setup as a new user): the way back
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if setup.testLive && trip.phase == .idle && !go.isOpen { TestSetupBanner().transition(.move(edge: .top).combined(with: .opacity)) }
+        }
+        .animation(DS.quick, value: setup.testLive)
+        .fullScreenCover(isPresented: Binding(get: { setupShown }, set: { _ in })) {
+            let m = setup.mode ?? .firstRun
+            SetupFlow(mode: m, draft: setup.draft(for: m))
+        }
+        .sheet(isPresented: $setup.demoAfter) { DemoSheetNew().presentationDetents([.large]) }
         .overlay {
             if let a = watch.alert, !alarming {          // (not over the alarm: after it)
                 if newLook {
@@ -2223,6 +2239,7 @@ struct SettingsView: View {
                         }
                     } footer: { Text("Fastest trip with the map and notifications, being recognised on the bus, the ride ring, the alarm and arriving, all pretend.") }
                 }
+                SetupSettingsSection(dismissSettings: { dismissSettings() })
                 SchoolAlarmSection()
                 MorningSection(preview: { look in
                     dismissSettings()

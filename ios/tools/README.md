@@ -26,3 +26,11 @@ your route, bending up to your stop, where the alarm bell rings. `node render-ic
 into `<folder>`) writes `icon-1024.png` (for `App/Assets.xcassets/AppIcon.appiconset/`) and the website sizes
 (`icon-512`, `icon-192`, `icon-180` for `icons/apple-touch-icon.png`, `icon-32` for the favicon). Save them without
 transparency.
+
+# The schools list
+
+`schools.js` makes `App/Schools.json`, the schools the first-run setup lists, from `schools-seed.json` (names, other
+names and, per campus, its town and what to search for). Every campus is geocoded with Transitous's `/v1/geocode`;
+no coordinate is typed by hand. From `ios/`: `node tools/schools.js` (behind a proxy, with `NODE_USE_ENV_PROXY=1`). It
+writes `schools-review.txt`: what each campus matched, and what was left out. Check it, and fix the seed's searches
+rather than the output.

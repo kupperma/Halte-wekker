@@ -73,6 +73,21 @@ final class ProfileStore: ObservableObject {
         Task { await SchoolAlarm.shared.refresh(force: true, now: true) }
     }
 
+    /// Home and School became other places all at once (a test setup went live, or your own came back): the saved
+    /// answers go, the live lists and the regions follow (`rolesMoved`) and the school week is planned again.
+    /// `clearingLearnt`: what was learnt for Home and School goes too (the test's); your own comes back with its backup.
+    func rolesSwitched(clearingLearnt: Bool) {
+        let all = Set(RoleMove.Role.allCases)
+        if clearingLearnt {
+            Self.clearLearnt(all)
+            StopsStore.shared.forgetModes(all)
+        } else {
+            SnapshotStore.shared.prune(olderThan: 0)
+        }
+        NotificationCenter.default.post(name: .rolesMoved, object: nil, userInfo: ["roles": all.map(\.rawValue)])
+        Task { await SchoolAlarm.shared.refresh(force: true, now: true) }
+    }
+
     /// What the saved data keeps for a role (the stores that hold some of it in memory follow `rolesMoved`).
     private static func clearLearnt(_ roles: Set<RoleMove.Role>) {
         let d = UserDefaults.standard

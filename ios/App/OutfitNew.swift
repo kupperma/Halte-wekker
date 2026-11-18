@@ -308,7 +308,7 @@ struct OutfitSheetNew: View {
 }
 
 /// Chips in rows: as many as fit on a line, then the next line (Dynamic Type's big sizes wrap them).
-private struct ChipFlow: Layout {
+struct ChipFlow: Layout {
     var spacing: CGFloat = 8
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {

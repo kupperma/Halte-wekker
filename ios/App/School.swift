@@ -575,6 +575,7 @@ struct SchoolAlarmSection: View {
     @Environment(\.settingsNewLook) private var newLook
     private var ink: SettingsInk { SettingsInk(newLook: newLook) }
     @ObservedObject private var school = SchoolAlarm.shared
+    @ObservedObject private var profile = ProfileStore.shared
     var body: some View {
         Section {
             Toggle(isOn: $school.on) {
@@ -585,18 +586,10 @@ struct SchoolAlarmSection: View {
                 }
             }
             if school.on {
-                if !school.allowed {
+                if profile.profile.schedule == .calendars && !school.allowed {
                     Button("Allow calendar access") { Task { await school.start() } }.foregroundStyle(ink.link)
                 } else {
-                    NavigationLink {
-                        SchoolCalendarsView()
-                    } label: {
-                        HStack {
-                            Text("School calendar")
-                            Spacer()
-                            Text(school.calendarIds.isEmpty ? "Pick one" : "\(school.calendarIds.count) picked").foregroundStyle(ink.muted)
-                        }
-                    }
+                    timetableRow
                     Stepper("At \(RoleWords.current.school) \(school.earlyMinutes) min before class", value: $school.earlyMinutes, in: 0...45, step: 5)
                     Stepper("Wake me \(school.wakeMinutes) min before I leave", value: $school.wakeMinutes, in: 15...150, step: 5)
                     if let n = school.next {
@@ -617,6 +610,37 @@ struct SchoolAlarmSection: View {
             }
         } header: { Text("School alarm") } footer: {
             Text("Only the calendars you pick are read, and only the first class of each day counts. Your own plans in other calendars are never used.")
+        }
+    }
+
+    /// Where the first classes come from: the calendar you picked (as before), your week, or not set up yet (0.23).
+    @ViewBuilder private var timetableRow: some View {
+        switch profile.profile.schedule {
+        case .calendars:
+            NavigationLink {
+                SchoolCalendarsView()
+            } label: {
+                HStack {
+                    Text("School calendar")
+                    Spacer()
+                    Text(school.calendarIds.isEmpty ? "Pick one" : "\(school.calendarIds.count) picked").foregroundStyle(ink.muted)
+                }
+            }
+        case .manual(let w):
+            NavigationLink { ManualWeekScreen() } label: {
+                HStack {
+                    Text("Your week")
+                    Spacer()
+                    Text(SetupLogic.weekWords(w)).foregroundStyle(ink.muted).multilineTextAlignment(.trailing)
+                }
+            }
+        case .none:
+            Button("Read it from a calendar on this iPhone") {
+                profile.setSchedule(.calendars)
+                Task { await school.start() }
+            }
+            .foregroundStyle(ink.link)
+            Button("Same times every week") { profile.setSchedule(.manual(.workdays)) }.foregroundStyle(ink.link)
         }
     }
 }

@@ -11,10 +11,16 @@ struct HaltewekkerApp: App {
         // The profile first (before anything saves a key, so a new install is told from an earlier version's user),
         // then your places and stops: the roles (`Place.home`, `.school`) are yours from the first thing that plans,
         // a background wake-up for the school alarm too.
+        // A "Test the setup as a new user" that the app stopped in the middle of goes back first (0.23).
         MainActor.assumeIsolated {
+            let recovered = SetupStore.recoverAtLaunch()
             _ = ProfileStore.shared
             _ = PlacesStore.shared
             _ = StopsStore.shared
+            if recovered {
+                SnapshotStore.shared.prune(olderThan: 0)
+                Task { await SchoolAlarm.shared.refresh(force: true, now: true) }
+            }
         }
         Watchdog.shared.start()
         Net.startWatchingConnection()
