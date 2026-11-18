@@ -2268,13 +2268,14 @@ struct SettingsView: View {
                     .onChange(of: trip.soundKind) { _, k in trip.sound.play(preview: k) }
                     Text(trip.soundKind.detail).font(ink.note(12)).foregroundStyle(ink.muted)
                     Button("Test alarm") { trip.testAlarm() }.foregroundStyle(link)
+                    Toggle(isOn: $trip.headphonesOnly) { label("Sound only with headphones", "Without Bluetooth, wired or USB headphones, the alarm and the announcer only vibrate, so the rest of the train doesn’t hear it. Not stopped after a minute? Then it rings out loud anyway.") }
                     Picker("If music is playing", selection: $trip.pauseMusic) {
                         Text("Keep it playing").tag(false)
                         Text("Pause it").tag(true)
                     }
                     Text(trip.pauseMusic ? "The loudest option: your music stops while it rings. To start it again, press play on your earbuds."
                                          : "The alarm plays over your music, a little louder than it.").font(ink.note(12)).foregroundStyle(ink.muted)
-                } header: { Text("Alarm") } footer: { Text("The alarm also rings in silent mode. Keep the volume up or wear earbuds. You can stop it from the lock screen: tap Stop alarm on the trip, or on the notification.") }
+                } header: { Text("Alarm") } footer: { Text("The alarm also rings in silent mode (with headphones, or out loud when Sound only with headphones is off). Keep the volume up. You can stop it from the lock screen: tap Stop alarm on the trip, or on the notification.") }
                 Section {
                     Picker("Backup alarm", selection: $trip.backupMinutes) {
                         Text("Off").tag(0)

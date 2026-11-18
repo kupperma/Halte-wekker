@@ -62,6 +62,10 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     @Published var pauseMusic: Bool = UserDefaults.standard.bool(forKey: "pauseMusic") {
         didSet { UserDefaults.standard.set(pauseMusic, forKey: "pauseMusic"); sound.pauseMusic = pauseMusic }
     }
+    /// Without headphones the alarm and the announcer only vibrate (out loud after a minute if not stopped). In Settings.
+    @Published var headphonesOnly: Bool = UserDefaults.standard.object(forKey: "headphonesOnly") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(headphonesOnly, forKey: "headphonesOnly"); sound.headphonesOnly = headphonesOnly }
+    }
     /// If you're using your phone when it would ring, you're awake: one notification instead of the alarm.
     @Published var quietWhenInUse: Bool = UserDefaults.standard.object(forKey: "quietWhenInUse") as? Bool ?? true {
         didSet { UserDefaults.standard.set(quietWhenInUse, forKey: "quietWhenInUse") }
@@ -333,6 +337,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         ])
         UNUserNotificationCenter.current().delegate = self
         sound.pauseMusic = pauseMusic
+        sound.headphonesOnly = headphonesOnly
         WatchStore.shared.holdAlerts = { [weak self] in self?.phase == .sleeping }
         WatchStore.shared.chime = { [weak self] in
             guard let self else { return }
@@ -904,7 +909,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         let c = UNMutableNotificationContent()
         c.title = "You’re at \(place)"
         c.body = then ?? (phase == .finished ? "Get off here: your trip is done." : "Get off here.")
-        c.sound = .default
+        c.sound = sound.quietNow ? nil : .default         // no headphones: no ding for the whole train
         c.interruptionLevel = .timeSensitive
         c.userInfo = ["kind": "ok"]
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "arrived-\(Int(Date().timeIntervalSince1970))", content: c, trigger: nil)) { _ in }
@@ -926,7 +931,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         let c = UNMutableNotificationContent()
         c.title = approach ? "Wake up" : "Get off now"
         c.body = approach ? "\(leg?.to.short ?? "Your stop") in about \(Fmt.distance(distance ?? 0))." : "You’re at \(leg?.to.short ?? "your stop")."
-        c.sound = .default
+        c.sound = sound.quietNow ? nil : .default         // no headphones: it buzzes instead
         c.interruptionLevel = .timeSensitive
         // Using your phone right now? Then you're awake: one notification is enough.
         if inUse {
@@ -2751,10 +2756,10 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     func resetAll() {
         if isRiding { endTrip() }
         let d = UserDefaults.standard
-        for k in ["busKm", "trainKm", "ringAtStop", "announce", "movingStation", "autoStart", "sound", "pauseMusic", "autoHome", "kmMem", "dir", "dirAt", "autoHomeDay", "quietWhenInUse", "backupMinutes", RideGPS.settingKey] { d.removeObject(forKey: k) }
+        for k in ["busKm", "trainKm", "ringAtStop", "announce", "movingStation", "autoStart", "sound", "pauseMusic", "autoHome", "kmMem", "dir", "dirAt", "autoHomeDay", "quietWhenInUse", "headphonesOnly", "backupMinutes", RideGPS.settingKey] { d.removeObject(forKey: k) }
         BatteryLog.shared.clear(); BatteryLog.shared.flush()          // (the battery and data log too)
         busKm = 2; trainKm = 5; ringAtStop = true; announce = true; movingStation = true; autoStart = true
-        soundKind = .steam; pauseMusic = false; autoHome = true; quietWhenInUse = true; kmMem = [:]; lastScore = nil
+        soundKind = .steam; pauseMusic = false; autoHome = true; quietWhenInUse = true; headphonesOnly = true; kmMem = [:]; lastScore = nil
         direction = Self.savedDirection()
         Ratings.shared.reset(); ScoreBook.shared.reset(); WatchStore.shared.reset(); StopsStore.shared.reset(); LineWatchStore.shared.reset()
         music.disconnectSpotify(); music.source = .off

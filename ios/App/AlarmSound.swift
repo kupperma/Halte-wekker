@@ -27,6 +27,20 @@ final class AlarmSound: NSObject, AVSpeechSynthesizerDelegate {
 
     /// "Pause it": the alarm stops your music instead of playing over it (louder; press play afterwards).
     var pauseMusic = false
+    /// Settings › "Sound only with headphones" (0.24.3): without headphones the alarm and the announcer only vibrate,
+    /// so the rest of the train doesn't hear it. Not stopped after `loudAfter`, it rings out loud anyway.
+    var headphonesOnly = true
+    static let loudAfter: TimeInterval = 60
+    private var loudLater: DispatchWorkItem?
+
+    /// Sound goes somewhere only you hear it: wired, USB or Bluetooth headphones (or the car).
+    static func privateOutput() -> Bool {
+        let mine: Set<AVAudioSession.Port> = [.headphones, .bluetoothA2DP, .bluetoothHFP, .bluetoothLE, .usbAudio, .carAudio]
+        return AVAudioSession.sharedInstance().currentRoute.outputs.contains { mine.contains($0.portType) }
+    }
+
+    /// Right now it would only vibrate (the setting is on and no headphones are in).
+    var quietNow: Bool { headphonesOnly && !Self.privateOutput() }
     private var alarm: AVAudioPlayer?
     private var jingle: AVAudioPlayer?
     private var silent: AVAudioPlayer?
@@ -64,6 +78,14 @@ final class AlarmSound: NSObject, AVSpeechSynthesizerDelegate {
         let s = AVAudioSession.sharedInstance()
         try? s.setCategory(.playback, mode: .spokenAudio, options: pauseMusic ? [] : [.mixWithOthers, .duckOthers])
         try? s.setActive(true)
+        if quietNow {
+            // no headphones: a strong buzz only, and out loud after a minute if you sleep through it
+            vibrate(every: 0.8)
+            let l = DispatchWorkItem { [weak self] in self?.startLoop() }
+            loudLater = l
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.loudAfter, execute: l)
+            return
+        }
         vibrate()
         guard let text = announcement, !text.isEmpty else { startLoop(); return }
         jingle = try? AVAudioPlayer(data: Synth.wav(Synth.jingle()))
@@ -88,6 +110,12 @@ final class AlarmSound: NSObject, AVSpeechSynthesizerDelegate {
         try? s.setCategory(.playback, mode: .spokenAudio, options: [.mixWithOthers, .duckOthers])
         try? s.setActive(true)
         AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
+        if quietNow {
+            // no headphones: two buzzes, no jingle or voice
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) { AudioServicesPlaySystemSound(kSystemSoundID_Vibrate) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in self?.stop() }
+            return
+        }
         jingle = try? AVAudioPlayer(data: Synth.wav(Synth.jingle()))
         jingle?.play()
         guard let text = announcement, !text.isEmpty else {
@@ -113,14 +141,15 @@ final class AlarmSound: NSObject, AVSpeechSynthesizerDelegate {
         alarm?.numberOfLoops = -1; alarm?.volume = 1; alarm?.currentTime = 0; alarm?.play()
     }
 
-    private func vibrate() {
+    private func vibrate(every seconds: TimeInterval = 1.6) {
         buzz?.invalidate()
         AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
-        buzz = Timer.scheduledTimer(withTimeInterval: 1.6, repeats: true) { _ in AudioServicesPlaySystemSound(kSystemSoundID_Vibrate) }
+        buzz = Timer.scheduledTimer(withTimeInterval: seconds, repeats: true) { _ in AudioServicesPlaySystemSound(kSystemSoundID_Vibrate) }
     }
 
     func stop() {
         fallback?.cancel(); fallback = nil; afterSpeech = nil
+        loudLater?.cancel(); loudLater = nil
         speech.stopSpeaking(at: .immediate)
         jingle?.stop(); alarm?.stop()
         buzz?.invalidate(); buzz = nil
