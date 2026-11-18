@@ -798,15 +798,25 @@ struct NewHome: View {
 
     private var bottomCards: some View {
         let data = cardData
-        return DepartureCardsView(cards: data.cards, loading: data.loading, asOf: data.asOf, note: data.note, nudge: nudge,
+        return DepartureCardsView(cards: data.cards, loading: data.loading, asOf: data.asOf, note: data.note, nudge: nudge, trips: tripsCard,
                                   focused: $focusedCard, tap: { tapped = $0 }, openDay: { openDay() })
             .padding(.bottom, 8)
     }
 
-    /// The cards' ids as they show (the nudge, the stops, or the empty card).
+    /// The cards' ids as they show (the nudge, the stops, or the empty card, and off the corridor your next trips).
     private var cardIds: [String] {
         let c = cardData.cards.map(\.id)
-        return (nudge == nil ? [] : ["nudge"]) + (c.isEmpty ? ["empty"] : c)
+        return (nudge == nil ? [] : ["nudge"]) + (c.isEmpty ? ["empty"] : c) + (tripsCard == nil ? [] : ["trips"])
+    }
+
+    /// Off the corridor (0.24): your next door-to-door trips between Home and School, as the last card, in place of the
+    /// corridor's lists of trains and campus buses. Only from your usual start (at home, or at school going home).
+    private var tripsCard: AnyView? {
+        guard RoleSnapshot.corridor == nil, !live.anywhere, live.custom == nil, trip.phase == .idle else { return nil }
+        let toSchool = trip.direction == .toSchool
+        return AnyView(HomeTripsCard(trips: live.next, title: toSchool ? "Next to \(placeName(.school))" : "Next home",
+                                     loading: live.updated == nil && live.nextError == nil, asOf: live.nextAsOf, note: live.nextError,
+                                     open: { HomeActions.openGo(live: live, trip: trip, goStore: goStore, near: near) }))
     }
 
     /// A swipe to a stop's card moves the map there.

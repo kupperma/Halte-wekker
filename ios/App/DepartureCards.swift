@@ -60,6 +60,8 @@ struct DepartureCardsView: View {
     let asOf: Date?
     let note: String?                         // nothing to show, and why
     let nudge: AnyView?
+    /// Off the corridor, your next trips between Home and School, after the stops (0.24: `HomeTripsCard`).
+    var trips: AnyView? = nil
     @Binding var focused: String?
     let tap: (DepartureTap) -> Void
     let openDay: () -> Void
@@ -90,6 +92,9 @@ struct DepartureCardsView: View {
                     ForEach(cards) { c in
                         card(c).containerRelativeFrame(.horizontal) { w, _ in w - 60 }.id(c.id)
                     }
+                    if let trips {
+                        trips.containerRelativeFrame(.horizontal) { w, _ in w - 60 }.id("trips")
+                    }
                 }
                 .scrollTargetLayout()
             }
@@ -103,7 +108,7 @@ struct DepartureCardsView: View {
         }
     }
 
-    private var ids: [String] { (nudge == nil ? [] : ["nudge"]) + (cards.isEmpty ? ["empty"] : cards.map(\.id)) }
+    private var ids: [String] { (nudge == nil ? [] : ["nudge"]) + (cards.isEmpty ? ["empty"] : cards.map(\.id)) + (trips == nil ? [] : ["trips"]) }
 
     @ViewBuilder private var dots: some View {
         if ids.count > 1 {

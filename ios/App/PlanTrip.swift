@@ -599,8 +599,11 @@ struct MoreWaysRows: View {
             ForEach(RoutePlan.all) { r in
                 item("bell.and.waves.left.and.right", "My route \(r.name.lowercased())", "Start the alarm by hand") { open(.route(r.id)) }
             }
-            if RoleSnapshot.corridor != nil {           // (its trains are the corridor's: Breda and the two hubs)
-                item("tram.fill", "Friend’s train", planner.trip.map { "\($0.dayLabel) · \($0.out ? "arrive Breda" : "leave Breda") \($0.time)" } ?? "Plan by the time of a train") {
+            // (on the corridor its trains between Breda and the two hubs; off it between the stations nearest Home and
+            // School, when both have one within 5 km: 0.24)
+            if TrainTime.available {
+                let w = TrainTime.words
+                item("tram.fill", w.title, planner.trip.map { "\($0.dayLabel) · \(w.arriveLeave(out: $0.out)) \($0.time)" } ?? "Plan by the time of a train") {
                     open(planner.trip == nil ? .newPlan(byArrival: false) : .planned)
                 }
             }

@@ -36,8 +36,8 @@ struct PlannedTripsSheetNew: View {
                             if let t = planner.trip { trip.pick(t.out ? .toSchool : .home) }
                             startReq = StartRequest(route: r)
                         })
-                    } else {
-                        DSQuietButton(title: "Plan by your friend’s train", icon: "tram.fill", full: true) { editing = false }
+                    } else if TrainTime.available {      // (off the corridor: a station near both Home and School, 0.24)
+                        DSQuietButton(title: TrainTime.words.planButton, icon: "tram.fill", full: true) { editing = false }
                     }
                 }
                 .padding(.horizontal, DS.s16).padding(.top, DS.s8).padding(.bottom, DS.s24)
@@ -181,12 +181,13 @@ struct PlannedPassNew: View {
 
     var body: some View {
         if let t = planner.trip {
+            let w = TrainTime.words
             VStack(alignment: .leading, spacing: DS.s12) {
                 VStack(alignment: .leading, spacing: DS.s12) {
                     HStack(alignment: .top, spacing: DS.s8) {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("Friend’s train · \(t.dayLabel)").font(DS.footnoteStrong).foregroundStyle(DS.accentText)
-                            Text("\(t.out ? "Arrive Breda" : "Leave Breda") \(t.time)").font(DS.title).monospacedDigit().foregroundStyle(DS.text)
+                            Text("\(w.title) · \(t.dayLabel)").font(DS.footnoteStrong).foregroundStyle(DS.accentText)
+                            Text("\(t.out ? "Arrive \(w.station)" : "Leave \(w.station)") \(t.time)").font(DS.title).monospacedDigit().foregroundStyle(DS.text)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                         .accessibilityElement(children: .combine)
@@ -203,7 +204,7 @@ struct PlannedPassNew: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .dsCard()
-                if let op = planner.chosen, let r = RoutePlan.via(op.station) {
+                if let op = planner.chosen, let r = op.route {
                     DSPrimaryButton(title: "Wake me on this trip", icon: "bell.and.waves.left.and.right") { wake(r) }
                 }
                 if let u = planner.updated {
@@ -219,7 +220,8 @@ struct PlannedPassNew: View {
     @ViewBuilder
     private func content(_ op: PlanOption, _ t: PlannedTrip) -> some View {
         let info = ns.rail(op.train.first)
-        let built = PlannedPass.build(op, out: t.out, info: info, extra: AnyView(TrainSizeRow(info: info)))
+        let w = TrainTime.words
+        let built = PlannedPass.build(op, out: t.out, info: info, extra: AnyView(TrainSizeRow(info: info)), w: w)
         if !built.right.isEmpty {
             Text(built.right).font(DS.subStrong).monospacedDigit().foregroundStyle(DS.secondary)
         }
@@ -230,7 +232,7 @@ struct PlannedPassNew: View {
             }
         }
         if planner.inexact {
-            DSNote(icon: "exclamationmark.triangle.fill", text: "No train \(t.out ? "arrives in" : "leaves") Breda at exactly \(t.time). This is the closest one.")
+            DSNote(icon: "exclamationmark.triangle.fill", text: w.inexact(out: t.out, time: t.time))
         }
         // the stops along it, with their times
         Text(built.stops.filter { !$0.time.isEmpty }.map { "\($0.name) \($0.time)" }.joined(separator: " → "))
@@ -238,7 +240,7 @@ struct PlannedPassNew: View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(built.legs.enumerated()), id: \.element.id) { i, l in
                 if i > 0 { Divider().overlay(DS.divider).padding(.vertical, DS.s8) }
-                LegRow(leg: l)
+                LegRow(leg: l, tagText: w.tag)
             }
         }
         let notes = [op.busInAlt.map { "Earlier bus: \($0.first.line) at \(Fmt.hhmm($0.first.departure))" },
@@ -255,6 +257,8 @@ struct PlannedPassNew: View {
     /// One ride: its time, its line, where it goes and how it's running, and its speed rank.
     private struct LegRow: View {
         let leg: PassLeg
+        /// The train's tag: "Friend’s" (off the corridor "Your train").
+        var tagText = "Friend’s"
         /// "BUS 306" → a bus pill "306"; "IC" → a train pill.
         private var pill: (line: String, train: Bool) {
             let b = leg.badge
@@ -271,7 +275,7 @@ struct PlannedPassNew: View {
                         Text(leg.time).font(DS.bodyStrong).monospacedDigit().foregroundStyle(DS.text)
                         DSLinePill(line: pill.line, train: pill.train)
                         if leg.tag != nil {
-                            Text("Friend’s").font(DS.footnoteStrong).foregroundStyle(DS.accentSoftText)
+                            Text(tagText).font(DS.footnoteStrong).foregroundStyle(DS.accentSoftText)
                                 .padding(.horizontal, 8).padding(.vertical, 2)
                                 .background(DS.accentSoft, in: Capsule())
                         }

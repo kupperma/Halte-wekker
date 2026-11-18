@@ -1,3 +1,4 @@
+import CoreLocation
 import Foundation
 import UserNotifications
 
@@ -44,8 +45,44 @@ struct PlanOption: Identifiable {
     var busInAlt: DoorTrip?
     var busOut: DoorTrip?
     var busOutAlt: DoorTrip?
-    var station: Place { from == .breda ? to : from }
+    /// The station on the home's side (on the corridor the hub: Den Bosch or Eindhoven).
+    var station: Place
     var tripIds: [String] { [train, busIn, busOut].compactMap { $0?.first.tripId } }
+
+    /// The whole trip, bus, train and bus, as one door-to-door trip (off the corridor the alarm follows it: 0.24).
+    var door: DoorTrip {
+        let rides = (busIn?.rides ?? []) + train.rides + (busOut?.rides ?? [])
+        return DoorTrip(rides: rides, start: busIn?.start ?? train.start, end: busOut?.end ?? train.end)
+    }
+
+    /// What "Wake me on this trip" starts: on the corridor the route via its hub (as before); off it this whole trip.
+    var route: RoutePlan? { RoutePlan.via(station) ?? RoutePlan.from(door) }
+}
+
+/// "A train's time" off the corridor (0.24): the stations nearest Home and School, and how Plan names it. On the
+/// corridor it's the friend's train between Breda and the two hubs.
+enum TrainTime {
+    /// Off the corridor: the station nearest Home and the one nearest School (nil: either has no rail within 5 km, or
+    /// it's the same station). Nil on the corridor (its stations are the hubs and Breda).
+    static var stations: (home: Place, school: Place)? {
+        let r = RoleSnapshot.current
+        guard r.corridor == nil, let p = NearestStation.pair(home: r.home.point, school: r.school.point, in: NSCodes.shared.stations) else { return nil }
+        return (Place(station: p.home), Place(station: p.school))
+    }
+    /// Plan by a train's time is offered: on the corridor, or with a station near both Home and School.
+    static var available: Bool { RoleSnapshot.corridor != nil || stations != nil }
+    static var words: TrainTimeWords {
+        let s = stations
+        return TrainTimeWords.make(corridor: RoleSnapshot.corridor, school: RoleWords.current.school, homeStation: s?.home.short, schoolStation: s?.school.short)
+    }
+}
+
+extension Place {
+    /// An NS station as a place to plan from (key "ns:UT": NS is asked about it by its code).
+    init(station s: NSStation) {
+        self.init(key: "ns:\(s.code)", name: s.name, short: s.name, ids: ["\(s.lat),\(s.lon)"],
+                  coordinate: CLLocationCoordinate2D(latitude: s.lat, longitude: s.lon), spoken: s.name)
+    }
 }
 
 @MainActor
@@ -201,13 +238,24 @@ final class Planner: ObservableObject {
         busy = true
         defer { busy = false }
         let out = t.out
+        // On the corridor its two hubs and Breda; off it the stations nearest Home and School (0.24)
+        let hubs: [Place], far: Place
+        if RoleSnapshot.corridor != nil {
+            hubs = [Place.eindhoven, Place.denBosch]; far = .breda
+        } else if let s = TrainTime.stations {
+            hubs = [s.home]; far = s.school
+        } else {
+            error = "There’s no train station near both your home and \(RoleWords.current.school)."
+            options = []; updated = Date()
+            return
+        }
         // Both stations at once; the answers keep the station order.
-        let planJobs: [@Sendable () async -> [(DoorTrip, Place, Place)]] = [Place.eindhoven, Place.denBosch].map { st in
+        let planJobs: [@Sendable () async -> [(DoorTrip, Place, Place)]] = hubs.map { st in
             { @Sendable in
                 if out {
-                    return await Transit.plan(from: st, to: .breda, modes: "RAIL", at: T.addingTimeInterval(-80 * 60), count: 8, maxTransfers: 1).map { ($0, st, Place.breda) }
+                    return await Transit.plan(from: st, to: far, modes: "RAIL", at: T.addingTimeInterval(-80 * 60), count: 8, maxTransfers: 1).map { ($0, st, far) }
                 } else {
-                    return await Transit.plan(from: .breda, to: st, modes: "RAIL", at: T.addingTimeInterval(-10 * 60), count: 6, maxTransfers: 1).map { ($0, Place.breda, st) }
+                    return await Transit.plan(from: far, to: st, modes: "RAIL", at: T.addingTimeInterval(-10 * 60), count: 6, maxTransfers: 1).map { ($0, far, st) }
                 }
             }
         }
@@ -228,11 +276,11 @@ final class Planner: ObservableObject {
         let picked = Array((exact.isEmpty ? Array(trains.prefix(1)) : exact).prefix(3))
         // The buses of every picked train at once; the options keep the picked order.
         let busJobs: [@Sendable () async -> (DoorTrip?, DoorTrip?, DoorTrip?, DoorTrip?)] = picked.map { p in
-            { @Sendable in await self.buses(for: p.0, station: out ? p.1 : p.2, out: out) }
+            { @Sendable in await self.buses(for: p.0, station: out ? p.1 : p.2, far: far, out: out) }
         }
         let found = await Progressive.all(busJobs)
         let opts: [PlanOption] = zip(picked, found).map { p, b in
-            PlanOption(train: p.0, from: p.1, to: p.2, busIn: b.0, busInAlt: b.1, busOut: b.2, busOutAlt: b.3)
+            PlanOption(train: p.0, from: p.1, to: p.2, busIn: b.0, busInAlt: b.1, busOut: b.2, busOutAlt: b.3, station: out ? p.1 : p.2)
         }
         guard trip == t else { return }
         for o in opts { Ratings.shared.learn(o.from, o.to, [o.train]) }
@@ -253,18 +301,21 @@ final class Planner: ObservableObject {
     }
 
     /// The latest bus that still makes the train (2 min spare; after a slow bus, a B 4 and a C 6), and the first one after it.
-    private func buses(for train: DoorTrip, station: Place, out: Bool) async -> (DoorTrip?, DoorTrip?, DoorTrip?, DoorTrip?) {
+    /// `far`: the station on the school's side (Breda on the corridor). Off it the ride to and from the stations may be
+    /// a tram or a metro too.
+    private func buses(for train: DoorTrip, station: Place, far: Place, out: Bool) async -> (DoorTrip?, DoorTrip?, DoorTrip?, DoorTrip?) {
         let dep = train.first.departure, arr = train.last.arrival
         let before: [DoorTrip], after: [DoorTrip]
+        let modes = RoleSnapshot.corridor != nil ? "BUS" : "BUS,TRAM,SUBWAY,FERRY"
         if out {
-            async let b = Transit.plan(from: .home, to: station, modes: "BUS", at: dep.addingTimeInterval(-90 * 60), count: 8, maxTransfers: 0)
-            async let a = Transit.plan(from: .breda, to: .school, modes: "BUS", at: arr, count: 4, maxTransfers: 0)
+            async let b = Transit.plan(from: .home, to: station, modes: modes, at: dep.addingTimeInterval(-90 * 60), count: 8, maxTransfers: 0)
+            async let a = Transit.plan(from: far, to: .school, modes: modes, at: arr, count: 4, maxTransfers: 0)
             let (x, y) = await (b, a)
             before = x; after = y
             Ratings.shared.learn(.home, station, before)
         } else {
-            async let b = Transit.plan(from: .school, to: .breda, modes: "BUS", at: dep.addingTimeInterval(-60 * 60), count: 8, maxTransfers: 0)
-            async let a = Transit.plan(from: station, to: .home, modes: "BUS", at: arr, count: 3, maxTransfers: 0)
+            async let b = Transit.plan(from: .school, to: far, modes: modes, at: dep.addingTimeInterval(-60 * 60), count: 8, maxTransfers: 0)
+            async let a = Transit.plan(from: station, to: .home, modes: modes, at: arr, count: 3, maxTransfers: 0)
             let (x, y) = await (b, a)
             before = x; after = y
             Ratings.shared.learn(station, .home, after)

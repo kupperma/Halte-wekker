@@ -532,6 +532,12 @@ final class LiveStore: ObservableObject {
         } else {
             next = trips; nextAsOf = nil; nextAt = Date()
             SnapshotStore.shared.save(SavedTrips(trips: trips, lat: from?.coordinate.latitude, lon: from?.coordinate.longitude), key: "next|\(key)")
+            // off the corridor the home's last card lists these (0.24): NS fills in a train's platform, at any station
+            if RoleSnapshot.corridor == nil, from == nil, trips.contains(where: { $0.rides.contains(where: \.isTrain) }) {
+                let start = usual, to = destination(dir)
+                let rows = trips.map { ($0, start, to) }
+                Task { await NSStore.shared.enrich(rows) }
+            }
         }
         nextError = next.isEmpty && !onTheMove ? "No trips found right now. It tries again in a minute." : nil
         if pick >= next.count { pick = 0 }

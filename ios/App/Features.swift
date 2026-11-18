@@ -205,8 +205,10 @@ struct PlanSheet: View {
     @State private var tomorrow = false
     @State private var error: String?
     private var w: RoleWords { RoleWords.current }
-    /// The friend's train is the corridor's (Breda and the two hubs): off it, only Be there by and Leave at.
-    private var corridor: Bool { RoleSnapshot.corridor != nil }
+    /// The friend's train is the corridor's (Breda and the two hubs); off it, a train's time between the stations nearest
+    /// Home and School, when both have one (0.24).
+    private var corridor: Bool { TrainTime.available }
+    private var tw: TrainTimeWords { TrainTime.words }
     var body: some View {
         let pal = HWPalette.of(home: !out)
         NavigationStack {
@@ -214,12 +216,12 @@ struct PlanSheet: View {
                 Section {
                     Picker("Plan by", selection: $mode) {
                         Text("Be there by").tag(0); Text("Leave at").tag(1)
-                        if corridor { Text("Friend’s train").tag(2) }
+                        if corridor { Text(tw.title).tag(2) }
                     }.pickerStyle(.segmented)
                 }
                 Section {
-                    Picker("Direction", selection: $out) { Text(arriveMode ? "To school" : "To Breda").tag(true); Text("Home").tag(false) }.pickerStyle(.segmented)
-                    DatePicker(leaveMode ? (out ? "Leave \(w.homeTown) at" : "Head home at") : arriveMode ? (out ? "Be at \(w.school) by" : "Be home by") : (out ? "Arrive in Breda at" : "Leave Breda at"),
+                    Picker("Direction", selection: $out) { Text(arriveMode ? "To school" : tw.toStation).tag(true); Text("Home").tag(false) }.pickerStyle(.segmented)
+                    DatePicker(leaveMode ? (out ? "Leave \(w.homeTown) at" : "Head home at") : arriveMode ? (out ? "Be at \(w.school) by" : "Be home by") : tw.timeLabel(out: out),
                                selection: $time, displayedComponents: .hourAndMinute)
                     Picker("Day", selection: $tomorrow) { Text("Today").tag(false); Text("Tomorrow").tag(true) }.pickerStyle(.segmented)
                 } footer: {
@@ -228,7 +230,7 @@ struct PlanSheet: View {
                     } else if arriveMode {
                         Text("The app finds the trip that leaves the latest and still gets you \(out ? "to \(w.school)" : w.homeToTown) in time, from \(out ? w.homeStops : w.school), with live times. You get a reminder ten minutes before you have to leave.")
                     } else {
-                        Text("Use the time of your friend’s train. The app finds that train, \(out ? "the bus from Veghel that gets you there in time and the bus to BUas after it" : "the bus from BUas to catch it and the bus to Veghel after it").")
+                        Text(tw.footer(out: out))
                     }
                 }
                 if let error { Section { Text(error).foregroundStyle(newLook ? DS.warning : Paper.late) } }
@@ -245,7 +247,7 @@ struct PlanSheet: View {
             .scrollContentBackground(newLook ? .automatic : .hidden)
             .background(PaperFill().ignoresSafeArea().opacity(newLook ? 0 : 1)).preferredColorScheme(newLook ? nil : .light)
             .font(newLook ? DS.body : HWFont.body(15)).tint(newLook ? DS.accentText : pal.band)
-            .navigationTitle(leaveMode ? "Leave at" : arriveMode ? "Be there by" : "Plan by train time")
+            .navigationTitle(leaveMode ? "Leave at" : arriveMode ? "Be there by" : tw.onCorridor ? "Plan by train time" : tw.title)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
         }
         .onChange(of: mode) { _, m in
@@ -393,43 +395,50 @@ struct PlannedPass: View {
     }
 
     /// The pass's three rides (bus, your friend's train, bus), the stops along it and the line on the right; `info`:
-    /// NS's word on the train, `extra`: what goes under the train's section.
-    static func build(_ op: PlanOption, out: Bool, info: RailInfo?, extra: AnyView?) -> (legs: [PassLeg], stops: [(name: String, time: String)], right: String) {
+    /// NS's word on the train, `extra`: what goes under the train's section. `w`: the corridor's words, to the letter, or
+    /// off it a train between the stations nearest Home and School (0.24).
+    static func build(_ op: PlanOption, out: Bool, info: RailInfo?, extra: AnyView?, w: TrainTimeWords = TrainTime.words) -> (legs: [PassLeg], stops: [(name: String, time: String)], right: String) {
         let o = op.train, arr = o.last.arrival
-        let train: PassLeg = PassLeg(time: Fmt.hhmm(o.first.departure), badge: o.first.line, to: out ? "to Breda" : "to \(op.to.short)",
+        let corridor = w.onCorridor
+        let train: PassLeg = PassLeg(time: Fmt.hhmm(o.first.departure), badge: o.first.line, to: out ? "to \(w.station)" : "to \(op.to.short)",
                             grade: o.rides.count == 1 ? o.first.grade : o.last.grade,
                             lines: [RideText.passLine(o.first, info), o.changes.isEmpty ? nil : PassLine(text: "Change at \(o.changes.joined(separator: ", "))"),
                                     PassLine(text: "\(o.rideLabel) · arrives \(Fmt.hhmm(arr))")],
                             tag: "FRIEND", gone: o.first.cancelled || info?.cancelled == true, extra: extra)
         let bi = op.busIn, bo = op.busOut
         func mins(_ a: Date, _ b: Date) -> Int { Int((b.timeIntervalSince(a) / 60).rounded()) }
+        /// "BUS 306"; off the corridor a tram or metro is just its line (the pill shows it as a bus).
+        func badge(_ b: DoorTrip) -> String { "BUS \(b.first.line)" }
         if out {
             let a: PassLeg = bi.map { b -> PassLeg in
-                PassLeg(time: Fmt.hhmm(b.first.departure), badge: "BUS \(b.first.line)", to: "to \(op.from.short)", grade: b.first.grade,
+                PassLeg(time: Fmt.hhmm(b.first.departure), badge: badge(b), to: "to \(op.from.short)", grade: b.first.grade,
                         lines: [RideText.passLine(b.first, nil), PassLine(text: "\(b.rideLabel) · arrives \(Fmt.hhmm(b.last.arrival))"),
                                 RideText.change(mins(b.end, o.first.departure), "change")], gone: b.first.cancelled)
-            } ?? PassLeg(time: "–", badge: "BUS", to: "No bus in time", grade: nil, lines: [PassLine(text: "Take an earlier bus to \(op.from.short).", warn: true)])
+            } ?? PassLeg(time: "–", badge: "BUS", to: corridor ? "No bus in time" : "Walk to the station", grade: nil,
+                         lines: [PassLine(text: corridor ? "Take an earlier bus to \(op.from.short)." : "No bus or tram in time to \(op.from.short): walk there, or leave earlier.", warn: true)])
             let c: PassLeg = bo.map { b -> PassLeg in
-                PassLeg(time: Fmt.hhmm(b.first.departure), badge: "BUS \(b.first.line)", to: "to \(Fmt.place(b.last.toStop))", grade: b.first.grade,
+                PassLeg(time: Fmt.hhmm(b.first.departure), badge: badge(b), to: "to \(Fmt.place(b.last.toStop))", grade: b.first.grade,
                         lines: [RideText.passLine(b.first, nil), PassLine(text: "\(b.rideLabel)\(b.walkAfter > 0 ? " · \(b.walkAfter) min walk" : "")"),
                                 RideText.change(mins(arr, b.first.departure) - b.first.walkBefore, "get to the bus")], gone: b.first.cancelled)
-            } ?? PassLeg(time: "–", badge: "BUS", to: "No bus to BUas", grade: nil, lines: [PassLine(text: "Walking takes about 17 min.")])
-            let stops: [(name: String, time: String)] = [(name: "Veghel", time: bi.map { Fmt.hhmm($0.first.departure) } ?? ""), (name: op.from.short, time: Fmt.hhmm(o.first.departure)),
-                         (name: "Breda", time: bo.map { Fmt.hhmm($0.first.departure) } ?? Fmt.hhmm(arr)), (name: "BUas", time: bo.map { Fmt.hhmm($0.end) } ?? "")]
-            return ([a, train, c], stops, bo.map { "At BUas \(Fmt.hhmm($0.end))" } ?? "Breda \(Fmt.hhmm(arr))")
+            } ?? PassLeg(time: "–", badge: "BUS", to: "No bus to \(w.school)", grade: nil,
+                         lines: [PassLine(text: corridor ? "Walking takes about 17 min." : "Walk from the station.")])
+            let stops: [(name: String, time: String)] = [(name: w.homeTown, time: bi.map { Fmt.hhmm($0.first.departure) } ?? ""), (name: op.from.short, time: Fmt.hhmm(o.first.departure)),
+                         (name: w.station, time: bo.map { Fmt.hhmm($0.first.departure) } ?? Fmt.hhmm(arr)), (name: w.school, time: bo.map { Fmt.hhmm($0.end) } ?? "")]
+            return ([a, train, c], stops, bo.map { "At \(w.school) \(Fmt.hhmm($0.end))" } ?? "\(w.station) \(Fmt.hhmm(arr))")
         } else {
             let a: PassLeg = bi.map { b -> PassLeg in
-                PassLeg(time: Fmt.hhmm(b.first.departure), badge: "BUS \(b.first.line)", to: "to Breda station", grade: b.first.grade,
-                        lines: [RideText.passLine(b.first, nil), b.first.walkBefore > 0 ? PassLine(text: "Leave BUas \(Fmt.hhmm(b.start)), \(b.first.walkBefore) min walk") : nil,
+                PassLeg(time: Fmt.hhmm(b.first.departure), badge: badge(b), to: corridor ? "to Breda station" : "to \(w.station)", grade: b.first.grade,
+                        lines: [RideText.passLine(b.first, nil), b.first.walkBefore > 0 ? PassLine(text: "Leave \(w.school) \(Fmt.hhmm(b.start)), \(b.first.walkBefore) min walk") : nil,
                                 RideText.change(mins(b.end, o.first.departure), "change")], gone: b.first.cancelled)
-            } ?? PassLeg(time: "–", badge: "BUS", to: "No bus in time", grade: nil, lines: [PassLine(text: "Walk to the station, about 17 min.", warn: true)])
+            } ?? PassLeg(time: "–", badge: "BUS", to: "No bus in time", grade: nil,
+                         lines: [PassLine(text: corridor ? "Walk to the station, about 17 min." : "Walk to the station, or leave earlier.", warn: true)])
             let c: PassLeg = bo.map { b -> PassLeg in
-                PassLeg(time: Fmt.hhmm(b.first.departure), badge: "BUS \(b.first.line)", to: "to \(Fmt.place(b.last.toStop))", grade: b.first.grade,
+                PassLeg(time: Fmt.hhmm(b.first.departure), badge: badge(b), to: "to \(Fmt.place(b.last.toStop))", grade: b.first.grade,
                         lines: [RideText.passLine(b.first, nil), PassLine(text: "\(b.rideLabel) to \(Fmt.place(b.last.toStop))"),
                                 RideText.change(mins(arr, b.first.departure) - b.first.walkBefore, "get to the bus")], gone: b.first.cancelled)
-            } ?? PassLeg(time: "–", badge: "BUS", to: "No bus to Veghel", grade: nil, lines: [])
-            let stops: [(name: String, time: String)] = [(name: "BUas", time: bi.map { Fmt.hhmm($0.start) } ?? ""), (name: "Breda", time: Fmt.hhmm(o.first.departure)),
-                         (name: op.to.short, time: bo.map { Fmt.hhmm($0.first.departure) } ?? Fmt.hhmm(arr)), (name: "Veghel", time: bo.map { Fmt.hhmm($0.last.arrival) } ?? "")]
+            } ?? PassLeg(time: "–", badge: "BUS", to: corridor ? "No bus to \(w.homeTown)" : "No bus home", grade: nil, lines: [])
+            let stops: [(name: String, time: String)] = [(name: w.school, time: bi.map { Fmt.hhmm($0.start) } ?? ""), (name: w.station, time: Fmt.hhmm(o.first.departure)),
+                         (name: op.to.short, time: bo.map { Fmt.hhmm($0.first.departure) } ?? Fmt.hhmm(arr)), (name: w.homeTown, time: bo.map { Fmt.hhmm($0.last.arrival) } ?? "")]
             return ([a, train, c], stops, bo.map { "Home around \(Fmt.hhmm($0.last.arrival))" } ?? "")
         }
     }
