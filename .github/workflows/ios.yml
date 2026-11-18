@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   build:
-    runs-on: macos-15
+    runs-on: macos-latest   # (macos-15 jobs kept getting cancelled unstarted, Nov 2026)
     steps:
       - uses: actions/checkout@v4
       - name: Use the newest Xcode (for AlarmKit, iOS 26)
