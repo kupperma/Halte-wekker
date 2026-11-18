@@ -25,7 +25,7 @@ struct GoViewNew: View {
             ZStack(alignment: .top) {
                 GoMap(ride: go.arrived ? nil : go.best?.first, here: go.here,
                       top: g.safeAreaInsets.top + bar, bottom: g.safeAreaInsets.top + bar + window, saved: go.asOf != nil, newLook: true,
-                      focus: mapFocus, onWalk: { walkMetres = $0 }, onLater: { id, at in gpsLater = at.map { (id, $0) } })
+                      focus: mapFocus, onWalk: { walkMetres = $0 }, onLater: { id, at in gpsLater = at.map { (trip: id, at: $0) } })
                     .ignoresSafeArea()
                 // (the map takes your hand in its window (0.20.1): the cards scroll below it, not over it)
                 ScrollView(showsIndicators: false) {
