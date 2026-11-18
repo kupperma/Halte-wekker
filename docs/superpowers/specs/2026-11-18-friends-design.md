@@ -1,6 +1,6 @@
 # Friends: travel together (design)
 
-Date: 2026-11-18 · Status: draft for approval
+Date: 2026-11-18 · Status: approved to build (the user asked to build everything overnight and review in the morning; open questions settled with the recommended picks below)
 
 ## Intent
 
@@ -158,6 +158,11 @@ Apple ID). Friends may live in different towns (e.g. Veghel and Tilburg) and go 
   them changed). After it deploys from main, the builder checks it from here with test requests to the live relay
   (the NS routes too) before any app work depends on it. If Durable Objects can't be used, the fallback is a KV
   namespace, and the user gets the exact click to make.
+
+- **Server metadata (user left it to the recommended pick):** the relay may see which accounts exchange boxes and
+  when, never contents. No sealed-sender / anonymous mailboxes in this project.
+- **Start area (recommended pick):** friends see home's nearest stops and station plus the school, never the home
+  address.
 
 ## Releases (proposed split)
 
