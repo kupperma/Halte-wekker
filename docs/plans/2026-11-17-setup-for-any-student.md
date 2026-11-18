@@ -4,7 +4,7 @@
 places and timetable. Today it works for one commute, Veghel ⇄ BUas by bus and NS train. The current user keeps
 working with zero setup. Their data becomes their saved profile, and the setup screen never appears for them.
 
-**Status:** plan only. Line numbers are at HEAD `6790c74` (0.20.9) and will move as steps land. Find each spot by the
+**Status:** 0.22.0 and 0.23.0 built (see their "As built" notes); the rest is plan. Line numbers are at HEAD `6790c74` (0.20.9) and will move as steps land. Find each spot by the
 function named.
 
 **Verification:** there is no local Swift toolchain. As in the earlier plans, verify each step with a push to the work
@@ -356,6 +356,45 @@ user"**. It lets the current user run the real first-run flow without losing the
 
 **Size:** L. About 1,300–1,600 lines: about 500 setup UI, about 250 pure logic, the JSON, the tool and about 250 lines
 of tests.
+
+**As built (0.23.0, build 102).** Where the code made the plan above change:
+
+- **Files.** The UI is `App/SetupFlow.swift` (the steps, `PlaceFinderSheet`, `ManualWeekEditor`, the test banner and
+  Settings' "Your school and home"); `App/SetupStore.swift` (app only) decides when it shows and saves Done. The pure
+  parts are `SetupLogic.swift` (steps, `SetupDraft`, `webcalURL`, `newSubscription`, the home board's stop choices and
+  what Done saves), `SetupBackup.swift`, `SchoolHints.swift`, `SchoolCatalog.swift` and `ManualWeek.lessons`, each in
+  the test target with `Schools.json`.
+- **Nothing is saved until Done.** Every step edits a `SetupDraft`; Done writes the profile, then the board, then the
+  places (`PlacesStore.replaceAll`, so a Home or School that moved clears what was learnt for it, as any move does),
+  then the school alarm's calendars, times and on/off. So Cancel ("Set up again") and End test change nothing, and a
+  new install that quits mid-way simply sees the setup again.
+- **The test's backup** (`setup.backup.v1`) is the stored values of the keys setup writes (`profile.v1`, `places.v1`,
+  `boardStops`, `boardLines`, `school.on`/`cals`/`early`/`wake`) and the ones learnt for Home and School (`kmMem`,
+  `lastMode`, `school.homeLat`/`homeLon`), a missing key kept as missing. It is taken before the flow opens. Done marks
+  it `live`. A backup that isn't live at launch (the app stopped during the flow, or while Done saved) is put back
+  before any store starts; a live one waits for "Back to my own". Plan differs: on going back, the learnt values are
+  **restored**, not cleared (clearing would lose the current user's wake distances); the saved answers are cleared and
+  `rolesMoved` re-registers the regions and reloads `kmMem` on both switch and restore, and the school week is planned
+  again. Going live clears what was learnt for both roles. While a test runs, the school alarm follows the test setup.
+- **Behind the first-run cover** the home isn't drawn (a plain page), so nothing plans for the placeholder places of
+  a new install. The cover waits for `trip.phase == .idle`; the test banner sits in the top safe area of `RootView`,
+  over either home, only while idle and Fastest trip is closed. Settings' entry is in both looks.
+- **School.** A catalog pick saves the campus coordinate with no stop ids, `schoolCatalogId`, `campus`, and the
+  calendar hints `[short, name]`. A search pick (an address, place or stop, `Transit.findPlaces`: the geocoder with no
+  type) keeps a name you can edit. BUas from the list with a Veghel home gives the corridor back.
+- **Home's stops** come from `/v1/map/stops` around home grouped by stop area (a bus station's platforms are one
+  choice, by its parent id) or by name; the nearest is picked to start with. They are Home's `stopIds` and the board,
+  lines empty. "Set up again" leaves the board and lines alone unless you change the stops or Home.
+- **Schools.json: 78 schools, 117 campuses**, every coordinate from Transitous by `ios/tools/schools.js` (seed
+  `schools-seed.json`; `schools-review.txt` lists each match for a person to check). Horizon College and ROC Friese
+  Poort are left out (nothing matched); their students use the address search.
+- **SchoolHints**: the legacy profile's hints give 0.22's two lists exactly (names, and event text); any other profile
+  gets the generic words plus its own hints of 4 letters or more ("UU" would match too much).
+- **ManualWeek** for Your day: start-only events (`ComingUp.Event.startOnly`), left out of the classes' end and of
+  Coming up. Settings › School alarm shows "Your week" (editable) or, with no timetable, the two ways to set one.
+- **Permissions** use the existing paths and Info.plist strings: when-in-use location through `NearMe.locate(ask:)`,
+  calendar through `SchoolAlarm.askCalendarAccess`, AlarmKit or notifications through `WakeAlarm.requestPermission`.
+  No new entitlement or usage string.
 
 ### 3.3 Release 0.24.0: works well anywhere (door to door polish)
 
