@@ -9,6 +9,10 @@ Travel comes first. These wait until the travel part is great.
 - **Recomp (weight loss):** on the back burner; its data is kept.
 - **Setup for other students:** make the app usable by any uni or college student (their own school, schedule and places).
 
+- **Android version (after Friends):** so Android friends can use the app and be friends with iPhone users through
+  the same relay and encrypted boxes. Likely a native Kotlin (Jetpack Compose) app; free to share as an APK from the
+  GitHub releases, built on Linux CI (no Mac needed). The Friends box format is kept platform-neutral for this.
+
 ## Travel (now)
 
 - Trip screen: make clear which stop or platform to go to and how to walk there (concepts S1–S3 on the design canvas).
