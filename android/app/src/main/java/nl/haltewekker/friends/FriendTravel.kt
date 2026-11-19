@@ -31,8 +31,19 @@ data class TravelState(
 ) {
     @Serializable data class Spot(val name: String, val lat: Double? = null, val lon: Double? = null)
     @Serializable data class Position(val lat: Double, val lon: Double, val acc: Double? = null, val at: Double)
-    /** Coach `n` of `of`: counted from the front when `front`, else from the left of NS's drawing at station `at`. */
-    @Serializable data class Coach(val n: Int, val of: Int, val front: Boolean, val at: String? = null)
+    /**
+     * Coach `n` of `of`: counted from the front when `front`, else from the left of NS's drawing at station `at`.
+     * (A5, iOS 0.31) `seat`: where in the coach, roughly (`SeatMap`); an app before it leaves it out and ignores it.
+     */
+    @Serializable data class Coach(val n: Int, val of: Int, val front: Boolean, val at: String? = null, val seat: Seat? = null)
+
+    /**
+     * (A5, iOS 0.31) Your window in your coach. `deck`: "upper" or "lower" in a double-deck coach, "none" in a
+     * single-deck one (anything else reads as "none"). `w`: the window, 1-based, counted from the back of the coach
+     * (the end nearer the back of the train) when the coach is counted from the front (`front`); else from the left of
+     * NS's drawing at `at`, like the coach. `of`: windows in a row as the picker drew them (11).
+     */
+    @Serializable data class Seat(val deck: String, val w: Int, val of: Int)
 
     enum class Stage { RIDING, WAITING, CHANGE }
 
@@ -147,6 +158,29 @@ object TravelWords {
                 s.eta?.let { t += " · arrives ${clock(it, zone)}" }
                 t
             }
+        }
+    }
+
+    /** (A5, iOS 0.31) A friend's card on the Friends map's sheet: "IC 3512 to Breda", "Waiting at Best", "Changing at Eindhoven". */
+    fun cardLine(s: TravelState): String = when (s.stage) {
+        TravelState.Stage.WAITING -> "Waiting at ${s.from.name}"
+        TravelState.Stage.CHANGE -> "Changing at ${s.from.name}"
+        TravelState.Stage.RIDING -> "${vehicle(s)} to ${s.to.name}"
+    }
+
+    /** (A5) Under it: "arrives 08:43" (null: not known, or still waiting). */
+    fun cardTime(s: TravelState, zone: ZoneId = ZoneId.systemDefault()): String? {
+        if (s.stage != TravelState.Stage.RIDING) return null
+        return s.eta?.let { "arrives ${clock(it, zone)}" }
+    }
+
+    /** (A5) The friend's page, next to the line's pill: "3512 to Breda · 08:43". */
+    fun headline(s: TravelState, zone: ZoneId = ZoneId.systemDefault()): String = when (s.stage) {
+        TravelState.Stage.WAITING -> "waiting at ${s.from.name}"
+        TravelState.Stage.CHANGE -> "changing at ${s.from.name}"
+        TravelState.Stage.RIDING -> {
+            val what = if (s.line == null) vehicle(s) + " " else (s.num?.let { "$it " } ?: "")
+            "${what}to ${s.to.name}" + (s.eta?.let { " · ${clock(it, zone)}" } ?: "")
         }
     }
 

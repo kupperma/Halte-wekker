@@ -121,6 +121,24 @@ object TripTake {
     }
 
     fun deadline(c: TripCard): Double? = c.by ?: c.arrival
+
+    /**
+     * (A5, iOS 0.31) "Ride along" on a friend's page: their bus or train now, as a card to take. On board, it starts
+     * from where they are (so your way gets onto it further along); waiting or changing, from their stop. Null: no
+     * vehicle known, or nowhere to get off (Home goes without a place).
+     */
+    fun rideAlong(s: TravelState, now: Double): TripCard? {
+        val trip = s.trip?.takeIf { it.isNotEmpty() } ?: return null
+        val tl = s.to.lat ?: return null
+        val to = s.to.lon ?: return null
+        var from = TripCard.Spot(s.from.name, null, s.from.lat, s.from.lon)
+        val p = s.pos
+        if (s.stage == TravelState.Stage.RIDING && p != null) from = TripCard.Spot("On the way to ${s.to.name}", null, p.lat, p.lon)
+        val end = TripCard.Spot(s.to.name, null, tl, to)
+        val arr = maxOf(now, s.eta ?: (now + 30 * 60))
+        val ride = TripCard.Ride(mode = s.mode, line = s.line ?: "", num = s.num, trip = trip, from = from, to = end, dep = now, arr = arr)
+        return TripCard(listOf(ride), end, end = arr)
+    }
 }
 
 object TripCardWords {

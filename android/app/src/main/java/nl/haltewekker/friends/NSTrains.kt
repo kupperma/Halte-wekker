@@ -90,7 +90,9 @@ class NSCodes(val stations: List<NSStation>) {
 }
 
 /** NS's drawing of one train at a station (relay `/ns/train`): its units with their coaches, platform letters, direction. */
-data class TrainDrawing(val units: List<CoachMap.Unit>, val letters: List<Pair<String, Double>>, val dir: String?, val cars: Int)
+data class TrainDrawing(val units: List<CoachMap.Unit>, val letters: List<Pair<String, Double>>, val dir: String?, val cars: Int,
+                        /** (A5) Each unit's type as NS names it ("VIRM-6"; else its drawing's name, "virm_6"), for the seat picker's decks. */
+                        val kinds: List<String> = emptyList())
 
 object NSTrains {
     private val kept = HashMap<String, Pair<Double, TrainDrawing?>>()
@@ -105,6 +107,12 @@ object NSTrains {
         val cars = if (length > 0) length else parts.sumOf { (it["bakken"] as? JsonArray)?.size ?: 0 }
         if (total <= 0 || parts.isEmpty()) return null
         var x = 0.0
+        val kinds = parts.map { m ->
+            val type = (m["type"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: (m["materieelType"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: ""
+            var key = ((m["afbeelding"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: "").split('/').last()
+            if (key.endsWith(".png")) key = key.dropLast(4)
+            type.ifEmpty { key }
+        }
         val units = parts.map { m ->
             val w = num(m["breedte"])
             val u = CoachMap.Unit(x / total, w / total, (m["bakken"] as? JsonArray)?.size ?: 0)
@@ -120,7 +128,7 @@ object NSTrains {
             if (pl < -0.03 * total || pl > 1.03 * total) null else l to pl / total
         }
         val rr = (d["rijrichting"] as? JsonPrimitive)?.content
-        return TrainDrawing(units, letters, if (rr == "LINKS") "left" else if (rr == "RECHTS") "right" else null, cars)
+        return TrainDrawing(units, letters, if (rr == "LINKS") "left" else if (rr == "RECHTS") "right" else null, cars, kinds)
     }
 
     /** The drawing of train `num` at station `code` (kept 15 minutes; null: NS doesn't know it). */
