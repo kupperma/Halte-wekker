@@ -38,6 +38,7 @@ class MainActivity : ComponentActivity() {
     companion object {
         const val EXTRA_SCREEN = "screen"
         const val SCREEN_DAY = "day"
+        const val SCREEN_FRIENDS = "friends"
         const val EXTRA_STOP_WAKE = "stopWake"
         /** A screen asked for from outside (the alarm's Open, a notification). */
         val asked = MutableStateFlow<String?>(null)
@@ -60,6 +61,23 @@ class MainActivity : ComponentActivity() {
         // the alarm's Open stops it (iOS 0.24.6 had an Open that left it ringing)
         if (i.getBooleanExtra(EXTRA_STOP_WAKE, false)) WakeService.stop(this)
         i.getStringExtra(EXTRA_SCREEN)?.let { asked.value = it }
+        // A3: a friend link (haltewekker://friend?…, the https /add page) or a Friends notification
+        val link = i.dataString
+        if (link != null && nl.haltewekker.friends.FriendStore.handle(link)) asked.value = SCREEN_FRIENDS
+        if (i.getBooleanExtra(nl.haltewekker.friends.FriendChats.EXTRA_FRIENDS, false)) {
+            i.getStringExtra(nl.haltewekker.friends.FriendChats.EXTRA_CHAT)?.let { nl.haltewekker.friends.FriendChats.toOpen.value = it }
+            asked.value = SCREEN_FRIENDS
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        nl.haltewekker.friends.FriendChats.foreground = true
+    }
+
+    override fun onStop() {
+        super.onStop()
+        nl.haltewekker.friends.FriendChats.foreground = false
     }
 
     override fun onResume() {
@@ -68,10 +86,12 @@ class MainActivity : ComponentActivity() {
         WakeService.stop(this)
         Notifications.sweep(this)
         (application as App).launch { SchoolAlarm.refresh(this) }
+        // A3: the app to the front checks the relay (at most every 20 s)
+        nl.haltewekker.friends.FriendStore.sync(nl.haltewekker.friends.FriendStore.Why.AUTO)
     }
 }
 
-private enum class Screen { HOME, PLAN, RIDE, SETTINGS, SETUP, TEST_SETUP, DAY, CALENDARS, WEEK }
+private enum class Screen { HOME, PLAN, RIDE, SETTINGS, SETUP, TEST_SETUP, DAY, CALENDARS, WEEK, FRIENDS }
 
 @Composable
 private fun Root() {
@@ -88,6 +108,7 @@ private fun Root() {
     LaunchedEffect(ride?.phase) { if (ride?.phase == Phase.ALARM && screen != Screen.SETUP && screen != Screen.TEST_SETUP) screen = Screen.RIDE }
     LaunchedEffect(asked) {
         if (asked == MainActivity.SCREEN_DAY && profile.setupDone) screen = Screen.DAY
+        if (asked == MainActivity.SCREEN_FRIENDS && profile.setupDone) screen = Screen.FRIENDS
         MainActivity.asked.value = null
     }
 
@@ -109,15 +130,17 @@ private fun Root() {
     when (screen) {
         Screen.HOME, Screen.SETUP, Screen.TEST_SETUP -> HomeScreen(r, onPlan = { planDir = it; screen = Screen.PLAN }, onRide = { screen = Screen.RIDE },
             onStart = { t, to -> start(t, to) }, onSettings = { screen = Screen.SETTINGS }, onDay = { screen = Screen.DAY },
-            onResume = { o -> ResumeStore.set(context, null); start(o.trip, o.destination, o.leg) })
+            onResume = { o -> ResumeStore.set(context, null); start(o.trip, o.destination, o.leg) }, onFriends = { screen = Screen.FRIENDS })
         Screen.PLAN -> PlanScreen(planDir, canStart = r == null, onBack = { screen = Screen.HOME }, onStart = { t, to -> start(t, to) })
         Screen.RIDE -> if (r != null) RideScreen(r, onBack = { screen = Screen.HOME }) else screen = Screen.HOME
         Screen.SETTINGS -> SettingsScreen(onBack = { screen = Screen.HOME }, onSetup = { screen = Screen.SETUP },
             onTestSetup = { if (TestSetup.start(context)) screen = Screen.TEST_SETUP }, onDay = { screen = Screen.DAY },
-            onCalendars = { screen = Screen.CALENDARS }, onWeek = { screen = Screen.WEEK })
+            onCalendars = { screen = Screen.CALENDARS }, onWeek = { screen = Screen.WEEK }, onFriends = { screen = Screen.FRIENDS })
         Screen.DAY -> DayScreen(onBack = { screen = Screen.HOME }, onSettings = { screen = Screen.SETTINGS }, canStart = r == null,
             onStart = { t, to -> start(t, to) })
         Screen.CALENDARS -> CalendarsScreen(onBack = { screen = Screen.SETTINGS })
         Screen.WEEK -> WeekScreen(onBack = { screen = Screen.SETTINGS })
+        Screen.FRIENDS -> nl.haltewekker.ui.friends.FriendsScreen(onBack = { screen = Screen.HOME }, canStart = r == null, onStart = { t, to -> start(t, to) })
     }
+    nl.haltewekker.ui.friends.FriendBannerHost { chat -> chat?.let { nl.haltewekker.friends.FriendChats.toOpen.value = it }; screen = Screen.FRIENDS }
 }

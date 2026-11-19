@@ -40,7 +40,8 @@ import nl.haltewekker.ui.theme.DS
 import kotlin.math.roundToInt
 
 @Composable
-fun SettingsScreen(onBack: () -> Unit, onSetup: () -> Unit, onTestSetup: () -> Unit, onDay: () -> Unit, onCalendars: () -> Unit, onWeek: () -> Unit) {
+fun SettingsScreen(onBack: () -> Unit, onSetup: () -> Unit, onTestSetup: () -> Unit, onDay: () -> Unit, onCalendars: () -> Unit, onWeek: () -> Unit,
+                   onFriends: () -> Unit = {}) {
     val testLive by TestSetup.live.collectAsState()
     val ride by nl.haltewekker.ride.RideStore.state.collectAsState()
     val app = LocalContext.current.applicationContext as App
@@ -54,6 +55,13 @@ fun SettingsScreen(onBack: () -> Unit, onSetup: () -> Unit, onTestSetup: () -> U
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = DS.t.text) }
             Text("Settings", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = DS.t.text)
+        }
+        // A3: Friends (the account, the backup code, what friends see)
+        Card {
+            Text("Friends", fontWeight = FontWeight.Bold, color = DS.t.text)
+            Text(if (nl.haltewekker.friends.FriendStore.hasAccount) "Your friends, chats, what they see, your backup code." else "Travel with friends: share trips, chat, compare timetables.",
+                color = DS.t.secondary)
+            QuietButton("Open Friends", onClick = onFriends)
         }
         SchoolSettingsCard(onDay, onCalendars, onWeek)
         Card {

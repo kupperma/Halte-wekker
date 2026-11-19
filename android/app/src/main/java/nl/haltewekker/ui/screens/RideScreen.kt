@@ -119,6 +119,8 @@ fun RideScreen(s: RideState, onBack: () -> Unit) {
             Header("After this")
             s.trip.rides.drop(s.index + 1).forEach { LegRow(it) }
         }
+        // A3: friends on this ride, the one-time question, the coach picker
+        if (s.phase != Phase.FINISHED) nl.haltewekker.ui.friends.RideFriendsCard(s)
         if (s.lastFixAt == null && s.phase == Phase.SLEEPING) Note("No GPS yet. The backup alarm still rings by time before your stop.")
         if (s.phase != Phase.FINISHED) HoldButton("Hold to end the trip") { RideService.send(context, RideService.ACTION_END); onBack() }
         Spacer(Modifier.height(24.dp))

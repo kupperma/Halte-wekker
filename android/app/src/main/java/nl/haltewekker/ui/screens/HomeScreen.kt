@@ -77,7 +77,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 /** The home: the live map, the next trip to school or home, Fastest trip, and the departures around you. */
 @Composable
 fun HomeScreen(ride: RideState?, onPlan: (Direction?) -> Unit, onRide: () -> Unit, onStart: (DoorTrip, String) -> Unit, onSettings: () -> Unit,
-               onDay: () -> Unit, onResume: (ResumeOffer) -> Unit) {
+               onDay: () -> Unit, onResume: (ResumeOffer) -> Unit, onFriends: () -> Unit = {}) {
     val context = LocalContext.current
     val app = context.applicationContext as App
     val model: HomeModel = viewModel()
@@ -124,8 +124,10 @@ fun HomeScreen(ride: RideState?, onPlan: (Direction?) -> Unit, onRide: () -> Uni
                 .clip(CircleShape).background(DS.t.surface)) {
                 Icon(Icons.Filled.Settings, "Settings", tint = DS.t.text)
             }
+            // A3: Friends, with requests and new lines as a badge
+            nl.haltewekker.ui.friends.FriendsHomeButton(Modifier.statusBarsPadding().padding(top = 8.dp, end = 60.dp).align(Alignment.TopEnd), onFriends)
             // the ride made smaller (iOS 0.26.1): the bar over the map while a trip runs
-            if (ride != null) RideBarView(ride, settings.ringAtStop, now, Modifier.statusBarsPadding().padding(start = 8.dp, end = 60.dp, top = 8.dp)
+            if (ride != null) RideBarView(ride, settings.ringAtStop, now, Modifier.statusBarsPadding().padding(start = 8.dp, end = 112.dp, top = 8.dp)
                 .align(Alignment.TopStart), onRide)
         }
         Column(Modifier.fillMaxWidth().weight(0.58f).verticalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 12.dp),

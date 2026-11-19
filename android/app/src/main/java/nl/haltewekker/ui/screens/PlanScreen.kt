@@ -142,6 +142,8 @@ fun PlanScreen(start: Direction?, canStart: Boolean, onBack: () -> Unit, onStart
                     if (t.walkAfter > 0) Text("Walk ${t.walkAfter} min to ${d.name}", color = DS.t.secondary, style = MaterialTheme.typography.bodySmall)
                     if (canStart) BigButton("I'm on it: start the ride") { onStart(t, d.name) }
                     else Text("A ride is running: end it first.", color = DS.t.secondary)
+                    // A3: as a card a friend can take
+                    nl.haltewekker.ui.friends.SendTripButton { nl.haltewekker.ui.friends.TripCards.card(t, d.name, d.point, d == profile.home) }
                 }
             }
         }
