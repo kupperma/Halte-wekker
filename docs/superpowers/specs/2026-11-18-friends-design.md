@@ -668,3 +668,146 @@ replaces the last in that mailbox). `FriendMessage.kindsVersion` is 4. All times
   page, "Share my timetable with this group" on a group's compare.
 - Not yet: friends' timetables aren't in the vault (after a restore they come back at their next send, within a day);
   meet halfway plans to school only.
+
+## As built (0.29)
+
+What 0.29.0 (build 118) adds: four Friends extras ("part A"): **Wait for me**, the **delay alarm for shared rides**, the
+**wake-up buddy** and **who's on campus**. Everything in "As built (0.25)" to "(0.28)" holds unchanged; this only adds
+four box kinds, two answer values and one optional vault field. **No relay change**: every box goes through
+`/f/v1/send` with a slot (the newest replaces the last one waiting in that mailbox) and a ttl inside the relay's
+60 s – 30 days. `FriendMessage.kindsVersion` is 5. Times are unix seconds; days are `yyyy-MM-dd` in Europe/Amsterdam.
+Rides are 0.27's `ride` objects (`{"mode","line","trip","from","to","dep","arr", "num"?, "sdep"?, …}`), spots 0.27's
+`spot` (`{"name","id"?,"lat"?,"lon"?}`). No push still: everything arrives at the other phone's next check.
+
+### When anything is sent or read
+- Only inside the app's existing checks of the relay (`FriendStore.sync`: app to the front ≤ every 20 s, every 30 s
+  while Friends is open, every 8 s while a chat is open, the ride's once-a-minute check during a trip, the background
+  refresh) and at region events (School's region, leaving a home region). No loop of its own; the trip, alarm,
+  wake-at-stop, Live Activity and matching are only read. Live times for the delay alarm at most every 2 minutes,
+  only while a shared ride is due within 90 minutes; planner questions only on a delay or a tap (below).
+
+### `wait` — "Wait for me" (slot `wait`, ttl 900 s)
+- Body: `{"id": string (required, 1–32 of [A-Za-z0-9_-], the same in every update), "state": "coming" | "there" | "off"
+  (required; unknown reads as coming), "stop": spot (required, with lat/lon), "ride"?: ride, "dist"?: integer metres
+  (straight line to the stop, 0–100000), "eta"?: t (when the sender expects to be at the stop), "at": t (required, when
+  measured)}`. A ride with an empty trip id or `arr < dep` is dropped from it; a bad id or a stop without a place drops
+  the box.
+- In a chat: one-to-one without `g` (only from a friend), or a group with `g` (one payload locked per member, from
+  someone on its list while you're in it), like 0.27's lines. The newest per sender (by `t`) wins.
+- **Sender** (`WaitRules`): started from a trip card in a chat (you sent it or said "I'm in", its shared ride leaves
+  within the hour: the card's shared ride and its first stop), from a friend's trip on their page while they wait at a
+  stop or change there (their `from`, no ride), or from the ride screen while you're not on board yet (the leg's first
+  stop and its planned ride; at a change, the next leg's stop and ride) to a friend or a group. Updated at each check:
+  `there` within 40 m, else `coming`; `eta` = now + `BoardAt.walkMinutes(dist)` (a third longer by the streets at
+  1.2 m/s, whole minutes up; now when within 40 m), or the bus or train's arrival there when you're riding to that
+  stop. Sent when the phase changes, else not within 20 s of the last, then when you moved ≥ 25 m, the eta moved ≥ 60 s,
+  or 60 s went by. Over (an `off` box) when you tap "Stop asking", 30 minutes after it started, or 2 minutes after its
+  ride left. Position: the trip's last fix (≤ 90 s old, accuracy < 300 m), else one asked for now while the app is in
+  front.
+- **Reader** (`WaitAge`): fresh for 90 s after `at` (never later than it came), greyed "Last update 08:41" until
+  15 minutes, gone then, at `off`, or 5 minutes after its ride's `dep`. Words: "Sam is 2 min from the stop (300 m)"
+  (minutes = eta − now, rounded up; "under a minute" at 0), "Sam is 300 m from the stop" (no eta), "Sam is at the stop";
+  under it "At Eindhoven Centraal · for the IC 3512 at 07:41", plus "· it leaves before Sam gets there" when eta > dep.
+  Distances: tens of metres below 1 km, else "1.2 km". The first box of a wait id: a banner, or (fetched in the
+  background) a notification that opens the chat.
+- **Answers**: a 0.27 `message` with `re` = the wait's `id` and `answer`: `"wait"` (text "I’ll wait") or `"next"`
+  (text "Let’s take the next one together"). An app that doesn't know them shows the text. With `next` the answering
+  phone also sends a 0.27 `trip` card for the next ride (`WaitNext`): one planner question from the wait's stop to its
+  own destination (its trip's leg from that stop, else the wait ride's `to`) at max(now, eta) + 60 s; the earliest way
+  whose first ride gets on within 300 m of the stop at or after that time and isn't the wait's ride, or one of the same
+  line instead when it leaves within 15 minutes of that one; note "Take the next one with me? IC 3516 at 08:11".
+
+### `delay` — the delay alarm for shared rides (slot `delay`, ttl 3 h)
+- Body: `{"ride": ride (required: as the sender has it, `from` where they get on, `dep` live and `sdep` scheduled
+  there), "late": minutes (required, 0–600; 0 when only cancelled), "cancelled"?: true, "next"?: ride (the next ride you
+  can all still take, from where the first of you gets on), "who"?: [account] (everyone on it the sender knows of,
+  their own too; at most 20 read)}`. Read from a friend or someone sharing a group with you.
+- **Shared rides** (`DelayAlarm.shared`): your trip's rides (the vehicle you're on, the next at a change, the planned
+  ones still to come) with each friend whose `travel` state has that `trip`; and 0.27 trip cards in your chats from the
+  last 24 h that you're in (you sent it, or answered "in") with the sender and everyone else who answered "in", on the
+  card's shared ride (first train, else longest; your own ride on it when your trip has that vehicle). Watched while it
+  leaves within 90 minutes and hasn't arrived, and someone else is on it.
+- **Lateness**: a train at an NS station with its number: NS's board (`/ns/departures`) delay and cancelled; else the
+  live data's trip (`/v5/trip`): at your stop (within 300 m, else by name) while it hasn't left there, after that at its
+  next stop ahead; cancelled when that stop is, or the whole trip is.
+- **Told** (`DelayAlarm.shouldTell`, the same rule as the 0.18 train watch): cancelled when you weren't told so; else
+  ≥ 3 min late and ≥ 2 min away from what you were told (never for "back on time"). One record per vehicle, shared by
+  what your own phone finds and what friends send, so you hear it once either way. Your phone tells you (banner, or a
+  local notification in the background) and sends a `delay` box to everyone else on it.
+- **Next ride** (`DelayAlarm.next`, 0.28's matching): on the first alarm for a vehicle, each person's ways from where
+  they get on to where they get off it (their `travel` state's from/to, or the card's ride), asked from now + 60 s (5
+  options, ≤ 2 changes), one question per distinct pair, at most 4; the ways that use the late vehicle left out;
+  `SharedRides.match(…, .home)` (leaving after the bound, within 45 min of each person's earliest); the late one left
+  out, only those leaving ≥ 2 min from now; the earliest with everyone, else the earliest with the most (at least two).
+  Later alarms for the same vehicle reuse it.
+- Words: "IC 3512 is 6 min late" / "Bus 305 is cancelled"; "You, Lisa and Sam are on it. It now leaves Eindhoven
+  Centraal at 07:47. Next you can all take: IC 3516 at 08:11 from Eindhoven Centraal." (cancelled without a next: "Look
+  for another way in Fastest trip.").
+
+### `buddy` — the wake-up buddy (slot `buddy`, ttl 36 h)
+- Body: `{"on": bool (required), "day"?: "yyyy-MM-dd", "leave"?: t (when they plan to leave the door), "ride"?: ride
+  (the first bus or train of it), "left"?: t (when they set off that day)}`. `{"on": false}` takes it back. Only from a
+  friend; the newest by `t` wins.
+- **Opt-in by the friend being watched**: "Tell Sam if I haven't left yet" on Sam's page, off by default, per friend
+  (`ExtrasSettings.buddy`). Only those friends get boxes; one switched off gets `{"on":false}`.
+- **Sender's plan**: the school alarm's next planned day (leave, its first ride) when it leaves within 24 h; else the
+  way to the next first class from the sender's own shared timetable and start area (0.28's question, one planner
+  question a day, cached). `left`: set once per day when a trip starts (any trip), when a home region is left, or at a
+  check on the plan's day from an hour before leaving when the phone is > 400 m from Home. Sent when it changed (so
+  `left` goes at once) or every 12 h, and at once to a friend newly allowed.
+- **Watcher** (`BuddyRules`): the plan for today is the buddy box's (day = today) else a trip card in your chats they're
+  in (they sent it: its `start`; they answered "in": 15 min before its shared ride). **Moving** if `left`, a `travel`
+  state, or a `wait` from them came since an hour before they'd leave. Told when not moving, from 5 min after `leave`
+  until 10 min after the ride's `dep` (or 15 min after leaving without a ride), **once per friend per day**: "Lisa isn’t
+  moving yet — their train is at 07:41" / "…— they planned to leave at 07:20", body "Lisa planned to leave at 07:20 for
+  the IC 3512 from Eindhoven Centraal. Maybe send a message?" (a notification opens their chat). The watcher only knows
+  it at its own next check (no push).
+
+### `campus` — who's on campus (slot `campus`)
+- Body: `{"on": bool (required), "school"?: the school's short name, "since"?: t, "until"?: t (≤ since + 10 h)}`; ttl
+  = until − now (60 s – 10 h). `{"on": false}` (ttl 3600) takes it back. Only from a friend; the newest by `t` wins;
+  shown while `on` and now < `until` and until − since ≤ 10 h (+60 s). Never a position.
+- **Opt-in**: "Show friends when I'm at school" (Friends › At school), off by default (`ExtrasSettings.campus`); to all
+  friends.
+- **Inside** (`CampusRules`): School's region (with "Always" location: the switch makes its region tell on entry and
+  exit; an exit added only for this never starts a trip), or the last fix at a check (≤ 10 min old): inside within the
+  school radius (350 m), outside past it + 150 m, else as it was. Posted once per stay (since = when you got there),
+  to friends who haven't had it (a new friend too); taken back when you leave, turn it off, or after 10 h (then not
+  again until you've left and come back).
+- Words: "On campus now: Tom and Lisa", "At BUas since 09:05".
+
+### The vault
+- `FriendVaultContents` gains `"extras"?: {"campus"?: true, "buddy"?: [account]}` (the switches only). An older app
+  ignores it. What came (waits, delays, plans, campus) is in Friends/extras.json, not backed up.
+
+### Test vectors (Node's crypto; checked in `ios/Tests/FriendExtrasVectorTests.swift`; keys as in 0.25)
+- A wait from Sam to Lou (Sam 300 m from Eindhoven Centraal, there 09:02, for IC 3512 at 09:11): payload (exact bytes)
+  `{"b":{"at":1799999990,"dist":300,"eta":1800000120,"id":"vector-wait-1","ride":{"arr":1800003720,"dep":1800000660,"from":{"lat":51.44306,"lon":5.47917,"name":"Eindhoven Centraal"},"line":"IC","mode":"train","num":"3512","to":{"lat":51.59556,"lon":4.78,"name":"Breda"},"trip":"vector-trip-3512"},"state":"coming","stop":{"lat":51.44306,"lon":5.47917,"name":"Eindhoven Centraal"}},"f":"3c157621a97cf055f5804a9826c6d1e1","k":"wait","n":"vector-11","t":1800000000,"v":1}`; signature (b64u) `dvEcw94cpL8gWf9Pk5zYUIs1-BuEqsDFUGLCyxkupqCyiFUZQNQ2u9kTLUICfKy0W_EOElr6dHRbdLfVWwJDBA`; eph_priv `5152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f70` (ephPub `0233f006ef4bed144ea0a5bb46c7067c7c2acec5f8cc811f3df59fdcd5ac7614`); nonce `7172737475767778797a7b7c`; box key `dcb844e611ba42e669c113ac7cc329bd2e7fd7f9de9a2743a35ee2c097803da9`; box (b64u):
+  `AQIz8AbvS-0UTqClu0bHBnx8Ks7F-MyBHz31n9zVrHYUcXJzdHV2d3h5ent8F4o711H-IQXcNO0jPzR1Ejq4_JNB8y8vGAu7V-8zdOX1UD3N50pM00P_1ADbwrE3h2wmhHcHqQEz3aRrX0n3sIOzc-UWOECBBaxHwmpFfUoOHcakg99KDVQeMqmhhAYlfNcUv5s09i7WlXYo67QXcMQAxr5LJm72nq6ZhSNVBXjGtjFHTuuUCl3ilkUa-8nepuYvnJSCbcLXRclEJUDxFeVEBO0-6NXuHP7FBDo7mTMP-TARfC1o7ZDV-dK67xSB-CeKwDJZelbIe7_mUIBbkv8lrXudYV_1qhsBCp-CBR_-XRSu-07ceS9do_vOnz6YQ0DSo-ec87gJn-J9jQlxYOWYhVezq9ZwxIOH-pLym5h0uZeYGhN6PAxlBQRZwJIbRILXFpqypJm36Ly9CjU7nxsZrGRMtrqmDTHxkSQwmbl9UTpgf6yZxz0BzBEAvOcz2ygKb8SITHbSbyaVL4TwQel2xRmpgMVfpe4KwaYlxTXLz6TObtYy6Kmx1urlARXMP2lRhDfH3TGnzA8Qq00AH43ryoWsZGtF4j7E6FSV5Jq1qAtOo7qIFPIx0XttCjdbaCUyfu-U_w0tz8Sh6hapPzAcJCYeI0UOgzsw63llntPRDyN9qb1pNHrKPIbHaSLdFV7tGH11uhMG9r7u92952kkBSFh9EeAuhn1nswYrEnL9vsH-K4aLg8PR1oTtR10ifQ5FF5YVTZWlzrrn66h83XM`
+- Sam on campus, to Lou (at BUas since 08:35, until 18:35): payload (exact bytes)
+  `{"b":{"on":true,"school":"BUas","since":1799998500,"until":1800034500},"f":"3c157621a97cf055f5804a9826c6d1e1","k":"campus","n":"vector-12","t":1800000000,"v":1}`; signature (b64u) `KZJaSU7N-X7-nf4ppDL55RLL8r1QNVvZk4tS_e-5MVXjklHFbv0DrckGuITkgbOQBMkqpwd-ZiiN2NKaHm0IAg`; eph_priv `8182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0` (ephPub `883186b800b41d5cf0429695da9b3cc4f328ebcd184a6e482fa578c103f06c77`); nonce `c1c2c3c4c5c6c7c8c9cacbcc`; box key `f1cbd7bf15bd198183f9df1d2c458781e5410eb1b5dc19f8464f81f8bc9c7341`; box (b64u):
+  `AYgxhrgAtB1c8EKWldqbPMTzKOvNGEpuSC-leMED8Gx3wcLDxMXGx8jJysvM7sUXIpFk66f2MxcXYYb_tMTT0JGE-coRJl94y_gjkkUpyQ_ek_2yhJS6fKfMo-pj9FNhe4peWbLP9HKoM4MKBl28GjWBJwVOwQ4G6cVMY_hDekvjQ95EHvOI39blGlgywHJi9oPKRZ9Ekxmlt8QzpLsk5t7xneAEPe-cObvOIgpDj3rPTKtBac__D4tMib7wYbiF-RVet2Ye-iIf8ku1lYuiCOEuXyBMNYvzEWPO3nv_ROSbsh9G7-jmTcDLepeX-ajit0lGM0KX8xALe_wdEIUXHrqadwbnll2Rvzk-2tVpM2Swb0y6udi-r5frt2Ai`
+- Sam's plan for the wake-up buddy, to Lou (leave 07:20, IC 3512 at 07:41): payload (exact bytes)
+  `{"b":{"day":"2027-01-15","leave":1799994000,"on":true,"ride":{"arr":1799998320,"dep":1799995260,"from":{"lat":51.44306,"lon":5.47917,"name":"Eindhoven Centraal"},"line":"IC","mode":"train","num":"3512","to":{"lat":51.59556,"lon":4.78,"name":"Breda"},"trip":"vector-trip-3512"}},"f":"3c157621a97cf055f5804a9826c6d1e1","k":"buddy","n":"vector-13","t":1799992800,"v":1}`; signature (b64u) `Zazseam6h_FFLC8gnZaYfx4ukSG2Dl2YbRSObRDZa9odsX5tHpyA-HpdHZJeZLEg3OQ91RYkIEUGzw8N6jR-Dg`
+- A delay from Sam to Lou (IC 3512 6 min late, next IC 3516): payload (exact bytes)
+  `{"b":{"late":6,"next":{"arr":1800004860,"dep":1800001800,"from":{"lat":51.44306,"lon":5.47917,"name":"Eindhoven Centraal"},"line":"IC","mode":"train","num":"3516","to":{"lat":51.59556,"lon":4.78,"name":"Breda"},"trip":"vector-trip-3516"},"ride":{"arr":1800003420,"dep":1800000360,"from":{"lat":51.44306,"lon":5.47917,"name":"Eindhoven Centraal"},"line":"IC","mode":"train","num":"3512","sdep":1800000000,"to":{"lat":51.59556,"lon":4.78,"name":"Breda"},"trip":"vector-trip-3512"},"who":["3c157621a97cf055f5804a9826c6d1e1","65392c81aa86e697083b0960bf107afb"]},"f":"3c157621a97cf055f5804a9826c6d1e1","k":"delay","n":"vector-14","t":1800000000,"v":1}`; signature (b64u) `hvyCU_Sk36bcLvd52FSIHuHI37Ni_qQhs7_Rpnmy5B_2hlbgSa2d47QAXRfYbBzbLV8gMvcS_c4zlVL_wJdZAA`
+- Lou's answer to the wait (to Sam; the `’` is U+2019): payload `{"b":{"answer":"wait","re":"vector-wait-1","text":"I’ll wait"},"f":"65392c81aa86e697083b0960bf107afb","k":"message","n":"vector-15","t":1800000030,"v":1}`; signature (b64u) `quv2P-b4oVOMfuXKCxJIVQIMwkH9zSq25Djgu81cSa7uWyaFt7gjlmcnX5kqidzMy_K-R9OC9PMbuWXzC8xDDA`.
+- Rules, worked (checked in `ios/Tests/FriendExtrasTests.swift`): 300 m → "6 min" walking; a stop's live departure
+  09:06 against 09:00 → 6 min late, 8 min at the next stop once past yours; with the late IC left out, the next ride
+  for you, Lisa (both Eindhoven) and Sam (Tilburg) is the one all three can take (IC 3520) rather than IC 3516 that
+  only two can; the buddy alert from leave + 5 min to ride + 10 min; campus posting, a new friend, leaving, 10 hours.
+
+### App (0.29)
+- Pure, tested (`FriendExtras.swift`): `WaitFor`/`WaitRules`/`WaitAge`/`WaitWords`/`WaitNext`, `RideDelay`/`DelayAlarm`/
+  `DelayWords`, `BuddyPlan`/`BuddyRules`/`BuddyWords`, `CampusState`/`CampusRules`/`CampusWords`, `ExtrasSettings`;
+  `RoleRegions.withCampus`/`exitStartsTrip`; `FriendInbox.process` reads the four kinds and the two answers;
+  `BoardAt.Stop.cancelled` (the live data's cancelled stop or trip).
+- `FriendExtrasStore` (Friends/extras.json; `due` in every check, `take` with each batch; region events through
+  `TripManager.onRegion`), `FriendStore.queueBox` (one payload locked per person, replacing a waiting box in its slot).
+- Screens: Friends gets "Waiting for you to wait" (each with "I’ll wait" / "Take the next one with you"), "Your wait",
+  "On campus now", "Rides with friends" (delays), and Friends › At school (the switch, and where the buddy switch is);
+  a friend's page "Tell Sam if I haven’t left yet" and "At BUas since 09:05"; a chat shows its waits and yours on top
+  and "Wait for me" on trip cards you're in; a friend's trip while they wait "Wait for me"; the ride screen "Ask a
+  friend to wait for me", your wait and the delays on your rides.
+- Not yet: the waits' and delays' records aren't in the vault; "Wait for me" updates in the background only while a
+  trip runs (its GPS and tick); the buddy and the delay alarm reach a phone only at its next check.
