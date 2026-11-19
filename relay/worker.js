@@ -5,7 +5,8 @@
 // 4. Gets one train from the Virtual Train API: /ns/train?num=1126&station=EHV
 // 5. Gets the positions of every train from the Virtual Train API: /ns/vehicles (no place of yours is sent)
 //    Needs a free NS API key saved as the secret NS_KEY (Settings → Variables and Secrets).
-// 6. Friends (0.25): end-to-end encrypted mailboxes under /f/v1/… and the share-link page /add (see friends.js).
+// 6. Friends (0.25): end-to-end encrypted mailboxes under /f/v1/… and the share-link page /add (see friends.js);
+//    0.26 adds the latest "travelling now" states (/f/v1/state/…).
 //    Stored in a Durable Object with SQLite storage, declared in wrangler.jsonc: nothing to set up by hand.
 import { DurableObject } from "cloudflare:workers";
 import { friends, FriendsCore } from "./friends.js";

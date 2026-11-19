@@ -173,6 +173,49 @@ async function run() {
   assert.equal((await signed(b, "/f/v1/inbox", {})).json.boxes.length, 1);
   console.log("drop/block ok");
 
+  // latest states (0.26): put replaces, get doesn't delete, clear takes it back, block refuses quietly
+  r = await signed(b, "/f/v1/state/get", {});
+  assert.equal(r.status, 200, JSON.stringify(r.json));
+  assert.deepEqual(r.json.states, []);
+  const mailBefore = (await signed(b, "/f/v1/inbox", {})).json.boxes.length;
+  const s1 = b64url(new TextEncoder().encode("state one")), s2 = b64url(new TextEncoder().encode("state two"));
+  r = await signed(a, "/f/v1/state/put", { states: [{ to: b.id, data: s1, ttl: 120 }] });
+  assert.equal(r.status, 200, JSON.stringify(r.json));
+  assert.equal(r.json.results[0].ok, true, JSON.stringify(r.json));
+  r = await signed(a, "/f/v1/state/put", { states: [{ to: b.id, data: s2 }, { to: "0".repeat(32), data: s2 }, { to: b.id, data: s1, ttl: 5 }] });
+  assert.equal(r.json.results[0].ok, true);
+  assert.equal(r.json.results[1].error, "unknown_account");
+  assert.equal(r.json.results[2].error, "bad_to");          // (the same friend twice in one put)
+  r = await signed(a, "/f/v1/state/put", { states: [{ to: b.id, data: b64url(new Uint8Array(17000)) }] });
+  assert.equal(r.json.results[0].error, "bad_data");
+  r = await signed(a, "/f/v1/state/put", { states: [{ to: b.id, data: s2, ttl: 5000 }] });
+  assert.equal(r.json.results[0].error, "bad_ttl");
+  r = await signed(b, "/f/v1/state/get", {});
+  assert.equal(r.json.states.length, 1, JSON.stringify(r.json));
+  assert.equal(r.json.states[0].from, a.id);
+  assert.equal(r.json.states[0].data, s2);
+  assert.ok(r.json.states[0].exp - r.json.states[0].at <= 300 && r.json.states[0].exp > r.json.states[0].at);
+  assert.equal((await signed(b, "/f/v1/state/get", {})).json.states.length, 1, "a read doesn't delete it");
+  assert.equal((await signed(b, "/f/v1/inbox", {})).json.boxes.length, mailBefore, "states aren't in the mailbox");
+  r = await signed(a, "/f/v1/state/clear", {});
+  assert.equal(r.status, 200);
+  assert.equal(r.json.cleared, 1);
+  assert.equal((await signed(b, "/f/v1/state/get", {})).json.states.length, 0);
+  await signed(a, "/f/v1/state/put", { states: [{ to: b.id, data: s1 }] });
+  r = await signed(a, "/f/v1/state/clear", { to: [b.id] });
+  assert.equal(r.json.cleared, 1);
+  await signed(b, "/f/v1/block", { peer: a.id, on: true });
+  r = await signed(a, "/f/v1/state/put", { states: [{ to: b.id, data: s1 }] });
+  assert.equal(r.json.results[0].ok, true);
+  assert.equal((await signed(b, "/f/v1/state/get", {})).json.states.length, 0, "blocked: refused quietly");
+  await signed(b, "/f/v1/block", { peer: a.id, on: false });
+  await signed(a, "/f/v1/state/put", { states: [{ to: b.id, data: s1 }] });
+  await signed(b, "/f/v1/drop", { peer: a.id });
+  assert.equal((await signed(b, "/f/v1/state/get", {})).json.states.length, 0, "drop takes states too");
+  await signed(a, "/f/v1/state/put", { states: [{ to: b.id, data: s1 }] });
+  assert.equal((await signed(b, "/f/v1/state/get", {})).json.states.length, 1);
+  console.log("states ok");
+
   // vault
   r = await signed(a, "/f/v1/vault/get", {});
   assert.equal(r.json.data, null);
@@ -199,9 +242,10 @@ async function run() {
   assert.equal((await call("/f/v1/nope", { method: "POST" })).status, 404);
   assert.equal((await call("/f/v1/inbox", { method: "GET" })).status, 405);
 
-  // leave: both throwaway accounts deleted
+  // leave: both throwaway accounts deleted (a's state at b goes with it)
   r = await signed(a2, "/f/v1/leave", {});
   assert.equal(r.status, 200);
+  assert.equal((await signed(b, "/f/v1/state/get", {})).json.states.length, 0, "leave takes your states back");
   r = await signed(b, "/f/v1/leave", {});
   assert.equal(r.status, 200);
   r = await signed(b, "/f/v1/inbox", {});

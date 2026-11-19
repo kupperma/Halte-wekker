@@ -25,6 +25,10 @@
 //   /f/v1/vault/put         {"data": b64url}                          -> your own locked backup (the friend list)
 //   /f/v1/vault/get         {}                                        -> {"data"|null,"at"}
 //   /f/v1/leave             {}                                        -> the account and all its boxes deleted
+//   (0.26) latest states: one locked box per (owner -> friend), replaced by the next, kept a few minutes, never acked
+//   /f/v1/state/put         {"states":[{"to","data","ttl"?}]}          -> {"results":[{"to","ok","error"?}]}
+//   /f/v1/state/get         {}                                        -> {"states":[{"from","at","exp","data"}]}
+//   /f/v1/state/clear       {"to"?: [account]}                        -> {"cleared"}: yours at those friends (all: no "to")
 //   /add                    (GET) a small page for share links: https://<relay>/add#<the link's fields>
 
 const V = 1;
@@ -42,6 +46,14 @@ const REQS_PER_MIN = 60;
 const BOXES_PER_HOUR = 600;
 const REGISTERS_PER_HOUR_PER_IP = 20;
 const IDLE_DELETE = 400 * 86400;          // an account nobody used for this long is deleted
+// latest states (0.26: "travelling now")
+const MAX_STATE = 16 * 1024;              // one state box (decoded)
+const MAX_STATES_PUT = 50;                // states per put request
+const STATE_TTL = 300;                    // default: 5 minutes
+const STATE_MIN_TTL = 60;
+const STATE_MAX_TTL = 900;
+const STATES_HELD = 500;                  // states one account may hold (one per friend)
+const STATES_PER_HOUR = 3000;
 
 const HEX32 = /^[0-9a-f]{32}$/;
 const SLOT = /^[a-z0-9._-]{1,32}$/;
@@ -97,7 +109,7 @@ export function canonical(method, path, account, device, time, nonce, bodyHashHe
 }
 
 const PUBLIC = new Set(["/f/v1/register", "/f/v1/send", "/f/v1/inbox", "/f/v1/ack", "/f/v1/drop", "/f/v1/block",
-  "/f/v1/vault/put", "/f/v1/vault/get", "/f/v1/leave"]);
+  "/f/v1/vault/put", "/f/v1/vault/get", "/f/v1/leave", "/f/v1/state/put", "/f/v1/state/get", "/f/v1/state/clear"]);
 
 /// The Worker's part: checks the shape of a request and hands it to the account's Durable Object.
 export async function friends(request, env, url) {
@@ -149,6 +161,10 @@ export class FriendsCore {
     this.sql.exec(`CREATE TABLE IF NOT EXISTS seen (sig TEXT PRIMARY KEY, exp INTEGER NOT NULL)`);
     this.sql.exec(`CREATE TABLE IF NOT EXISTS rate (bucket TEXT PRIMARY KEY, n INTEGER NOT NULL, exp INTEGER NOT NULL)`);
     this.sql.exec(`CREATE TABLE IF NOT EXISTS blocked (peer TEXT PRIMARY KEY)`);
+    // (0.26) the latest state each friend left for this account, and where this account left its own
+    this.sql.exec(`CREATE TABLE IF NOT EXISTS states (sender TEXT PRIMARY KEY, at INTEGER NOT NULL, exp INTEGER NOT NULL,
+      size INTEGER NOT NULL, data TEXT NOT NULL)`);
+    this.sql.exec(`CREATE TABLE IF NOT EXISTS left_at (peer TEXT PRIMARY KEY, exp INTEGER NOT NULL)`);
   }
 
   now() { return Math.floor(Date.now() / 1000); }
@@ -176,6 +192,8 @@ export class FriendsCore {
       }
       if (url.pathname === "/int/deposit") return await this.deposit(await request.json());
       if (url.pathname === "/int/drop") return this.dropFrom((await request.json()).peer);
+      if (url.pathname === "/int/state") return await this.stateDeposit(await request.json());
+      if (url.pathname === "/int/unstate") return this.stateRemove((await request.json()).from);
       if (url.pathname === "/pub") return await this.pub(request);
       return fail("not_found", 404);
     } catch (e) {
@@ -228,7 +246,10 @@ export class FriendsCore {
       case "/f/v1/block": return this.block(input);
       case "/f/v1/vault/put": return this.vaultPut(input);
       case "/f/v1/vault/get": return this.vaultGet();
-      case "/f/v1/leave": return await this.leave();
+      case "/f/v1/leave": return await this.leave(account);
+      case "/f/v1/state/put": return await this.statePut(account, input);
+      case "/f/v1/state/get": return this.stateGet();
+      case "/f/v1/state/clear": return await this.stateClear(account, input);
     }
     return fail("not_found", 404);
   }
@@ -316,6 +337,8 @@ export class FriendsCore {
   dropFrom(peer) {
     if (!HEX32.test(peer || "")) return fail("bad_peer", 400);
     this.sql.exec(`DELETE FROM boxes WHERE sender = ?`, peer);
+    this.sql.exec(`DELETE FROM states WHERE sender = ?`, peer);
+    this.sql.exec(`DELETE FROM left_at WHERE peer = ?`, peer);
     return json({ ok: true });
   }
 
@@ -353,11 +376,97 @@ export class FriendsCore {
     return json({ data, at: data ? Number(this.get("vaultAt")) : null });
   }
 
-  async leave() {
+  async leave(account) {
+    // (the states this account left with friends go first; they'd expire within minutes anyway)
+    await this.stateClear(account, {}).catch(() => {});
     await this.ctx.storage.deleteAlarm();
     await this.ctx.storage.deleteAll();
     this.schema();
     return json({ ok: true });
+  }
+
+  // MARK: latest states (0.26)
+
+  /// Puts (replaces) this account's state box at each friend. A blocked sender is refused quietly.
+  async statePut(account, input) {
+    const list = input.states;
+    if (!Array.isArray(list) || list.length === 0 || list.length > MAX_STATES_PUT) return fail("bad_states", 400);
+    if (!this.bump("state:" + Math.floor(this.now() / 3600), STATES_PER_HOUR, 3700, list.length)) return fail("slow_down", 429);
+    const results = [];
+    const seen = new Set();
+    for (const b of list) {
+      const to = typeof b?.to === "string" ? b.to.toLowerCase() : "";
+      const raw = b64urlDecode(b?.data);
+      const ttl = b?.ttl ?? STATE_TTL;
+      if (!HEX32.test(to) || to === account || seen.has(to)) { results.push({ to, ok: false, error: "bad_to" }); continue; }
+      seen.add(to);
+      if (!raw || raw.length === 0 || raw.length > MAX_STATE) { results.push({ to, ok: false, error: "bad_data" }); continue; }
+      if (!Number.isInteger(ttl) || ttl < STATE_MIN_TTL || ttl > STATE_MAX_TTL) { results.push({ to, ok: false, error: "bad_ttl" }); continue; }
+      const stub = this.env.FRIENDS.get(this.env.FRIENDS.idFromName("a:" + to));
+      const r = await stub.fetch("https://do/int/state", {
+        method: "POST",
+        body: JSON.stringify({ from: account, ttl, data: b.data, size: raw.length }),
+      });
+      const out = await r.json().catch(() => ({}));
+      if (r.status === 200) {
+        const exp = this.now() + ttl;
+        this.sql.exec(`INSERT INTO left_at (peer, exp) VALUES (?, ?) ON CONFLICT(peer) DO UPDATE SET exp = excluded.exp`, to, exp);
+        results.push({ to, ok: true });
+      } else results.push({ to, ok: false, error: out.error || "relay_error" });
+    }
+    await this.wake(this.now() + STATE_MAX_TTL + 5);
+    return json({ results });
+  }
+
+  async stateDeposit({ from, ttl, data, size }) {
+    if (!this.get("signKey")) return fail("unknown_account", 404);
+    const now = this.now();
+    this.sql.exec(`DELETE FROM states WHERE exp < ?`, now);
+    if (this.sql.exec(`SELECT 1 FROM blocked WHERE peer = ?`, from).toArray().length) return json({ ok: true });
+    const had = this.sql.exec(`SELECT 1 FROM states WHERE sender = ?`, from).toArray().length > 0;
+    if (!had && this.sql.exec(`SELECT COUNT(*) AS n FROM states`).toArray()[0].n >= STATES_HELD) return fail("inbox_full", 507);
+    const exp = now + ttl;
+    this.sql.exec(`INSERT INTO states (sender, at, exp, size, data) VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(sender) DO UPDATE SET at = excluded.at, exp = excluded.exp, size = excluded.size, data = excluded.data`,
+      from, now, exp, size, data);
+    await this.wake(exp + 5);
+    return json({ ok: true });
+  }
+
+  stateRemove(from) {
+    if (!HEX32.test(from || "")) return fail("bad_peer", 400);
+    const n = this.sql.exec(`DELETE FROM states WHERE sender = ?`, from).rowsWritten || 0;
+    return json({ cleared: n });
+  }
+
+  /// The states friends left for this account (not deleted by reading: the newest replaces each one).
+  stateGet() {
+    const now = this.now();
+    this.sql.exec(`DELETE FROM states WHERE exp < ?`, now);
+    const rows = this.sql.exec(`SELECT sender, at, exp, data FROM states ORDER BY at DESC`).toArray();
+    return json({ states: rows.map((r) => ({ from: r.sender, at: r.at, exp: r.exp, data: r.data })) });
+  }
+
+  /// Takes this account's state back from those friends (all of them it left one with: no "to").
+  async stateClear(account, input) {
+    let peers;
+    if (input.to === undefined || input.to === null) {
+      peers = this.sql.exec(`SELECT peer FROM left_at`).toArray().map((r) => r.peer);
+    } else {
+      if (!Array.isArray(input.to) || input.to.length > 500) return fail("bad_to", 400);
+      peers = [...new Set(input.to.map((t) => (typeof t === "string" ? t.toLowerCase() : "")))];
+      if (!peers.every((p) => HEX32.test(p))) return fail("bad_to", 400);
+    }
+    let cleared = 0;
+    for (const peer of peers) {
+      if (peer === account) continue;
+      const stub = this.env.FRIENDS.get(this.env.FRIENDS.idFromName("a:" + peer));
+      const r = await stub.fetch("https://do/int/unstate", { method: "POST", body: JSON.stringify({ from: account }) });
+      const out = await r.json().catch(() => ({}));
+      cleared += out.cleared || 0;
+      this.sql.exec(`DELETE FROM left_at WHERE peer = ?`, peer);
+    }
+    return json({ cleared });
   }
 
   /// Makes sure an alarm comes by `at` at the latest (expired boxes go, an idle account goes).
@@ -371,6 +480,8 @@ export class FriendsCore {
     this.sql.exec(`DELETE FROM boxes WHERE exp < ?`, now);
     this.sql.exec(`DELETE FROM seen WHERE exp < ?`, now);
     this.sql.exec(`DELETE FROM rate WHERE exp < ?`, now);
+    this.sql.exec(`DELETE FROM states WHERE exp < ?`, now);
+    this.sql.exec(`DELETE FROM left_at WHERE exp < ?`, now);
     const key = this.get("signKey");
     const seen = Number(this.get("lastSeen") || "0");
     if (!key) {
@@ -380,7 +491,9 @@ export class FriendsCore {
       return;
     }
     if (now - seen > IDLE_DELETE) { await this.ctx.storage.deleteAll(); return; }
-    const next = this.sql.exec(`SELECT MIN(exp) AS e FROM boxes`).toArray()[0].e;
+    const nb = this.sql.exec(`SELECT MIN(exp) AS e FROM boxes`).toArray()[0].e;
+    const ns = this.sql.exec(`SELECT MIN(exp) AS e FROM states`).toArray()[0].e;
+    const next = nb && ns ? Math.min(nb, ns) : nb || ns;
     const at = Math.min(next ? next + 5 : Infinity, seen + IDLE_DELETE + 60);
     await this.ctx.storage.setAlarm(at * 1000);
   }
