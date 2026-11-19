@@ -184,9 +184,13 @@ enum FriendNames {
 
     /// A name as shown and sent: trimmed, single spaces, no control characters, at most 40 characters.
     static func clean(_ s: String) -> String {
-        let kept = s.unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) }
-        let one = String(String.UnicodeScalarView(kept)).split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
-        return String(one.prefix(maxLength))
+        // Whitespace first (tabs and newlines are control characters too, and must become a space, not vanish).
+        let words: [Substring] = s.split(whereSeparator: { $0.isWhitespace })
+        let kept: [String] = words.map { word in
+            String(String.UnicodeScalarView(word.unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) }))
+        }
+        let one: String = kept.filter { !$0.isEmpty }.joined(separator: " ")
+        return String(one.prefix(maxLength)).trimmingCharacters(in: .whitespaces)
     }
 
     /// "SJ" for "Sam Jansen", "S" for "Sam".
