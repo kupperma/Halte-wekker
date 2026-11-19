@@ -3,7 +3,7 @@
 The Android version of Haltewekker, built from the iOS app (`ios/`, SwiftUI) as the reference. It lives in
 `android/` (one Gradle project), with this plan in `docs/android/`. The iOS app and the relay are not changed by it.
 
-Status: **A1 (0.1.0, version code 1), A2 (0.2.0, version code 2), A3 (0.3.0, version code 3: Friends), A4 (0.4.0, version code 4: Friends extras and shared ride logs) and A5 (0.5.0, version code 5: Friends map first, the seat picker, the test friend) built.**
+Status: **A1 (0.1.0, version code 1), A2 (0.2.0, version code 2), A3 (0.3.0, version code 3: Friends), A4 (0.4.0, version code 4: Friends extras and shared ride logs) A5 (0.5.0, version code 5: Friends map first, the seat picker, the test friend) and A5.1 (0.5.1, version code 6: 1st class in the seat picker) built.**
 
 ## Architecture
 
@@ -123,6 +123,8 @@ JUnit, run by CI before every build (`./gradlew testReleaseUnitTest`):
   `LiveLinkInteropTest` (live, opt-in): see "As built A4".
 - (A5) `SeatMapTest` (the 0.31 seat vector byte for byte, older coaches, decks, windows, words, map framing, routes,
   Ride along), `TestFriendTest` (the bot's rules), `TestFriendLiveTest` (live, opt-in): see "As built A5".
+- (A5.1) `SeatClassTest` (1st class from 11 real NS compositions, the table, the words, the seat box unchanged): see
+  "As built A5.1".
 
 ## CI and releases (`.github/workflows/android.yml`)
 
@@ -202,6 +204,63 @@ byte for byte, and its test vectors as JUnit tests before any screen:
 
 - iOS 0.30.1's test friend, iOS 0.31's "Map first" Friends, a friend's page on the map, the seat (`coach.seat`) and the
   whole-train / side-view seat picker.
+
+### A5.1 — 1st class in the seat picker (0.5.1, code 6) — built ("As built A5.1" says how)
+
+- iOS 0.31.1's 1st class in the seat picker, from NS's drawings, per coach and per deck.
+
+## As built A5.1 (0.5.1, version code 6): 1st class in the seat picker
+
+The spec's "As built (0.31.1)" (the per-drawing, per-coach, per-deck table, the rules, the words and the test
+vectors), from the iOS reference (`SeatClass.swift`, `SeatMap.swift`, `SeatPicker.swift`, `SeatClassTests.swift`). No new
+box kind, no relay change, nothing new in the seat: whether a coach or a window is 1st class is worked out on the phone
+from the train, never sent. The iOS app and the relay were not changed.
+
+**Where it comes from (`friends/SeatClass.kt`).** `NSTrains.parse` now also keeps each unit's drawing's name (the file
+name of `afbeelding`, lower case, without ".png": `icng_B_8.png` → `icng_b_8`) and its 1st-class seats
+(`zitplaatsen.zitplaatsEersteKlas`; null when not said) in `TrainDrawing.drawings` / `firstSeats`. The table (19
+drawings: VIRM, VIRMm1/2, DDZ, ICM, ICNG, ICNG-B, SLT, SNG, NS Flirt; each its coach edges and per coach its 1st-class
+parts `[a, b]` on the upper, lower or every deck) is the spec's, value for value. A drawing not in the table is found
+from the unit's type (Roman numerals to digits, joined with "_", else with "nsr_" in front: "VIRMm1 VI" → `virmm1_6`,
+"Flirt 3" → `nsr_flirt_3`). A unit with 0 1st-class seats has none (Keolis); a drawing not in the table (ICE, GTW,
+Arriva…) or a unit whose coaches NS counts differently from its drawing: not known. The guess (no NS) knows none.
+
+**The rules (`SeatMap.train`, `SeatMap.isFirst`).** Each picker coach (`CoachMap.spots`) gets the unit its middle falls
+in, its place in that unit from the left and the table's parts for it (`SeatMap.Coach.first`: empty none, null not
+known; `kind` SECOND / PART / FIRST). All 1st class: a part on every deck from ≤ .02 to ≥ .98; part: any part. A window
+(11 a row, `(i + 0.5) / 11`) is 1st class when its middle is inside a part on its row's deck (a single-deck coach's row
+takes every part), or the coach is all 1st class. Your pick (or a friend's) is 1st class when its coach is all 1st
+class or its window (scaled to 11) is; a coach without a window in a part-1st coach is not. `TrainDrawing.seatTrain`
+builds the picker's train the same way everywhere (the picker, a friend's coach note, the tests).
+
+**The picker (`ui/friends/SeatPicker.kt`).** Side view: 1st-class windows darker gold glass in a 2 dp gold frame, a gold
+"1" badge on the first (left) window of each run, per deck (not where someone sits); a coach that's all 1st class has a
+cream body and a gold "1st class" tag at its bottom left. Train strip: an all-1st coach is gold (deeper when open) with
+a "1" badge by its number; a part-1st coach has a gold bar along its bottom where any deck has 1st class
+(`SeatClass.span`). Under it the legend "[1] = 1st class (about here)" ("= 1st class (about here) · gold coach: all 1st
+class" when there's one; "= 1st class · gold coach: all 1st class" with only those), read by TalkBack as "1st class is
+marked with a 1, about where it is; gold coaches are all 1st class". A train from NS where no coach is known to have 1st
+class and some aren't known: "Where 1st class is in this train isn’t known." Colours as iOS `FirstClassLook` (NS's
+yellow, light and dark). TalkBack: "Coach 3 of 8, 1st class", "Coach 2 of 10, from the front, two decks, part 1st
+class", a window "…, window 5 from the back, 1st class".
+
+**Words.** Your seat (ride screen): "Coach 2 of 10 · upper deck · 5th window from the back · 1st class" when your pick
+is (the picker tells the card through `onMineFirst`). A friend's page: "Sam is in coach 3 of 8 · 1st class", from NS's
+drawing of their train at the station their coach is counted at (`coach.at`).
+
+**Checks.** `SeatClassTest`, the iOS `SeatClassTests` with the same 11 real compositions as fixtures (read through the
+app's own `NSTrains.parse`): IC 3078 `2p2pp22pp2`, IC 2280 `2pp22p2pp2`, SPR 4982 `p22pp2222p`, IC 678 `2p2`, IC 2685
+`22122212`, IC 1783 `p2p2`, SPR 5683 `p22`, IC 1184 `22pp2`, IC 9583 `22pppp22`, ICE 120 `????????`, Keolis 8581 `222`;
+the windows per deck (VIRMm1 IV upper 6–7 / lower 5–7, ICM 3 5–9, DDZ 4 upper 2–5 / lower 2–3, VIRM IV lower only
+5–7); your seat and its words; the seat box byte for byte unchanged
+(`{"at":"UT","front":true,"n":2,"of":10,"seat":{"deck":"upper","of":11,"w":5}}`); TalkBack words and the legend; the
+drawing names; the table well formed; the unit zones (SNG 3 at one end only); the strip's bar.
+
+### Calls made in A5.1 (the user can correct)
+
+- Android has no "1st class near A, D" platform line (A3's coach map has no 1st-class zones), so the spec's unit
+  zones (`SeatClass.unitZones`) are ported and tested but not shown anywhere yet.
+- "Rides with you" on the ride card ("Sam is on this train · coach 3 of 6 …") stays without "· 1st class", as iOS.
 
 ## As built A5 (0.5.0, version code 5): Friends map first, the seat picker, the test friend
 
