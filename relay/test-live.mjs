@@ -70,8 +70,9 @@ const hhmm = (t) => { const d = new Date(t * 1000); return two(d.getHours()) + "
 
 // MARK: the page, on a stand-in for a browser
 
-async function runPage(link, script) {
+async function runPage(link, script, storage = null) {
   const u = new URL(link);
+  const history = { urls: [], replaceState(_s, _t, url) { this.urls.push(url); } };
   const els = {};
   const el = (id) => (els[id] ??= { id, textContent: "", hidden: true, className: "", style: {}, clientWidth: 320, clientHeight: 220,
     children: [], appendChild(c) { this.children.push(c); } });
@@ -86,15 +87,16 @@ async function runPage(link, script) {
     },
     fetch: (path, init) => call(path.startsWith("/") ? path : new URL(path).pathname + new URL(path).search, init),
     crypto: globalThis.crypto, TextEncoder, TextDecoder, atob, Date, Math, JSON, Error, Promise, String, Number, Uint8Array,
-    encodeURIComponent,
+    encodeURIComponent, decodeURIComponent, history,
     setTimeout: (f, ms) => { timers.push(ms); return timers.length; }, clearTimeout() {},
   };
   ctx.window = ctx;
+  if (storage) ctx.localStorage = storage;
   vm.createContext(ctx);
   vm.runInContext(script, ctx);
   for (let i = 0; i < 100 && (els.head?.textContent ?? "").startsWith("Opening"); i++) await pause(50);
   await pause(100);
-  return { els, ctx, timers };
+  return { els, ctx, timers, history };
 }
 
 // MARK: the checks
@@ -103,7 +105,8 @@ const secret = crypto.getRandomValues(new Uint8Array(32));
 const keyBytes = crypto.getRandomValues(new Uint8Array(32));
 const token = await liveToken(secret);
 assert.match(token, /^[A-Za-z0-9_-]{22}$/);
-const link = `${base}/live/${token}#${b64u(keyBytes)}`;
+// (0.30.1) the app's links say "#k=<key>"; the page also takes 0.30's "#<key>"
+const link = `${base}/live/${token}#k=${b64u(keyBytes)}`;
 const now = Math.floor(Date.now() / 1000);
 const state = { v: 1, name: "Sam", state: "riding", mode: "bus", line: "305", from: "Veghel, Busstation", to: "Den Bosch",
   dest: "Breda", eta: now + 1200, end: now + 3600, late: 3, pos: { lat: 51.6167, lon: 5.5486, at: now - 10 }, t: now };
@@ -146,7 +149,7 @@ const got = await r.json();
 assert.ok(!JSON.stringify(got).includes("Sam"));
 // decrypted here with the key from the link, as the page does
 const box = Buffer.from(got.data, "base64url");
-const k = await crypto.subtle.importKey("raw", Buffer.from(new URL(link).hash.slice(1), "base64url"), { name: "AES-GCM" }, false, ["decrypt"]);
+const k = await crypto.subtle.importKey("raw", Buffer.from(new URL(link).hash.slice(3), "base64url"), { name: "AES-GCM" }, false, ["decrypt"]);
 const plain = JSON.parse(new TextDecoder().decode(await crypto.subtle.decrypt({ name: "AES-GCM", iv: box.subarray(1, 13),
   additionalData: new TextEncoder().encode("hw-live-v1\n" + token) }, k, box.subarray(13))));
 assert.deepEqual(plain, state);
@@ -157,12 +160,34 @@ assert.equal(page.els.detail.textContent, `Then on to Breda · there around ${hh
 assert.equal(page.els.map.hidden, false);
 assert.ok(page.els.tiles.children.length >= 2 && page.els.tiles.children[0].src.startsWith("https://tile.openstreetmap.org/15/"));
 assert.ok(page.timers.includes(15000), "polls again in 15 s");
+// 0.30's form, a %-encoded one, one with something glued on after it, standard base64: the same key
+const std = Buffer.from(keyBytes).toString("base64").replace(/=+$/, "");
+for (const l of [`${base}/live/${token}#${b64u(keyBytes)}`, `${base}/live/${token}#k%3D${b64u(keyBytes)}`,
+  `${base}/live/${token}#k=${b64u(keyBytes)}).`, `${base}/live/${token}#k=${encodeURIComponent(std)}`]) {
+  await pause(600);
+  page = await runPage(l, script);
+  assert.match(page.els.head.textContent, /^Sam is on bus 305/, l);
+}
 // a wrong key
 page = await runPage(`${base}/live/${token}#${b64u(crypto.getRandomValues(new Uint8Array(32)))}`, script);
 assert.match(page.els.head.textContent, /key doesn’t fit/);
-// no key
+// no key: said so, but not "Ended" while the trip is still shared
 page = await runPage(`${base}/live/${token}`, script);
 assert.match(page.els.head.textContent, /missing its key/);
+assert.equal(page.els.badge.textContent, "Key missing");
+assert.match(page.els.detail.textContent, /Copy link/);
+page = await runPage(`${base}/live/${token}#k=`, script);
+assert.equal(page.els.badge.textContent, "Key missing");
+// a key that worked once in this browser: opened again without the #, it still works (and the link is whole again)
+const storage = { m: new Map(), getItem(k) { return this.m.has(k) ? this.m.get(k) : null; }, setItem(k, v) { this.m.set(k, String(v)); },
+  removeItem(k) { this.m.delete(k); } };
+await pause(600);
+page = await runPage(link, script, storage);
+assert.equal(storage.getItem("hw-live:" + token), b64u(keyBytes));
+await pause(600);
+page = await runPage(`${base}/live/${token}`, script, storage);
+assert.match(page.els.head.textContent, /^Sam is on bus 305/);
+assert.deepEqual(page.history.urls, [`/live/${token}#k=${b64u(keyBytes)}`]);
 
 // arrived (the app's last state), then ended
 await pause(5200);
@@ -178,8 +203,12 @@ assert.equal(e.status, 200);
 assert.equal((await end(secret)).status, 200, "ending twice is fine");
 r = await call(`/live/v1/get?t=${token}`);
 assert.equal(r.status, 410);
-page = await runPage(link, script);
+page = await runPage(link, script, storage);
 assert.equal(page.els.head.textContent, "This link has ended");
+assert.equal(storage.getItem("hw-live:" + token), null, "the kept key goes with the link");
+page = await runPage(`${base}/live/${token}`, script);
+for (let i = 0; i < 60 && page.els.head.textContent !== "This link has ended"; i++) await pause(50);
+assert.equal(page.els.head.textContent, "This link has ended", "no key, and ended: ended");
 await pause(5200);
 assert.equal((await put(secret, await lock(state, keyBytes, token), now + 900)).status, 410, "an ended link stays ended");
 assert.equal((await call("/live/v1/nothing")).status, 404);
