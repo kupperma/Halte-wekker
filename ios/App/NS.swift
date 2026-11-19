@@ -4,7 +4,11 @@ import Foundation
 // the real platform, cancellations, how busy it is, how long it is and where 1st class stops.
 
 struct TrainZone: Hashable { let a: Double; let b: Double }                  // 0…1 along the whole train
-struct TrainUnit: Hashable { let x: Double; let w: Double; let zones: [TrainZone]? }
+struct TrainUnit: Hashable {
+    let x: Double; let w: Double; let zones: [TrainZone]?
+    /// Its coaches ("bakken"), 0 when NS didn't list them (0.26, the coach picker).
+    var cars: Int = 0
+}
 struct PlatformLetter: Hashable { let letter: String; let x: Double }
 
 struct TrainLayout: Hashable {
@@ -236,7 +240,7 @@ final class NSStore: ObservableObject {
                     return TrainZone(a: (x + a * w) / total, b: (x + b * w) / total)
                 }
             }
-            units.append(TrainUnit(x: x / total, w: w / total, zones: zones))
+            units.append(TrainUnit(x: x / total, w: w / total, zones: zones, cars: ((m["bakken"] as? [Any]) ?? []).count))
             x += w
         }
         let letters = ((d["perronVoorzieningen"] as? [[String: Any]]) ?? []).compactMap { p -> PlatformLetter? in

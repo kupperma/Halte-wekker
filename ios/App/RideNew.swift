@@ -23,6 +23,8 @@ struct RideViewNew: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: DS.s16) {
                     if trip.waitingToBoard { boarding } else { riding }
+                    // Friends (0.26): who sees this trip, friends on board, your coach (only with friends)
+                    RideFriendsCard()
                 }
                 .padding(.horizontal, DS.s16).padding(.top, DS.s8).padding(.bottom, DS.s16)
             }

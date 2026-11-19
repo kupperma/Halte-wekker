@@ -12,7 +12,7 @@ struct FriendsScreen: View {
     @State private var pasteWrong = false
 
     enum Sheet: String, Identifiable {
-        case myCode, scan, create, restore, backup, profile
+        case myCode, scan, create, restore, backup, profile, travel
         var id: String { rawValue }
     }
 
@@ -45,6 +45,8 @@ struct FriendsScreen: View {
             }
         }
         .sheet(item: $sheet) { s in sheetView(s) }
+        // (0.26) with the first friend, once: what friends see of your trips, and the switch
+        .task(id: store.book?.friends.count ?? 0) { await askAboutTripsOnce() }
         .sheet(item: $store.opened) { code in FriendAddSheet(code: code) }
         .confirmationDialog("Delete your friends account?", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("Delete my friends account", role: .destructive) { Task { await store.deleteAccount() } }
@@ -78,7 +80,15 @@ struct FriendsScreen: View {
         case .restore: FriendRestoreSheet()
         case .backup: FriendBackupSheet()
         case .profile: FriendProfileSheet()
+        case .travel: TravelConsentSheet()
         }
+    }
+
+    private func askAboutTripsOnce() async {
+        guard store.hasFriends, !store.travelAnswered else { return }
+        try? await Task.sleep(nanoseconds: 700_000_000)
+        guard store.hasFriends, !store.travelAnswered, sheet == nil, store.opened == nil else { return }
+        sheet = .travel
     }
 
     /// (after the scanner's sheet has gone, so the next one can come up)
@@ -100,8 +110,11 @@ struct FriendsScreen: View {
 
     @ViewBuilder private var accountContent: some View {
         if let b = store.book {
+            let moving: [FriendTravelSeen] = store.travelling()
+            if !moving.isEmpty { FriendsTravellingCard(list: moving) }
             meCard(b)
             if !b.incoming.isEmpty { requestsCard(b.incoming) }
+            if !b.friends.isEmpty { MyTripsCard(explain: { sheet = .travel }) }
             friendsCard(b.sortedFriends)
             if !b.outgoing.isEmpty { waitingCard(b.outgoing) }
             addCard
@@ -138,7 +151,7 @@ struct FriendsScreen: View {
             }
             ForEach(list) { f in
                 NavigationLink { FriendDetailView(id: f.id) } label: {
-                    FriendRowLabel(name: f.name, id: f.id, picture: store.pictures[f.id], detail: "Friends since \(FriendDates.day(f.since))") {
+                    FriendRowLabel(name: f.name, id: f.id, picture: store.pictures[f.id], detail: friendLine(f)) {
                         Image(systemName: "chevron.right").font(.footnote.weight(.bold)).foregroundStyle(DS.secondary)
                     }
                     .contentShape(Rectangle())
@@ -148,6 +161,13 @@ struct FriendsScreen: View {
             }
         }
         .dsPanel()
+    }
+
+    /// Under a friend's name: what they're on now, else since when you're friends (and whether they see your trips).
+    private func friendLine(_ f: Friend) -> String {
+        if let t = store.travel[f.id], TravelAge.freshness(t, now: Date()) != .gone { return TravelWords.summary(t.state) }
+        let since = "Friends since \(FriendDates.day(f.since))"
+        return f.showsTrips ? since : since + " · doesn’t see your trips"
     }
 
     private func waitingCard(_ list: [FriendRequest]) -> some View {
@@ -218,7 +238,7 @@ struct FriendsScreen: View {
         if store.offline { checked = "Can’t reach the relay right now." }
         else if let t = store.lastChecked { checked = "Checked at \(Fmt.hhmm(t))." }
         else { checked = "Checking…" }
-        return Text("\(checked) There are no notifications: requests come in when Haltewekker is open (it checks every 30 seconds while this screen is open) and now and then in the background.")
+        return Text("\(checked) There are no notifications: requests and friends’ trips come in when Haltewekker is open (it checks every 30 seconds while this screen is open, and every minute on your own trips) and now and then in the background.")
             .font(DS.footnote).foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, DS.s4)
     }
@@ -236,7 +256,7 @@ struct FriendsIntroCard: View {
                 .frame(width: 56, height: 56).background(DS.accent, in: Circle())
                 .accessibilityHidden(true)
             Text("Travel with friends").font(DS.title).foregroundStyle(DS.text).accessibilityAddTraits(.isHeader)
-            Text("Add friends with a code or a link. Coming next: see when friends are on their way, send each other rides and compare timetables.")
+            Text("Add friends with a code or a link, and see when they’re on their way. Coming next: send each other rides and compare timetables.")
                 .font(DS.body).foregroundStyle(DS.text).fixedSize(horizontal: false, vertical: true)
             point("lock.fill", "Locked end to end: only you and your friends can read what you share. Not even the Haltewekker relay can.")
             point("person.crop.circle", "Just a name and a picture you choose. No email, no phone number, nobody can search for you.")
@@ -302,12 +322,10 @@ struct FriendDetailView: View {
                     FriendAvatar(name: f.name, id: f.id, picture: store.pictures[f.id], size: 112)
                     Text(f.name).font(DS.title).foregroundStyle(DS.text).multilineTextAlignment(.center)
                     Text("Friends since \(FriendDates.day(f.since))").font(DS.sub).foregroundStyle(DS.secondary)
-                    VStack(alignment: .leading, spacing: DS.s8) {
-                        DSHeader(title: "What \(f.name) sees")
-                        Text("Your name and picture. Trips, messages and timetables come in the next versions, and you’ll choose what you share.")
-                            .font(DS.sub).foregroundStyle(DS.text).fixedSize(horizontal: false, vertical: true)
+                    if let t = store.travel[f.id], TravelAge.freshness(t, now: Date()) != .gone {
+                        FriendTripCard(seen: t, name: f.name)
                     }
-                    .dsPanel()
+                    FriendSeesCard(friend: f)
                     DSQuietButton(title: "Remove \(f.name)", icon: "person.badge.minus", full: true) { asking = true }
                         .confirmationDialog("Remove \(f.name)?", isPresented: $asking, titleVisibility: .visible) {
                             Button("Remove", role: .destructive) {
@@ -326,6 +344,38 @@ struct FriendDetailView: View {
         .background(DS.page.ignoresSafeArea())
         .navigationTitle(store.book?.friend(id)?.name ?? "Friend")
         .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// A friend's page: what they see of you, and their "Show my trips" switch.
+struct FriendSeesCard: View {
+    let friend: Friend
+    @ObservedObject private var store = FriendStore.shared
+
+    private var on: Binding<Bool> {
+        Binding(get: { friend.showsTrips }, set: { store.setShowTrips(friend.id, $0) })
+    }
+
+    private var note: String {
+        if !friend.showsTrips { return "\(friend.name) doesn’t see your trips." }
+        if !store.travelAnswered { return "Your trips aren’t shown to anyone until you say yes in Friends › Your trips." }
+        if store.travelPaused { return "Paused for everyone in Friends › Your trips." }
+        return "While a trip runs and you’re on board: what you’re on, where you are, when you arrive and your coach. Nothing when no trip runs."
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: DS.s8) {
+            DSHeader(title: "What \(friend.name) sees")
+            Text("Your name and picture. Messages and timetables come in the next versions, and you’ll choose what you share.")
+                .font(DS.sub).foregroundStyle(DS.text).fixedSize(horizontal: false, vertical: true)
+            Toggle(isOn: on) {
+                Text("Show my trips to \(friend.name)").font(DS.bodyStrong).foregroundStyle(DS.text)
+            }
+            .tint(DS.accent)
+            .frame(minHeight: DS.hit)
+            Text(note).font(DS.sub).foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+        .dsPanel()
     }
 }
 

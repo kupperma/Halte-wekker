@@ -203,7 +203,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     @Published var pickAgain = false
     private var headsignOf: [String: String] = [:]        // where the sheet's vehicles go, by trip id
     /// Friends (0.26): told on each ride network tick, to send what's due on the same wake (it only reads the trip).
-    var onNetTick: (() -> Void)?
+    var onNetTick: (@MainActor () -> Void)?
 
     var leg: Leg? { index < legs.count ? legs[index] : nil }
     var wakeKm: Double { leg.map(km(for:)) ?? busKm }

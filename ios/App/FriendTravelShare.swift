@@ -31,6 +31,10 @@ final class FriendTravelShare: ObservableObject {
     private var lastFetch: Date?
     private var lastKey = ""
     private var sending = false
+    /// A leg changed while the last one was still going out: the next goes right after it.
+    private var again = false
+    /// The trip ended while a state was still going out: taken back right after it lands.
+    private var clearAfter = false
     private var asking: Set<String> = []
 
     private init() {}
@@ -51,7 +55,7 @@ final class FriendTravelShare: ObservableObject {
         // (published before the change lands: a moment later it reads the trip as it is)
         Publishers.MergeMany(changes)
             .debounce(for: .seconds(2), scheduler: RunLoop.main)
-            .sink { [weak self] in self?.changed() }
+            .sink { [weak self] _ in self?.changed() }
             .store(in: &subs)
         // a trip that ended while the app was gone: its state is taken back (nothing happens if none went out)
         if !Self.running(t) { Task { await FriendStore.shared.clearTravel() } }
@@ -127,24 +131,36 @@ final class FriendTravelShare: ObservableObject {
     // MARK: sending
 
     private func send(_ ids: [String], _ t: TripManager) {
-        guard !sending, var s = build(t) else { return }
+        if sending { again = true; return }
+        guard let base = build(t) else { return }
         sending = true
         sharing = true
         lastSent = Date()
         lastKey = key(t)
         Task {
+            var s = base
             if s.isTrain, s.num == nil, let id = s.trip { s.num = await self.number(id) }
             await FriendStore.shared.putTravel(s, to: ids)
             await FriendStore.shared.fetchTravel()
             self.lastFetch = Date()
+            if self.clearAfter {
+                self.clearAfter = false
+                await FriendStore.shared.clearTravel()
+            }
             self.sending = false
+            if self.again {
+                self.again = false
+                self.evaluate(force: true)
+            }
         }
     }
 
     private func clear() {
+        again = false
         sharing = false
         lastSent = nil
         lastKey = ""
+        if sending { clearAfter = true; return }
         Task { await FriendStore.shared.clearTravel() }
     }
 
@@ -211,6 +227,19 @@ final class FriendTravelShare: ObservableObject {
         if let n = await Transit.liveTrip(tripId, maxAge: RideTick.tripCache)?.num, !n.isEmpty {
             numbers[tripId] = n
             return n
+        }
+        return nil
+    }
+
+    /// The NS station where your trip boards this train (you're on it, or a leg still to come takes it); nil: it isn't
+    /// on your trip.
+    func boarding(tripId: String) -> String? {
+        guard let t = trip, Self.running(t) else { return nil }
+        if t.vehicle?.tripId == tripId, let l = t.leg { return NSStore.code(l.from) }
+        if t.phase == .transfer, t.next?.tripId == tripId, let l = t.legs[safe: t.index + 1] { return NSStore.code(l.from) }
+        let planned: [PlannedRide] = t.route?.planned ?? []
+        for (k, p) in planned.enumerated() where k > t.index && p.tripId == tripId {
+            if let l = t.legs[safe: k] { return NSStore.code(l.from) }
         }
         return nil
     }
