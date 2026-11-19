@@ -1,6 +1,6 @@
 // Haltewekker live links (0.30): a web page with your trip's live times for someone without the app (a parent).
 //
-// The phone makes a link   https://<relay>/live/<token>#<key>
+// The phone makes a link   https://<relay>/live/<token>#k=<key>   (0.30 made "#<key>": the page reads both)
 //   secret = 32 random bytes (only the phone has it: it lets it write);  key = 32 more random bytes (AES-256-GCM)
 //   token  = base64url(first 16 bytes of SHA-256("hw-live-token-v1" + secret))  (22 characters)
 // and, on the ride's network tick, posts the trip's state locked with the key:
@@ -15,7 +15,8 @@
 //                      within that. Puts at least 5 s apart, at most 240 an hour per link. 410 "ended" once ended.
 //   POST /live/v1/end  {"secret"}                -> {"ok":true}: the data goes at once, the page says it ended
 //   GET  /live/v1/get?t=<token>                  -> {"data","at","exp"} | 410 {"error":"ended"} | 404 {"error":"gone"}
-//   GET  /live/<token>                           the page (it reads the key from the fragment and decrypts there)
+//   GET  /live/<token>                           the page (it reads the key from the fragment and decrypts there;
+//                                                a key that worked is kept in that browser for that link until it ends)
 //   GET  /live/app.js                            the page's script (same origin: no script from anywhere else)
 // One Durable Object per link (SQLite-backed, its key-value storage), named "t:<token>"; "ip:<hash>" counts new links.
 
@@ -272,8 +273,28 @@ with a key that is only in the link (after the #), so the relay that passes it o
 const APP_JS = `(function () {
   "use strict";
   var token = (location.pathname.split("/")[2] || "").replace(/\\/$/, "");
-  var keyText = location.hash.slice(1);
   var key = null, timer = null, over = false, lastPos = null, errors = 0;
+  // The key is only ever in the fragment (after the #), never sent to the relay. Taken as "#<key>" or "#k=<key>"
+  // (0.30.1), %-encoded or not, with whatever an app glued on after it; standard base64 ("+", "/") reads too.
+  function keyFrom(h) {
+    var s = String(h || "").replace(/^#/, "");
+    try { s = decodeURIComponent(s); } catch (e) {}
+    s = s.replace(/\\s+/g, "");
+    var m = s.match(/(?:^|[&;?])k=([^&;]*)/);
+    if (m) s = m[1];
+    s = s.replace(/\\+/g, "-").replace(/\\//g, "_");
+    var b = s.match(/^[A-Za-z0-9_-]{43}/);
+    return b ? b[0] : s.replace(/=+$/, "");
+  }
+  // A key that worked once is kept in this browser (for this link only), so opening it again without its # (a tab
+  // brought back, a link an app cut short) still works; it goes when the link has ended.
+  var saved = null;
+  try { saved = window.localStorage || null; } catch (e) { saved = null; }
+  function remembered() { try { return saved ? saved.getItem("hw-live:" + token) || "" : ""; } catch (e) { return ""; } }
+  function remember(k) { try { if (saved) saved.setItem("hw-live:" + token, k); } catch (e) {} }
+  function forget() { try { if (saved) saved.removeItem("hw-live:" + token); } catch (e) {} }
+  var keyText = keyFrom(location.hash), keyKept = false;
+  if (!keyText) { keyText = remembered(); keyKept = !!keyText; }
   function $(id) { return document.getElementById(id); }
   function show(id, text) { var e = $(id); if (text) { e.textContent = text; e.hidden = false; } else { e.hidden = true; } }
   function b64u(s) {
@@ -308,12 +329,21 @@ const APP_JS = `(function () {
     if (stage(s) === "arrived" || !s.dest || s.dest === s.to) return "";
     return "Then on to " + s.dest + (s.end ? " \\u00b7 there around " + hhmm(s.end) : "");
   }
-  function ended(text) {
+  function ended(text, badge) {
     over = true;
     clearTimeout(timer);
     show("head", text);
-    var b = $("badge"); b.className = "badge end"; b.textContent = "Ended"; b.hidden = false;
+    var b = $("badge"); b.className = "badge end"; b.textContent = badge || "Ended"; b.hidden = false;
     show("detail", ""); show("age", ""); $("map").hidden = true;
+  }
+  // No key (or a broken one): not "Ended" while the trip is still shared. One look at the relay says which it is.
+  function missingKey() {
+    ended("This link is missing its key. Ask for the link again (all of it, with the part after the #).", "Key missing");
+    show("detail", "Some apps cut a link short. In Haltewekker, “Copy link” gives the whole link to paste.");
+    if (!/^[A-Za-z0-9_-]{22}$/.test(token)) return;
+    fetch("/live/v1/get?t=" + encodeURIComponent(token), { cache: "no-store" }).then(function (r) {
+      if (r.status === 404 || r.status === 410) { forget(); ended("This link has ended"); }
+    }, function () {});
   }
   function map(p) {
     var box = $("map");
@@ -353,7 +383,7 @@ const APP_JS = `(function () {
   function next(ms) { clearTimeout(timer); if (!over && document.visibilityState !== "hidden") timer = setTimeout(poll, ms); }
   function poll() {
     fetch("/live/v1/get?t=" + encodeURIComponent(token), { cache: "no-store" }).then(function (r) {
-      if (r.status === 404 || r.status === 410) { ended("This link has ended"); return null; }
+      if (r.status === 404 || r.status === 410) { forget(); ended("This link has ended"); return null; }
       if (r.status === 429) { next(30000); return null; }
       if (!r.ok) throw new Error("status " + r.status);
       return r.json();
@@ -364,9 +394,15 @@ const APP_JS = `(function () {
       return crypto.subtle.decrypt({ name: "AES-GCM", iv: box.slice(1, 13), additionalData: new TextEncoder().encode("hw-live-v1\\n" + token), tagLength: 128 },
         key, box.slice(13)).then(function (plain) {
         errors = 0;
+        remember(keyText);
+        if (keyKept) {
+          // (the link as it should be, so it can be copied from here again)
+          keyKept = false;
+          try { history.replaceState(null, "", location.pathname + "#k=" + keyText); } catch (e) {}
+        }
         render(JSON.parse(new TextDecoder().decode(plain)), j.at);
         next(15000);
-      }, function () { ended("This link’s key doesn’t fit. Ask for the link again."); });
+      }, function () { if (keyKept) forget(); ended("This link’s key doesn’t fit. Ask for the link again."); });
     }).catch(function () {
       errors += 1;
       if (errors >= 2) show("age", "Can’t reach the trip right now. Trying again…");
@@ -374,11 +410,9 @@ const APP_JS = `(function () {
     });
   }
   document.addEventListener("visibilitychange", function () { if (document.visibilityState === "visible" && key && !over) poll(); });
-  var raw = b64u(keyText);
-  if (!/^[A-Za-z0-9_-]{22}$/.test(token) || !raw || raw.length !== 32 || !window.crypto || !crypto.subtle) {
-    ended(!window.crypto || !crypto.subtle ? "This browser can’t open the trip. Try another browser." : "This link is missing its key. Ask for the link again (all of it, with the part after the #).");
-    return;
-  }
+  var raw = keyText ? b64u(keyText) : null;
+  if (!window.crypto || !crypto.subtle) { ended("This browser can’t open the trip. Try another browser."); return; }
+  if (!/^[A-Za-z0-9_-]{22}$/.test(token) || !raw || raw.length !== 32) { missingKey(); return; }
   crypto.subtle.importKey("raw", raw, { name: "AES-GCM" }, false, ["decrypt"]).then(function (k) { key = k; poll(); },
     function () { ended("This browser can’t open the trip. Try another browser."); });
 })();
