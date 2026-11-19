@@ -83,6 +83,8 @@ final class LiveStore: ObservableObject {
     private var lastMoving: Date?               // when you last went at bus or train speed
     /// The bus or train you're on now (you're moving, and its live position is right where you are).
     @Published private(set) var onBoard: OnBoard? { didSet { if onBoard == nil { onBoardLooks = 0 } } }
+    /// A trip runs (0.26.1, set by `TripManager`): the home doesn't look for the bus or train you're on then.
+    static var rideOn = false
     /// How many refreshes in a row found you on the same one (0.20.5): from two, the home starts your trip by itself.
     @Published private(set) var onBoardLooks = 0
     /// Your fixes of the last minutes (0.20.5), for the matcher: it judges your track, not one position.
@@ -276,10 +278,15 @@ final class LiveStore: ObservableObject {
             }
         }
         let ranked = VehicleMatch.rank(judged, planned: nil)
+        // (0.26.1) a timetable-only fit never beats one by its own GPS, and counts only while you move like a vehicle
+        let pick: String? = OnBoardRules.best(judged, yourSpeed: f.speed.isFinite ? max(0, f.speed) : 0)
         let lines = Dictionary(tracks.map { ($0.tripId, $0.line) }, uniquingKeysWith: { a, _ in a })
-        let outcome = ranked.first.map { "best " + FieldFormat.label($0.id, lines) } ?? "none"
+        let outcome: String
+        if let pick { outcome = "best " + FieldFormat.label(pick, lines) }
+        else if ranked.isEmpty { outcome = "none" }
+        else { outcome = "none · timetable only, not moving like a bus or train" }
         FieldLog.shared.add(.match, FieldFormat.match("on board", judged, outcome: outcome, count: judged.count))
-        guard let id = ranked.first?.id else { return nil }
+        guard let id = pick else { return nil }
         let pieces = segs.filter { $0.tripId == id }
         return pieces.filter { $0.departure <= now }.max { $0.departure < $1.departure } ?? pieces.min { $0.departure < $1.departure }
     }
@@ -511,7 +518,8 @@ final class LiveStore: ObservableObject {
             // on a bus or train (moving, or moved in the last 3 minutes, e.g. standing at a station): carry on with it
             let to = destination(dir)
             let history = fixes.filter { Date().timeIntervalSince($0.t) < 120 }     // (as the trip's: the last 2 minutes)
-            if let m = lastMoving, Date().timeIntervalSince(m) < 180,
+            // (0.26.1: not while a trip runs, e.g. walking at a change with the home in front: the ride has its own)
+            if !Self.rideOn, let m = lastMoving, Date().timeIntervalSince(m) < 180,
                let ob = await Net.within(7, { await Self.onBoardTrips(f, to: to, wasMoving: true, history: { history }) }) ?? nil {
                 let same = onBoard?.vehicle.tripId == ob.0.vehicle.tripId
                 onBoard = ob.0; trips = ob.1; onTheMove = false

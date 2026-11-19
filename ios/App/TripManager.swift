@@ -31,6 +31,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     @Published private(set) var phase: Phase = .idle {
         didSet {
             // the home screen's stills (some 25 MB decoded) aren't kept while a trip runs; back when it's over
+            LiveStore.rideOn = phase != .idle     // (the home's own on-board look waits while a trip runs)
             if oldValue == .idle, phase != .idle { StillCache.shared.purge() }
             else if oldValue != .idle, phase == .idle, UIApplication.shared.applicationState != .background { StillCache.shared.warm() }
         }
@@ -575,6 +576,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
 
     func endTrip() {
         if phase != .idle, !demo { BatteryMeter.rideEnd(legs: max(1, index - startedAtLeg + 1)) }   // its line in the field log
+        if phase != .idle, let v = vehicle { HomeActions.rideEnded(on: v) }   // (the home doesn't start it again by itself)
         activityLater?.cancel(); activityLater = nil
         farTask?.cancel(); farTask = nil
         detectTask?.cancel(); detectTask = nil

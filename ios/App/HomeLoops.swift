@@ -130,13 +130,16 @@ enum HomeActions {
     }
 
     /// The buses and trains a trip has started by itself on: stop it and it doesn't start again on that one.
+    /// (0.26.1) And the ones you ended a ride on: on 2026-11-19 a ride ended on the 305 started again by itself on it.
     private static var autoStartedOn: Set<String> = []
+    static func rideEnded(on v: Vehicle) { autoStartedOn.insert(v.tripId) }
     static func mayAutoStart(_ v: Vehicle) -> Bool { !autoStartedOn.contains(v.tripId) }
 
     /// Found on the same bus or train in two looks in a row (about a minute, your track against its position): your trip
     /// starts by itself with it, wake-up alarm and all, as Fastest trip's does once you're on board.
     static func autoStartOnBoard(live: LiveStore, trip: TripManager, goStore: GoStore) {
-        guard live.onBoardLooks >= 2, trip.phase == .idle, !goStore.isOpen, let ob = live.onBoard, mayAutoStart(ob.vehicle),
+        guard live.onBoardLooks >= 2, !goStore.isOpen, let ob = live.onBoard,
+              OnBoardRules.mayAutoStart(ob.vehicle.tripId, idle: trip.phase == .idle, running: trip.vehicle?.tripId, blocked: autoStartedOn),
               let t = onBoardTrip(live: live), let r = RoutePlan.from(t) else { return }
         autoStartedOn.insert(ob.vehicle.tripId)
         trip.start(r, vehicle: ob.vehicle, auto: true, alternatives: [t], how: "Home on board, by itself")
