@@ -398,7 +398,7 @@ only adds a box kind, three relay routes and one field in the friend list.
 
 ## As built (0.27)
 
-What 0.27.0 (build 114) adds: chats (one-to-one and groups), trip cards, and "Take this trip". Everything in "As built
+What 0.27.0 (build 115) adds: chats (one-to-one and groups), trip cards, and "Take this trip". Everything in "As built
 (0.25)" and "As built (0.26)" holds unchanged; this only adds box kinds and one optional header use. **No relay change**:
 the 0.25 routes already carry all of it (`/f/v1/send` takes up to 20 boxes to any mix of mailboxes, which is a group
 message's fan-out; slots replace the newest box per sender per mailbox). `FriendMessage.kindsVersion` is 3.
