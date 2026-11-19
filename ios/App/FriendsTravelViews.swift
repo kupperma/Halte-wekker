@@ -23,10 +23,12 @@ struct FriendCoachNote: View {
     let name: String
     @ObservedObject private var share = FriendTravelShare.shared
     @State private var hint: String?
+    /// (0.31.1) Their coach or window is in 1st class (from the train's drawing at the station they gave).
+    @State private var firstClass = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("\(name) is in \(SeatMap.label(coach).lowercasedFirst)")
+            Text("\(name) is in \(SeatMap.label(coach, firstClass: firstClass).lowercasedFirst)")
                 .font(DS.subStrong).foregroundStyle(DS.text).fixedSize(horizontal: false, vertical: true)
             if let hint {
                 Text(hint).font(DS.sub).foregroundStyle(DS.accentText).fixedSize(horizontal: false, vertical: true)
@@ -38,6 +40,17 @@ struct FriendCoachNote: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
         .task(id: "\(state.trip ?? "")|\(coach.n)") { await findHint() }
+        .task(id: "\(state.trip ?? "")|\(coach.n)|\(coach.seat?.deck ?? "")|\(coach.seat?.w ?? 0)") { await findClass() }
+    }
+
+    /// (0.31.1) Whether their pick is in 1st class: NS's drawing of the train at the station their coach is counted at.
+    private func findClass() async {
+        guard let id = state.trip, let at = coach.at, !at.isEmpty else { firstClass = false; return }
+        var num: String? = state.num
+        if num == nil { num = await share.number(id) }
+        guard let num, !num.isEmpty, let size = await NSStore.shared.trainSize(num: num, code: at) else { return }
+        let t: SeatMap.Train = TrainSize.seatTrain(size, line: state.line, coaches: coach.of)
+        firstClass = t.fromNS && SeatMap.isFirst(coach, in: t, station: at)
     }
 
     /// On the same train as you (your trip has it, still to board or on board): where its coach stops at your station.
