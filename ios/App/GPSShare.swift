@@ -203,6 +203,6 @@ enum ShareAsk {
     static let fixesTitle = "Share GPS points during rides"
     static let fixesText = "Only while a trip runs: where the phone was every few seconds (time, place to about a metre, accuracy, speed and direction), with the leg and the bus or train it was on. The first and last 500 m of every trip are left out, and so is anything within 500 m of Home, School or another place you saved."
     /// A point as it's sent (made up), for Settings › What's sent and the docs.
-    static let sampleFix = #"{"t":1763534038.2,"lat":51.69012,"lon":5.29871,"acc":8,"spd":12.4,"crs":87,"leg":"1/3","veh":"bus 305·7821","ride":"3f9a1c2e"}"#
+    static let sampleFix = #"{"t":1795070038.2,"lat":51.69012,"lon":5.29871,"acc":8,"spd":12.4,"crs":87,"leg":"1/3","veh":"bus 305·7821","ride":"3f9a1c2e"}"#
     static let who = "It goes to \(Maker.name) only, under a random id made for this (not your Friends account), and is deleted after 60 days. Not during a trip, in Low Data Mode or in Low Power Mode. “Delete what I sent” in Settings › Help improve Haltewekker deletes it all at once."
 }

@@ -20,9 +20,9 @@ final class GPSShareTests: XCTestCase {
     // MARK: one point
 
     func test_aPointIsRoundedAndTagged() {
-        let f = GPSShareRules.fix(at: Date(timeIntervalSince1970: 1_763_534_038.24), lat: 51.690123456, lon: 5.298714999,
+        let f = GPSShareRules.fix(at: Date(timeIntervalSince1970: 1_795_070_038.24), lat: 51.690123456, lon: 5.298714999,
                                   accuracy: 8.4, speed: 12.36, course: 87.4, leg: "1/3", vehicle: "bus 305·7821", ride: "3f9a1c2e")!
-        XCTAssertEqual(f.t, 1_763_534_038.2)
+        XCTAssertEqual(f.t, 1_795_070_038.2)
         XCTAssertEqual(f.lat, 51.69012)
         XCTAssertEqual(f.lon, 5.29871)
         XCTAssertEqual(f.acc, 8)
