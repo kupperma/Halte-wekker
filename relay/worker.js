@@ -10,9 +10,12 @@
 //    Stored in a Durable Object with SQLite storage, declared in wrangler.jsonc: nothing to set up by hand.
 // 7. Shared ride logs (0.28.1, opt-in in the app): /logs/v1/put, /logs/v1/delete, and /logs/v1/export for the
 //    developer, which needs the secret LOGS_ADMIN_KEY (see docs/logs-export.md and logs.js).
+// 8. Live links (0.30): /live/<token>#<key>, a page with a trip's live times for someone without the app, locked on
+//    the phone with a key the relay never sees (/live/v1/put, /live/v1/end, /live/v1/get; see live.js).
 import { DurableObject } from "cloudflare:workers";
 import { friends, FriendsCore } from "./friends.js";
 import { logs, LogsCore } from "./logs.js";
+import { live, LiveCore } from "./live.js";
 
 export class Friends extends DurableObject {
   constructor(ctx, env) {
@@ -32,6 +35,15 @@ export class Logs extends DurableObject {
   alarm() { return this.core.alarm(); }
 }
 
+export class Live extends DurableObject {
+  constructor(ctx, env) {
+    super(ctx, env);
+    this.core = new LiveCore(ctx, env);
+  }
+  fetch(request) { return this.core.fetch(request); }
+  alarm() { return this.core.alarm(); }
+}
+
 export default {
   async fetch(request, env) {
     const cors = {
@@ -41,6 +53,9 @@ export default {
     if (request.method === "OPTIONS") return new Response(null, { headers: cors });
     const url = new URL(request.url);
     if (url.pathname.startsWith("/f/") || url.pathname === "/add") return friends(request, env, url);
+    if (url.pathname.startsWith("/live/")) {
+      try { return await live(request, env, url); } catch (e) { return new Response("relay error", { status: 500 }); }
+    }
     if (url.pathname.startsWith("/logs/")) {
       try { return await logs(request, env, url); } catch (e) { return new Response("relay error", { status: 500 }); }
     }
