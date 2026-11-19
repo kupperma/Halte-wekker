@@ -416,7 +416,6 @@ final class FriendStore: ObservableObject {
     /// After a batch: the groups as they are now, their pictures, and your picture to new people in them.
     private func takeGroups(_ r: FriendInbox.Result, me: FriendIdentity) {
         setGroups(r.groups)
-        state.orphans = r.orphans.isEmpty ? nil : r.orphans
         for (gid, d) in r.groupPictures {
             groupPictures[gid] = d.isEmpty ? nil : d
             Self.writePicture("g-\(gid)", d.isEmpty ? nil : d)
@@ -749,11 +748,14 @@ final class FriendStore: ObservableObject {
                 state.kindsVersion = FriendMessage.kindsVersion
             }
             var retry: [RelayBox] = state.orphans ?? []
+            var orphans: [RelayBox] = []
             for _ in 0..<5 {
                 let inbox = try await relay.inbox(after: state.cursor, lane: why == .now ? .urgent : .background)
                 guard let b = book else { return }
                 let r = FriendInbox.process(inbox.boxes, book: b, groups: groups, retry: retry, me: me, now: Date())
                 retry = []
+                orphans += r.orphans
+                state.orphans = orphans.isEmpty ? nil : Array(orphans.suffix(FriendInbox.maxOrphans))
                 apply(r.book, r.effects)
                 takeGroups(r, me: me)
                 keepPictures(r.pictures)
@@ -779,6 +781,7 @@ final class FriendStore: ObservableObject {
             }
             offline = false
             lastChecked = Date()
+            FriendChats.shared.refresh()
         } catch FriendRelay.Failure.signedOut {
             forget(moved: true)
         } catch FriendRelay.Failure.unknownAccount {

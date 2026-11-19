@@ -43,6 +43,9 @@ final class FriendChats: ObservableObject {
         store.unread = book.unreadTotal(me: me, among: liveKeys)
     }
 
+    /// The badge again (a friend gone, a group left).
+    func refresh() { publishUnread() }
+
     func unread(_ key: String) -> Int {
         guard let me = store.myAccount else { return 0 }
         return book.unread(key, me: me)
