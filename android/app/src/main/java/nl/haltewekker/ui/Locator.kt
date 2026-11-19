@@ -23,14 +23,16 @@ object Locator {
         ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
             ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
 
+    fun last(context: Context): GeoPoint? = lastFix(context)?.let { GeoPoint(it.latitude, it.longitude) }
+
+    /** The phone's newest known fix (no new location asked). */
     @SuppressLint("MissingPermission")
-    fun last(context: Context): GeoPoint? {
+    fun lastFix(context: Context): Location? {
         if (!granted(context)) return null
         val lm = context.getSystemService(LocationManager::class.java)
-        val l = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER, LocationManager.PASSIVE_PROVIDER)
+        return listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER, LocationManager.PASSIVE_PROVIDER)
             .mapNotNull { try { lm.getLastKnownLocation(it) } catch (_: Exception) { null } }
-            .maxByOrNull { it.time } ?: return null
-        return GeoPoint(l.latitude, l.longitude)
+            .maxByOrNull { it.time }
     }
 
     /** Fixes every `ms` (at least 25 m apart), GPS and network. */

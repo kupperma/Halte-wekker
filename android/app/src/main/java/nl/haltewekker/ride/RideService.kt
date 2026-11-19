@@ -26,6 +26,13 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import nl.haltewekker.App
+import nl.haltewekker.auto.AutoRules
+import nl.haltewekker.auto.AutoStart
+import nl.haltewekker.auto.Regions
+import nl.haltewekker.auto.ResumeOffer
+import nl.haltewekker.auto.ResumeStore
+import nl.haltewekker.auto.TripResume
+import nl.haltewekker.data.Transit
 import nl.haltewekker.core.Geo
 import nl.haltewekker.core.GeoPoint
 import nl.haltewekker.core.Iso
@@ -49,16 +56,36 @@ class RideService : Service() {
         const val ACTION_BACKUP = "nl.haltewekker.ride.BACKUP"
         const val ACTION_ON_IT = "nl.haltewekker.ride.ON_IT"
         const val ACTION_WAKE = "nl.haltewekker.ride.WAKE"
+        const val ACTION_LOOK = "nl.haltewekker.ride.LOOK"
         const val EXTRA_KM = "km"
+        const val EXTRA_REGION = "region"
+        const val EXTRA_BY_HAND = "byHand"
 
-        /** Starts a ride on `trip` ("I'm on it"): the first leg asleep, each leg's wake distance from the settings. */
-        fun start(context: Context, trip: DoorTrip, destination: String) {
+        private fun newState(context: Context, trip: DoorTrip, destination: String, index: Int): RideState {
             val st = (context.applicationContext as App).store.settings.value
             val now = Iso.now()
-            val state = RideState(trip = trip, destination = destination, startedAt = now, legStart = now,
-                wakeKm = trip.rides.map { WakeRules.wakeKm(it.isTrain, st.busKm, st.trainKm) })
-            RideStore.set(context, state)
+            return RideState(trip = trip, destination = destination, index = index.coerceIn(0, maxOf(0, trip.rides.size - 1)),
+                startedAt = now, legStart = now, wakeKm = trip.rides.map { WakeRules.wakeKm(it.isTrain, st.busKm, st.trainKm) })
+        }
+
+        /** Starts a ride on `trip` ("I'm on it"), at leg `index`: asleep, each leg's wake distance from the settings. */
+        fun start(context: Context, trip: DoorTrip, destination: String, index: Int = 0) {
+            RideStore.set(context, newState(context, trip, destination, index))
+            nl.haltewekker.auto.ResumeStore.set(context, null)
             ContextCompat.startForegroundService(context, Intent(context, RideService::class.java).setAction(ACTION_START))
+        }
+
+        /**
+         * You left a home stop or School (auto-start): GPS on for a few minutes, to find the bus or train you're on
+         * and start the trip by itself. Android may not let it start from the background (battery limits): then a
+         * notification asks you to open the app.
+         */
+        fun look(context: Context, region: String) {
+            try {
+                ContextCompat.startForegroundService(context, Intent(context, RideService::class.java).setAction(ACTION_LOOK).putExtra(EXTRA_REGION, region))
+            } catch (_: Exception) {
+                Notifications.news(context, "autostart-ask", "On your way?", "Open Haltewekker to start your trip: Android didn't let it look for your bus by itself.")
+            }
         }
 
         fun send(context: Context, action: String, km: Double? = null) {
@@ -81,6 +108,10 @@ class RideService : Service() {
     private var etaAt = 0.0
 
     private val listener = LocationListener { onLocation(it) }
+    private var lookJob: Job? = null
+    private var lookRegion: String? = null
+    private var lookFrom = 0.0
+    private val autoLook = OnBoardLook()
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -92,6 +123,12 @@ class RideService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_LOOK) {
+            if (RideStore.state.value != null) return START_STICKY                 // a ride runs: nothing to look for
+            if (!goForeground(looking = true)) { stopSelf(); return START_NOT_STICKY }
+            startLook(intent.getStringExtra(EXTRA_REGION) ?: "")
+            return START_NOT_STICKY
+        }
         if (!goForeground()) {
             // Not allowed to follow location now (started from the background without "all the time"): the backup
             // alarm still rings, from here, and the alarm screen brings the app to the front.
@@ -99,10 +136,11 @@ class RideService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
-        if (RideStore.state.value == null) { stopRide(); return START_NOT_STICKY }
+        if (RideStore.state.value == null) { lookJob?.cancel(); stopRide(); return START_NOT_STICKY }
+        lookJob?.cancel(); lookJob = null
         when (intent?.action) {
             ACTION_STOP_ALARM -> stopAlarm()
-            ACTION_END -> { end(); return START_NOT_STICKY }
+            ACTION_END -> { end(byHand = intent.getBooleanExtra(EXTRA_BY_HAND, true)); return START_NOT_STICKY }
             ACTION_BACKUP -> if (RideStore.state.value?.phase == Phase.SLEEPING) ring("backup alarm by time")
             ACTION_ON_IT -> onIt()
             ACTION_WAKE -> intent.getDoubleExtra(EXTRA_KM, -1.0).takeIf { it > 0 }?.let(::setWakeKm)
@@ -111,8 +149,8 @@ class RideService : Service() {
         return START_STICKY
     }
 
-    private fun goForeground(): Boolean {
-        val n = Notifications.ride(this, RideStore.state.value)
+    private fun goForeground(looking: Boolean = false): Boolean {
+        val n = if (looking) Notifications.looking(this) else Notifications.ride(this, RideStore.state.value)
         return try {
             if (Build.VERSION.SDK_INT >= 29) startForeground(Notifications.RIDE_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
             else startForeground(Notifications.RIDE_ID, n)
@@ -266,7 +304,7 @@ class RideService : Service() {
         } else {
             RideStore.update(this) { it.copy(phase = Phase.FINISHED) }
             cancelBackup()
-            scope.launch { delay(90_000); if (RideStore.state.value?.finished == true) end() }
+            scope.launch { delay(90_000); if (RideStore.state.value?.finished == true) end(byHand = false) }
         }
         notifyRide(force = true)
     }
@@ -288,7 +326,18 @@ class RideService : Service() {
         notifyRide(force = true)
     }
 
-    private fun end() {
+    private fun end(byHand: Boolean) {
+        RideStore.state.value?.let { s ->
+            AutoStart.noteEnd(this, fixes.lastOrNull()?.p ?: if (s.finished) s.trip.last.to else null)
+            if (byHand && !s.finished) {
+                // not started again by itself; offered to go on with while you're on the way (TripResume)
+                AutoStart.block(this, listOfNotNull(s.vehicleTripId, s.leg?.tripId))
+                val atChange = s.index > 0 && s.vehicleSource == VehicleSource.NONE && s.phase == Phase.SLEEPING
+                TripResume.leg(atChange, false, if (atChange) s.index - 1 else s.index, s.trip.rides.size)?.let {
+                    ResumeStore.set(this, ResumeOffer(s.trip, s.destination, it, Iso.now()))
+                }
+            }
+        }
         AlarmPlayer.stop(this)
         cancelBackup()
         Notifications.cancel(this, Notifications.ALARM_ID)
@@ -338,6 +387,60 @@ class RideService : Service() {
     private fun cancelBackup() {
         backupScheduledFor = null
         getSystemService(AlarmManager::class.java).cancel(backupIntent())
+    }
+
+    // MARK: auto-start: the look after leaving a home stop or School (iOS TripManager.leftRegion)
+
+    private fun startLook(region: String) {
+        if (lookJob?.isActive == true) return
+        lookRegion = region; lookFrom = Iso.now()
+        autoLook.reset()
+        requestLocation(3_000)
+        lookJob = scope.launch {
+            repeat(AutoRules.LOOKS) {
+                delay((AutoRules.LOOK_EVERY * 1000).toLong())
+                if (RideStore.state.value != null) return@launch                   // a ride started meanwhile
+                val now = Iso.now()
+                val mine = fixes.toList()
+                val real = app.store.settings.value.realPositions
+                val f = withContext(Dispatchers.Default) { try { autoLook.look(mine, null, now, real) } catch (_: Exception) { null } }
+                if (f != null && AutoRules.mayStart(f.tripId, idle = true, running = null, blocked = AutoStart.blocked(this@RideService).keys)
+                    && autoStartDoor(region, f)) return@launch
+            }
+            if (RideStore.state.value == null) stopRide()                          // nothing found: back to watching cheaply
+        }
+    }
+
+    /** Off the corridor (iOS `autoStartDoor`): the trip to the other place that rides this bus or train, started. */
+    private suspend fun autoStartDoor(region: String, f: OnBoardLook.Found): Boolean {
+        val prof = app.store.profile.value
+        val role = AutoRules.role(region) ?: return false
+        val dest = (if (role == AutoRules.Role.HOME) prof.school else prof.home) ?: return false
+        val destName = if (role == AutoRules.Role.HOME) dest.name.ifBlank { "School" } else "Home"
+        val spec = Regions.current(this).firstOrNull { it.id == region }
+        val here = fixes.lastOrNull()?.p
+        val tries = listOfNotNull(spec?.let { "${it.lat},${it.lon}" to lookFrom - 15 * 60 }, here?.let { "${it.lat},${it.lon}" to Iso.now() - 5 * 60 })
+        val now = Iso.now()
+        for ((from, at) in tries) {
+            for (t in Transit.plan(from, dest.planId, at, count = 6)) {
+                val i = t.rides.indexOfFirst { it.tripId == f.tripId }
+                if (i < 0 || t.end < now) continue
+                val trip = if (i == 0) t else DoorTrip(t.rides.drop(i), t.rides[i].departure, t.end)
+                if (RideStore.state.value != null) return true
+                RideStore.set(this, newState(this, trip, destName, 0).copy(vehicleTripId = f.tripId, vehicleLine = f.line,
+                    vehicleSource = VehicleSource.BY_GPS, auto = true))
+                ResumeStore.set(this, null)
+                lookJob = null
+                intervalMs = 0
+                begin()
+                val leg = trip.first
+                Notifications.news(this, "autostart", "Trip started by itself",
+                    "${if (leg.isTrain) leg.line else "Bus ${leg.line}"} to ${leg.toStop}, on your way to ${if (destName == "Home") "home" else destName}. " +
+                        "It rings ${WakeRules.distanceText(RideStore.state.value?.wakeMetres ?: 2000.0)} before your stop.")
+                return true
+            }
+        }
+        return false
     }
 
     override fun onDestroy() {

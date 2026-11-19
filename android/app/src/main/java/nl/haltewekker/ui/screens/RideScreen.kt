@@ -15,7 +15,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -61,9 +61,11 @@ fun RideScreen(s: RideState, onBack: () -> Unit) {
     Column(Modifier.fillMaxSize().background(DS.t.page).safeDrawingPadding().verticalScroll(rememberScrollState()).padding(horizontal = 12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = DS.t.text) }
-            Text("To ${s.destination}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = DS.t.text)
+            // made smaller (iOS 0.26.1): the ride goes on in the bar over the home
+            IconButton(onClick = onBack) { Icon(Icons.Filled.KeyboardArrowDown, "Make smaller", tint = DS.t.text) }
+            Text("To ${s.destination}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = DS.t.text, modifier = Modifier.weight(1f))
         }
+        if (s.auto) Text("Started by itself when you left the stop.", color = DS.t.secondary, style = MaterialTheme.typography.bodySmall)
         when (s.phase) {
             Phase.ALARM -> {
                 Card {

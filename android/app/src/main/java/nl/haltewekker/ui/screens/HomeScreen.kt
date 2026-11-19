@@ -36,6 +36,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
@@ -63,10 +64,20 @@ import nl.haltewekker.ui.Note
 import nl.haltewekker.ui.QuietButton
 import nl.haltewekker.ui.TripRow
 import nl.haltewekker.ui.theme.DS
+import nl.haltewekker.auto.AutoStart
+import nl.haltewekker.auto.ResumeOffer
+import nl.haltewekker.auto.ResumeStore
+import nl.haltewekker.auto.TripResume
+import nl.haltewekker.profile.TestSetup
+import nl.haltewekker.ride.RideBar
+import nl.haltewekker.ride.Phase
+import androidx.lifecycle.compose.LifecycleResumeEffect
+import androidx.compose.foundation.shape.RoundedCornerShape
 
 /** The home: the live map, the next trip to school or home, Fastest trip, and the departures around you. */
 @Composable
-fun HomeScreen(ride: RideState?, onPlan: (Direction?) -> Unit, onRide: () -> Unit, onStart: (DoorTrip, String) -> Unit, onSettings: () -> Unit) {
+fun HomeScreen(ride: RideState?, onPlan: (Direction?) -> Unit, onRide: () -> Unit, onStart: (DoorTrip, String) -> Unit, onSettings: () -> Unit,
+               onDay: () -> Unit, onResume: (ResumeOffer) -> Unit) {
     val context = LocalContext.current
     val app = context.applicationContext as App
     val model: HomeModel = viewModel()
@@ -81,12 +92,20 @@ fun HomeScreen(ride: RideState?, onPlan: (Direction?) -> Unit, onRide: () -> Uni
     val dir by model.direction.collectAsState()
     val scope = rememberCoroutineScope()
     var now by remember { mutableDoubleStateOf(Iso.now()) }
+    val resume by ResumeStore.offer.collectAsState()
+    val testLive by TestSetup.live.collectAsState()
+    LaunchedEffect(Unit) { ResumeStore.load(context) }
+    LifecycleResumeEffect(Unit) {
+        // auto-home reached school: the next trip goes home
+        if (AutoStart.takeDirection(context) != null) { model.pick(Direction.HOME); scope.launch { model.refreshNext(true) } }
+        onPauseOrDispose {}
+    }
 
     // Everything below runs only while the home is in front.
     LaunchedEffect(Unit) {
         if (model.here.value == null) model.here.value = Locator.last(context)
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-            launch { Locator.updates(context, 5000, 25f).collect { model.here.value = GeoPoint(it.latitude, it.longitude) } }
+            launch { Locator.updates(context, 5000, 25f).collect { model.here.value = GeoPoint(it.latitude, it.longitude); model.noteFix(it) } }
             launch { while (true) { now = Iso.now(); model.refreshBoard(); model.refreshNext(); delay(20_000) } }
             launch {
                 var k = 0
@@ -105,18 +124,35 @@ fun HomeScreen(ride: RideState?, onPlan: (Direction?) -> Unit, onRide: () -> Uni
                 .clip(CircleShape).background(DS.t.surface)) {
                 Icon(Icons.Filled.Settings, "Settings", tint = DS.t.text)
             }
+            // the ride made smaller (iOS 0.26.1): the bar over the map while a trip runs
+            if (ride != null) RideBarView(ride, settings.ringAtStop, now, Modifier.statusBarsPadding().padding(start = 8.dp, end = 60.dp, top = 8.dp)
+                .align(Alignment.TopStart), onRide)
         }
         Column(Modifier.fillMaxWidth().weight(0.58f).verticalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            if (ride != null) Card(Modifier.clickable(onClick = onRide)) {
-                val leg = ride.leg
-                Header("Ride in progress", ride.legArrival?.let { "there ${Fmt.time(it)}" })
-                if (leg != null) Row(verticalAlignment = Alignment.CenterVertically) {
-                    LinePill(leg.line, leg.kind); Spacer(Modifier.width(8.dp))
-                    Text("to ${leg.toStop}", color = DS.t.text, modifier = Modifier.weight(1f))
-                    ride.distance?.let { Text(Fmt.metres(it), color = DS.t.secondary) }
+            if (testLive) Card {
+                Text("Test setup", fontWeight = FontWeight.Bold, color = DS.t.text)
+                Text("You're trying the setup as a new user.", color = DS.t.secondary)
+                QuietButton("Back to my own") { TestSetup.backToOwn(context) }
+            }
+            // "Continue your trip" after ending one by hand before its last leg (iOS 0.26.2)
+            val r = resume
+            if (r != null && ride == null) {
+                val leg = r.trip.rides.getOrNull(r.leg)
+                val from = leg?.from
+                val offered = leg != null && TripResume.offer(r.endedAt, now, idle = true, moving = model.moving(now),
+                    metresToItsStop = from?.let { f -> here?.let { nl.haltewekker.core.Geo.metres(it, f) } })
+                if (offered && leg != null) Card {
+                    Header("Continue your trip?", "to ${r.destination}")
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        LinePill(leg.line, leg.kind); Spacer(Modifier.width(8.dp))
+                        Text("${Fmt.time(leg.departure)} from ${leg.fromStop}", color = DS.t.text, modifier = Modifier.weight(1f))
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        QuietButton("Continue") { onResume(r) }
+                        QuietButton("No") { ResumeStore.set(context, null) }
+                    }
                 }
-                QuietButton("Open the ride", onClick = onRide)
             }
             Card {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -142,6 +178,7 @@ fun HomeScreen(ride: RideState?, onPlan: (Direction?) -> Unit, onRide: () -> Uni
                     }
                 }
             }
+            SchoolHomeCard(onDay = onDay, onSettings = onSettings)
             BigButton("Fastest trip") { onPlan(null) }
             if (!Locator.granted(context)) Note("Allow location (Settings) for the map around you, the stops near you and trips from where you are.")
             Card {
@@ -164,6 +201,25 @@ fun HomeScreen(ride: RideState?, onPlan: (Direction?) -> Unit, onRide: () -> Uni
             Text("Trips and times: Transitous (MOTIS). Live positions: OVapi and NS. Map: OpenFreeMap, © OpenStreetMap contributors.",
                 color = DS.t.secondary, style = MaterialTheme.typography.bodySmall)
             Spacer(Modifier.height(24.dp))
+        }
+    }
+}
+
+/** The ride made smaller: what you're on, the countdown, how the wake-up stands; tap to open it full. */
+@Composable
+fun RideBarView(r: RideState, ringAtStop: Boolean, now: Double, modifier: Modifier = Modifier, onOpen: () -> Unit) {
+    val leg = r.leg
+    val vehicle = r.vehicleLine?.let { if (leg?.isTrain == true) it else "Bus $it" }
+    val wake = RideBar.wake(r.phase, r.vehicleSource != nl.haltewekker.ride.VehicleSource.NONE)
+    Row(modifier.fillMaxWidth().shadow(4.dp, RoundedCornerShape(20.dp)).clip(RoundedCornerShape(20.dp))
+        .background(if (r.phase == Phase.ALARM) DS.t.warning else DS.t.surface).clickable(onClick = onOpen).padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        if (leg != null) LinePill(r.vehicleLine ?: leg.line, leg.kind)
+        Column(Modifier.weight(1f)) {
+            Text(RideBar.title(vehicle, leg?.toStop ?: r.destination), color = DS.t.text, fontWeight = FontWeight.Bold, maxLines = 1)
+            val d = RideBar.detail(RideBar.countdown(r.legArrival, r.distance, now), r.index, r.trip.rides.size)
+            Text(listOf(d, RideBar.wakeText(wake, ringAtStop)).filter { it.isNotEmpty() }.joinToString(" · "), color = DS.t.secondary,
+                style = MaterialTheme.typography.bodySmall, maxLines = 1)
         }
     }
 }

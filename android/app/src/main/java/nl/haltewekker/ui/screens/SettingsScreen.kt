@@ -32,13 +32,17 @@ import androidx.compose.ui.unit.dp
 import nl.haltewekker.App
 import nl.haltewekker.BuildConfig
 import nl.haltewekker.profile.Settings
+import nl.haltewekker.profile.TestSetup
+import nl.haltewekker.ui.Note
 import nl.haltewekker.ui.Card
 import nl.haltewekker.ui.QuietButton
 import nl.haltewekker.ui.theme.DS
 import kotlin.math.roundToInt
 
 @Composable
-fun SettingsScreen(onBack: () -> Unit, onSetup: () -> Unit) {
+fun SettingsScreen(onBack: () -> Unit, onSetup: () -> Unit, onTestSetup: () -> Unit, onDay: () -> Unit, onCalendars: () -> Unit, onWeek: () -> Unit) {
+    val testLive by TestSetup.live.collectAsState()
+    val ride by nl.haltewekker.ride.RideStore.state.collectAsState()
     val app = LocalContext.current.applicationContext as App
     val s by app.store.settings.collectAsState()
     val p by app.store.profile.collectAsState()
@@ -51,6 +55,7 @@ fun SettingsScreen(onBack: () -> Unit, onSetup: () -> Unit) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = DS.t.text) }
             Text("Settings", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = DS.t.text)
         }
+        SchoolSettingsCard(onDay, onCalendars, onWeek)
         Card {
             Text("Wake-up distance", fontWeight = FontWeight.Bold, color = DS.t.text)
             Text("Bus: %.1f km before your stop".format(s.busKm), color = DS.t.text)
@@ -70,12 +75,20 @@ fun SettingsScreen(onBack: () -> Unit, onSetup: () -> Unit) {
             Toggle("Real bus and train positions", "From OVapi and NS, while the map is open or a ride looks for your vehicle. Off: by their timetables (less data).", s.realPositions) { v -> set { it.copy(realPositions = v) } }
             Toggle("Rough GPS on long rides", "Far from your stop on a known bus or train: a fix every 25 s instead of every 2 s.", s.roughGPSOnLongRides) { v -> set { it.copy(roughGPSOnLongRides = v) } }
         }
+        AutoStartCard()
         PermissionsCard(showExtras = true)
         Card {
             Text("Your places", fontWeight = FontWeight.Bold, color = DS.t.text)
             Text("School: ${p.school?.name ?: "not set"}", color = DS.t.text)
             Text("Home: ${if (p.home != null) "set (${p.homeStops.size} stops)" else "not set"}", color = DS.t.text)
             QuietButton("Set up again", onClick = onSetup)
+            if (testLive) {
+                Note("You're using a test setup.", tint = DS.t.accent)
+                QuietButton("Back to my own setup") { TestSetup.backToOwn(app) }
+            } else if (ride == null) {
+                QuietButton("Test the setup as a new user", onClick = onTestSetup)
+                Text("Try the first-run setup as someone new. Your own setup is kept and comes back with one tap.", color = DS.t.secondary, style = MaterialTheme.typography.bodySmall)
+            }
         }
         Text("Haltewekker for Android ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})", color = DS.t.secondary, style = MaterialTheme.typography.bodySmall)
         Spacer(Modifier.height(24.dp))

@@ -22,9 +22,14 @@ object Notifications {
     const val RIDE = "ride"
     const val ALARM = "alarm"
     const val ARRIVAL = "arrival"
+    const val SCHOOL = "school"
+    const val WAKE = "wake"
+    const val NEWS = "news"
     const val RIDE_ID = 1
     const val ALARM_ID = 2
     const val ARRIVAL_ID = 3
+    const val WAKE_ID = 4
+    const val NEWS_ID = 5
 
     fun channels(context: Context) {
         val nm = context.getSystemService(NotificationManager::class.java)
@@ -42,13 +47,27 @@ object Notifications {
             description = "You're at your stop: get off here."
             setSound(null, null)
         })
+        nm.createNotificationChannel(NotificationChannel(WAKE, "School alarm", NotificationManager.IMPORTANCE_HIGH).apply {
+            description = "Wakes you before you have to leave for your first class."
+            setSound(null, null)            // the app plays the alarm itself
+            enableVibration(false)
+            lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+            setBypassDnd(true)
+        })
+        nm.createNotificationChannel(NotificationChannel(SCHOOL, "School alarm news", NotificationManager.IMPORTANCE_DEFAULT).apply {
+            description = "When the school alarm is set or moves with the buses."
+        })
+        nm.createNotificationChannel(NotificationChannel(NEWS, "Trips by themselves", NotificationManager.IMPORTANCE_HIGH).apply {
+            description = "A trip started by itself when you left a home stop or school; looking for your bus or train."
+        })
     }
 
     private val hm = SimpleDateFormat("HH:mm", Locale.ROOT)
     fun time(t: Double): String = hm.format(Date((t * 1000).toLong()))
 
-    private fun openApp(context: Context): PendingIntent = PendingIntent.getActivity(context, 0,
-        Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+    fun openApp(context: Context, screen: String? = null): PendingIntent = PendingIntent.getActivity(context, if (screen == null) 0 else 30 + screen.length,
+        Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            .apply { screen?.let { putExtra(MainActivity.EXTRA_SCREEN, it) } },
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
 
     fun action(context: Context, action: String, code: Int): PendingIntent = PendingIntent.getService(context, code,
@@ -87,6 +106,16 @@ object Notifications {
         return b.build()
     }
 
+    /** Auto-start's look, after you left a home stop or School: GPS on for a few minutes. */
+    fun looking(context: Context): Notification = NotificationCompat.Builder(context, RIDE)
+        .setSmallIcon(R.drawable.ic_stat_ride)
+        .setOngoing(true)
+        .setContentTitle("Looking for your bus or train")
+        .setContentText("You left a stop: if you're on a bus or train, the trip starts by itself.")
+        .setContentIntent(openApp(context))
+        .addAction(0, "Stop looking", action(context, RideService.ACTION_END, 13))
+        .build()
+
     fun alarm(context: Context, s: RideState): Notification {
         val leg = s.leg
         val full = PendingIntent.getActivity(context, 1, Intent(context, AlarmActivity::class.java)
@@ -106,6 +135,31 @@ object Notifications {
             .build()
     }
 
+    /** The school alarm's news: set, moved (old after 12 hours). */
+    fun school(context: Context, tag: String, title: String, text: String) {
+        val n = NotificationCompat.Builder(context, SCHOOL)
+            .setSmallIcon(R.drawable.ic_stat_ride)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setContentIntent(openApp(context, MainActivity.SCREEN_DAY))
+            .setAutoCancel(true)
+        post(context, NEWS_ID, n, tag)
+    }
+
+    /** A trip that started by itself, the look for your bus, "Continue your trip": high, short-lived. */
+    fun news(context: Context, tag: String, title: String, text: String, screen: String? = null) {
+        val n = NotificationCompat.Builder(context, NEWS)
+            .setSmallIcon(R.drawable.ic_stat_ride)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setContentIntent(openApp(context, screen))
+            .setAutoCancel(true)
+        post(context, NEWS_ID + 1, n, tag)
+    }
+
     fun arrived(context: Context, place: String, then: String?) {
         val n = NotificationCompat.Builder(context, ARRIVAL)
             .setSmallIcon(R.drawable.ic_stat_ride)
@@ -115,14 +169,27 @@ object Notifications {
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setContentIntent(openApp(context))
             .setAutoCancel(true)
-            .build()
-        post(context, ARRIVAL_ID, n)
+        post(context, ARRIVAL_ID, n, "arrived-$place")
     }
 
-    fun post(context: Context, id: Int, n: Notification) {
+    fun post(context: Context, id: Int, n: Notification, tag: String? = null) {
         val nm = context.getSystemService(NotificationManager::class.java)
         if (Build.VERSION.SDK_INT >= 33 && !nm.areNotificationsEnabled()) return
-        try { nm.notify(id, n) } catch (_: SecurityException) {}
+        try { nm.notify(tag, id, n) } catch (_: SecurityException) {}
+    }
+
+    /** Posted with its tag, and timed out by its kind (`NoticeExpiry`): old ones go by themselves. */
+    fun post(context: Context, id: Int, b: NotificationCompat.Builder, tag: String) {
+        NoticeExpiry.minutes(tag)?.let { b.setTimeoutAfter((it * 60_000).toLong()) }
+        post(context, id, b.build(), tag)
+    }
+
+    /** Takes off the notifications older than their kind's time (`NoticeExpiry`), whenever the app is awake. */
+    fun sweep(context: Context) {
+        val nm = context.getSystemService(NotificationManager::class.java)
+        val active = try { nm.activeNotifications.toList() } catch (_: Exception) { return }
+        val due = NoticeExpiry.due(active.map { it.tag to it.postTime / 1000.0 }, nl.haltewekker.core.Iso.now()).toSet()
+        for (a in active) if (a.tag != null && a.tag in due) nm.cancel(a.tag, a.id)
     }
 
     fun cancel(context: Context, id: Int) = context.getSystemService(NotificationManager::class.java).cancel(id)

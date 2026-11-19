@@ -34,6 +34,8 @@ data class RideState(
     val quiet: Boolean = false,
     val roughGPS: Boolean = false,
     val note: String? = null,
+    /** (A2) Started by itself, on leaving a home stop or School. */
+    val auto: Boolean = false,
 ) {
     val leg: Ride? get() = trip.rides.getOrNull(index)
     val wakeMetres: Double get() = (wakeKm.getOrNull(index) ?: WakeRules.BUS_KM) * 1000

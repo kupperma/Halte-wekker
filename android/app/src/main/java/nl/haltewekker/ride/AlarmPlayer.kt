@@ -53,7 +53,7 @@ object AlarmPlayer {
     private fun later(ms: Long, r: Runnable) { pending.add(r); main.postDelayed(r, ms) }
 
     /** The announcement (if any), then the alarm on repeat; or, `quiet`, a strong buzz, out loud after a minute. */
-    fun ring(context: Context, announcement: String?, quiet: Boolean) {
+    fun ring(context: Context, announcement: String?, quiet: Boolean, outLoud: Boolean = false) {
         stop(context)
         ringing = true
         val ctx = context.applicationContext
@@ -62,7 +62,7 @@ object AlarmPlayer {
             later((WakeRules.LOUD_AFTER * 1000).toLong()) { if (ringing) loop(ctx, loud = true) }
             return
         }
-        val private = AudioRoute.privateOutput(ctx)
+        val private = !outLoud && AudioRoute.privateOutput(ctx)
         requestFocus(ctx, loud = !private)
         if (announcement.isNullOrEmpty() || !ttsReady) { loop(ctx, loud = !private); return }
         val fallback = Runnable { if (ringing && player == null) loop(ctx, loud = !private) }

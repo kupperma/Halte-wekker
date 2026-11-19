@@ -32,7 +32,7 @@ class OnBoardLook {
 
     fun reset() { lastBest = null; run = GPSChoice(); fits = emptyMap() }
 
-    suspend fun look(fixes: List<Fix>, leg: Ride, now: Double, realPositions: Boolean): Found? {
+    suspend fun look(fixes: List<Fix>, leg: Ride?, now: Double, realPositions: Boolean): Found? {
         val newest = fixes.maxByOrNull { it.t } ?: return null
         if (!VehicleMatch.enoughFixes(fixes)) return null
         val c = newest.p
@@ -44,11 +44,11 @@ class OnBoardLook {
         })
         if (realPositions) {
             val buses = LiveFeeds.busFixes()
-            val trains = if (leg.isTrain) LiveFeeds.trainFixes() else emptyMap()
-            val legNum = RealPositions.trainNumber(leg.num)
+            val trains = if (leg?.isTrain == true) LiveFeeds.trainFixes() else emptyMap()
+            val legNum = leg?.let { RealPositions.trainNumber(it.num) }
             tracks = tracks.map { t ->
                 val f = RealPositions.usable(buses, t.tripId, now, RealPositions.MATCH_FRESH)
-                    ?: if (t.tripId == leg.tripId && legNum != null) trains[legNum]?.let { RealPositions.usable(it, t.tripId, now, RealPositions.MATCH_FRESH) } else null
+                    ?: if (t.tripId == leg?.tripId && legNum != null) trains[legNum]?.let { RealPositions.usable(it, t.tripId, now, RealPositions.MATCH_FRESH) } else null
                 if (f != null) t.copy(gps = VehicleGPS(f)) else t
             }
         }
@@ -59,7 +59,7 @@ class OnBoardLook {
         val (nr, byGps) = ChooseGPS.gpsLook(passed, judged, run, now)
         run = nr
         val speed = if (newest.speed.isFinite() && newest.speed >= 0) newest.speed else 0.0
-        val best = byGps ?: OnBoardRules.best(judged, speed, planned = leg.tripId)
+        val best = byGps ?: OnBoardRules.best(judged, speed, planned = leg?.tripId)
         val sure = best != null && (best == lastBest || byGps != null)
         lastBest = best
         if (!sure || best == null) return null

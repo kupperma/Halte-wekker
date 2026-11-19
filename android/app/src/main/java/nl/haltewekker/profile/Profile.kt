@@ -8,6 +8,8 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import nl.haltewekker.core.GeoPoint
 import nl.haltewekker.data.NearStop
+import nl.haltewekker.school.ManualWeek
+import nl.haltewekker.school.ScheduleSource
 
 /** One of your places: Home or School (iOS `SavedPlace`), with the stops it is planned from. */
 @Serializable
@@ -27,6 +29,10 @@ data class Profile(
     val school: SavedPlace? = null,
     val home: SavedPlace? = null,
     val homeStops: List<NearStop> = emptyList(),
+    /** (A2) Where the first classes come from: a calendar on the phone, your week, or not set up yet. */
+    val schedule: ScheduleSource = ScheduleSource.NONE,
+    /** (A2) "Same times every week". */
+    val week: ManualWeek? = null,
 )
 
 /** Settings that mirror the iOS Settings › Alarm and Map switches (same defaults). */
@@ -40,11 +46,15 @@ data class Settings(
     val backupAlarm: Boolean = true,
     val realPositions: Boolean = true,
     val roughGPSOnLongRides: Boolean = true,
+    /** (A2) Leaving a home stop or School on a bus or train starts the trip by itself (needs location all the time). */
+    val autoStart: Boolean = true,
+    /** (A2) Reaching School switches the next trip to home, once a day. */
+    val autoHome: Boolean = true,
 )
 
 /** The profile and settings, in SharedPreferences, as state the screens follow. */
 class Store(context: Context) {
-    private val prefs = context.getSharedPreferences("haltewekker", Context.MODE_PRIVATE)
+    val prefs: android.content.SharedPreferences = context.getSharedPreferences("haltewekker", Context.MODE_PRIVATE)
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
     private val _profile = MutableStateFlow(read(KEY_PROFILE) ?: Profile())
@@ -59,8 +69,17 @@ class Store(context: Context) {
     fun setSettings(s: Settings) { _settings.value = s; prefs.edit().putString(KEY_SETTINGS, json.encodeToString(s)).apply() }
     fun updateSettings(f: (Settings) -> Settings) = setSettings(f(_settings.value))
 
+    fun updateProfile(f: (Profile) -> Profile) = setProfile(f(_profile.value))
+
     fun getString(key: String): String? = prefs.getString(key, null)
-    fun putString(key: String, v: String?) { prefs.edit().apply { if (v == null) remove(key) else putString(key, v) }.apply() }
+    /** Written at once (commit): the setup backup and its restore must be on disk before anything goes on. */
+    fun putString(key: String, v: String?) { prefs.edit().apply { if (v == null) remove(key) else putString(key, v) }.commit() }
+
+    /** Read the profile and settings again (after the setup backup was put back). */
+    fun reload() {
+        _profile.value = read(KEY_PROFILE) ?: Profile()
+        _settings.value = read(KEY_SETTINGS) ?: Settings()
+    }
 
     companion object {
         const val KEY_PROFILE = "profile.v1"

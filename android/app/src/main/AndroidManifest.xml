@@ -15,6 +15,19 @@
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- A2: the school alarm reads the timetable calendars you pick, rings as an alarm clock, and is set again after a restart -->
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+
+    <!-- a roster link is handed to the app that subscribes to calendars (webcal) -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="webcal" />
+        </intent>
+    </queries>
 
     <uses-feature android:name="android.hardware.location.gps" android:required="false" />
 
@@ -58,5 +71,39 @@
         <receiver
             android:name=".ride.AlarmReceiver"
             android:exported="false" />
+
+        <activity
+            android:name=".school.WakeActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleInstance"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:taskAffinity="nl.haltewekker.wake"
+            android:theme="@style/Theme.Haltewekker" />
+
+        <service
+            android:name=".school.WakeService"
+            android:exported="false"
+            android:foregroundServiceType="systemExempted|mediaPlayback" />
+
+        <receiver
+            android:name=".school.WakeReceiver"
+            android:exported="false" />
+
+        <receiver
+            android:name=".auto.RegionReceiver"
+            android:exported="false" />
+
+        <receiver
+            android:name=".work.BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

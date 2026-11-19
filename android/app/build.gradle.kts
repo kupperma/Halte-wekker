@@ -32,8 +32,8 @@ android {
         applicationId = "nl.haltewekker.android"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
         // phones: ARM only (the map's native library is 11 MB per ABI; x86 is emulators and a few Chromebooks)
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
@@ -102,6 +102,7 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.okhttp)
     implementation(libs.maplibre)
+    implementation(libs.androidx.work)
 
     testImplementation(libs.junit)
 }

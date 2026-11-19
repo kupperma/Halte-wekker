@@ -80,7 +80,7 @@ fun PermissionsCard(showExtras: Boolean = true) {
         if (showExtras) {
             if (Build.VERSION.SDK_INT >= 29) PermRow(
                 "Location all the time (optional)",
-                "Not needed for rides you start in the app. Later versions use it to start a ride by themselves. Choose \"Allow all the time\" in the next screen.",
+                "Not needed for rides you start in the app. With it, leaving a home stop or school on a bus starts the trip by itself. Choose \"Allow all the time\" in the next screen.",
                 Perms.background(c),
             ) {
                 if (Perms.location(c)) askOne.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)

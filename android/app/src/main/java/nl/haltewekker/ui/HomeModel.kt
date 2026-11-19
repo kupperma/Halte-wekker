@@ -58,6 +58,15 @@ class HomeModel(app: Application) : AndroidViewModel(app) {
     private var segmentsAt = 0.0
     private var segmentsBox: Pair<GeoPoint, GeoPoint>? = null
 
+    /** Your recent fixes on the home (for "Continue your trip": moving like a bus or train). */
+    private val fixes = ArrayDeque<nl.haltewekker.match.Fix>()
+    fun noteFix(l: android.location.Location) {
+        fixes.addLast(nl.haltewekker.match.Fix(l.time / 1000.0, GeoPoint(l.latitude, l.longitude), if (l.hasAccuracy()) l.accuracy.toDouble() else -1.0,
+            if (l.hasSpeed()) l.speed.toDouble() else -1.0, if (l.hasBearing()) l.bearing.toDouble() else -1.0))
+        while (fixes.size > 30) fixes.removeFirst()
+    }
+    fun moving(now: Double): Boolean = nl.haltewekker.match.OnBoardRules.movingByTrack(fixes.toList(), now)
+
     private fun autoDirection(): Direction = if (Calendar.getInstance().get(Calendar.HOUR_OF_DAY) < 12) Direction.TO_SCHOOL else Direction.HOME
 
     fun pick(d: Direction) { direction.value = d; pickedAt = Iso.now(); nextTime = 0.0 }
