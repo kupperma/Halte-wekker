@@ -349,6 +349,14 @@ struct NewHome: View {
         .onChange(of: live.updated) { _, u in if u != nil { warmedUp = true } }
         .onChange(of: plan.focused) { _, _ in if planOpen { fitRoute() } }
         .onChange(of: goStore.isOpen) { _, open in if open { planOpen = false; dayOpen = false; weekOpen = false } }
+        // (0.27) "Take this trip" from a friend: Plan, filled in
+        .onChange(of: friends.planRequest) { _, r in
+            guard let r else { return }
+            friends.planRequest = nil
+            var when: PlanCompare.When = .now
+            if let by = r.arriveBy, by > Date().addingTimeInterval(10 * 60) { when = .arrive(by) }
+            openPlan(to: .place(r.to, name: r.name), when: when)
+        }
         .onChange(of: homeStyleRaw) { _, _ in weekOpen = false; dayOpen = false }
         .sheet(item: $tapped) { DepartureDetailSheet(tap: $0).presentationDetents([.medium, .large]) }
         .sheet(item: $stopTap) { s in
@@ -560,16 +568,16 @@ struct NewHome: View {
     /// Friends (0.25): the list, requests and adding someone; a badge with the requests waiting.
     private var friendsButton: some View {
         Button { friends.showing = true } label: {
-            Image(systemName: friends.waiting > 0 ? "person.2.fill" : "person.2")
+            Image(systemName: friends.badge > 0 ? "person.2.fill" : "person.2")
                 .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(friends.waiting > 0 ? DS.accentText : DS.secondary)
+                .foregroundStyle(friends.badge > 0 ? DS.accentText : DS.secondary)
                 .frame(width: DS.hit, height: DS.hit)
                 .background(DS.surface, in: Circle())
-                .overlay(alignment: .topTrailing) { if friends.waiting > 0 { FriendsBadge(count: friends.waiting).offset(x: 4, y: -4) } }
+                .overlay(alignment: .topTrailing) { if friends.badge > 0 { FriendsBadge(count: friends.badge).offset(x: 4, y: -4) } }
                 .dsFloat()
         }
         .buttonStyle(DSPressStyle())
-        .accessibilityLabel(friends.waiting > 0 ? "Friends, \(friends.waiting) waiting" : "Friends")
+        .accessibilityLabel(friends.badge > 0 ? "Friends, \(friends.badge) new" : "Friends")
     }
 
     /// `inline`: inside the search field (Next trip first), without its own shadow.
@@ -892,7 +900,7 @@ struct NewHome: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             // (not while a trip runs: at a change the bar to your trip takes its place)
             if trip.phase == .idle {
-                NextTripBar(weekOpen: weekOpen, friendsWaiting: friends.waiting, friends: { friends.showing = true },
+                NextTripBar(weekOpen: weekOpen, friendsWaiting: friends.badge, friends: { friends.showing = true },
                             week: { withAnimation(DS.quick) { weekOpen.toggle() } },
                             settings: { weekOpen = false; sheet = .settings })
             }

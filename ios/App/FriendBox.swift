@@ -13,7 +13,8 @@ import CryptoKit
 // The payload: {"v":1, "k": kind, "f": sender account, "t": unix seconds, "n": random id, "g": group id (optional,
 // for the group chats to come: the same message is locked once per member and posted to all their mailboxes in one
 // /f/v1/send), "b": the kind's body}.
-// 0.26 adds travel (sent through the state routes, not the mailbox). New kinds (0.27 message and trip, 0.28 timetable and area) only add a case and a body: an app that
+// 0.26 adds travel (sent through the state routes, not the mailbox); 0.27 message, trip, seen and the group kinds (group,
+// gpicture, gleave; a group's boxes carry `g` and are locked once per member). New kinds (0.28 timetable and area) only add a case and a body: an app that
 // doesn't know a kind leaves that box on the relay (unacknowledged, until it expires), so a newer app can still read it.
 
 /// What a box says. 0.25 knows these; anything else comes back as `.unknown`.
@@ -31,6 +32,18 @@ enum FriendMessage: Equatable {
     /// (0.26) Your trip right now, to a friend you show your trips to: through the relay's state routes (the newest
     /// replaces the last; taken back when the trip ends), never the mailbox.
     case travel(TravelState)
+    /// (0.27) A line in a chat (one-to-one, or in a group with the header's `g`), or an answer to a trip card.
+    case message(ChatText)
+    /// (0.27) A trip to take together.
+    case trip(TripCard)
+    /// (0.27) How far you got and read the recipient's lines in that chat (slot `seen`; a group: `se.<id>`).
+    case seen(ChatSeen)
+    /// (0.27) A group's list (from the one who runs it; slot `gr.<id>`).
+    case group(GroupRoster)
+    /// (0.27) A group's picture (from the one who runs it; slot `gp.<id>`); an empty one takes it away.
+    case groupPicture(FriendPicture)
+    /// (0.27) The sender left the group.
+    case groupLeave
     /// A kind this version doesn't know (from a newer app).
     case unknown(String)
 
@@ -42,15 +55,31 @@ enum FriendMessage: Equatable {
         case .profile: return "profile"
         case .picture: return "picture"
         case .travel: return "travel"
+        case .message: return "message"
+        case .trip: return "trip"
+        case .seen: return "seen"
+        case .group: return "group"
+        case .groupPicture: return "gpicture"
+        case .groupLeave: return "gleave"
         case .unknown(let k): return k
         }
     }
 
     /// The kinds this version reads (and acknowledges, so the relay drops them).
-    static let known: Set<String> = ["request", "accept", "unfriend", "profile", "picture", "travel"]
+    static let known: Set<String> = ["request", "accept", "unfriend", "profile", "picture", "travel",
+                                     "message", "trip", "seen", "group", "gpicture", "gleave"]
     /// Raised whenever a release learns new kinds: boxes left on the relay are read again from the start once.
-    /// (2: 0.26, travel.)
-    static let kindsVersion = 2
+    /// (2: 0.26, travel. 3: 0.27, messages, trips and groups.)
+    static let kindsVersion = 3
+
+    /// The kinds that belong to a chat (read after the rest of a batch, so a group's list that came in the same batch
+    /// is known first).
+    var isChat: Bool {
+        switch self {
+        case .message, .trip, .seen: return true
+        default: return false
+        }
+    }
 }
 
 struct FriendIntro: Codable, Equatable {
@@ -110,20 +139,32 @@ enum FriendBox {
 
     // MARK: payload
 
-    static func payload(_ m: FriendMessage, from: String, at: Date, id: String) throws -> Data {
+    /// `group`: the header's `g` (a group's line, list, picture or leave).
+    static func payload(_ m: FriendMessage, from: String, at: Date, id: String, group: String? = nil) throws -> Data {
         let e = FriendJSON.encoder
         let t = Int(at.timeIntervalSince1970)
+        let k = m.kind
+        let v = payloadVersion
+        let g = group
         switch m {
         case .request(let b), .accept(let b):
-            return try e.encode(BoxEnvelope(v: payloadVersion, k: m.kind, f: from, t: t, n: id, b: b))
+            return try e.encode(BoxEnvelope(v: v, k: k, f: from, t: t, n: id, g: g, b: b))
         case .profile(let b):
-            return try e.encode(BoxEnvelope(v: payloadVersion, k: m.kind, f: from, t: t, n: id, b: b))
-        case .picture(let b):
-            return try e.encode(BoxEnvelope(v: payloadVersion, k: m.kind, f: from, t: t, n: id, b: b))
+            return try e.encode(BoxEnvelope(v: v, k: k, f: from, t: t, n: id, g: g, b: b))
+        case .picture(let b), .groupPicture(let b):
+            return try e.encode(BoxEnvelope(v: v, k: k, f: from, t: t, n: id, g: g, b: b))
         case .travel(let b):
-            return try e.encode(BoxEnvelope(v: payloadVersion, k: m.kind, f: from, t: t, n: id, b: b))
-        case .unfriend, .unknown:
-            return try e.encode(BoxEnvelope(v: payloadVersion, k: m.kind, f: from, t: t, n: id, b: NoBody()))
+            return try e.encode(BoxEnvelope(v: v, k: k, f: from, t: t, n: id, g: g, b: b))
+        case .message(let b):
+            return try e.encode(BoxEnvelope(v: v, k: k, f: from, t: t, n: id, g: g, b: b))
+        case .trip(let b):
+            return try e.encode(BoxEnvelope(v: v, k: k, f: from, t: t, n: id, g: g, b: b))
+        case .seen(let b):
+            return try e.encode(BoxEnvelope(v: v, k: k, f: from, t: t, n: id, g: g, b: b))
+        case .group(let b):
+            return try e.encode(BoxEnvelope(v: v, k: k, f: from, t: t, n: id, g: g, b: b))
+        case .unfriend, .groupLeave, .unknown:
+            return try e.encode(BoxEnvelope(v: v, k: k, f: from, t: t, n: id, g: g, b: NoBody()))
         }
     }
 
@@ -139,6 +180,12 @@ enum FriendBox {
             case "profile": return (h, .profile(try d.decode(BoxEnvelope<FriendProfile>.self, from: data).b))
             case "picture": return (h, .picture(try d.decode(BoxEnvelope<FriendPicture>.self, from: data).b))
             case "travel": return (h, .travel(try d.decode(BoxEnvelope<TravelState>.self, from: data).b))
+            case "message": return (h, .message(try d.decode(BoxEnvelope<ChatText>.self, from: data).b))
+            case "trip": return (h, .trip(try d.decode(BoxEnvelope<TripCard>.self, from: data).b))
+            case "seen": return (h, .seen(try d.decode(BoxEnvelope<ChatSeen>.self, from: data).b))
+            case "group": return (h, .group(try d.decode(BoxEnvelope<GroupRoster>.self, from: data).b))
+            case "gpicture": return (h, .groupPicture(try d.decode(BoxEnvelope<FriendPicture>.self, from: data).b))
+            case "gleave": return (h, .groupLeave)
             default: return (h, .unknown(h.k))
             }
         } catch { throw FriendBoxError.badFormat }
@@ -152,8 +199,8 @@ enum FriendBox {
 
     /// Locks `m` for the friend with `card`.
     static func seal(_ m: FriendMessage, from me: FriendIdentity, to card: FriendCard, at: Date = Date(),
-                     id: String = RelaySign.nonce()) throws -> Data {
-        try seal(payload: payload(m, from: me.account, at: at, id: id), from: me, to: card)
+                     id: String = RelaySign.nonce(), group: String? = nil) throws -> Data {
+        try seal(payload: payload(m, from: me.account, at: at, id: id, group: group), from: me, to: card)
     }
 
     /// Locks a payload already written (the test vectors pass the ephemeral key and the nonce).

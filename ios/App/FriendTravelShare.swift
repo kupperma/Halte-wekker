@@ -106,7 +106,8 @@ final class FriendTravelShare: ObservableObject {
         let store = FriendStore.shared
         guard store.hasFriends, !sending, TravelAge.due(last: lastFetch, now: Date()) else { return }
         lastFetch = Date()
-        Task { await store.fetchTravel() }
+        // (0.27) the whole check (the mailbox too, so messages come in on a trip), at most once a minute
+        Task { await store.sync(.tick) }
     }
 
     /// The switches changed (the one-time screen, the pause, a friend's switch).

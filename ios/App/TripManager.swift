@@ -999,6 +999,10 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     /// "Stop alarm" on the notification (or tapping it while it rings).
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler done: @escaping () -> Void) {
         let id = response.notification.request.identifier, action = response.actionIdentifier
+        // (0.27) a friend's message: Friends opens at that chat
+        if id.hasPrefix("friends-chat-"), action == UNNotificationDefaultActionIdentifier {
+            FriendChats.tapped(response.notification.request.content.userInfo)
+        }
         Task { @MainActor in
             if action == "STOP" || (id == "alarm" && (action == UNNotificationDefaultActionIdentifier || action == UNNotificationDismissActionIdentifier)) { self.stopAlarm() }
             if id.hasPrefix("wake-") { WakeAlarm.cancelRepeats(of: id) }

@@ -205,7 +205,7 @@ struct NextTripBar: View {
     var body: some View {
         HStack(spacing: 0) {
             item("Friends", icon: friendsWaiting > 0 ? "person.2.fill" : "person.2",
-                 label: friendsWaiting > 0 ? "Friends, \(friendsWaiting) waiting" : "Friends", badge: friendsWaiting, action: friends)
+                 label: friendsWaiting > 0 ? "Friends, \(friendsWaiting) new" : "Friends", badge: friendsWaiting, action: friends)
             item("Week", icon: "calendar", label: "Your week", selected: weekOpen, action: week)
             item("Settings", icon: "gearshape", label: "Settings", action: settings)
         }

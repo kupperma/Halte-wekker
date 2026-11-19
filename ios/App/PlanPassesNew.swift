@@ -142,6 +142,8 @@ struct ArrivePassNew: View {
                     VStack(spacing: DS.s8) {
                         DSPrimaryButton(title: "Go hands-free", icon: "bolt.fill", action: go)
                         DSQuietButton(title: "Wake me on this trip now", icon: "bell.and.waves.left.and.right", full: true) { wake(t) }
+                        // (0.27) to a friend or a group: "Thursday: be at BUas by 09:00, this way"
+                        SendTripButton(make: { TripCards.card(t, to: a.out ? Place.school : Place.home, by: a.leaving ? nil : a.when) })
                     }
                     Text("Hands-free shows the walk and the bus, tells you if it changes, and starts the ride by itself once you’re on. It also opens by itself when you open the app around the time to leave.")
                         .font(DS.footnote).foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
@@ -206,6 +208,10 @@ struct PlannedPassNew: View {
                 .dsCard()
                 if let op = planner.chosen, let r = op.route {
                     DSPrimaryButton(title: "Wake me on this trip", icon: "bell.and.waves.left.and.right") { wake(r) }
+                }
+                if let op = planner.chosen {
+                    // (0.27) the train (and its buses) to a friend or a group
+                    SendTripButton(make: { TripCards.card(op.door, to: t.out ? Place.school : Place.home) })
                 }
                 if let u = planner.updated {
                     let watched = planner.chosen.map { watch.isWatched($0.train.first, from: $0.from) } ?? false

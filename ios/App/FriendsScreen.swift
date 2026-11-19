@@ -5,19 +5,21 @@ import SwiftUI
 
 struct FriendsScreen: View {
     @ObservedObject private var store = FriendStore.shared
+    @ObservedObject private var chats = FriendChats.shared
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scene
     @State private var sheet: Sheet?
     @State private var confirmDelete = false
     @State private var pasteWrong = false
+    @State private var path: [FriendsRoute] = []
 
     enum Sheet: String, Identifiable {
-        case myCode, scan, create, restore, backup, profile, travel
+        case myCode, scan, create, restore, backup, profile, travel, newGroup
         var id: String { rawValue }
     }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             ScrollView {
                 VStack(alignment: .leading, spacing: DS.s12) {
                     if store.movedAway { movedNote }
@@ -30,7 +32,10 @@ struct FriendsScreen: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbar }
             .refreshable { await store.sync(.now) }
+            .navigationDestination(for: FriendsRoute.self) { r in destination(r) }
         }
+        // (0.27) a chat to open (a notification tapped, a friend's "Message")
+        .onChange(of: chats.toOpen, initial: true) { _, k in openChat(k) }
         .tint(DS.accentText)
         .dynamicTypeSize(...DynamicTypeSize.accessibility2)
         .followsSystemScheme()
@@ -81,6 +86,28 @@ struct FriendsScreen: View {
         case .backup: FriendBackupSheet()
         case .profile: FriendProfileSheet()
         case .travel: TravelConsentSheet()
+        case .newGroup: NewGroupSheet(made: { id in openLaterChat(ChatKey.group(id)) })
+        }
+    }
+
+    @ViewBuilder private func destination(_ r: FriendsRoute) -> some View {
+        switch r {
+        case .friend(let id): FriendDetailView(id: id)
+        case .chat(let key): FriendChatView(key: key)
+        case .group(let id): GroupInfoView(id: id)
+        }
+    }
+
+    private func openChat(_ k: String?) {
+        guard let k else { return }
+        chats.toOpen = nil
+        path = [.chat(k)]
+    }
+
+    private func openLaterChat(_ k: String) {
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            path = [.chat(k)]
         }
     }
 
@@ -114,6 +141,7 @@ struct FriendsScreen: View {
             if !moving.isEmpty { FriendsTravellingCard(list: moving) }
             meCard(b)
             if !b.incoming.isEmpty { requestsCard(b.incoming) }
+            if !b.friends.isEmpty { FriendChatsCard(newGroup: { sheet = .newGroup }) }
             if !b.friends.isEmpty { MyTripsCard(explain: { sheet = .travel }) }
             friendsCard(b.sortedFriends)
             if !b.outgoing.isEmpty { waitingCard(b.outgoing) }
@@ -150,7 +178,7 @@ struct FriendsScreen: View {
                     .font(DS.sub).foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
             }
             ForEach(list) { f in
-                NavigationLink { FriendDetailView(id: f.id) } label: {
+                NavigationLink(value: FriendsRoute.friend(f.id)) {
                     FriendRowLabel(name: f.name, id: f.id, picture: store.pictures[f.id], detail: friendLine(f)) {
                         Image(systemName: "chevron.right").font(.footnote.weight(.bold)).foregroundStyle(DS.secondary)
                     }
@@ -238,7 +266,7 @@ struct FriendsScreen: View {
         if store.offline { checked = "Can’t reach the relay right now." }
         else if let t = store.lastChecked { checked = "Checked at \(Fmt.hhmm(t))." }
         else { checked = "Checking…" }
-        return Text("\(checked) There are no notifications: requests and friends’ trips come in when Haltewekker is open (it checks every 30 seconds while this screen is open, and every minute on your own trips) and now and then in the background.")
+        return Text("\(checked) There are no push notifications: requests, messages and friends’ trips come in when Haltewekker is open (it checks every 30 seconds while this screen is open, every few seconds in a chat, and every minute on your own trips) and now and then in the background.")
             .font(DS.footnote).foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, DS.s4)
     }
@@ -256,11 +284,11 @@ struct FriendsIntroCard: View {
                 .frame(width: 56, height: 56).background(DS.accent, in: Circle())
                 .accessibilityHidden(true)
             Text("Travel with friends").font(DS.title).foregroundStyle(DS.text).accessibilityAddTraits(.isHeader)
-            Text("Add friends with a code or a link, and see when they’re on their way. Coming next: send each other rides and compare timetables.")
+            Text("Add friends with a code or a link, see when they’re on their way, chat (in groups too) and send each other trips. Coming next: compare timetables.")
                 .font(DS.body).foregroundStyle(DS.text).fixedSize(horizontal: false, vertical: true)
             point("lock.fill", "Locked end to end: only you and your friends can read what you share. Not even the Haltewekker relay can.")
             point("person.crop.circle", "Just a name and a picture you choose. No email, no phone number, nobody can search for you.")
-            point("bell.slash", "No notifications: requests show up when you open the app.")
+            point("bell.slash", "No push notifications: requests and messages show up when you open the app, or on a trip.")
             DSPrimaryButton(title: "Make my friend code", icon: "qrcode", action: make)
             DSQuietButton(title: "I have a backup code", icon: "key", full: true, action: restore)
         }
@@ -312,6 +340,8 @@ struct FriendRequestRow: View {
 struct FriendDetailView: View {
     let id: String
     @ObservedObject private var store = FriendStore.shared
+    @ObservedObject private var chats = FriendChats.shared
+    private var unread: Int { chats.unread(ChatKey.friend(id)) }
     @Environment(\.dismiss) private var dismiss
     @State private var asking = false
 
@@ -322,6 +352,16 @@ struct FriendDetailView: View {
                     FriendAvatar(name: f.name, id: f.id, picture: store.pictures[f.id], size: 112)
                     Text(f.name).font(DS.title).foregroundStyle(DS.text).multilineTextAlignment(.center)
                     Text("Friends since \(FriendDates.day(f.since))").font(DS.sub).foregroundStyle(DS.secondary)
+                    NavigationLink(value: FriendsRoute.chat(ChatKey.friend(f.id))) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "bubble.left.and.bubble.right.fill").font(.body.weight(.semibold))
+                            Text(unread > 0 ? "Message · \(unread) new" : "Message").font(DS.bodyStrong)
+                        }
+                        .foregroundStyle(DS.onAccent)
+                        .frame(maxWidth: .infinity, minHeight: DS.cta)
+                        .background(DS.accent, in: Capsule())
+                    }
+                    .buttonStyle(DSPressStyle())
                     if let t = store.travel[f.id], TravelAge.freshness(t, now: Date()) != .gone {
                         FriendTripCard(seen: t, name: f.name)
                     }
@@ -366,7 +406,7 @@ struct FriendSeesCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: DS.s8) {
             DSHeader(title: "What \(friend.name) sees")
-            Text("Your name and picture. Messages and timetables come in the next versions, and you’ll choose what you share.")
+            Text("Your name and picture, and what you write to them. Timetables come in the next version, and you’ll choose what you share.")
                 .font(DS.sub).foregroundStyle(DS.text).fixedSize(horizontal: false, vertical: true)
             Toggle(isOn: on) {
                 Text("Show my trips to \(friend.name)").font(DS.bodyStrong).foregroundStyle(DS.text)
@@ -473,18 +513,73 @@ struct FriendsSettingsSection: View {
                 HStack {
                     Label("Friends", systemImage: "person.2")
                     Spacer()
-                    if store.waiting > 0 {
-                        Text("\(store.waiting)").font(DS.footnoteStrong).monospacedDigit().foregroundStyle(DS.onAccent)
+                    if store.badge > 0 {
+                        Text("\(store.badge)").font(DS.footnoteStrong).monospacedDigit().foregroundStyle(DS.onAccent)
                             .padding(.horizontal, 8).padding(.vertical, 2).background(DS.accent, in: Capsule())
-                            .accessibilityLabel("\(store.waiting) waiting")
+                            .accessibilityLabel("\(store.badge) new")
                     }
                 }
             }
             .sheet(isPresented: $open) { FriendsScreen() }
         } footer: {
             Text(store.hasAccount
-                 ? "Your friend list, requests, your code and your backup code."
+                 ? "Your friends, chats and groups, requests, your code and your backup code."
                  : "Add friends with a code or a link. Locked end to end; nothing to sign up for.")
         }
+    }
+}
+
+/// (0.27) Chats: each friend's and group's, newest first, with what's new; and making a group.
+struct FriendChatsCard: View {
+    let newGroup: () -> Void
+    @ObservedObject private var store = FriendStore.shared
+    @ObservedObject private var chats = FriendChats.shared
+
+    /// Groups without a line yet show too (under the chats).
+    private var rows: [String] {
+        let recent: [String] = chats.recent.map(\.key)
+        let quietGroups: [String] = store.groups.shown.map { ChatKey.group($0.id) }.filter { !recent.contains($0) }
+        return recent + quietGroups
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: DS.s8) {
+            DSHeader(title: "Chats", sub: store.unread > 0 ? "\(store.unread) new" : nil)
+            if rows.isEmpty {
+                Text("Write to a friend from their page, or make a group. You can also send a trip from Fastest trip, Plan or a planned trip.")
+                    .font(DS.sub).foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            ForEach(rows, id: \.self) { k in
+                NavigationLink(value: FriendsRoute.chat(k)) { row(k) }
+                    .buttonStyle(.plain)
+                if k != rows.last { Divider().overlay(DS.divider) }
+            }
+            DSQuietButton(title: "New group", icon: "person.3", full: true, action: newGroup)
+        }
+        .dsPanel()
+    }
+
+    private func row(_ k: String) -> some View {
+        let n: Int = chats.unread(k)
+        let me: String = store.myAccount ?? ""
+        let gid: String? = ChatKey.groupId(k)
+        let g: FriendGroup? = gid.flatMap { store.group($0) }
+        let name: String = g?.name ?? store.name(k)
+        let pic: Data? = gid.map { store.groupPictures[$0] } ?? store.pictures[k]
+        let avatarId: String = gid.map { "g-\($0)" } ?? k
+        let last: ChatMessage? = chats.book.chat(k)?.last
+        var detail: String = last.map { ChatWords.preview($0, me: me, name: { store.name($0) }, group: g != nil) } ?? "\(g?.roster.members.count ?? 0) people"
+        if let l = last { detail = Fmt.hhmm(l.at) + " · " + detail }
+        if g?.out == .removed { detail = "You’re no longer in it · " + detail }
+        return FriendRowLabel(name: name, id: avatarId, picture: pic, detail: detail) {
+            if n > 0 {
+                Text("\(n)").font(DS.footnoteStrong).monospacedDigit().foregroundStyle(DS.onAccent)
+                    .padding(.horizontal, 8).padding(.vertical, 2).background(DS.accent, in: Capsule())
+                    .accessibilityLabel("\(n) new")
+            } else {
+                Image(systemName: "chevron.right").font(.footnote.weight(.bold)).foregroundStyle(DS.secondary)
+            }
+        }
+        .contentShape(Rectangle())
     }
 }

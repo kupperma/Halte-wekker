@@ -73,6 +73,7 @@ struct NoticeBanner: View {
         case "faster": return ("bolt.fill", Paper.ok)
         case "go": return ("figure.walk", Paper.navy)
         case "ok": return ("checkmark.circle.fill", Paper.ok)
+        case "friends": return ("bubble.left.fill", Paper.navy)
         default: return ("bell.fill", Paper.navy)
         }
     }

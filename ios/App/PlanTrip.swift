@@ -288,6 +288,7 @@ struct PlanTripOverlay: View {
             }
             if let note { Text(note).font(DS.footnote).foregroundStyle(DS.secondary).padding(.horizontal, DS.edge) }
             action.padding(.horizontal, DS.edge)
+            sendTrip.padding(.horizontal, DS.edge)
         }
         .padding(.bottom, 8)
     }
@@ -370,6 +371,17 @@ struct PlanTripOverlay: View {
             } else if let out = homeSchoolOut, PlanCompare.offersRemind(homeSchool: true, fromHere: false, when: model.when, day: dayOffset) {
                 DSPrimaryButton(title: "Remind me", icon: "bell") { remind(out: out) }
             }
+        }
+    }
+
+    /// (0.27) The option you look at, to a friend or a group.
+    @ViewBuilder private var sendTrip: some View {
+        if let t = focusedTrip, case .place(let dest, _)? = model.to {
+            let from: Place? = model.place(model.from, here: near.position)
+            let by: Date? = { if case .arrive(let d) = model.when { return d }; return nil }()
+            SendTripButton(make: { TripCards.card(t, to: dest, from: from, by: by) })
+                .background(DS.surface, in: Capsule())
+                .dsFloat()
         }
     }
 

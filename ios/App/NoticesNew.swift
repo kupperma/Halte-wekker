@@ -19,6 +19,7 @@ struct NoticeBannerNew: View {
         case "faster": return ("bolt.fill", DS.accentText)
         case "go": return ("figure.walk", DS.accentText)
         case "ok": return ("checkmark.circle.fill", DS.accentText)
+        case "friends": return ("bubble.left.fill", DS.accentText)
         default: return ("bell.fill", DS.accentText)
         }
     }

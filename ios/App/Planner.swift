@@ -8,6 +8,7 @@ struct PlannedTrip: Codable, Equatable {
     var date: String            // yyyy-MM-dd
     var time: String            // HH:mm
     var leave: Bool? = nil      // a "leave at" plan: `time` is when you head off (else when you want to be there)
+    var prefer: [String]? = nil // (0.27) a trip a friend sent: the way with their bus or train (its trip id) goes first
 
     var leaving: Bool { leave == true }
 
@@ -120,9 +121,9 @@ final class Planner: ObservableObject {
 
     /// Plan backwards from when you want to be there, or (`leave`) forwards from when you want to head off. Returns a
     /// message if the time doesn't work.
-    func setArrive(out: Bool, time: Date, tomorrow: Bool, leave: Bool = false) -> String? {
+    func setArrive(out: Bool, time: Date, tomorrow: Bool, leave: Bool = false, prefer: [String]? = nil) -> String? {
         let day = Calendar.current.date(byAdding: .day, value: tomorrow ? 1 : 0, to: Date())!
-        let a = PlannedTrip(out: out, date: Fmt.ymd.string(from: day), time: Fmt.hhmm(time), leave: leave ? true : nil)
+        let a = PlannedTrip(out: out, date: Fmt.ymd.string(from: day), time: Fmt.hhmm(time), leave: leave ? true : nil, prefer: prefer)
         if let w = a.when {
             if leave, w < Date().addingTimeInterval(-5 * 60) { return "That time has passed today. Pick a later time, or Tomorrow." }
             if !leave, w < Date().addingTimeInterval(10 * 60) { return "That’s too soon (or already passed) today. Pick a later time, or Tomorrow." }
@@ -185,8 +186,16 @@ final class Planner: ObservableObject {
             return
         }
         let old = arriveChosen?.first.tripId
-        arriveOptions = Array(best.prefix(4))
-        arrivePick = arriveOptions.firstIndex { $0.first.tripId == old } ?? 0
+        var top = Array(best.prefix(4))
+        // (0.27) a friend's trip: the way with their ride stays among the options, and is the pick to start with
+        var preferred: Int?
+        if let p = a.prefer, !p.isEmpty {
+            let want = Set(p)
+            if let f = best.first(where: { t in t.rides.contains { want.contains($0.tripId) } }), !top.contains(f) { top[top.count - 1] = f }
+            preferred = top.firstIndex { t in t.rides.contains { want.contains($0.tripId) } }
+        }
+        arriveOptions = top
+        arrivePick = arriveOptions.firstIndex { $0.first.tripId == old } ?? preferred ?? 0
         arriveError = nil
         remind()
     }

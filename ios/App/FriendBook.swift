@@ -171,8 +171,9 @@ struct FriendBook: Codable, Equatable {
             guard !n.isEmpty, let i = friends.firstIndex(where: { $0.id == id }) else { return ([], nil) }
             friends[i].name = n
             return ([], nil)
-        case .picture, .travel, .unknown:
-            // (a picture is kept beside the list, by FriendInbox; nothing here changes)
+        case .picture, .travel, .message, .trip, .seen, .group, .groupPicture, .groupLeave, .unknown:
+            // (a picture is kept beside the list, by FriendInbox; chats and groups are FriendInbox's too; nothing here
+            // changes)
             return ([], nil)
         }
     }

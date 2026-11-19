@@ -262,6 +262,8 @@ struct GoViewNew: View {
                 liveTrack = LiveTrackTarget(tripId: r.tripId, line: r.line, headsign: r.headsign.isEmpty ? Fmt.place(r.toStop) : r.headsign,
                                             stopName: r.fromStop, time: r.departure, rail: r.isTrain)
             }
+            // (0.27) this trip to a friend or a group, as a card they can take
+            SendTripButton(make: { TripCards.card(t, to: go.dest, by: go.deadline) })
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .dsCard()
