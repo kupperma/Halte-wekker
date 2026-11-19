@@ -100,6 +100,7 @@ struct FriendsScreen: View {
         case .group(let id): GroupInfoView(id: id)
         case .compare(let key): CompareView(key: key)
         case .compareDay(let key, let day): CompareDayView(key: key, dayKey: day)
+        case .leaderboard: FriendsLeaderboardScreen()
         }
     }
 
@@ -156,15 +157,20 @@ struct FriendsScreen: View {
             MyWaitCard(panel: true)
             CampusNowCard()
             SharedDelaysCard()
+            // (0.30) free time together today, and the live link while a trip runs
+            FreeTodayCard()
+            LiveLinkCard()
             meCard(b)
             if !b.incoming.isEmpty { requestsCard(b.incoming) }
             if !b.friends.isEmpty { FriendChatsCard(newGroup: { sheet = .newGroup }) }
             if !b.friends.isEmpty { MyTripsCard(explain: { sheet = .travel }) }
             if !b.friends.isEmpty { MyTimetableCard(explain: { sheet = .timetable }) }
             if !b.friends.isEmpty { ExtrasSwitchesCard() }
+            if !b.friends.isEmpty { FriendsTogetherCard() }
             friendsCard(b.sortedFriends)
             if !b.outgoing.isEmpty { waitingCard(b.outgoing) }
             addCard
+            LiveLinkCard(idleNote: true)
             statusLine
         }
     }
@@ -390,6 +396,8 @@ struct FriendDetailView: View {
                     if let c = extras.onCampus().first(where: { $0.id == f.id }) {
                         DSNote(icon: "building.columns.fill", tint: DS.accent, text: CampusWords.since(c.state))
                     }
+                    // (0.30) the rides you shared, counted on this phone
+                    RidesTogetherCard(friend: f)
                     FriendSeesCard(friend: f)
                     DSQuietButton(title: "Remove \(f.name)", icon: "person.badge.minus", full: true) { asking = true }
                         .confirmationDialog("Remove \(f.name)?", isPresented: $asking, titleVisibility: .visible) {

@@ -75,35 +75,19 @@ struct DemoSheetNew: View {
 /// door-to-door trips between Home and School.)
 struct LeaderboardScreenNew: View {
     @EnvironmentObject var scores: ScoreBook
+    @ObservedObject private var friends = FriendStore.shared
     @State private var home = true
     @State private var week = true
+    /// (0.30) Yours, or you and the friends who share their scores.
+    @State private var withFriends = false
 
     var body: some View {
-        let all = scores.trips.filter { $0.home == home }
-        let list = Array(scores.board(home: home, week: week).prefix(10))
-        let best = scores.bestThisWeek(home: home)
         ScrollView {
             VStack(alignment: .leading, spacing: DS.s12) {
-                VStack(spacing: DS.s8) {
-                    Picker("Direction", selection: $home) { Text("Home").tag(true); Text("To \(RoleWords.current.toSchoolWord)").tag(false) }.pickerStyle(.segmented)
-                    Picker("When", selection: $week) { Text("This week").tag(true); Text("All time").tag(false) }.pickerStyle(.segmented)
+                if friends.hasFriends {
+                    Picker("Whose", selection: $withFriends) { Text("You").tag(false); Text("With friends").tag(true) }.pickerStyle(.segmented)
                 }
-                VStack(alignment: .leading, spacing: DS.s12) {
-                    if list.isEmpty {
-                        Text(all.isEmpty ? "No trips yet. Start the alarm for a trip and ride to your last stop. Each trip gets a score out of 500 here." : "No trips this week yet.")
-                            .font(DS.sub).foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
-                    }
-                    ForEach(Array(list.enumerated()), id: \.element.id) { i, t in
-                        if i > 0 { Divider().overlay(DS.divider) }
-                        row(i, t, best: t.id == best?.id)
-                    }
-                }
-                .dsPanel()
-                Text(RoleWords.current.onCorridor
-                     ? "Time from starting the alarm until you reach your last stop, so waiting at the change counts. 500 means as fast as that route gets."
-                     : "Trips between home and \(RoleWords.current.school), from starting the alarm until your last stop, so waiting at a change counts. 500 means as fast as your fastest one so far.")
-                    .font(DS.footnote).foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, DS.s4)
+                if withFriends && friends.hasFriends { FriendsLeaderboardView() } else { mine }
             }
             .padding(.horizontal, DS.s16).padding(.top, DS.s8).padding(.bottom, DS.s24)
         }
@@ -111,6 +95,32 @@ struct LeaderboardScreenNew: View {
         .navigationTitle("Leaderboard")
         .navigationBarTitleDisplayMode(.inline)
         .dynamicTypeSize(...DynamicTypeSize.accessibility2)
+    }
+
+    @ViewBuilder private var mine: some View {
+        let all = scores.trips.filter { $0.home == home }
+        let list = Array(scores.board(home: home, week: week).prefix(10))
+        let best = scores.bestThisWeek(home: home)
+        VStack(spacing: DS.s8) {
+            Picker("Direction", selection: $home) { Text("Home").tag(true); Text("To \(RoleWords.current.toSchoolWord)").tag(false) }.pickerStyle(.segmented)
+            Picker("When", selection: $week) { Text("This week").tag(true); Text("All time").tag(false) }.pickerStyle(.segmented)
+        }
+        VStack(alignment: .leading, spacing: DS.s12) {
+            if list.isEmpty {
+                Text(all.isEmpty ? "No trips yet. Start the alarm for a trip and ride to your last stop. Each trip gets a score out of 500 here." : "No trips this week yet.")
+                    .font(DS.sub).foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            ForEach(Array(list.enumerated()), id: \.element.id) { i, t in
+                if i > 0 { Divider().overlay(DS.divider) }
+                row(i, t, best: t.id == best?.id)
+            }
+        }
+        .dsPanel()
+        Text(RoleWords.current.onCorridor
+             ? "Time from starting the alarm until you reach your last stop, so waiting at the change counts. 500 means as fast as that route gets."
+             : "Trips between home and \(RoleWords.current.school), from starting the alarm until your last stop, so waiting at a change counts. 500 means as fast as your fastest one so far.")
+            .font(DS.footnote).foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, DS.s4)
     }
 
     private func row(_ i: Int, _ t: TripScore, best: Bool) -> some View {

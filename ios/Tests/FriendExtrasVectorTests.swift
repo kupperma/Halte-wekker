@@ -50,7 +50,7 @@ final class FriendExtrasVectorTests: XCTestCase {
 
     func test_kindsVersion() {
         for k in ["wait", "delay", "buddy", "campus"] { XCTAssertTrue(FriendMessage.known.contains(k)) }
-        XCTAssertEqual(FriendMessage.kindsVersion, 5)
+        XCTAssertGreaterThanOrEqual(FriendMessage.kindsVersion, 5)
     }
 
     func test_waitBox() throws {

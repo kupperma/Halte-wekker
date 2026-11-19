@@ -28,6 +28,8 @@ struct RideViewNew: View {
                     if trip.waitingToBoard { boarding } else { riding }
                     // Friends (0.26): who sees this trip, friends on board, your coach (only with friends)
                     RideFriendsCard()
+                    // (0.30) a live link for someone without the app (works without friends)
+                    if !trip.demo { LiveLinkCard() }
                 }
                 .padding(.horizontal, DS.s16).padding(.top, DS.s8).padding(.bottom, DS.s16)
             }

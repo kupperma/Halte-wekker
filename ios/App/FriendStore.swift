@@ -286,6 +286,7 @@ final class FriendStore: ObservableObject {
         FriendChats.shared.clearAll()
         FriendTimetables.shared.forgetAll()
         FriendExtrasStore.shared.forgetAll()
+        FriendTogetherStore.shared.forgetAll()
         identity = nil
         device = ""
         state = Saved()
@@ -876,6 +877,7 @@ final class FriendStore: ObservableObject {
                 FriendChats.shared.take(r.chat)
                 FriendTimetables.shared.take(r)
                 FriendExtrasStore.shared.take(r)
+                FriendTogetherStore.shared.take(r)
                 state.cursor = inbox.cursor
                 save()
                 try await relay.ack(r.ack)
@@ -884,6 +886,8 @@ final class FriendStore: ObservableObject {
             await timetableDue(me, now: Date())
             // (0.29) the extras: a wait on its way, at school, your plan for the wake-up buddy, delays on shared rides
             await FriendExtrasStore.shared.due(now: Date())
+            // (0.30) part B: your scores for the friends leaderboard, free time together today
+            await FriendTogetherStore.shared.due(now: Date())
             try await flush(relay)
             let statesDue = why != .chat || (travelChecked.map { now.timeIntervalSince($0) >= 30 } ?? true)
             if statesDue { await travelAfterSync(relay, lane: why == .now ? .urgent : .background) }

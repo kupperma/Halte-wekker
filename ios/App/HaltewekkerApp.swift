@@ -63,6 +63,8 @@ struct HaltewekkerApp: App {
                     FriendTravelShare.shared.attach(t)
                     // (0.29) the Friends extras: region events (at school, leaving home) and the trip's start, read only
                     FriendExtrasStore.shared.attach(t)
+                    // (0.30) the live link for people without the app: ends with the trip, read only
+                    LiveLinkStore.shared.attach(t)
                     // (0.28.1) shared ride logs: a trip that ended is a moment to send (only when turned on)
                     LogShareStore.shared.attach(t)
                     Task { await NoticeLog.shared.collectDelivered() }

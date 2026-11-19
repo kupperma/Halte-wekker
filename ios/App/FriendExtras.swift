@@ -568,8 +568,11 @@ enum CampusWords {
 // MARK: your switches
 
 /// The extras' switches (kept with the friend list and in the vault): "Show friends when I'm at school" (off by
-/// default) and who may hear you haven't left yet (nobody by default).
+/// default) and who may hear you haven't left yet (nobody by default); (0.30) the morning note about free time
+/// together and "Share my scores" (both off by default).
 struct ExtrasSettings: Codable, Equatable {
     var campus: Bool? = nil
     var buddy: [String]? = nil
+    var free: Bool? = nil
+    var scores: Bool? = nil
 }

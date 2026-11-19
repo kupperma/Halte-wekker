@@ -12,6 +12,8 @@ enum FriendsRoute: Hashable {
     case compare(String)
     /// (0.28) One day of it in full.
     case compareDay(String, String)
+    /// (0.30) The leaderboard with friends.
+    case leaderboard
 }
 
 struct FriendChatView: View {

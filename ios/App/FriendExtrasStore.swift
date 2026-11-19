@@ -492,6 +492,24 @@ final class FriendExtrasStore: NSObject, ObservableObject, CLLocationManagerDele
 
     private func fixTime() -> Date? { position(maxAge: CampusRules.fixAge)?.timestamp }
 
+    // MARK: part B's switches (0.30)
+
+    /// The morning note about free time together (off by default).
+    func setFreeNote(_ on: Bool) {
+        saved.settings.free = on ? true : nil
+        save()
+        publish()
+        store.extrasSettingsChanged()
+    }
+
+    /// "Share my scores" with friends for the friends leaderboard (off by default).
+    func setShareScores(_ on: Bool) {
+        saved.settings.scores = on ? true : nil
+        save()
+        publish()
+        store.extrasSettingsChanged()
+    }
+
     // MARK: the wake-up buddy (yours)
 
     func allowsBuddy(_ id: String) -> Bool { (settings.buddy ?? []).contains(id) }
@@ -644,7 +662,7 @@ final class FriendExtrasStore: NSObject, ObservableObject, CLLocationManagerDele
     }
 
     /// Trip cards you're in, with the others who are.
-    private func myCards(_ now: Date) -> [(card: TripCard, riders: [String])] {
+    func myCards(_ now: Date) -> [(card: TripCard, riders: [String])] {
         var out: [(card: TripCard, riders: [String])] = []
         let book = FriendChats.shared.book
         for chat in FriendChats.shared.recent {

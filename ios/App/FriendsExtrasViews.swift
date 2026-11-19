@@ -290,6 +290,9 @@ struct ExtrasSwitchesCard: View {
             Text("Wake-up buddy").font(DS.bodyStrong).foregroundStyle(DS.text)
             Text("On a friend’s page you can let them know when you haven’t left yet by your planned time (once a morning). Off for everyone until you turn it on.")
                 .font(DS.sub).foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
+            Divider().overlay(DS.divider)
+            // (0.30) free time together: the morning note
+            FreeNoteSwitch()
         }
         .dsPanel()
     }

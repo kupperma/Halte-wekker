@@ -121,6 +121,9 @@ enum FriendInbox {
         var buddies: [String: BuddySeen] = [:]
         /// Friends on campus (the newest per friend; `on: false`: they left).
         var campus: [String: CampusSeen] = [:]
+        // 0.30
+        /// Friends' scores for the friends leaderboard (the newest per friend; `on: false` takes them back).
+        var scores: [String: ScoresSeen] = [:]
     }
 
     /// How long a box nobody has the key for yet is kept on this phone.
@@ -242,6 +245,10 @@ enum FriendInbox {
         case .campus(let c):
             if r.book.isFriend(id), (r.campus[id]?.t ?? Int.min) <= opened.header.t {
                 r.campus[id] = CampusSeen(state: c, t: opened.header.t, got: now)
+            }
+        case .scores(let sc):
+            if r.book.isFriend(id), (r.scores[id]?.t ?? Int.min) <= opened.header.t {
+                r.scores[id] = ScoresSeen(share: ScoresShare.valid(sc), t: opened.header.t, got: now)
             }
         case .travel, .message, .trip, .seen:
             break

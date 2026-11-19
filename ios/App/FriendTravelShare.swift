@@ -63,7 +63,7 @@ final class FriendTravelShare: ObservableObject {
 
     // MARK: what the trip says
 
-    private static func running(_ t: TripManager) -> Bool {
+    static func running(_ t: TripManager) -> Bool {
         switch t.phase {
         case .sleeping, .awake, .alarm, .transfer: return true
         case .idle, .finished: return false
@@ -94,6 +94,8 @@ final class FriendTravelShare: ObservableObject {
     /// The phase, the leg or the vehicle changed (or how sure it is): send now if the leg is another, or take it back.
     private func changed() {
         guard let t = trip else { return }
+        // (0.30) the live link: at once on a new leg, stage or vehicle (it has its own rules)
+        LiveLinkStore.shared.tick()
         let s = signals(t)
         confirmed = s.running ? TravelShareRules.confirmed(before: confirmed, s) : false
         if coachTrip != nil, coachTrip != t.vehicle?.tripId { coach = nil; coachTrip = nil }
@@ -103,6 +105,9 @@ final class FriendTravelShare: ObservableObject {
     /// The ride's network tick (every 30 s on a trip): the next state when a minute has gone by, and friends' states.
     private func tick() {
         evaluate(force: false)
+        // (0.30) the live link's next state, and the ride history (friends on this bus or train with you)
+        LiveLinkStore.shared.tick()
+        if let t = trip { FriendTogetherStore.shared.rideTick(t) }
         let store = FriendStore.shared
         guard store.hasFriends, !sending, TravelAge.due(last: lastFetch, now: Date()) else { return }
         lastFetch = Date()
@@ -166,6 +171,9 @@ final class FriendTravelShare: ObservableObject {
     }
 
     // MARK: the state
+
+    /// (0.30) The trip as friends get it right now (nil: no leg), for the live link.
+    func currentState() -> TravelState? { trip.flatMap { build($0) } }
 
     /// A place as friends see it: a stop's name and where it is; never where Home is.
     private static func spot(_ p: Place) -> TravelState.Spot {
