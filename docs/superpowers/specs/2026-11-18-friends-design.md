@@ -523,3 +523,148 @@ message's fan-out; slots replace the newest box per sender per mailbox). `Friend
   under Plan's options, on a Be there by plan and on the friend's train. The Friends button's badge counts requests and
   unread lines.
 - Not yet: chats aren't in the vault (a restore brings back the friends and groups, not the lines); no read-mark switch.
+
+## As built (0.28)
+
+What 0.28.0 (build 116) adds: timetables and start areas shared with friends, compare (a friend or a whole group),
+rides together, and meet halfway. Everything in "As built (0.25)" to "(0.27)" holds unchanged; this only adds two box
+kinds and one optional vault field. **No relay change**: both kinds go through `/f/v1/send` with a slot (the newest
+replaces the last in that mailbox). `FriendMessage.kindsVersion` is 4. All times are unix seconds; days are
+`yyyy-MM-dd` in Europe/Amsterdam.
+
+### The `timetable` box (slot `tt`, ttl 21 days)
+- Body: `{"from": t, "to": t, "classes": [class] (0–300), "src"?: "calendar" | "week", "off"?: true}`.
+  - `from` is the first day's local midnight (today), `to` the end of the 14th day (exclusive), at most 16 days after
+    `from`. A day inside `[from, to)` without classes has **no school**; a day outside it is **not known**.
+  - class = `{"start": t (required, in the window), "end"?: t, "title"?: string, "room"?: string}`. `end` is absent
+    when not known (a week of first classes without an end time); readers drop an `end` that isn't after `start` or
+    is over 12 h after it. Titles ≤ 80 and rooms ≤ 60 characters, control characters removed, whitespace runs →
+    one space, trimmed, empty → absent. Sorted by start; at most 300 kept.
+  - `"off": true` (with `classes: []`, `from == to`): **taken back** — the reader forgets the sender's timetable and
+    area. A window that doesn't make sense (`to ≤ from`, over 16 days) and isn't `off`: the box is dropped.
+- Calendar users send every non-all-day, non-cancelled event of the calendars picked for the school alarm (title,
+  location as room; nothing over 12 h). Same-times-every-week users send one class per school day: from the first
+  class to the day's end time when set, with the day's title.
+
+### The `area` box (slot `area`, ttl 30 days)
+- Body: `{"stops": [spot] (0–4, required), "station"?: station, "school": spot (required, with lat/lon), "early"?: 0–60}`.
+  - `stops`: the bus stops nearest home, nearest first (spot as 0.27: `{"name","id"?,"lat","lon"}`, `id` a Transitous
+    stop id): the home board's stops when the setup knows where they are, else the three nearest non-rail stops
+    within 1.2 km of Home (looked up once, again when Home moves 300 m). A stop without lat/lon is dropped.
+  - `station`: `{"name","code"?,"id"?,"lat","lon"}`, the NS station nearest Home within 5 km (`code` NS's).
+  - `school`: name (the app's short name, e.g. "BUas"), lat/lon (5 decimals), `id` its first Transitous stop id when it
+    has one. `early`: minutes the sender likes to be there before class (absent: 10).
+  - **Never the home address**: only stops, a station and the school.
+- A trip from home starts at the first stop (else the station); to school is to `school.id` (else its lat/lon).
+
+### Who sends, who reads
+- Read from a **friend**, or from someone on the list of a group you're in (0.27's group cards); anything else is
+  dropped (acked). The newest per sender by the box's `t` wins. Readers keep them only while the sender is a friend or
+  in a group with them.
+- Sent to: friends (unless "Share my timetable" is off for them, or off for everyone, or the one-time screen wasn't
+  answered yet), plus the members of groups where you turned on "Share my timetable with this group" who aren't your
+  friends. Someone who had it and no longer should (a switch went off, they left the group) gets an `off` box.
+- When (`TimetableShareRules`): at a check of the relay (app to the front, the 30 s Friends tick, the 8 s chat tick,
+  the ride's once-a-minute check, the background refresh) the app reads its own timetable at most every 30 minutes, or
+  at once when the calendar or the week changed or someone new should get it. The timetable goes to everyone when it
+  changed and the last went ≥ 3 h ago, or ≥ 20 h ago whatever (the window moves on daily); to someone who hasn't had
+  it, at once, to them only. The area the same, with 7 days instead of 20 h. The fingerprint is FNV-1a 64 over the
+  body's JSON (sorted keys). No loop of its own.
+
+### The vault
+- `FriendVaultContents` gains `"timetable"?: {"answered"?: bool, "on"?: bool, "off"?: [account], "groups"?: [group id]}`
+  (the switches, not the timetables). An older app ignores it.
+
+### Compare (`Compare`, `SharedRides`; on the phone)
+- Days: today to Sunday, then next Monday to Sunday; Saturday and Sunday only when someone has class. Per person and
+  day: known (the window covers it), the classes, first start, last end (the latest `end`, when it's after the last
+  start).
+- **Free together**: each person's gaps between classes (overlapping classes merge; a class without an end runs into
+  the next), cut where any gap starts or ends; segments where ≥ 2 people are free, merged while the same people;
+  ≥ 30 min; the most people first, then the longest; two shown, in time order.
+- **Rides together**: per person with class and an area, one planner question per direction: to school arriving by
+  first class − `early` (arriveBy, 5 options, ≤ 3 changes); home leaving from 5 min after the last end. A way is
+  *usable* to school if it arrives by the bound (+60 s) and no more than 45 min before that person's latest usable
+  way; home if it leaves after the bound (−60 s) and no more than 45 min after their earliest. Every leg's trip id of
+  every usable way is a vehicle; a vehicle with ≥ 2 people is a shared ride (each person's way: to school the one
+  leaving latest, home the one arriving first). Order: most people, then the longest time all are on it at once (last
+  boarding to first alighting), then the earliest departure, then trip id. Shown: the best, and others only when they
+  bring a set of people that isn't a subset of one shown (at most 3).
+- Words: "IC 3512 · 07:41 from Eindhoven Centraal", "With Lisa, you and Sam (gets on at Tilburg 08:03)", and for each
+  person not on it "Tom starts 10:45" / "Tom ends 17:15" / "Kim: no classes" / "Kim hasn’t shared this day" /
+  "Kim: no start area yet".
+
+### Meet halfway (`MeetHalfway`)
+1. Everyone's own ways to school by their bound (first class − early, or a chosen time). The shared rides (as above)
+   are the plans; each plan lists who it doesn't fit. Kind: **same ride** (each gets on at their own stop), or **meet
+   at** a stop when everyone boards at the same stop (same name, or within 300 m) and someone comes by an earlier leg:
+   at the latest arrival of those earlier legs (never after the departure).
+2. No shared ride at all: each of the first two people's main ride (the longest leg of their latest usable way) is a
+   one-person plan to get the others onto.
+3. For the best two plans with someone missing: the vehicle's stops (`/v5/trip`); for each missing person the stops
+   before the last rider gets off, where boarding is allowed and it leaves ≥ 10 min from now, nearest their start
+   first; for each (at most two) a way on: off at the stop nearest their school if within 1.5 km and there (with the
+   walk) by their bound, else onto the rest of one of their own ways that leaves from a stop of the route (≤ 300 m) ≥
+   3 min after the vehicle gets there. Their way to the stop: a walk when it's within 900 m of their start, else one
+   planner question arriving by its departure − 3 min (the way leaving latest that is there a minute before it).
+4. Rank: fewest missing, most riders, least time to spare summed over people, fewest changes, then id. Plans with
+   fewer than 2 people aren't shown; at most 4.
+- "Send to …" posts a 0.27 trip card to the chat it came from: in a friend's chat the friend's own way (to their
+  school, `by` their bound), so "Take this trip" makes it their Be there by plan with the shared ride first; in a group
+  your own way (each member takes it from where they are, as 0.27). Its `note`: "Meet halfway: IC 3512 together · Sam
+  gets on at Tilburg 08:03".
+
+### Request budget
+- Compare screen: at most **24** Transitous planner questions while it's open: the next school day you share is
+  looked up by itself (2 per person: there and home; people with the same start, school and time share one), any
+  other day only when tapped. Answers kept per question for the day (`WayCache`, Caches/friend-ways.json): 30 min for
+  a time within 36 h, else 6 h; plus the planner's own 45 s memo.
+- Meet halfway: at most **12** per search (N for everyone's ways, mostly kept from the compare screen; 1 per plan for
+  the vehicle's stops; 1 per missing person's way to a stop). For three people ≈ 3 + 2 + 4.
+- Your own area: one `/v1/map/stops` question near Home, once (again only if Home moves).
+
+### Test vectors (Node's crypto; checked in `ios/Tests/FriendTimetableTests.swift`)
+- A timetable from Sam to Lou (keys as in 0.25): payload (exact bytes)
+  `{"b":{"classes":[{"end":1800010800,"room":"C1.02","start":1800004500,"title":"Design"},{"end":1800024300,"start":1800016200,"title":"Maths"}],"from":1799967600,"src":"calendar","to":1801177200},"f":"3c157621a97cf055f5804a9826c6d1e1","k":"timetable","n":"vector-8","t":1800000000,"v":1}`
+  (Friday 15 January 2027: Design 10:15–12:00 in C1.02, Maths 13:30–15:45, Amsterdam time; the window to 29 January
+  00:00); eph_priv `e0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff`, nonce `0a0b0c0d0e0f101112131415` →
+  signature (b64u) `PhtJtWWwYne2jAvNgh5dBivMMs3MYal36jGMHf91URegi3vJOFDnTX0frmmjT9YZbsI9UV-73lkwk2sUBGeMDA`; ephPub
+  `736845d54e87de09d6bb114aa7042c50a4a015bd9901d1a0026f5956533a1519`; box key `24ac3b6697d3e534b1d114ee317b401608258e500d3224cac9783a9641cc0cf1`; box (b64u):
+  `AXNoRdVOh94J1rsRSqcELFCkoBW9mQHRoAJvWVZTOhUZCgsMDQ4PEBESExQVUxMTxDR2FAxkJX3qhoNrBCJncUIfOfkfJjntZ0pd8fh1vrOGo-Sys35eTTnNHXM-Az3pzc_CH_XS_TIA9hRe6PMo321YrlGo3tfPC10VxchYYlzyAER-DubzI_Ix_3ALwatYL9PW0TmCATUVWG_UBXAbN7fkj8RioTXAa2EmWbWnpt38MYvc6sVFvYKTru2KsvRPZkqpS4wHmndn0-T4FE0g3Ey_vm4YZcw4i4riTdqYUmRFtHjCEpo7AbXb_MXgb4TgPdfZ-m-yX1YLptvqZXDSLx716k3zFL_Po4whHeR8Ds6q7uTZJpvF9uRnSIQgqG_NXv7C95b89-W3kDlBIc8aPhmKfH03cGrgp6wsvK8P-rPOvKdaYs2e30A4g6bFjnGnHRESID5IJog5ROBAQoG1EkrDeGE1SPudxqn5lSW6dNfGtCC1dXB8kGcHOoHCaBBlrH4fdgSCl77ft98vH1Hd_rfeRg6TYh0IhaM`
+- Sam's area to Lou: payload
+  `{"b":{"early":10,"school":{"lat":51.5866,"lon":4.7745,"name":"BUas"},"station":{"code":"EHV","lat":51.44306,"lon":5.47917,"name":"Eindhoven Centraal"},"stops":[{"id":"vector-stop-1","lat":51.4401,"lon":5.4789,"name":"Eindhoven, Station"}]},"f":"3c157621a97cf055f5804a9826c6d1e1","k":"area","n":"vector-9","t":1800000000,"v":1}`;
+  eph_priv `1112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f30`, nonce `161718191a1b1c1d1e1f2021` →
+  signature (b64u) `Ss9LsAU1yEaX78X0NNGZFVbmMGCXyExL5bWwVVSymzYmKLKb_MhS1ygSw5fsTHnDaCSo7OIwxLpf6-TAM0PDDA`; ephPub
+  `4d27bcee3135c4944b28d27dd809b07be10c35160d20131caa7e85575498d07c`; box key `4423045437c7bc86a7785ab582f3d1484d4ebebb030362781ef112ebaf53947b`; box (b64u):
+  `AU0nvO4xNcSUSyjSfdgJsHvhDDUWDSATHKp-hVdUmNB8FhcYGRobHB0eHyAhU3XtQHq-Kuv74wBPlsCOmaWksIfkUDbPCW0apmIKieezb6cFqAZ63AHeQe4XXFDv76oFbqYeUij9rl0PMQwxkFmNZgK2Mg1oqBp3sDufRowOyjVrcRDaP4obdhOlN9ot0tQ4Iuifd4oCvkFWMc7MhWNZ8eVA0IXLBIlTsRiQoysMZ1CxgTULPogfMBFoCh9g0vu1ZWsd58izUufy1Zl2uL3_X5bnb0_hJuCQrmKMlkzJeIWTVxGQbRiq5ap13GALwBblYhO2Y10ZWjIynlfs1LIFG3E5uKAViR74WGG4inY-wV5asAhgo2VkMJsPV4aLkjZUJxpAF26TVVBXl2K_S95hD66KYH2QqrQp7zy1AnEn6iyP-tz-lg3Rxpf5_8LliKgaRCufXpu0qgq-gJsiiqeHwibhVEBwOQUIZV0couDS9kiCU-tkao2VcGmfgsfxgliM-1R9Dxat4OU8GvYy4t3SwoL6ukAMlKxbSQOArQD2KY5y400LatGpejnkyR_SY9eLh44yqGSg_OrieMUPzKSPwZOd1A`
+- Taking it back (payload only): `{"b":{"classes":[],"from":1800000000,"off":true,"to":1800000000},"f":"3c157621a97cf055f5804a9826c6d1e1","k":"timetable","n":"vector-10","t":1800000060,"v":1}`.
+- Matching, worked (checked in `ios/Tests/FriendCompareTests.swift`), Monday 18 January 2027, everyone there by 08:50:
+  you: bus `b305-0` 06:35–07:05 + IC `ic-3510` 07:11–08:02 (there 08:15), or bus `b305-1` 07:05–07:35 + IC `ic-3512`
+  Eindhoven 07:41 – Breda 08:32 (there 08:45); Lisa: `ic-3512` from Eindhoven 07:41; Sam: `ic-3512` from Tilburg
+  08:03; Tom (there by 10:35): `ic-3520`. → one shared ride `ic-3512` with Lisa, you and Sam (your second way; 29 min
+  all on it); "IC 3512 · 07:41 from Eindhoven Centraal", "Lisa, you and Sam (gets on at Tilburg 08:03)", "Tom starts
+  10:45"; meet halfway: same ride. With Lisa instead coming by Sprinter Helmond 07:20–07:33: "Meet at Eindhoven
+  Centraal 07:35, then IC 3512 together". Kim (start Tilburg station, going to 51.5930, 4.7790, her own train too late):
+  onto `ic-3512` at Tilburg (a walk), off at Breda, 6 min walk, there 08:38.
+
+### Also in 0.28
+- **Your week** (`ManualWeek.Day`): `"end"?: minutes after midnight` (after the start) and `"title"?: string`
+  (≤ 40), both optional; a week saved before 0.28 reads as it was, and one without them is written as before. It
+  lives in `profile.v1`, which "Test the setup" already keeps. Settings › School alarm › Your week and the setup's
+  "Same times every week" step set them ("Add end time", "What it is").
+- **The home's on-board look backs off** (`OnBoardBackoff`, Thrift.swift): after 6 looks in a row that find nothing
+  while you move like a bus or train, one every 2 min until you stop or start moving (or it finds one). Trips, alarms,
+  wake-at-stop, the Live Activity and a running trip's matching are unchanged.
+
+### App (0.28)
+- Pure, tested: `TimetableShare`/`TimetableArea`/`TimetableShareRules`, `Compare`, `SharedRides`/`RideWords`,
+  `MeetHalfway`/`MeetWords`, `RequestBudget`, `OnBoardBackoff`; `FriendInbox.process` reads both kinds.
+- `FriendTimetables` (theirs, the switches, yours as read; Friends/timetables.json), `FriendStore.timetableDue` (in
+  every check), `CompareModel`/`MeetModel`/`WayCache` (the planner's questions).
+- Screens: a friend's page and a group's page get "Compare timetables": who shared, each day this week and next with
+  everyone's day, "To school"/"Home" rides together and who's missing, free time together, "Every class" (the day in
+  full), "Meet halfway" (pick a day, each first class or a time; each plan with everyone's way and "Send to …").
+  Friends › Your timetable (the switch for everyone), the one-time screen, "Share my timetable with Sam" on a friend's
+  page, "Share my timetable with this group" on a group's compare.
+- Not yet: friends' timetables aren't in the vault (after a restore they come back at their next send, within a day);
+  meet halfway plans to school only.
