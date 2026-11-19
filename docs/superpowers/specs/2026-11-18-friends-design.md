@@ -952,7 +952,8 @@ iOS share sheet.
 - Rules, worked (Friday 15 January 2027): you 10:15–12:00 and 13:30–15:45, Sam 09:00–11:30 and 13:00–14:00, Lisa
   10:00–12:00 and 13:30–16:00 → "Today: you and Sam are both free 12:00–13:00", "Today: you and Lisa are both free
   12:00–13:30"; the note at 06:00–10:59 once; your trips 48.5 (today) and 52.34 min to school, 52 and 55 (December)
-  home → `best`/`mbest` as in the payload; a ride shared twice in a day is one record.
+  home → `best` as in the payload (the payload's `mbest` holds the trip to school only; `build` also puts the 14th's
+  trip home in it); the same vehicle on one day is one record, the people added to it.
 
 ### App (0.30)
 - Pure, tested: `FreeToday`, `ScoresShare`/`ScoresRules`/`ScoreBoard`, `RideHistory`/`RideHistoryWords`
