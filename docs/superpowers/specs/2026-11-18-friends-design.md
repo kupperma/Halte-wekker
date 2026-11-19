@@ -198,7 +198,7 @@ Each release ships on its own and leaves trips/alarms untouched.
 
 ## As built (0.25)
 
-What 0.25.0 (build 109) ships, written so 0.26–0.28 and an Android app can build on it byte for byte. Everything is
+What 0.25.0 (build 110) ships, written so 0.26–0.28 and an Android app can build on it byte for byte. Everything is
 standard: Ed25519 (RFC 8032), X25519 (RFC 7748), HKDF-SHA256 (RFC 5869), ChaCha20-Poly1305 (RFC 8439, 12-byte nonce,
 16-byte tag), SHA-256, BIP-39 English, UTF-8 JSON. No Apple-only format anywhere.
 
