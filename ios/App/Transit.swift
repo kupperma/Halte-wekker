@@ -44,6 +44,30 @@ extension Ride {
              live: live, cancelled: cancelled, walkBefore: minutes, num: num, headsign: headsign, plannedPlatform: plannedPlatform,
              fromLat: fromLat, fromLon: fromLon, toLat: toLat, toLon: toLon)
     }
+
+    /// The same ride, got on at another stop of its trip (`BoardAt`, 0.25.1), with the walk there: its time, platform
+    /// and place there; the rest as it was.
+    func boarding(at s: BoardAt.Stop, walk minutes: Int) -> Ride {
+        let dep: Date = s.departure ?? departure
+        let sched: Date = s.scheduledDeparture ?? dep
+        let platform: String? = s.track ?? s.scheduledTrack
+        let planned: String? = s.scheduledTrack ?? s.track
+        let stopName: String = s.name.isEmpty ? fromStop : s.name
+        let stopId: String = s.id.isEmpty ? fromId : s.id
+        return Ride(tripId: tripId, line: line, name: name, isTrain: isTrain, departure: dep, scheduledDeparture: sched,
+                    arrival: arrival, scheduledArrival: scheduledArrival, fromStop: stopName,
+                    fromId: stopId, toStop: toStop, platform: platform,
+                    live: live, cancelled: cancelled, walkBefore: minutes, num: num, headsign: headsign, plannedPlatform: planned,
+                    fromLat: s.point.lat, fromLon: s.point.lon, toLat: toLat, toLon: toLon)
+    }
+}
+
+extension DoorTrip {
+    /// The same trip, its first ride got on at another stop of its trip (`BoardAt`): you leave by then minus the walk.
+    func boardingFirst(at s: BoardAt.Stop, walk minutes: Int) -> DoorTrip {
+        let f = first.boarding(at: s, walk: minutes)
+        return DoorTrip(rides: [f] + rides.dropFirst(), start: f.departure.addingTimeInterval(-Double(minutes) * 60), end: end)
+    }
 }
 
 /// A door-to-door trip from the planner: the rides plus where it starts and ends.
@@ -442,10 +466,12 @@ enum Transit {
     /// earlier that leaves time to spare for the same train. The planner leaves those out (the same arrival), but
     /// they're good to know: out of the cold sooner, and a change you won't miss.
     /// `at`: only these rides (nil: every one).
-    static func earlierWays(onto best: DoorTrip, now: Date = Date(), at only: Set<Int>? = nil) async -> [DoorTrip] {
+    /// `further`: at your first stop also (two) buses you can't be there for any more, but may catch at a later stop of
+    /// theirs: Fastest trip gets you on wherever you make it (`BoardAt`, 0.25.1), and drops the ones you can't.
+    static func earlierWays(onto best: DoorTrip, now: Date = Date(), at only: Set<Int>? = nil, further: Bool = false) async -> [DoorTrip] {
         await withTaskGroup(of: [DoorTrip].self) { g in
             for k in best.rides.indices where only?.contains(k) ?? true {
-                g.addTask { await earlier(at: k, onto: best, now: now) }
+                g.addTask { await earlier(at: k, onto: best, now: now, further: further) }
             }
             var out: [DoorTrip] = []
             for await r in g { out += r }
@@ -453,15 +479,16 @@ enum Transit {
         }
     }
 
-    private static func earlier(at k: Int, onto best: DoorTrip, now: Date) async -> [DoorTrip] {
+    private static func earlier(at k: Int, onto best: DoorTrip, now: Date, further: Bool = false) async -> [DoorTrip] {
         let r = best.rides[k]
         guard let ta = r.toLat, let to = r.toLon, !r.fromId.isEmpty, r.fromId != "onboard" else { return [] }
         let change = CLLocation(latitude: ta, longitude: to)
         // when you can be there to get on: the walk from where you are (but looking no more than 35 minutes before it),
         // or when the ride before gets you there and the walk across
         let canBoard: Date
+        let reach = now.addingTimeInterval(Double(r.walkBefore) * 60 + 30)        // (there in time, at the first stop)
         if k == 0 {
-            canBoard = max(now.addingTimeInterval(Double(r.walkBefore) * 60 + 30), r.departure.addingTimeInterval(-35 * 60))
+            canBoard = max(further ? now.addingTimeInterval(60) : reach, r.departure.addingTimeInterval(-35 * 60))
         } else {
             canBoard = best.rides[k - 1].arrival.addingTimeInterval(Double(max(2, r.walkBefore + 1)) * 60)
         }
@@ -477,7 +504,7 @@ enum Transit {
         let q: [URLQueryItem] = [.init(name: "stopId", value: r.fromId), .init(name: "time", value: iso.string(from: canBoard.addingTimeInterval(-60))),
                                  .init(name: "n", value: "40"), .init(name: "fetchStops", value: "true")]
         guard let json = try? await get("/v6/stoptimes", q) as? [String: Any], let list = json["stopTimes"] as? [[String: Any]] else { return [] }
-        var out: [DoorTrip] = [], seen = Set<String>()
+        var out: [DoorTrip] = [], seen = Set<String>(), late = 0
         for st in list {
             let p = st["place"] as? [String: Any] ?? [:]
             guard let id = st["tripId"] as? String, id != r.tripId, seen.insert(id).inserted,
@@ -506,8 +533,11 @@ enum Transit {
             var rides = best.rides
             rides[k] = ride
             let start = k == 0 ? dep.addingTimeInterval(-Double(r.walkBefore) * 60) : best.start
+            // (one you can't be at this stop for: only to get on further along, at most two of those)
+            let tooLate = k == 0 && dep < reach
+            if tooLate { guard late < 2 else { continue }; late += 1 }
             out.append(DoorTrip(rides: rides, start: start, end: best.end))
-            if out.count >= (k == 0 ? 3 : 2) { break }
+            if out.count - late >= (k == 0 ? 3 : 2) { break }
         }
         return out
     }
@@ -782,6 +812,34 @@ enum Transit {
             if let s = stop(l["to"] as? [String: Any], "arrival") { out.append(s) }
         }
         return out
+    }
+
+    /// Every stop of one trip where it leaves from, with its stop id, its (live) departure, its platform and whether you
+    /// may get on there: for where to get on (`BoardAt`, 0.25.1). Nil: no answer.
+    static func boardStops(_ tripId: String, maxAge: TimeInterval? = nil) async -> [BoardAt.Stop]? {
+        guard let data = await tripAnswer(tripId, maxAge: maxAge),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let legs = json["legs"] as? [[String: Any]] else { return nil }
+        var out: [BoardAt.Stop] = []
+        func stop(_ o: [String: Any]?) -> BoardAt.Stop? {
+            guard let o, let la = o["lat"] as? Double, let lo = o["lon"] as? Double else { return nil }
+            let pickup = (o["pickupType"] as? String) ?? "NORMAL"
+            let cancelled = (o["cancelled"] as? Bool) ?? false
+            let id: String = (o["stopId"] as? String) ?? ""
+            let name: String = (o["name"] as? String) ?? ""
+            var s = BoardAt.Stop(id: id, name: name, point: GeoPoint(lat: la, lon: lo), departure: date(o["departure"]))
+            s.scheduledDeparture = date(o["scheduledDeparture"])
+            s.track = o["track"] as? String
+            s.scheduledTrack = o["scheduledTrack"] as? String
+            s.boarding = pickup != "NOT_ALLOWED" && !cancelled
+            return s
+        }
+        for l in legs {
+            if out.isEmpty, let s = stop(l["from"] as? [String: Any]) { out.append(s) }
+            for o in (l["intermediateStops"] as? [[String: Any]]) ?? [] { if let s = stop(o) { out.append(s) } }
+            if let s = stop(l["to"] as? [String: Any]) { out.append(s) }
+        }
+        return out.count >= 2 ? out : nil
     }
 
     /// A bus or train's whole trip with its live times and the road it takes, for the live map.
