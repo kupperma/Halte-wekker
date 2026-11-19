@@ -31,6 +31,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     @Published private(set) var phase: Phase = .idle {
         didSet {
             // the home screen's stills (some 25 MB decoded) aren't kept while a trip runs; back when it's over
+            LiveStore.rideOn = phase != .idle     // (the home's own on-board look waits while a trip runs)
             if oldValue == .idle, phase != .idle { StillCache.shared.purge() }
             else if oldValue != .idle, phase == .idle, UIApplication.shared.applicationState != .background { StillCache.shared.warm() }
         }
@@ -180,6 +181,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     private var candLead: (id: String, n: Int)?
     private var candSwitch = SwitchState()                // the matcher: who has been beating the one it shows, since when
     private var candMisses: [String: Int] = [:]           // …and the looks in a row each one failed
+    private var candGPS = GPSChoice()                     // …and what their own GPS said (0.26.1): it decides, not "planned"
     private var candTimedOut: TimedOut?                   // the last choice that ran out of time, between which ones
     private var candCheckAt = Date.distantPast
     private var resolving = false
@@ -403,7 +405,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         vehicleStops = []; matchMeters = nil; pickedByHand = false; byTimetable = false; startDistance = nil
         handLock = nil; stillOnAsk = nil
         roadOf = nil; offRoad = 0; farLooks = 0; sameCheckAt = Date().addingTimeInterval(45)
-        cands = []; choosing = []; candSince = nil; candLead = nil; candSwitch = SwitchState(); candMisses = [:]; candTimedOut = nil
+        cands = []; choosing = []; candSince = nil; candLead = nil; candSwitch = SwitchState(); candMisses = [:]; candTimedOut = nil; candGPS = GPSChoice()
         legClosest = nil; awayLooked = false
         transferAnchor = nil; changeSince = nil; finishedAt = nil; finishTask?.cancel(); finishTask = nil
         backstopHit = false; sameOK = nil
@@ -574,6 +576,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
 
     func endTrip() {
         if phase != .idle, !demo { BatteryMeter.rideEnd(legs: max(1, index - startedAtLeg + 1)) }   // its line in the field log
+        if phase != .idle, let v = vehicle { HomeActions.rideEnded(on: v) }   // (the home doesn't start it again by itself)
         activityLater?.cancel(); activityLater = nil
         farTask?.cancel(); farTask = nil
         detectTask?.cancel(); detectTask = nil
@@ -587,7 +590,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         route = nil; legs = []; distance = nil; arrival = nil; next = nil; vehicle = nil; legArrival = nil; arrivedAt = nil
         upcoming = []; upcomingAt = nil; upcomingError = nil; upcomingKey = ""; upcomingBoard = []; upcomingAsOf = nil; vehicleStops = []; matchMeters = nil; speed = nil; currentSpeed = nil; startDistance = nil
         roadOf = nil; offRoad = 0; farLooks = 0; boardAlternatives = []
-        cands = []; choosing = []; candSince = nil; candLead = nil; candSwitch = SwitchState(); candMisses = [:]; candTimedOut = nil
+        cands = []; choosing = []; candSince = nil; candLead = nil; candSwitch = SwitchState(); candMisses = [:]; candTimedOut = nil; candGPS = GPSChoice()
         legFrom = nil; legTo = nil; maxDistance = nil
         handLock = nil; stillOnAsk = nil; pickAgain = false; headsignOf = [:]
         let a = activity, e = endedActivity; activity = nil; endedActivity = nil
@@ -1620,7 +1623,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         guard phase == .sleeping || phase == .awake, index == p.leg, route?.id == p.routeId else { return }
         let old = vehicle
         detectTask?.cancel(); detectTask = nil
-        cands = []; choosing = []; candSince = nil; candLead = nil; candSwitch = SwitchState(); candMisses = [:]
+        cands = []; choosing = []; candSince = nil; candLead = nil; candSwitch = SwitchState(); candMisses = [:]; candGPS.restart()
         roadOf = nil; offRoad = 0; farLooks = 0; heldPick = nil; heldFromPlan = false
         pickedByHand = true; byTimetable = false; matchMeters = nil
         // (its own times come with its stops; until then the timetable's)
@@ -1660,7 +1663,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         guard phase == .sleeping || phase == .awake, leg != nil else { return }
         let old = vehicle
         detectTask?.cancel(); detectTask = nil
-        cands = []; choosing = []; candSince = nil; candLead = nil; candSwitch = SwitchState(); candMisses = [:]
+        cands = []; choosing = []; candSince = nil; candLead = nil; candSwitch = SwitchState(); candMisses = [:]; candGPS.restart()
         roadOf = nil; offRoad = 0; farLooks = 0; heldPick = nil; heldFromPlan = false
         vehicle = nil; vehicleStops = []; matchMeters = nil; byTimetable = false; pickedByHand = true
         legArrival = nil; legFrom = nil; legTo = nil
@@ -1846,6 +1849,12 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
                                                               gpsAge: mine?.evidence?.gpsAge, instead: instead))
             verdict = .passes; keptNote = " · by GPS"
         }
+        // its own GPS fitted a moment ago (0.26.1): a failure by its times alone is not sure, not a miss (so it doesn't
+        // go looking for another one, and flip back to the one it just left, while the bus's GPS feed is quiet)
+        VehicleMatch.noteGPSFits(judged, into: &candGPS.fitAt, now: now)
+        if verdict == .fails, !away, let m = mine, VehicleMatch.softened(m, fitAt: candGPS.fitAt[v.tripId], now: now) {
+            verdict = .notSure; keptNote = " · its GPS fitted a moment ago"
+        }
         if verdict != .fails {
             if verdict == .passes { offRoad = 0 }            // not sure yet, on its road: neither a miss nor a reset
             FieldLog.shared.add(.match, FieldFormat.match("same bus", judged, outcome: "keep \(shown)" + (verdict == .notSure ? ", not sure" : "") + keptNote,
@@ -1902,7 +1911,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         guard list.count > 1, !demo, !pickedByHand, HandLock.autoSwitch(handLock, leg: index) else { cands = []; choosing = []; return }
         cands = list.map { Candidate(vehicle: $0) }
         choosing = list
-        candSince = Date(); candLead = nil; candSwitch = SwitchState(); candMisses = [:]
+        candSince = Date(); candLead = nil; candSwitch = SwitchState(); candMisses = [:]; candGPS.restart()
         candCheckAt = Date().addingTimeInterval(8)
         applyGPS()                                            // (choosing: the best GPS, at once)
     }
@@ -1983,13 +1992,15 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         let away = VehicleMatch.offRoad(road, isTrain: mine?.vehicle.isTrain ?? false)
         let c = VehicleMatch.choose(list.map(\.vehicle.tripId), judged: judged, shown: shown, shownOffRoad: away,
                                     choosingFor: candSince.map { now.timeIntervalSince($0) } ?? 0,
-                                    misses: &candMisses, state: &candSwitch, now: now)
+                                    misses: &candMisses, state: &candSwitch, gps: &candGPS, now: now)
         let lines = Dictionary(list.map { ($0.vehicle.tripId, $0.vehicle.line) }, uniquingKeysWith: { a, _ in a })
         var note = ""
         if away, VehicleMatch.verdict(judged.first(where: { $0.id == shown })?.result, offRoad: false) == .notSure { note += " · off its road" }
         switch c.why {
         case .onlyOneLeft?: note += " · the only one left"
         case .timedOut?: note += " · 12 minutes"
+        case .byGPS?: note += " · by its GPS"
+        case .split?: note += " · roads split"
         case .decided?, nil: break
         }
         FieldLog.shared.add(.match, FieldFormat.match("choose", judged, outcome: FieldFormat.outcome(c, shown: shown, lines: lines) + note,
@@ -2005,7 +2016,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
 
     /// Sure now: the one it showed (just stop saying "checking"), or the other one (switch to it, and tell you).
     private func settle(_ w: Vehicle) async {
-        cands = []; choosing = []; candLead = nil; candSince = nil; candSwitch = SwitchState(); candMisses = [:]
+        cands = []; choosing = []; candLead = nil; candSince = nil; candSwitch = SwitchState(); candMisses = [:]; candGPS.restart()
         offRoad = 0; farLooks = 0; sameCheckAt = Date().addingTimeInterval(30)
         guard let old = vehicle, w.tripId != old.tripId else { pushActivity(force: true); return }
         let urgentAsk = isRiding || going      // on a ride: a pause after a 429 mustn't leave it without stops

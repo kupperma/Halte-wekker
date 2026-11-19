@@ -17,9 +17,12 @@ struct RideViewNew: View {
     @State private var walkTo: WalkTarget?
     @State private var picking = false                  // the "I'm actually on…" sheet (0.20.5)
     @ScaledMetric(relativeTo: .largeTitle) private var big: CGFloat = 96
+    /// Make the ride smaller (0.26.1): to the home, the trip running on, with the ride bar to come back.
+    var minimise: (() -> Void)? = nil
 
     var body: some View {
         VStack(spacing: 0) {
+            if let minimise { smallerRow(minimise) }
             ScrollView {
                 VStack(alignment: .leading, spacing: DS.s16) {
                     if trip.waitingToBoard { boarding } else { riding }
@@ -59,6 +62,24 @@ struct RideViewNew: View {
     }
 
     // MARK: the top
+
+    /// "Home ⌄": the ride made smaller, the home in front (Friends from there), the trip running on.
+    private func smallerRow(_ minimise: @escaping () -> Void) -> some View {
+        HStack {
+            Spacer(minLength: 0)
+            Button(action: minimise) {
+                Label("Home", systemImage: "chevron.down")
+                    .font(DS.subStrong).foregroundStyle(DS.accentText)
+                    .padding(.horizontal, 14).frame(minHeight: DS.hit)
+                    .background(DS.surface, in: Capsule())
+                    .contentShape(Capsule())
+            }
+            .buttonStyle(DSPressStyle())
+            .accessibilityLabel("Make the ride smaller")
+            .accessibilityHint("Opens the home screen. Your trip keeps running, with a bar at the bottom to come back.")
+        }
+        .padding(.horizontal, DS.s16).padding(.top, DS.s8)
+    }
 
     private var legWord: String? { trip.legs.count > 1 ? "Leg \(trip.index + 1) of \(trip.legs.count)" : nil }
 
@@ -767,5 +788,110 @@ struct ChangeBarNew: View {
         }
         .buttonStyle(DSPressStyle())
         .accessibilityHint("Back to your change")
+    }
+}
+
+// MARK: the ride made smaller (0.26.1)
+
+/// Over the home while a trip runs: the line, where to, the next stop and the minutes, and where the wake-up stands.
+/// A tap opens the ride again. The trip itself runs on as before; this only keeps the ride screen's own refresh of
+/// the buses at the stop going (it feeds which one you get on), and opens the ride when it asks you to pick again.
+struct RideBarNew: View {
+    @EnvironmentObject var trip: TripManager
+    let open: () -> Void
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 10)) { tl in
+            bar(now: tl.date)
+        }
+        .dynamicTypeSize(...DynamicTypeSize.accessibility2)
+        .onAppear { if trip.pickAgain { open() } }
+        .onChange(of: trip.pickAgain) { _, p in if p { open() } }
+        .task(id: trip.index) {
+            while !Task.isCancelled {
+                if trip.waitingToBoard { await trip.loadUpcoming() }
+                try? await Task.sleep(nanoseconds: 20_000_000_000)
+            }
+        }
+    }
+
+    private func bar(now: Date) -> some View {
+        let v: Vehicle? = trip.vehicle
+        let to: String = trip.leg?.to.short ?? ""
+        let eta: Date? = trip.legArrival ?? trip.legTo
+        let c: RideAhead.Countdown? = trip.waitingToBoard ? nil : RideAhead.countdown(eta: eta, metres: trip.distance, now: now)
+        let next: TripStop? = trip.waitingToBoard ? nil : trip.nextStop
+        let yours: Bool = next.map { isYourStop($0) } ?? false
+        let nextName: String? = next.map { Fmt.stop($0.name) }
+        let w: RideBar.Wake = RideBar.wake(awake: trip.phase == .awake, waitingToBoard: trip.waitingToBoard, vehicleKnown: v != nil,
+                                           byLocation: trip.handLock != nil, asked: trip.stillOnAsk != nil)
+        let wake: String = RideBar.wakeText(w, ringAtStop: trip.ringAtStop)
+        let title: String = RideBar.title(vehicle: v?.title, to: to)
+        let detail: String = RideBar.detail(next: nextName, yours: yours, countdown: c)
+        let spoken: String = RideBar.spoken(title: title, next: nextName, yours: yours, countdown: c, wake: wake)
+        return Button(action: open) {
+            content(v: v, title: title, detail: detail, wake: wake, w: w)
+        }
+        .buttonStyle(DSPressStyle())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(spoken)
+        .accessibilityHint("Opens your ride")
+        .accessibilityAddTraits(.isButton)
+    }
+
+    private func content(v: Vehicle?, title: String, detail: String, wake: String, w: RideBar.Wake) -> some View {
+        HStack(spacing: DS.s12) {
+            badge(v)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(DS.bodyStrong).foregroundStyle(DS.text).lineLimit(2)
+                if !detail.isEmpty {
+                    Text(detail).font(DS.footnote).monospacedDigit().foregroundStyle(DS.secondary).lineLimit(2)
+                }
+                Label(wake, systemImage: icon(w)).font(DS.footnoteStrong).foregroundStyle(tint(w)).lineLimit(2)
+            }
+            Spacer(minLength: 4)
+            Image(systemName: "chevron.up").font(.body.weight(.bold)).foregroundStyle(DS.accentText)
+                .frame(minWidth: DS.hit, minHeight: DS.hit)
+        }
+        .padding(.leading, DS.s16).padding(.trailing, DS.s8).padding(.vertical, 10)
+        .frame(minHeight: DS.cta)
+        .background(DS.surface, in: RoundedRectangle(cornerRadius: DS.cardRadiusSmall, style: .continuous))
+        .shadow(color: .black.opacity(0.18), radius: 10, y: 4)
+        .padding(.horizontal, DS.edge).padding(.bottom, 4)
+    }
+
+    @ViewBuilder private func badge(_ v: Vehicle?) -> some View {
+        if let v {
+            DSLinePill(line: v.isTrain ? Transit.trainLabel(v.line) : v.line, train: v.isTrain)
+        } else {
+            let train: Bool = trip.leg?.mode == .train
+            Image(systemName: train ? "tram.fill" : "bus.fill").font(.body.weight(.bold)).foregroundStyle(DS.onAccent)
+                .frame(width: 36, height: 36).background(DS.mode(train: train), in: Circle())
+        }
+    }
+
+    private func icon(_ w: RideBar.Wake) -> String {
+        switch w {
+        case .question: return "questionmark.circle.fill"
+        case .boarding: return "clock"
+        case .finding: return "location.magnifyingglass"
+        case .sleeping: return "bell.fill"
+        case .awake: return "bell.and.waves.left.and.right.fill"
+        }
+    }
+
+    private func tint(_ w: RideBar.Wake) -> Color {
+        switch w {
+        case .question, .awake: return DS.warning
+        case .boarding, .finding, .sleeping: return DS.accentText
+        }
+    }
+
+    /// The ride screen's own test (`RideViewNew.isYourStop`): its time is your stop's, or it's within 300 m of it.
+    private func isYourStop(_ n: TripStop) -> Bool {
+        if let t = n.arrival, let mine = trip.legTo, t == mine { return true }
+        guard let to = trip.leg?.to.coordinate else { return false }
+        let here = CLLocation(latitude: n.coordinate.latitude, longitude: n.coordinate.longitude)
+        return here.distance(from: CLLocation(latitude: to.latitude, longitude: to.longitude)) < 300
     }
 }

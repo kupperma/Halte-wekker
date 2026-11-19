@@ -26,6 +26,26 @@ struct RootView: View {
     /// The stop alarm is ringing: nothing goes over it.
     private var alarming: Bool { if case .alarm = trip.phase { return true }; return false }
 
+    /// The ride screen made smaller (0.26.1): the home in front with the ride bar, the trip running on. For this trip
+    /// only (a new one opens full), and never over the alarm (its phase has its own screen).
+    @State private var rideSmall = false
+
+    /// On a ride: the ride screen, or (new look, made smaller) the home with the ride bar to come back.
+    @ViewBuilder private var rideScreen: some View {
+        if newLook && rideSmall {
+            NewHome()
+                .safeAreaInset(edge: .bottom) {
+                    RideBarNew { withAnimation(.easeInOut(duration: 0.3)) { rideSmall = false } }
+                }
+                .transition(.opacity)
+        } else if newLook {
+            RideViewNew(minimise: { withAnimation(.easeInOut(duration: 0.3)) { rideSmall = true } })
+                .transition(.opacity)
+        } else {
+            RideView()
+        }
+    }
+
     /// Morning screen › Go hands-free: Fastest trip to your first class.
     private func morningGo(_ p: SchoolAlarm.Planned) {
         withAnimation(.easeInOut(duration: 0.35)) { morning.showing = false }
@@ -52,11 +72,14 @@ struct RootView: View {
             case .transfer, .finished:
                 if newLook { ArrivalViewNew(browse: { withAnimation(.easeInOut(duration: 0.3)) { browsing = true } }) }
                 else { ArrivalView(browse: { withAnimation(.easeInOut(duration: 0.3)) { browsing = true } }) }
-            default: if newLook { RideViewNew() } else { RideView() }
+            default: rideScreen
             }
         }
         .onChange(of: trip.phase) { _, p in
             if p != .transfer { browsing = false }
+            // the ride made smaller holds for this trip only; the alarm takes the screen and the ride opens full after it
+            let ringing: Bool = { if case .alarm = p { return true }; return false }()
+            rideSmall = RideBar.keepsSmall(rideSmall, rideOn: p != .idle, alarm: ringing)
             if p != .idle && go.isOpen { go.close() }        // a trip started: the ride screen takes over
         }
         .animation(.easeInOut(duration: 0.35), value: go.isOpen)
