@@ -1,6 +1,8 @@
 package nl.haltewekker.data
 
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import nl.haltewekker.core.GeoPoint
@@ -30,7 +32,10 @@ object Transit {
     private class Kept(val at: Double, val trips: List<DoorTrip>)
     private val plans = ConcurrentHashMap<String, Kept>()
 
-    suspend fun plan(from: String, to: String, at: Double, count: Int = 5, maxTransfers: Int = 4, arriveBy: Boolean = false): List<DoorTrip> {
+    suspend fun plan(from: String, to: String, at: Double, count: Int = 5, maxTransfers: Int = 4, arriveBy: Boolean = false): List<DoorTrip> =
+        withContext(Dispatchers.Default) { planHere(from, to, at, count, maxTransfers, arriveBy) }
+
+    private suspend fun planHere(from: String, to: String, at: Double, count: Int, maxTransfers: Int, arriveBy: Boolean): List<DoorTrip> {
         val minute = Math.floor(at / 60) * 60
         val key = "$from>$to@$minute|$count|$maxTransfers|$arriveBy"
         val now = Iso.now()
@@ -69,25 +74,28 @@ object Transit {
     suspend fun stopChoices(c: GeoPoint): List<NearStop>? = ask("/v1/map/stops", box(c, 0.008, 0.012))?.let { TransitParse.stopChoices(it, c) }
 
     /** The departure boards of stops, soonest first. */
-    suspend fun board(stopIds: List<String>, n: Int = 20): List<BoardDeparture> = coroutineScope {
+    suspend fun board(stopIds: List<String>, n: Int = 20): List<BoardDeparture> = withContext(Dispatchers.Default) {
         stopIds.distinct().map { id ->
             async { ask("/v6/stoptimes", listOf("stopId" to id, "n" to "$n"))?.let { TransitParse.parseStopTimes(it, id) } ?: emptyList() }
         }.awaitAll().flatten().sortedBy { it.time }
     }
 
     /** Vehicles running in a box now and in the next minutes (the live map; matching). */
-    suspend fun vehicles(min: GeoPoint, max: GeoPoint, back: Double = 60.0, ahead: Double = 240.0, allTrips: Boolean = false): List<VehicleSegment> {
+    suspend fun vehicles(min: GeoPoint, max: GeoPoint, back: Double = 60.0, ahead: Double = 240.0, allTrips: Boolean = false): List<VehicleSegment> =
+        withContext(Dispatchers.Default) {
         val now = Iso.now()
         val q = listOf("min" to "${min.lat},${min.lon}", "max" to "${max.lat},${max.lon}",
             "startTime" to Iso.format(now - back), "endTime" to Iso.format(now + ahead), "zoom" to "15")
-        return ask("/v1/map/trips", q)?.let { TransitParse.parseMapTrips(it, allTrips) } ?: emptyList()
+        ask("/v1/map/trips", q)?.let { TransitParse.parseMapTrips(it, allTrips) } ?: emptyList()
     }
 
     private class KeptTrip(val at: Double, val trip: TransitParse.LiveTrip)
     private val trips = ConcurrentHashMap<String, KeptTrip>()
 
     /** One trip with its live times, remembered for `maxAge` seconds. */
-    suspend fun trip(tripId: String, maxAge: Double = 20.0): TransitParse.LiveTrip? {
+    suspend fun trip(tripId: String, maxAge: Double = 20.0): TransitParse.LiveTrip? = withContext(Dispatchers.Default) { tripHere(tripId, maxAge) }
+
+    private suspend fun tripHere(tripId: String, maxAge: Double): TransitParse.LiveTrip? {
         val now = Iso.now()
         trips[tripId]?.let { if (now - it.at < maxAge) return it.trip }
         val t = ask("/v5/trip", listOf("tripId" to tripId))?.let(TransitParse::parseTrip) ?: return trips[tripId]?.trip

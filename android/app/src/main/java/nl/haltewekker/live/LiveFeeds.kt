@@ -1,7 +1,9 @@
 package nl.haltewekker.live
 
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import nl.haltewekker.core.Iso
 import nl.haltewekker.data.Net
 
@@ -25,7 +27,7 @@ object LiveFeeds {
         private set
 
     /** OVapi's bus (and tram, metro) positions: fresh enough for `maxAge` seconds, else fetched now. */
-    suspend fun busFixes(maxAge: Double = RealPositions.EVERY): Map<String, GPSFix> = busLock.withLock {
+    suspend fun busFixes(maxAge: Double = RealPositions.EVERY): Map<String, GPSFix> = withContext(Dispatchers.Default) { busLock.withLock {
         val now = Iso.now()
         if (now >= busState.next) {
             val a = Net.get(RealPositions.FEED_URL, etag = busState.etag)
@@ -39,10 +41,10 @@ object LiveFeeds {
             busState.next = now + maxOf(maxAge, RealPositions.backoff(busState.failures))
         }
         buses.fixes
-    }
+    } }
 
     /** NS's positions of every train, through the relay (no place of yours goes with it). */
-    suspend fun trainFixes(maxAge: Double = RealPositions.EVERY): Map<Int, GPSFix> = trainLock.withLock {
+    suspend fun trainFixes(maxAge: Double = RealPositions.EVERY): Map<Int, GPSFix> = withContext(Dispatchers.Default) { trainLock.withLock {
         val now = Iso.now()
         if (now >= trainState.next) {
             val a = Net.get(RealPositions.RELAY + RealPositions.TRAINS_PATH, etag = trainState.etag)
@@ -59,5 +61,5 @@ object LiveFeeds {
             trainState.next = now + maxOf(maxAge, RealPositions.backoff(trainState.failures))
         }
         trains
-    }
+    } }
 }

@@ -24,6 +24,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import nl.haltewekker.App
 import nl.haltewekker.core.Geo
 import nl.haltewekker.core.GeoPoint
@@ -91,7 +92,13 @@ class RideService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (!goForeground()) return START_NOT_STICKY
+        if (!goForeground()) {
+            // Not allowed to follow location now (started from the background without "all the time"): the backup
+            // alarm still rings, from here, and the alarm screen brings the app to the front.
+            if (intent?.action == ACTION_BACKUP && RideStore.state.value?.phase == Phase.SLEEPING) ring("backup alarm by time")
+            stopSelf()
+            return START_NOT_STICKY
+        }
         if (RideStore.state.value == null) { stopRide(); return START_NOT_STICKY }
         when (intent?.action) {
             ACTION_STOP_ALARM -> stopAlarm()
@@ -113,7 +120,6 @@ class RideService : Service() {
         } catch (e: Exception) {
             // no location permission (Android 14 needs it for a location service), or not allowed from the background
             RideStore.update(this) { it.copy(note = "Couldn't follow your ride: location isn't allowed.") }
-            stopSelf()
             false
         }
     }
@@ -187,7 +193,9 @@ class RideService : Service() {
                 if (s.vehicleTripId == null && s.phase == Phase.SLEEPING) {
                     val moving = OnBoardRules.movingByTrack(fixes.toList(), now)
                     if (moving || fixes.size >= 3) {
-                        val f = look.look(fixes.toList(), leg, now, app.store.settings.value.realPositions)
+                        val mine = fixes.toList()
+                        val real = app.store.settings.value.realPositions
+                        val f = withContext(Dispatchers.Default) { look.look(mine, leg, now, real) }
                         if (f != null) RideStore.update(this) {
                             it.copy(vehicleTripId = f.tripId, vehicleLine = f.line,
                                 vehicleSource = if (f.byGPS || moving) VehicleSource.BY_GPS else VehicleSource.BY_TIMES)
