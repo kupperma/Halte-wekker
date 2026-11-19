@@ -7,8 +7,15 @@
   // Keep variables set in the Cloudflare dashboard when deploying from GitHub.
   "keep_vars": true,
   // Friends (0.25): one Durable Object per account, with SQLite storage (works on the free plan, nothing to set up).
+  // Shared ride logs (0.28.1): one more, "Logs", that keeps the uploads 60 days.
   "durable_objects": {
-    "bindings": [{ "name": "FRIENDS", "class_name": "Friends" }]
+    "bindings": [
+      { "name": "FRIENDS", "class_name": "Friends" },
+      { "name": "LOGS", "class_name": "Logs" }
+    ]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Friends"] }]
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["Friends"] },
+    { "tag": "v2", "new_sqlite_classes": ["Logs"] }
+  ]
 }

@@ -8,13 +8,25 @@
 // 6. Friends (0.25): end-to-end encrypted mailboxes under /f/v1/… and the share-link page /add (see friends.js);
 //    0.26 adds the latest "travelling now" states (/f/v1/state/…).
 //    Stored in a Durable Object with SQLite storage, declared in wrangler.jsonc: nothing to set up by hand.
+// 7. Shared ride logs (0.28.1, opt-in in the app): /logs/v1/put, /logs/v1/delete, and /logs/v1/export for the
+//    developer, which needs the secret LOGS_ADMIN_KEY (see docs/logs-export.md and logs.js).
 import { DurableObject } from "cloudflare:workers";
 import { friends, FriendsCore } from "./friends.js";
+import { logs, LogsCore } from "./logs.js";
 
 export class Friends extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
     this.core = new FriendsCore(ctx, env);
+  }
+  fetch(request) { return this.core.fetch(request); }
+  alarm() { return this.core.alarm(); }
+}
+
+export class Logs extends DurableObject {
+  constructor(ctx, env) {
+    super(ctx, env);
+    this.core = new LogsCore(ctx, env);
   }
   fetch(request) { return this.core.fetch(request); }
   alarm() { return this.core.alarm(); }
@@ -29,6 +41,9 @@ export default {
     if (request.method === "OPTIONS") return new Response(null, { headers: cors });
     const url = new URL(request.url);
     if (url.pathname.startsWith("/f/") || url.pathname === "/add") return friends(request, env, url);
+    if (url.pathname.startsWith("/logs/")) {
+      try { return await logs(request, env, url); } catch (e) { return new Response("relay error", { status: 500 }); }
+    }
     // The key may be saved as NS_KEY or NS-KEY.
     const NS_KEY = env.NS_KEY || env["NS-KEY"];
 
