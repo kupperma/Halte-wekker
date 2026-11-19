@@ -275,7 +275,7 @@ standard: Ed25519 (RFC 8032), X25519 (RFC 7748), HKDF-SHA256 (RFC 5869), ChaCha2
 - **Flow**: scanning/opening a code sends `request` (+ `picture`). The other side accepts → `accept` (+ `picture`); both
   asking → friends. Decline is silent (optionally block). Remove = `drop`, then `unfriend`. A new name → `profile` to
   every friend.
-- **Adding kinds** (0.26 `travel` with slot `travel` and a short ttl; 0.27 `message`, `trip`, groups with `g` and one
+- **Adding kinds** (0.26 `travel`, as built: through the state routes, see As built (0.26); 0.27 `message`, `trip`, groups with `g` and one
   box per member in one send; 0.28 `timetable`/`area` in slots): a case and body in `FriendMessage`, add it to
   `FriendMessage.known` and raise `FriendMessage.kindsVersion` (the app then reads its mailbox from the start once, so
   boxes an older version left unacked are read).
@@ -312,3 +312,86 @@ standard: Ed25519 (RFC 8032), X25519 (RFC 7748), HKDF-SHA256 (RFC 5869), ChaCha2
 - Entry: Next trip first's bottom bar (Friends replaced Search; the top field still opens Plan), a round button under
   Your week on Live around you, Settings › Friends; badges count requests waiting. Follows the phone's light or dark.
 - Not yet: friends' pictures aren't in the vault (after a restore they come back when a friend changes theirs).
+
+## As built (0.26)
+
+What 0.26.0 (build 111) adds: "Travelling now" and the coach. Everything in "As built (0.25)" holds unchanged; this
+only adds a box kind, three relay routes and one field in the friend list.
+
+### When a trip is shared (`FriendTravel.swift`, `TravelShareRules`)
+- Only while a trip runs (riding, waiting at the first stop, or at a change; not after the last stop) and once you're
+  **confirmed on board** for that trip: you started it yourself, or the app matched your bus/train (a vehicle, none
+  left to choose between, not "by its timetable"), or you picked it / said "I'm on it" / "none of these". Once
+  confirmed it stays so until the trip ends. Never the demo ride.
+- Only after the **one-time screen** is answered (it comes up in Friends with the first friend, and on the ride screen
+  as a note once you're on board): what friends see and when, with the switch right there (on by default; off = paused).
+- To each friend whose **"Show my trips"** switch is on (the default) unless **paused for everyone** (Friends › Your
+  trips). A switch turned off mid-trip takes the state back from that friend at the next send.
+- Sent on the ride's existing 30 s network tick when 55 s have gone by since the last one, and at once (2 s after it
+  settles) when the leg, the vehicle, the stage or the coach changes. No loop of its own; the trip, alarm, wake-at-stop,
+  Live Activity and matching only get read. When the trip ends (or sharing goes off) the app calls
+  `/f/v1/state/clear`; if that fails it tries again at the next check, and the relay drops it by itself anyway.
+- On the same tick (at most once a minute, only with friends) it reads friends' states; also on every check of the
+  relay (app to the front, every 30 s while Friends is open, the background refresh).
+
+### The `travel` box
+- A normal box (0.25 format), kind `travel`, sent only through the state routes below, never the mailbox (a `travel`
+  box found in a mailbox is acknowledged and ignored). `FriendMessage.kindsVersion` is 2.
+- Opened only from a **friend** (not a request); anything else is skipped.
+- Body (`b`), every key but `state`, `mode`, `from`, `to` optional:
+  - `state`: `"riding"` | `"waiting"` (the trip runs, still at the stop) | `"change"` (between two legs; `from`/`to`
+    and the line are then the *next* leg's). An unknown value reads as `riding`.
+  - `mode`: `"train"` | `"bus"` (a newer app may add `"tram"`, `"metro"`, `"ferry"`).
+  - `line` (as shown: `"IC"`, `"SPR"`, `"306"`), `num` (a train's number, `"3512"`), `trip` (the vehicle's trip id as
+    Transitous names it: the same id is the same vehicle).
+  - `from`, `to`, `dest` (the trip's end when it isn't `to`): `{"name", "lat"?, "lon"?}`. Home is never sent as a
+    place: it goes as `{"name":"Home"}` without coordinates.
+  - `eta` (arrival at `to`), `end` (arrival at the trip's end): unix seconds.
+  - `pos`: `{"lat","lon","acc"?,"at"}`, the phone's last GPS fix (5 decimals, at most 5 minutes old, accuracy under
+    500 m), `at` in unix seconds.
+  - `leg`, `legs`: this leg (1-based) of how many.
+  - `coach`: `{"n","of","front","at"?}`: coach `n` of `of`; `front: true` = counted from the front (the direction the
+    train goes, from NS's `rijrichting`), else counted from the left of NS's drawing at station `at` (NS code).
+- Freshness (`TravelAge`): fresh while the box's time (`t`, but never later than the relay's `at`) is at most 150 s
+  old; then shown greyed as "Last update 08:41"; gone after the relay's `exp`, 600 s, or 20 min past `end`/`eta`.
+
+### Relay routes (signed like every 0.25 route; `relay/friends.js`)
+- `/f/v1/state/put {"states":[{"to": account, "data": b64u(box), "ttl"?: seconds}]}` →
+  `{"results":[{"to","ok","error"?}]}`. 1–50 per request, each box ≤ 16 KB decoded, ttl 60–900 s (default 300; the app
+  sends 360). Replaces your previous state at that friend. The same friend twice in one request: `bad_to`. A friend
+  who blocked you: refused quietly (`ok`). An unknown account: `unknown_account`. 3000 states/hour per account; an
+  account holds at most 500 states (507 `inbox_full`).
+- `/f/v1/state/get {}` → `{"states":[{"from","at","exp","data"}]}`, newest first. Reading doesn't delete (each one is
+  replaced by the next or expires). States are not in the mailbox and don't count against its limits.
+- `/f/v1/state/clear {"to"?: [account]}` → `{"cleared"}`: takes your state back from those friends; without `to`, from
+  everyone you left one with (the relay remembers where, until it expires).
+- `drop` and `block` take the states between the two accounts too; `leave` takes yours back first.
+
+### The friend list
+- A friend may carry `"trips": false` ("Show my trips" off); absent means on. It's in the vault like the rest.
+
+### The coach (`CoachMap`)
+- NS's `/ns/train?num=&station=` drawing: units (`materieeldelen`, each with its `bakken`), platform letters and
+  `rijrichting` (`LINKS`: the front is drawn on the left; `RECHTS`: on the right). A unit's coaches are its `bakken`
+  count (if NS leaves them out: the train's `lengte` shared out by unit length, at least one).
+- Your coach is numbered from the front when the direction is known. Label: "Coach 3 of 6 · front" (halves; the
+  middle coach of an odd train is "middle"), or "Coach 3 of 6" without a direction.
+- A friend on the same train (their trip id is the vehicle you're on, or a leg of yours still to come) gets NS's
+  drawing for *their own* boarding station, finds coach `n` from the front there, and the platform letter nearest
+  its middle: "Wait near B, at the front end of the platform". Without letters: "Coach 3 from the front".
+
+### Test vectors (Node's crypto; checked in `ios/Tests/FriendTravelVectorTests.swift`)
+- A travel box from Sam to Lou (keys as in 0.25): payload (exact bytes)
+  `{"b":{"coach":{"at":"EHV","front":true,"n":3,"of":6},"end":1800004200,"eta":1800003780,"from":{"lat":51.44306,"lon":5.47917,"name":"Eindhoven Centraal"},"leg":2,"legs":2,"line":"IC","mode":"train","num":"3512","pos":{"acc":12,"at":1799999990,"lat":51.5112,"lon":5.2874},"state":"riding","to":{"lat":51.59556,"lon":4.78,"name":"Breda"},"trip":"vector-trip-3512"},"f":"3c157621a97cf055f5804a9826c6d1e1","k":"travel","n":"vector-2","t":1800000000,"v":1}`; signature (b64u) `7PkPXX1XZcPuaJGBWjjmWJhPZv2Z8FlixA7Ddq0nx8x0mU2Gy6q90ZPGYeE7TaryRZL9mhCFNzpPBlSHfhilCw`; eph_priv `606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f`
+  (ephPub `675dd574ed7789310b3d2e7681f3790b466c773b1521fecf36577958371ea52f`); nonce `808182838485868788898a8b`; box key `05c9590bb92a41d682e8ac3bf021bf56cf37208db21837c8f04264fb85e4da5c`; box (b64u):
+  `AWdd1XTtd4kxCz0udoHzeQtGbHc7FSH-zzZXeVg3HqUvgIGCg4SFhoeIiYqLZXWLBco9z3tfobhx5IFO49FI_IR1QXGidybz-bpO_guAfOgz4G8oLdQIaF5b0bBOaJAf1w41CGfhpE6u9ABuv3dyd--Hzvkjf8lvET3kp0QXZpaPiGlZG04GLRL7cXaLgoA0WoWBO7mYef611woIfWFo_o2GXLiK8YxMongc9PQd2FIQGmhHo-xyrnK2Vy3FMYRJCpwIVDZFO5rLrLrMqzc278Q2jy7rdH468tESk0304xKQXctnPMSHZ2TDfx4TPlyErsc9DpqkRgv9ErPLJJIZDDpPvEi_-ZdeR8WSxaoQsyplZax_d_QwUpXClUC3J19Dqiz7vzptdwqEUOwhcV6i8hUE4EJ48icVvs226zj6HaYBLOayX6naO12GN2K0VikdEJ6gVq7qFXrO5TozyVPwssFx0wsBT1__KhSyL8PdhQH1rc7IFxJEWEs-vblDYPj3aOrao8LRoq1VSc-YIiE_OBac2LeIKmhBYW8PnYVUd5K4axYnbur2FS2Wqv2bt1jJMwH-1HjNkQ8Pu513wljfQCOC0TXDk-6T5TEtxUU9n2c7qnJSmefcV_m5od2Tqvx4yiz3qS9cBnjSmMoMduBGuL1QzHYAuJgQ0e9E7pLcsIFUWoDEWdwlRXxPYrTTkWBUe6A2BiS2qK932vckg-5qkXwc3rVhs4T_FxkakhGpng4J2gKoq-SKAjXprkahwrg`
+- A signed `/f/v1/state/put` by Sam: body `{"states":[{"data":"AWdd1XTtd4kxCz0udoHzeQtGbHc7FSH-zzZXeVg3HqUvgIGCg4SFhoeIiYqLZXWLBco9z3tfobhx5IFO49FI_IR1QXGidybz-bpO_guAfOgz4G8oLdQIaF5b0bBOaJAf1w41CGfhpE6u9ABuv3dyd--Hzvkjf8lvET3kp0QXZpaPiGlZG04GLRL7cXaLgoA0WoWBO7mYef611woIfWFo_o2GXLiK8YxMongc9PQd2FIQGmhHo-xyrnK2Vy3FMYRJCpwIVDZFO5rLrLrMqzc278Q2jy7rdH468tESk0304xKQXctnPMSHZ2TDfx4TPlyErsc9DpqkRgv9ErPLJJIZDDpPvEi_-ZdeR8WSxaoQsyplZax_d_QwUpXClUC3J19Dqiz7vzptdwqEUOwhcV6i8hUE4EJ48icVvs226zj6HaYBLOayX6naO12GN2K0VikdEJ6gVq7qFXrO5TozyVPwssFx0wsBT1__KhSyL8PdhQH1rc7IFxJEWEs-vblDYPj3aOrao8LRoq1VSc-YIiE_OBac2LeIKmhBYW8PnYVUd5K4axYnbur2FS2Wqv2bt1jJMwH-1HjNkQ8Pu513wljfQCOC0TXDk-6T5TEtxUU9n2c7qnJSmefcV_m5od2Tqvx4yiz3qS9cBnjSmMoMduBGuL1QzHYAuJgQ0e9E7pLcsIFUWoDEWdwlRXxPYrTTkWBUe6A2BiS2qK932vckg-5qkXwc3rVhs4T_FxkakhGpng4J2gKoq-SKAjXprkahwrg","to":"65392c81aa86e697083b0960bf107afb","ttl":360}]}` (SHA-256 `0c15ebabfaa77e823f6831b5718b0ed587350e01cd3ca08e842971307246ec57`), device `00112233445566778899aabbccddeeff`,
+  time `1800000000`, nonce `vector-nonce-0002` → signature (b64u) `TYjw9PyrJ_a6Y0ahTV_e6jnPN_YsdfOobgbhBIJXyLtokJQvQOCicQpl-ZnmZPbFJlCmYLw8vXV8YcZl6ikHAQ`.
+
+### App (0.26)
+- `FriendTravelShare` (watches `TripManager`: its published phase, leg, vehicle, choosing, picks; and
+  `onNetTick`, one callback on the ride's network tick), `FriendStore.putTravel / clearTravel / fetchTravel`,
+  `FriendInbox.readStates`.
+- Friends: "Travelling now" on top (a map with their pictures, a row each: "Sam · IC 3512 to Breda · arrives 08:43"),
+  Your trips (the switch for everyone), a friend's page with their trip on the map, their coach, and "Show my trips to
+  Sam". The ride screen (new look): the question once on board, friends on the same vehicle, the coach picker on a train.
