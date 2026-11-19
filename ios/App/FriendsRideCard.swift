@@ -78,6 +78,8 @@ struct RideSeatCard: View {
     let towards: String?
     var friends: [SeatMark] = []
     @ObservedObject private var share = FriendTravelShare.shared
+    /// (0.31.1) Your pick is in 1st class (the picker works it out from the train).
+    @State private var mineFirst = false
 
     private var mine: TravelState.Coach? { share.coachTrip == tripId ? share.coach : nil }
 
@@ -85,12 +87,13 @@ struct RideSeatCard: View {
         VStack(alignment: .leading, spacing: DS.s8) {
             DSHeader(title: "Your seat")
             if let m = mine {
-                Text(SeatMap.label(m)).font(DS.subStrong).foregroundStyle(DS.text).fixedSize(horizontal: false, vertical: true)
+                Text(SeatMap.label(m, firstClass: mineFirst)).font(DS.subStrong).foregroundStyle(DS.text).fixedSize(horizontal: false, vertical: true)
             } else {
                 Text("Tap your coach, then your window: friends on this trip see it, and friends who get on later know where to wait.")
                     .font(DS.footnote).foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
             }
-            TrainSeatPicker(tripId: tripId, station: station, line: line, towards: towards, friends: friends, editable: true)
+            TrainSeatPicker(tripId: tripId, station: station, line: line, towards: towards, friends: friends, editable: true,
+                            onMineFirst: { mineFirst = $0 })
         }
         .dsPanel()
     }

@@ -1157,3 +1157,86 @@ from this text; until then an Android friend's coach just has no window.
   coach and window is a button for VoiceOver ("Coach 3 of 6, from the front, two decks"; "Coach 3, upper deck, window
   8 from the back, your seat"). Yours to set on the ride screen ("Your seat", replacing 0.26's coach strip) and on a
   friend's page when your trip takes that train; otherwise theirs to look at.
+
+## As built (0.31.1)
+
+What 0.31.1 (build 122) adds: **1st class in the seat picker**. Everything in "As built (0.25)" to "(0.31)" holds
+unchanged: no new box kind, no relay change, and **nothing new in the seat**: whether a coach or a window is 1st class
+is worked out by each reader from the train (NS's composition and the table below), never sent. Android ports the
+table and the rules below to show the same.
+
+### Where the class comes from (`SeatClass.swift`, tested in `ios/Tests/SeatClassTests.swift`)
+- NS's `/ns/train?num=&station=&features=zitplaats` (through the relay, as 0.26) gives each unit (`materieeldelen[]`)
+  its `type` ("VIRMm1 VI"), its drawing (`afbeelding`, `https://vt.ns-mlab.nl/v1/images/virmm1_6.png`), its coaches
+  (`bakken`: a list of **empty** objects, nothing per coach) and `zitplaatsen.zitplaatsEersteKlas` (the unit's 1st-class
+  seats). Nothing says which coach the 1st class is in.
+- NS's drawings do: they mark 1st class as the trains do, a "1" by the doors and a thin line along the 1st-class
+  windows, per deck. The table is read off those drawings (November 2026). It's NS's picture, not the real seats, so a
+  part of a coach is shown as "1st class (about here)"; a coach that's 1st class all through as "1st class".
+- The drawing's name: the file name of `afbeelding`, lower case, without ".png" (`icng_B_8.png` → `icng_b_8`); without
+  one, from `type`: lower case, split on anything not a letter or digit, Roman numerals II/III/IV/V/VI/VIII to digits,
+  joined with "_" ("VIRMm1 VI" → `virmm1_6`, "DDZ 4" → `ddz_4`), else with "nsr_" in front ("Flirt 3" →
+  `nsr_flirt_3`).
+- A unit with `zitplaatsEersteKlas` 0: no 1st class (Keolis' Flirts). A drawing not in the table (ICE, GTW, Keolis,
+  Arriva…), or a unit whose `bakken` count isn't the drawing's: not known; the picker says "Where 1st class is in this
+  train isn't known." when no coach of it is known to have 1st class. The guessed train (no NS) knows none.
+
+### The table
+Per drawing: where its coaches meet (shares of the unit's drawn length, from the left), then each coach's 1st-class
+parts as `[a, b]`, shares of that coach from the left of the drawing, on the upper deck (U), the lower deck (L) or
+every deck (no letter). `—`: no 1st class. "All" = `[0, 1]`, the coach is 1st class all through.
+
+| drawing | coach edges | coaches, left to right |
+|---|---|---|
+| `virm_4` | .2523 .5033 .7477 | — · L[.45,.77] · [.22,.54] · — |
+| `virm_6` | .1688 .3323 .4997 .6677 .8312 | — · [.45,.77] · — · [.45,.78] · [.22,.55] · — |
+| `virmm1_4` | as `virm_4` | — · U[.54,.76] L[.46,.76] · U[.22,.44] L[.22,.52] · — |
+| `virmm1_6` | as `virm_6` | — · U[.54,.76] L[.46,.76] · — · U[.54,.76] L[.46,.76] · U[.22,.44] L[.22,.52] · — |
+| `virmm2_4` | as `virm_4` | — · U[.54,.76] · U[.22,.45] L[.22,.53] · — |
+| `virmm2_6` | as `virm_6` | — · U[.54,.76] L[.46,.76] · — · U[.54,.76] · U[.22,.45] L[.22,.53] · — |
+| `ddz_4` | .2648 .5263 .7878 | U[.21,.50] L[.21,.37] · — · U[.59,.78] L[.44,.78] · — |
+| `ddz_6` | .1739 .3456 .5173 .689 .8607 | U[.21,.50] L[.21,.37] · — · U[.59,.78] L[.44,.78] · — · U[.59,.78] L[.44,.78] · — |
+| `icm_3` | .333 .666 | — · [.43,.89] · — |
+| `icm_4` | .2496 .4993 .75 | — · — · **All** · — |
+| `icng_5` | .2159 .3847 .5844 .7841 | — · — · [.25,1] · [0,.32] · — |
+| `icng_8`, `icng_b_8` | .1434 .2555 .3674 .5 .6326 .7445 .8566 | — · — · [.27,1] · [0,.13] · [.87,1] · [0,.67] · — · — |
+| `slt_4` | .2756 .5 .7237 | [.24,.47] · — · — · [.53,.76] |
+| `slt_6` | .1903 .345 .4997 .6545 .8092 | [.24,.47] · — · — · — · — · [.53,.76] |
+| `sng_3` | .3634 .6366 | [.20,.42] · — · — (one end only) |
+| `sng_4` | .2854 .5 .7146 | [.20,.42] · — · — · [.58,.80] |
+| `nsr_flirt_3` | .361 .638 | [.27,.41] · — · [.59,.73] |
+| `nsr_flirt_4` | .2824 .4994 .7164 | [.27,.41] · — · — · [.59,.73] |
+
+### The rules
+- A coach's place in its unit: the picker's coaches (`CoachMap.spots`, as 0.26) by the unit their middle falls in,
+  counted from the unit's left; its parts are the table's for that coach (the drawing is used as NS draws it, the same
+  way round as the train's drawing, like 0.26's coaches).
+- A coach is **1st class all through** when one of its parts is on every deck from ≤ .02 to ≥ .98; **part 1st class**
+  when it has any part; else 2nd class.
+- A window (11 a row, drawn from the left, 0-based `i`) is 1st class when its middle, `(i + 0.5) / 11`, is inside a
+  part on its row's deck (the top row the upper deck, the bottom the lower; a single-deck coach's row takes every part)
+  — or the coach is all 1st class.
+- Your pick (or a friend's) is 1st class when its coach is all 1st class, or its seat's window (`SeatMap.drawnWindow`,
+  scaled to 11 as 0.31) is a 1st-class window in its row. A coach without a window in a part-1st coach is not.
+- Platform letters ("1st class near A, D", 0.24): the zones are now the table's parts as shares of the unit (any deck,
+  merged where they touch) — this fixes the SNG-3, which used to show 1st class at both ends.
+
+### Test vectors (from the relay, 19 November 2026; `2` none, `p` part, `1` all, `?` not known; drawn from the left)
+- IC 3078 at UT (VIRMm1 VI + VIRMm1 IV, `LINKS`): `2p2pp22pp2`. Its coach 2 from the front, upper deck, window 5 from
+  the back is 1st class ("Coach 2 of 10 · upper deck · 5th window from the back · 1st class"); window 1 isn't. The
+  VIRMm1 IV's second coach: upper deck windows 6–7, lower 5–7 (drawn, 0-based).
+- IC 2280 at RTD (VIRM IV + VIRMm1 VI): `2pp22p2pp2`; the VIRM IV's second coach only on the lower deck (5–7).
+- SPR 4982 at UT (SLT 4 + SLT 6): `p22pp2222p`. IC 678 at UT (ICM 3): `2p2`, windows 5–9. IC 2685 at ASD (2× ICM 4):
+  `22122212` ("Coach 3 of 8 · 1st class"). IC 1783 at UT (DDZ 4): `p2p2`, behind the cab upper 2–5, lower 2–3.
+  SPR 5683 at UT (SNG 3): `p22`. IC 1184 at EHV (ICNG 5): `22pp2`. IC 9583 at RTD (ICNG-B 8): `22pppp22`.
+  ICE 120 at UT: `????????`. Keolis 8581 at ZL (0 1st-class seats): `222`.
+
+### App (0.31.1)
+- **Seat picker**: in the side view, 1st-class windows have darker gold glass with a gold frame, and a gold "1" badge
+  on the first window of each run; a coach that's all 1st class has a cream body and a gold "1st class" tag. In the
+  train strip, a part-1st coach has a gold bar where its 1st class is; an all-1st coach is gold, with a "1" by its
+  number. Under it the legend: "[1] = 1st class (about here)" (and "gold coach: all 1st class" when there is one).
+  VoiceOver: "Coach 3 of 8, 1st class", "Coach 2 of 10, from the front, two decks, part 1st class", "…, window 5 from
+  the back, 1st class".
+- **Your seat** (ride screen): "Coach 2 of 10 · upper deck · 5th window from the back · 1st class" when your pick is.
+  A friend's page: "Sam is in coach 3 of 8 · 1st class" the same way (from NS's drawing at the station of their coach).

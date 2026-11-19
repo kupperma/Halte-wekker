@@ -11,6 +11,10 @@ struct TrainUnit: Hashable {
     /// (0.31) Its type as NS names it ("VIRM-6", "SNG-3"; else its drawing's name, "virm_6"), for the seat picker's
     /// decks ("" not known).
     var kind: String = ""
+    /// (0.31.1) Its drawing's name ("virmm1_6"), for where 1st class is in each coach (`SeatClass`).
+    var drawing: String = ""
+    /// (0.31.1) Its 1st-class seats as NS counts them (nil: not said).
+    var firstSeats: Int? = nil
 }
 struct PlatformLetter: Hashable { let letter: String; let x: Double }
 
@@ -212,17 +216,12 @@ final class NSStore: ObservableObject {
         return v
     }
 
-    /// Where 1st class is in each kind of NS train, from NS's own drawings (share of the unit's length).
-    private static let class1: [String: [[Double]]] = [
-        "ddz_4": [[0.015, 0.12], [0.669, 0.774]], "ddz_6": [[0.01, 0.079], [0.439, 0.508], [0.783, 0.851]],
-        "icm_3": [[0.537, 0.669]], "icm_4": [[0.498, 0.752]], "icng_5": [[0.41, 0.667]], "icng_8": [[0.272, 0.379], [0.62, 0.727]],
-        "nsr_flirt_3": [[0.039, 0.206], [0.791, 0.958]], "nsr_flirt_4": [[0.03, 0.161], [0.837, 0.967]],
-        "slt_4": [[0.02, 0.172], [0.825, 0.977]], "slt_6": [[0.014, 0.119], [0.879, 0.984]],
-        "sng_3": [[0.038, 0.215], [0.823, 1.0]], "sng_4": [[0.03, 0.169], [0.861, 1.0]],
-        "virm_4": [[0.376, 0.667]], "virm_6": [[0.223, 0.315], [0.582, 0.777]],
-        "virmm1_4": [[0.376, 0.625]], "virmm1_6": [[0.25, 0.315], [0.582, 0.749]],
-        "virmm2_4": [[0.376, 0.625]], "virmm2_6": [[0.25, 0.315], [0.582, 0.749]], "i11_eurocity": [[0.708, 0.851]],
-    ]
+    /// Where 1st class is in each kind of NS train, from NS's own drawings (share of the unit's length). (0.31.1) From
+    /// `SeatClass`'s per-coach table (read off the drawings); the Eurocity's drawing isn't served, so its old zone stays.
+    private static func class1(_ key: String) -> [[Double]]? {
+        if let z = SeatClass.unitZones(key) { return z.isEmpty ? nil : z.map { [$0.a, $0.b] } }
+        return ["i11_eurocity": [[0.708, 0.851]]][key]
+    }
     nonisolated static let cab = 0.045
 
     private static func layout(_ d: [String: Any]) -> TrainLayout? {
@@ -237,15 +236,16 @@ final class NSStore: ObservableObject {
             var key = ((m["afbeelding"] as? String) ?? "").split(separator: "/").last.map(String.init) ?? ""
             if key.hasSuffix(".png") { key = String(key.dropLast(4)) }
             // Every unit has a driver's cab at both ends; 1st class near an end starts right behind it.
-            let zones = class1[key.lowercased()].map { list in
+            let zones = class1(key.lowercased()).map { list in
                 list.map { z -> TrainZone in
                     let a = z[0] < 0.08 ? cab : z[0], b = z[1] > 0.92 ? 1 - cab : z[1]
                     return TrainZone(a: (x + a * w) / total, b: (x + b * w) / total)
                 }
             }
             let type: String = (m["type"] as? String) ?? (m["materieelType"] as? String) ?? ""
+            let seats: Int? = ((m["zitplaatsen"] as? [String: Any])?["zitplaatsEersteKlas"] as? NSNumber)?.intValue
             units.append(TrainUnit(x: x / total, w: w / total, zones: zones, cars: ((m["bakken"] as? [Any]) ?? []).count,
-                                   kind: type.isEmpty ? key : type))
+                                   kind: type.isEmpty ? key : type, drawing: key.lowercased(), firstSeats: seats))
             x += w
         }
         let letters = ((d["perronVoorzieningen"] as? [[String: Any]]) ?? []).compactMap { p -> PlatformLetter? in
