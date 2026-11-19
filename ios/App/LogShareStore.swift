@@ -1,4 +1,5 @@
 import Combine
+import CoreLocation
 import Foundation
 import UIKit
 
@@ -7,13 +8,22 @@ import UIKit
 /// field log go to the relay, scrubbed (`LogScrub`), gzipped, at most 200 KB at a time and 2 MB a day. Not during a
 /// trip, not in Low Data Mode (the request isn't allowed on a constrained network) and not in Low Power Mode. It only
 /// reads the field log and the trip's phase: nothing about a trip, the alarm or matching changes.
+///
+/// 0.32: Share GPS points during rides (`fixesOn`, off unless you turn it on): while a trip runs, a point every few
+/// seconds (`heard`, from the trip's own location updates: it asks for no GPS of its own); when it ends, trimmed
+/// (`GPSShareRules.finished`) and sent with the next upload, at most 600 KB of points at a time and 4 MB a day.
 @MainActor
 final class LogShareStore: ObservableObject {
     static let shared = LogShareStore()
     static let onKey = "logShare.on"
     static let stateKey = "logShare.state.v1"
+    static let fixesKey = "gpsShare.on"
 
     @Published private(set) var on: Bool
+    /// Share GPS points during rides (0.32).
+    @Published private(set) var fixesOn: Bool
+    /// The one-time question was answered or put away (`ShareAsk`).
+    @Published private(set) var asked: Bool
     @Published private(set) var state: LogShareState?
     @Published private(set) var busy = false
     /// What the last delete did, for Settings ("Deleted…", "Couldn't reach…").
@@ -24,11 +34,26 @@ final class LogShareStore: ObservableObject {
     private var wasRunning = false
     private var uploading = false
     private let session: URLSession
+    /// The GPS points kept on the phone (the trip that runs, those waiting to go), in a small file.
+    private var queue: GPSShareQueue
+    private var queueSaved = Date.distantPast
+    /// Counts every clear of the queue, so an upload that was under way doesn't drop points that came after it.
+    private var queueEra = 0
+
+    private static var queueFile: URL {
+        let fm = FileManager.default
+        let dir = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first ?? fm.temporaryDirectory
+        try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent("gpsshare.json")
+    }
 
     private init() {
         let d = UserDefaults.standard
         on = d.bool(forKey: Self.onKey)
+        fixesOn = d.bool(forKey: Self.fixesKey)
+        asked = d.bool(forKey: ShareAsk.askedKey)
         state = LogShareState.decode(d.data(forKey: Self.stateKey))
+        queue = d.bool(forKey: Self.fixesKey) ? GPSShareQueue.decode(try? Data(contentsOf: Self.queueFile)) : GPSShareQueue()
         let c = URLSessionConfiguration.ephemeral
         c.allowsConstrainedNetworkAccess = false            // not in Low Data Mode
         c.waitsForConnectivity = false
@@ -42,8 +67,70 @@ final class LogShareStore: ObservableObject {
     private func save() {
         let d = UserDefaults.standard
         d.set(on, forKey: Self.onKey)
+        d.set(fixesOn, forKey: Self.fixesKey)
         if let state, let data = try? JSONEncoder().encode(state) { d.set(data, forKey: Self.stateKey) }
         else { d.removeObject(forKey: Self.stateKey) }
+    }
+
+    /// The points to the file (at most once a minute while a trip runs; `now` at once).
+    private func saveQueue(now: Bool = true) {
+        guard now || Date().timeIntervalSince(queueSaved) >= 60 else { return }
+        queueSaved = Date()
+        let file = Self.queueFile
+        if queue.current == nil && queue.ready.isEmpty {
+            DispatchQueue.global(qos: .utility).async { try? FileManager.default.removeItem(at: file) }
+            return
+        }
+        guard let data = try? JSONEncoder().encode(queue) else { return }
+        DispatchQueue.global(qos: .utility).async {
+            try? data.write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        }
+    }
+
+    private func clearQueue() {
+        queue = GPSShareQueue()
+        queueEra += 1
+        saveQueue()
+    }
+
+    /// Share GPS points during rides. Off: the points not sent yet go too.
+    func setFixesOn(_ v: Bool) {
+        guard v != fixesOn else { return }
+        fixesOn = v
+        if v, state == nil { state = LogShareState.fresh(now: Date()) }
+        if !v { clearQueue() }
+        note = nil
+        save()
+    }
+
+    /// Both switches at once, and the question answered (the setup's step, the card).
+    func answer(logs: Bool, fixes: Bool) {
+        setOn(logs)
+        setFixesOn(fixes)
+        markAsked()
+    }
+
+    /// The card was answered or put away: it doesn't come back.
+    func markAsked() {
+        guard !asked else { return }
+        asked = true
+        UserDefaults.standard.set(true, forKey: ShareAsk.askedKey)
+    }
+
+    /// The saved switches read again ("Back to my own" after a test setup put them back).
+    func reload() {
+        let d = UserDefaults.standard
+        on = d.bool(forKey: Self.onKey)
+        asked = d.bool(forKey: ShareAsk.askedKey)
+        let f = d.bool(forKey: Self.fixesKey)
+        if f != fixesOn {
+            fixesOn = f
+            if !f { clearQueue() }
+        }
+        if (on || fixesOn) && state == nil {
+            state = LogShareState.fresh(now: Date())
+            save()
+        }
     }
 
     /// The switch. On: lines from now on (a first install id and secret are made); off: nothing more goes.
@@ -74,6 +161,8 @@ final class LogShareStore: ObservableObject {
         guard trip == nil else { return }
         trip = t
         wasRunning = Self.running(t.phase)
+        // (a trip's points from before the app last stopped, and no trip runs now: that trip ended)
+        if !wasRunning, queue.current != nil { finishRide() }
         t.$phase
             .removeDuplicates()
             .sink { [weak self] p in
@@ -90,8 +179,45 @@ final class LogShareStore: ObservableObject {
         let now = Self.running(p)
         let ended = wasRunning && !now
         wasRunning = now
-        if ended { Task { await self.upload(.tripEnded) } }
+        if ended {
+            finishRide()
+            Task { await self.upload(.tripEnded) }
+        }
     }
+
+    // MARK: GPS points (0.32)
+
+    /// A location the trip heard (`TripManager.handle`): kept while a trip runs, when it's turned on. Reads the trip's
+    /// leg and vehicle only.
+    func heard(_ loc: CLLocation, trip t: TripManager) {
+        guard fixesOn, Self.running(t.phase) else { return }
+        let vehicle: String? = t.vehicle.map { FieldFormat.vehicle(line: $0.line, tripId: $0.tripId, isTrain: $0.isTrain) }
+        let c = loc.coordinate
+        let leg = GPSShareRules.leg(index: t.index, count: t.legs.count)
+        guard let f = GPSShareRules.fix(at: loc.timestamp, lat: c.latitude, lon: c.longitude, accuracy: loc.horizontalAccuracy,
+                                        speed: loc.speed, course: loc.course, leg: leg, vehicle: vehicle, ride: nil) else { return }
+        queue.heard(f, newRide: { GPSShareRules.rideId() })
+        saveQueue(now: false)
+    }
+
+    /// Your places: no point near one of them goes.
+    private func zones() -> [GeoPoint] {
+        var z: [GeoPoint] = PlacesStore.shared.list.map { $0.point }
+        for p in [Place.home, Place.school, Place.homeBoard] {
+            z.append(GeoPoint(lat: p.coordinate.latitude, lon: p.coordinate.longitude))
+        }
+        return z
+    }
+
+    /// The trip ended: its points trimmed, to go with the next upload.
+    private func finishRide() {
+        guard queue.current != nil else { return }
+        queue.finishRide(zones: zones())
+        saveQueue()
+    }
+
+    /// Points waiting to go (for Settings).
+    var fixesWaiting: Int { queue.ready.count }
 
     /// The app came to the front: at most once an hour.
     func tick() { Task { await self.upload(.tick) } }
@@ -168,16 +294,27 @@ final class LogShareStore: ObservableObject {
     }
 
     private func upload(_ trigger: LogShareRules.Trigger) async {
-        guard on, var s = state, !uploading else { return }
+        guard on || fixesOn, var s = state, !uploading else { return }
         let now = Date(), today = LogShareRules.day(now)
-        guard LogShareRules.due(s, enabled: on, trigger: trigger, tripRunning: tripRunning,
-                                lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled, now: now, today: today) else { return }
+        let fixesWaiting = fixesOn && !queue.ready.isEmpty
+        guard LogShareRules.due(s, enabled: on || fixesOn, trigger: trigger, tripRunning: tripRunning,
+                                lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled, now: now, today: today,
+                                fixes: fixesWaiting) else { return }
         s = LogShareRules.tried(s, now: now)
         state = s; save()
-        let batch = LogShareRules.batch(FieldLog.shared.entries, after: s.through,
-                                        budget: LogShareRules.budget(s, today: today), known: known())
-        guard !batch.lines.isEmpty else { return }
-        let put = LogSharePut(install: s.install, secret: s.secret, app: Self.appVersion, lines: batch.lines)
+        let batch: LogShareBatch = on ? LogShareRules.batch(FieldLog.shared.entries, after: s.through,
+                                                            budget: LogShareRules.budget(s, today: today), known: known())
+                                      : LogShareBatch()
+        let points: (fixes: [SharedFix], bytes: Int, more: Bool) = fixesWaiting
+            ? GPSShareRules.batch(queue.ready, budget: GPSShareRules.budget(s, today: today))
+            : ([], 0, false)
+        guard !batch.lines.isEmpty || !points.fixes.isEmpty else { return }
+        let era = queueEra
+        var put = LogSharePut(install: s.install, secret: s.secret, app: Self.appVersion, lines: batch.lines)
+        if !points.fixes.isEmpty {
+            put.fixes = points.fixes
+            put.tz = TimeZone.current.secondsFromGMT()
+        }
         guard let body = try? JSONEncoder().encode(put), let req = request(LogShareRules.path, body: body) else { return }
         uploading = true
         defer { uploading = false }
@@ -187,8 +324,13 @@ final class LogShareStore: ObservableObject {
         defer { if bg != .invalid { app.endBackgroundTask(bg) } }
         let answer = await send(req, label: LogShareRules.path)
         // (switched off, or deleted with a new id, meanwhile: what was sent isn't counted on the new one)
-        guard answer?.status == 200, on, let cur = state, cur.install == put.install else { return }
-        state = LogShareRules.sent(cur, batch, now: Date(), today: today)
+        guard answer?.status == 200, on || fixesOn, let cur = state, cur.install == put.install else { return }
+        // (the points that went: unless the queue was cleared meanwhile, the first of those waiting)
+        if !points.fixes.isEmpty, era == queueEra {
+            queue.sent(points.fixes.count)
+            saveQueue()
+        }
+        state = LogShareRules.sent(cur, on ? batch : LogShareBatch(), fixBytes: points.bytes, now: Date(), today: today)
         save()
     }
 

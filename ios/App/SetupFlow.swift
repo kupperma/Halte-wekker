@@ -87,6 +87,7 @@ struct SetupFlow: View {
         case .places: SetupPlacesStep(draft: $draft)
         case .timetable: SetupTimetableStep(draft: $draft)
         case .arrival: SetupMorningStep(draft: $draft)
+        case .improve: SetupImproveStep(draft: $draft)
         case .done: SetupDoneStep(draft: draft, test: mode == .test, change: go)
         }
     }
@@ -915,7 +916,43 @@ private struct SetupMorningStep: View {
     }
 }
 
-// MARK: 7. done
+// MARK: 7. help improve Haltewekker (0.32)
+
+private struct SetupImproveStep: View {
+    @Binding var draft: SetupDraft
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: DS.s16) {
+            Text(ShareAsk.intro)
+                .font(DS.body).foregroundStyle(DS.text).fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: DS.s12) {
+                ShareSwitch(title: ShareAsk.logsTitle, text: ShareAsk.logsText, isOn: $draft.shareLogs)
+                Divider()
+                ShareSwitch(title: ShareAsk.fixesTitle, text: ShareAsk.fixesText, isOn: $draft.shareFixes)
+            }
+            .dsPanel()
+            DSNote(icon: "hand.raised.fill", tint: DS.accentText, text: ShareAsk.who)
+        }
+    }
+}
+
+/// One of the two switches, with what it sends under it (the setup's step and the home's card).
+struct ShareSwitch: View {
+    let title: String
+    let text: String
+    @Binding var isOn: Bool
+
+    var body: some View {
+        Toggle(isOn: $isOn) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(DS.bodyStrong).foregroundStyle(DS.text)
+                Text(text).font(DS.footnote).foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+}
+
+// MARK: 8. done
 
 private struct SetupDoneStep: View {
     let draft: SetupDraft
@@ -942,6 +979,8 @@ private struct SetupDoneStep: View {
                 Divider()
                 row("alarm.fill", "Mornings",
                     "At school \(draft.earlyMinutes) min early · wake \(draft.wakeMinutes) min before you leave · school alarm \(draft.wakeOn ? "on" : "off")", .arrival)
+                Divider()
+                row("hand.raised.fill", "Help improve Haltewekker", SetupLogic.shareWords(draft), .improve)
             }
             .dsPanel(padding: DS.s12)
             if test {

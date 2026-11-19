@@ -190,9 +190,11 @@ enum LogShareRules {
 
     /// Time to look for new lines and send them: on, no trip running, not in Low Power Mode, the day's 2 MB not used
     /// up, and the last try long enough ago (a minute after a trip, else an hour; a clock that stepped back doesn't hold it).
+    /// `fixes` (0.32): GPS points are waiting to go: then the day's 4 MB of points not used up does too.
     static func due(_ s: LogShareState, enabled: Bool, trigger: Trigger, tripRunning: Bool, lowPower: Bool,
-                    now: Date, today: String) -> Bool {
-        guard enabled, !tripRunning, !lowPower, budget(s, today: today) > 0 else { return false }
+                    now: Date, today: String, fixes: Bool = false) -> Bool {
+        let room = budget(s, today: today) > 0 || (fixes && GPSShareRules.budget(s, today: today) > 0)
+        guard enabled, !tripRunning, !lowPower, room else { return false }
         guard let last = s.lastTry else { return true }
         let age = now.timeIntervalSince(last)
         if age < 0 { return true }
@@ -206,11 +208,12 @@ enum LogShareRules {
         return n
     }
 
-    /// After an upload the relay took.
-    static func sent(_ s: LogShareState, _ b: LogShareBatch, now: Date, today: String) -> LogShareState {
+    /// After an upload the relay took (`fixBytes`: of GPS points, 0.32).
+    static func sent(_ s: LogShareState, _ b: LogShareBatch, fixBytes: Int = 0, now: Date, today: String) -> LogShareState {
         var n = s
-        if n.day != today { n.day = today; n.sentToday = 0 }
+        if n.day != today { n.day = today; n.sentToday = 0; n.fixBytesToday = nil }
         n.sentToday += b.bytes
+        if fixBytes > 0 { n.fixBytesToday = (n.fixBytesToday ?? 0) + fixBytes }
         if let t = b.through { n.through = t }
         n.sentEver = true
         n.lastSent = now
@@ -233,6 +236,8 @@ struct LogShareState: Codable, Equatable, Sendable {
     var sentToday = 0
     /// Something went with this install id (so "Delete what I sent" has something to delete).
     var sentEver = false
+    /// Today's bytes of GPS points (0.32; nil before any, and in a copy saved by an older version).
+    var fixBytesToday: Int?
 
     static func hex(_ bytes: [UInt8]) -> String { bytes.map { String(format: "%02x", $0) }.joined() }
 
@@ -267,12 +272,15 @@ struct LogShareState: Codable, Equatable, Sendable {
     }
 }
 
-/// The body of a put: what the relay is sent, and nothing else.
+/// The body of a put: what the relay is sent, and nothing else. `fixes` and `tz` (0.32) only with GPS points: the
+/// points, and the phone's offset from UTC in seconds (the lines' own clock is the phone's).
 struct LogSharePut: Codable, Equatable, Sendable {
     var install: String
     var secret: String
     var app: String
     var lines: [String]
+    var fixes: [SharedFix]? = nil
+    var tz: Int? = nil
 }
 
 /// The body of a delete.

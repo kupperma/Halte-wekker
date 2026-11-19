@@ -18,6 +18,7 @@ struct SetupBackup {
         "school.on", "school.cals", "school.early", "school.wake",
         "kmMem", "lastMode", "school.homeLat", "school.homeLon",
         "ui.homeStyle",                                   // HomeStyle.key: a finished setup picks Next trip first
+        "logShare.on", "gpsShare.on", "share.asked.v1",   // (0.32) Help improve Haltewekker: the setup's step sets them
     ]
 
     /// When it was taken.
