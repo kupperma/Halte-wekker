@@ -82,7 +82,7 @@ class HomeModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** The next trip to school or home, from where you are (or the other place), every 2 minutes or after 400 m. */
-    suspend fun refreshNext(force: Boolean = false) {
+    suspend fun refreshNext(force: Boolean = false, flipped: Boolean = false) {
         if (Iso.now() - pickedAt > 3 * 3600) direction.value = autoDirection()
         val d = direction.value
         val to = target(d) ?: return
@@ -90,7 +90,7 @@ class HomeModel(app: Application) : AndroidViewModel(app) {
         val now = Iso.now()
         if (Geo.metres(from, to.point) < 400) {
             // you're there already: the other way
-            if (pickedAt == 0.0 || now - pickedAt > 3 * 3600) { direction.value = if (d == Direction.HOME) Direction.TO_SCHOOL else Direction.HOME; return refreshNext(true) }
+            if (!flipped && (pickedAt == 0.0 || now - pickedAt > 3 * 3600)) { direction.value = if (d == Direction.HOME) Direction.TO_SCHOOL else Direction.HOME; pickedAt = now; return refreshNext(true, flipped = true) }
             _next.value = emptyList(); return
         }
         if (!force && nextDir == d && nextFrom?.let { Geo.metres(it, from) < 400 } == true && now - nextTime < 120) return
