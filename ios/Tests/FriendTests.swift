@@ -159,10 +159,10 @@ final class FriendBoxTests: XCTestCase {
     }
 
     func test_unknownKindsComeBackUnknown() throws {
-        let box = try FriendBox.seal(.unknown("timetable"), from: sam, to: lou.card)
+        let box = try FriendBox.seal(.unknown("carpool"), from: sam, to: lou.card)
         let o = try FriendBox.open(box, me: lou, from: sam.account, known: { _ in self.sam.card })
-        XCTAssertEqual(o.message, .unknown("timetable"))
-        XCTAssertFalse(FriendMessage.known.contains("timetable"))
+        XCTAssertEqual(o.message, .unknown("carpool"))
+        XCTAssertFalse(FriendMessage.known.contains("carpool"))
     }
 
     func test_payloadIsVersionedJSON() throws {
@@ -334,7 +334,7 @@ final class FriendInboxTests: XCTestCase {
         let boxes = [
             try relayBox(1, .request(FriendIntro(card: sam.card, name: "Sam")), from: sam, to: lou.card),
             try relayBox(2, .profile(FriendProfile(name: "Sammy")), from: sam, to: lou.card),   // not a friend yet: dropped
-            try relayBox(3, .unknown("timetable"), from: sam, to: lou.card),                       // known (asking), a newer kind: kept
+            try relayBox(3, .unknown("carpool"), from: sam, to: lou.card),                       // known (asking), a newer kind: kept
             RelayBox(id: 4, from: sam.account, slot: nil, at: 0, exp: 0, data: "!!"),           // garbage: dropped
         ]
         let r = FriendInbox.process(boxes, book: book, me: lou, now: t0)
