@@ -45,6 +45,8 @@ struct HaltewekkerApp: App {
                 .onChange(of: scenePhase) { _, phase in
                     guard phase == .active else { return }
                     Task { await FriendStore.shared.sync(.auto) }
+                    // (0.28.1: shared ride logs, only when you turned it on; at most once an hour)
+                    LogShareStore.shared.tick()
                 }
                 .onAppear {
                     Watchdog.shared.mark("drawing the first screen")
@@ -59,6 +61,8 @@ struct HaltewekkerApp: App {
                     near.onPosition = { t.guessFromPlace($0); t.maybeAutoHome($0) }
                     // Friends (0.26): your trip to the friends you show it to, watched from the trip (it changes nothing)
                     FriendTravelShare.shared.attach(t)
+                    // (0.28.1) shared ride logs: a trip that ended is a moment to send (only when turned on)
+                    LogShareStore.shared.attach(t)
                     Task { await NoticeLog.shared.collectDelivered() }
                     Morning.shared.checkAfterAlarm()
                     // (Recomp is parked since 0.19: its data stays on the phone, untouched, and nothing in the app

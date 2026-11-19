@@ -2283,6 +2283,7 @@ struct SettingsView: View {
                 })
                 FreezeSection()
                 FieldLogSection()
+                LogShareSection()
                 Section {
                     Toggle(isOn: $trip.autoStart) { label("Start trips by itself", "Notices when you leave your stop or station on a bus or train, and starts the alarm. Needs location set to Always.") }
                     if trip.autoStart && !trip.always {
