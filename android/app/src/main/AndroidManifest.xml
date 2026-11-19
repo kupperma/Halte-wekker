@@ -20,6 +20,8 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <!-- A3: scanning a friend's QR code (asked for only when you tap Scan) -->
+    <uses-permission android:name="android.permission.CAMERA" />
 
     <!-- a roster link is handed to the app that subscribes to calendars (webcal) -->
     <queries>
@@ -30,6 +32,7 @@
     </queries>
 
     <uses-feature android:name="android.hardware.location.gps" android:required="false" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
 
     <application
         android:name=".App"
@@ -50,6 +53,20 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- A3: a friend code's link (haltewekker://friend?v=1&k=…&n=…, as the relay's /add page opens it) -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="haltewekker" android:host="friend" />
+            </intent-filter>
+            <!-- and the share link itself, for phones where you let the app open it (not verified: the browser's page works too) -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="haltewekker-relay.tsfaw1.workers.dev" android:path="/add" />
             </intent-filter>
         </activity>
 
