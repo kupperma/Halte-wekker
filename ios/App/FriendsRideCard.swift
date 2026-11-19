@@ -8,6 +8,7 @@ struct RideFriendsCard: View {
     @EnvironmentObject var trip: TripManager
     @ObservedObject private var store = FriendStore.shared
     @ObservedObject private var share = FriendTravelShare.shared
+    @ObservedObject private var extras = FriendExtrasStore.shared
     @State private var asking = false
 
     var body: some View {
@@ -15,6 +16,10 @@ struct RideFriendsCard: View {
             VStack(alignment: .leading, spacing: DS.s12) {
                 if share.needsAnswer { askNote }
                 ForEach(together, id: \.from) { s in togetherRow(s) }
+                // (0.29) delays on this trip's rides you share, your wait, and asking a friend to wait
+                SharedDelaysCard(trips: extras.myTrips(), panel: false)
+                MyWaitCard()
+                if let w = extras.rideWaitTarget() { RideWaitMenu(stop: w.stop, ride: w.ride) }
                 if let v = trip.vehicle, v.isTrain, !trip.waitingToBoard, trip.phase != .transfer {
                     CoachPicker(tripId: v.tripId, station: trip.leg.flatMap { NSStore.code($0.from) })
                 }

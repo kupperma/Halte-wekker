@@ -186,6 +186,10 @@ struct FriendTripCard: View {
                     .clipShape(RoundedRectangle(cornerRadius: DS.inner(DS.cardRadius, padding: DS.s8), style: .continuous))
             }
             if let c = s.coach, s.isTrain { FriendCoachNote(coach: c, state: s, name: name) }
+            // (0.29) they're waiting at a stop (or changing there): ask them to wait for you
+            if s.stage != .riding, let lat = s.from.lat, let lon = s.from.lon {
+                WaitForMeButton(chat: ChatKey.friend(seen.from), stop: TripCard.Spot(name: s.from.name, lat: lat, lon: lon))
+            }
         }
         .opacity(TravelAge.freshness(seen, now: now) == .stale ? 0.75 : 1)
         .dsPanel()

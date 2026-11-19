@@ -18,6 +18,7 @@ struct FriendChatView: View {
     let key: String
     @ObservedObject private var store = FriendStore.shared
     @ObservedObject private var chats = FriendChats.shared
+    @ObservedObject private var extras = FriendExtrasStore.shared
     @EnvironmentObject private var trip: TripManager
     @Environment(\.scenePhase) private var scene
     @State private var draft = ""
@@ -28,6 +29,7 @@ struct FriendChatView: View {
     private var me: String { store.myAccount ?? "" }
     private var lines: [ChatMessage] { chats.book.chat(key)?.messages ?? [] }
     private var canWrite: Bool { !store.recipients(key).isEmpty }
+    private var waitsHere: [WaitSeen] { extras.waitsForMe().filter { $0.chat == key } }
 
     private var title: String {
         if let g = group { return g.name }
@@ -39,6 +41,9 @@ struct FriendChatView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: DS.s8) {
                     noPushNote
+                    // (0.29) someone here asks you to wait; your own wait in this chat
+                    ForEach(waitsHere, id: \.from) { w in WaitForYouCard(seen: w) }
+                    MyWaitCard(chat: key)
                     ForEach(lines) { m in
                         row(m).id(m.id)
                     }
@@ -296,6 +301,12 @@ struct TripCardBubble: View {
     @State private var said: String?
 
     private var answers: [String: TripAnswer] { chats.book.answers(to: line.n, in: chat) }
+    /// The shared ride, when you're in on it (you sent it or said "I'm in") and it leaves within the hour.
+    private var waitRide: TripCard.Ride? {
+        guard mine || myAnswer == .yes, let s = TripTake.shared(card), s.from.point != nil else { return nil }
+        let left: TimeInterval = s.dep.timeIntervalSinceNow
+        return left > -60 && left < 3600 ? s : nil
+    }
     private var myAnswer: TripAnswer? { store.myAccount.flatMap { answers[$0] } }
 
     var body: some View {
@@ -305,6 +316,8 @@ struct TripCardBubble: View {
                 TripCardBody(card: card, group: ChatKey.isGroup(chat))
                 answersLine
                 if !mine { actions }
+                // (0.29) on your way to its first stop: ask them to wait
+                if let s = waitRide { WaitForMeButton(chat: chat, stop: s.from, ride: s) }
                 if let said { Text(said).font(DS.footnote).foregroundStyle(DS.text).fixedSize(horizontal: false, vertical: true) }
             }
             .padding(DS.s12)

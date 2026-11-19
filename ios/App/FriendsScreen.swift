@@ -151,11 +151,17 @@ struct FriendsScreen: View {
         if let b = store.book {
             let moving: [FriendTravelSeen] = store.travelling()
             if !moving.isEmpty { FriendsTravellingCard(list: moving) }
+            // (0.29) waits for you, your own wait, who's on campus, delays on rides you share
+            WaitsForYouPanel()
+            MyWaitCard(panel: true)
+            CampusNowCard()
+            SharedDelaysCard()
             meCard(b)
             if !b.incoming.isEmpty { requestsCard(b.incoming) }
             if !b.friends.isEmpty { FriendChatsCard(newGroup: { sheet = .newGroup }) }
             if !b.friends.isEmpty { MyTripsCard(explain: { sheet = .travel }) }
             if !b.friends.isEmpty { MyTimetableCard(explain: { sheet = .timetable }) }
+            if !b.friends.isEmpty { ExtrasSwitchesCard() }
             friendsCard(b.sortedFriends)
             if !b.outgoing.isEmpty { waitingCard(b.outgoing) }
             addCard
@@ -354,6 +360,7 @@ struct FriendDetailView: View {
     let id: String
     @ObservedObject private var store = FriendStore.shared
     @ObservedObject private var chats = FriendChats.shared
+    @ObservedObject private var extras = FriendExtrasStore.shared
     private var unread: Int { chats.unread(ChatKey.friend(id)) }
     @Environment(\.dismiss) private var dismiss
     @State private var asking = false
@@ -378,6 +385,10 @@ struct FriendDetailView: View {
                     CompareButton(key: ChatKey.friend(f.id))
                     if let t = store.travel[f.id], TravelAge.freshness(t, now: Date()) != .gone {
                         FriendTripCard(seen: t, name: f.name)
+                    }
+                    // (0.29) on campus now
+                    if let c = extras.onCampus().first(where: { $0.id == f.id }) {
+                        DSNote(icon: "building.columns.fill", tint: DS.accent, text: CampusWords.since(c.state))
                     }
                     FriendSeesCard(friend: f)
                     DSQuietButton(title: "Remove \(f.name)", icon: "person.badge.minus", full: true) { asking = true }
@@ -447,6 +458,9 @@ struct FriendSeesCard: View {
             .tint(DS.accent)
             .frame(minHeight: DS.hit)
             Text(timetableNote).font(DS.sub).foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
+            Divider().overlay(DS.divider)
+            // (0.29) the wake-up buddy: off by default, per friend
+            BuddySwitch(friend: friend)
         }
         .dsPanel()
     }

@@ -185,11 +185,13 @@ enum WaitNext {
             return Geo.metres(p, stop) <= sameStop
         }.sorted { ($0.legs.first?.dep ?? .distantFuture) < ($1.legs.first?.dep ?? .distantFuture) }
         guard let first = ok.first, let firstDep = first.legs.first?.dep else { return nil }
-        if let line, first.legs.first?.line != line,
-           let same = ok.first(where: { $0.legs.first?.line == line && ($0.legs.first?.dep ?? .distantFuture) <= firstDep.addingTimeInterval(15 * 60) }) {
-            return same
+        guard let line, first.legs.first?.line != line else { return first }
+        let until: Date = firstDep.addingTimeInterval(15 * 60)
+        let same: Way? = ok.first { w in
+            guard let l = w.legs.first else { return false }
+            return l.line == line && l.dep <= until
         }
-        return first
+        return same ?? first
     }
 }
 
@@ -287,21 +289,30 @@ enum DelayAlarm {
         }
         if at == nil { at = stops.firstIndex { $0.name == board.name } }
         let allCancelled: Bool = stops.allSatisfy(\.cancelled)
-        guard let i = at else { return allCancelled ? (0, true, nil) : nil }
+        guard let i = at else {
+            if allCancelled { return (late: 0, cancelled: true, dep: nil) }
+            return nil
+        }
         let mine: BoardAt.Stop = stops[i]
-        if mine.cancelled || allCancelled { return (0, true, mine.departure) }
+        if mine.cancelled || allCancelled { return (late: 0, cancelled: true, dep: mine.departure) }
         var s: BoardAt.Stop = mine
         if let d = mine.departure, d < now, let ahead = stops[i...].first(where: { ($0.departure ?? .distantPast) >= now }) { s = ahead }
         guard let dep = s.departure, let sched = s.scheduledDeparture else { return nil }
         let late = max(0, Int((dep.timeIntervalSince(sched) / 60).rounded()))
-        return (late, false, mine.departure)
+        return (late: late, cancelled: false, dep: mine.departure)
     }
 
     /// The next ride all of you can take, from each person's ways from where they get on to where they get off
     /// (asked from now): 0.28's shared-ride matching (`SharedRides.match`, leaving after `after`), without `exclude`;
     /// the earliest that has everyone, else the earliest with the most of you. Nil: none with two or more.
     static func next(_ people: [PersonWays], exclude: String, after: Date) -> SharedRide? {
-        let all: [SharedRide] = SharedRides.match(people, .home).filter { $0.trip != exclude && $0.firstDep >= after }
+        // (the late or cancelled one's ways out first: the next ones count from each person's earliest other way)
+        let others: [PersonWays] = people.map { p in
+            var q = p
+            q.ways = p.ways.filter { w in !w.legs.contains { $0.trip == exclude } }
+            return q
+        }
+        let all: [SharedRide] = SharedRides.match(others, .home).filter { $0.trip != exclude && $0.firstDep >= after }
         guard let most = all.map({ $0.riders.count }).max(), most >= 2 else { return nil }
         let best: [SharedRide] = all.filter { $0.riders.count == most }
         return best.min { a, b in a.firstDep != b.firstDep ? a.firstDep < b.firstDep : a.trip < b.trip }
@@ -362,7 +373,9 @@ enum DelayWords {
         var parts: [String] = []
         if !names.isEmpty {
             let list: String = CompareWords.names(names)
-            parts.append("\(TravelWords.capitalFirst(list)) \(names.count == 1 && names[0] != "you" ? "is" : "are") on it.")
+            let one: Bool = names.count == 1 && names[0] != "you"
+            let verb: String = one ? "is" : "are"
+            parts.append("\(TravelWords.capitalFirst(list)) \(verb) on it.")
         }
         if !d.isCancelled { parts.append("It now leaves \(d.ride.from.name) at \(TimetableDays.hhmm(d.ride.dep)).") }
         if let n = d.next {

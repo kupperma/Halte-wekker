@@ -334,6 +334,36 @@ final class FriendExtrasStore: NSObject, ObservableObject, CLLocationManagerDele
         return t.legArrival ?? t.legTo
     }
 
+    struct WaitTarget: Equatable {
+        var stop: TripCard.Spot
+        var ride: TripCard.Ride?
+    }
+
+    /// On the ride screen: the stop you're on your way to (the trip's first stop, or where you change next) and the
+    /// ride from there, while you're not on board yet. Nil: on board, or no stop with a place.
+    func rideWaitTarget() -> WaitTarget? {
+        guard let t = trip, !t.demo else { return nil }
+        if t.phase == .transfer, let l = t.legs[safe: t.index + 1] {
+            let stop: TripCard.Spot = Self.spot(l.from)
+            guard stop.point != nil else { return nil }
+            let next: TripCard.Ride? = t.next.map { (r: Ride) -> TripCard.Ride in TripCards.ride(r) }
+            return WaitTarget(stop: stop, ride: next)
+        }
+        guard t.waitingToBoard, let l = t.leg else { return nil }
+        let stop: TripCard.Spot = Self.spot(l.from)
+        guard stop.point != nil else { return nil }
+        var ride: TripCard.Ride? = nil
+        if let p = t.route?.planned?[safe: t.index], !p.tripId.isEmpty {
+            let arr: Date = max(p.departure, t.legTo ?? t.arrival ?? p.departure)
+            ride = TripCard.Ride(mode: p.isTrain ? "train" : "bus", line: p.isTrain ? Transit.trainLabel(p.line) : p.line, trip: p.tripId,
+                                 from: stop, to: Self.spot(l.to), dep: p.departure, arr: arr)
+        }
+        return WaitTarget(stop: stop, ride: ride)
+    }
+
+    /// The vehicles of your trip now (for its delays on the ride screen).
+    func myTrips() -> Set<String> { Set(myRides(Date()).map(\.trip)) }
+
     /// The answers to your wait so far, by account.
     func answersToMine() -> [String: WaitAnswer] {
         guard let w = myWait else { return [:] }
@@ -408,11 +438,16 @@ final class FriendExtrasStore: NSObject, ObservableObject, CLLocationManagerDele
         store.extrasSettingsChanged()
     }
 
+    struct OnCampus: Identifiable, Equatable {
+        var id: String
+        var state: CampusState
+    }
+
     /// Friends on campus now, by name.
-    func onCampus(now: Date = Date()) -> [(id: String, state: CampusState)] {
+    func onCampus(now: Date = Date()) -> [OnCampus] {
         campus.filter { CampusRules.here($0.value, now: now) && store.book?.isFriend($0.key) == true }
             .sorted { store.name($0.key) < store.name($1.key) }
-            .map { (id: $0.key, state: $0.value.state) }
+            .map { OnCampus(id: $0.key, state: $0.value.state) }
     }
 
     private func campusDue(_ now: Date) {
