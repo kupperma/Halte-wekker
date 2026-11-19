@@ -238,6 +238,33 @@ enum TravelWords {
         }
     }
 
+    /// (0.31) A friend's card on the Friends map's sheet: "IC 3512 to Breda", "Waiting at Best", "Changing at Eindhoven".
+    static func cardLine(_ s: TravelState) -> String {
+        switch s.stage {
+        case .waiting: return "Waiting at \(s.from.name)"
+        case .change: return "Changing at \(s.from.name)"
+        case .riding: return "\(vehicle(s)) to \(s.to.name)"
+        }
+    }
+
+    /// (0.31) Under it: "arrives 08:43" (nil: not known, or still waiting).
+    static func cardTime(_ s: TravelState, zone: TimeZone = .current) -> String? {
+        guard s.stage == .riding, let e = s.eta else { return nil }
+        return "arrives \(clock(e, zone: zone))"
+    }
+
+    /// (0.31) The friend's page, next to the line's pill: "to Breda · 08:43".
+    static func headline(_ s: TravelState, zone: TimeZone = .current) -> String {
+        switch s.stage {
+        case .waiting: return "waiting at \(s.from.name)"
+        case .change: return "changing at \(s.from.name)"
+        case .riding:
+            let v = vehicle(s)
+            let what: String = s.line == nil ? v + " " : (s.num.map { "\($0) " } ?? "")
+            return "\(what)to \(s.to.name)" + (s.eta.map { " · \(clock($0, zone: zone))" } ?? "")
+        }
+    }
+
     /// Under it: where the trip ends and when, if that's further.
     static func ending(_ s: TravelState, zone: TimeZone = .current) -> String? {
         guard let d = s.dest, d.name != s.to.name else { return nil }

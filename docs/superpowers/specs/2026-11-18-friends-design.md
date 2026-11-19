@@ -1063,3 +1063,97 @@ relay route, `FriendMessage.kindsVersion` stays 6. One relay change, in the live
 - Settings › Friends: "Add a test friend" / "Remove test friend". Friends: the empty friend list's test friend card; the
   "TEST" tag; its page's "Test friend controls". The live link card and sheet: "Send the link" (as text) and "Copy link".
 - Not yet: the test friend is iOS only; it answers only while your app checks (no push, as everything else).
+
+## As built (0.31)
+
+What 0.31.0 (build 121) adds: **where you sit** (a seat: deck and window, in the coach of 0.26's `travel` box), the
+**seat picker**, and Friends laid out **map first**. Everything in "As built (0.25)" to "(0.30.1)" holds unchanged: no
+new box kind, no new relay route, `FriendMessage.kindsVersion` stays 6. The seat is one optional object inside
+`coach`: an app before 0.31 ignores it (JSON keys it doesn't know are skipped) and sends none. Android should add it
+from this text; until then an Android friend's coach just has no window.
+
+### The seat (`TravelState.Seat` in `FriendTravel.swift`; the sums in `SeatMap.swift`, tested)
+- `coach` gains `seat`: `{"deck", "w", "of"}`, all three required when `seat` is there:
+  - `deck`: `"upper"` | `"lower"` (a double-deck coach) | `"none"` (a single-deck one). Anything else reads as `"none"`.
+  - `w`: the window, 1-based, **counted from the back of the coach** (the end nearer the back of the train) when the
+    coach is counted from the front (`front: true`); when it isn't (`front: false`), from the left of NS's drawing at
+    `at`, like the coach number itself.
+  - `of`: windows in a row as the sender's picker drew them (0.31 draws **11**). A reader drawing another number
+    scales `w` (rounding up). A seat with `of` outside 1–40 or `w` outside 1–`of` is dropped (the coach stays).
+- Words: "Coach 3 of 6 · upper deck · 8th window from the back" ("… · 6th window from the back" on one deck; "… from
+  the left" without a direction). Without a seat, 0.26's "Coach 3 of 6 · front". VoiceOver, per window: "Coach 3,
+  upper deck, window 8 from the back".
+- It goes out like the coach did: with the next state, at once when it changes; tapping your window again takes the
+  window away (the coach stays), "Take it away" takes both.
+
+### The train in the picker (`SeatMap.train`)
+- From NS's `/ns/train?num=&station=` (through the relay, as 0.26): the units and their coaches (`CoachMap.spots`),
+  numbered from the front when NS gives `rijrichting`, drawn the way NS draws them (the front on the left: "← Driving
+  to Breda"; on the right: "Driving to Breda →"; no direction: "Towards Breda", numbered from the left).
+- Each unit's decks by its type (`materieeldelen[].type`, else its drawing's file name): **two decks** VIRM (VIRMm),
+  DDZ / NID / DD-IRM, DD-AR / mDDM; **one deck** SNG, SLT, FLIRT, SGM, GTW, ICM (the Koploper has one deck, even though
+  it's an Intercity), ICNG, ICR, ICE and the other international trains. A type it doesn't know: by the line.
+- Without NS's drawing: NS's length (`lengte`) or the friend's `of`, else **6** coaches; the front drawn on the right
+  and numbered from it (`front: true`); an Intercity (`IC`, `ICD`) double-deck, a Sprinter and anything else single.
+  The picker says it's a guess.
+- At most 16 coaches drawn.
+
+### Test vector (checked in `ios/Tests/SeatMapTests.swift`)
+- 0.26's travel state from Sam with a seat (header `n` = `vector-31`), the exact payload bytes `FriendBox.payload`
+  makes (sorted keys, as every box):
+  `{"b":{"coach":{"at":"EHV","front":true,"n":3,"of":6,"seat":{"deck":"upper","of":11,"w":8}},"end":1800004200,"eta":1800003780,"from":{"lat":51.44306,"lon":5.47917,"name":"Eindhoven Centraal"},"leg":2,"legs":2,"line":"IC","mode":"train","num":"3512","pos":{"acc":12,"at":1799999990,"lat":51.5112,"lon":5.2874},"state":"riding","to":{"lat":51.59556,"lon":4.78,"name":"Breda"},"trip":"vector-trip-3512"},"f":"3c157621a97cf055f5804a9826c6d1e1","k":"travel","n":"vector-31","t":1800000000,"v":1}`
+  → "Coach 3 of 6 · upper deck · 8th window from the back". Read as 0.26's coach (`n`, `of`, `front`, `at`) it is
+  coach 3 of 6 from the front, the seat skipped. A coach without a seat encodes exactly as in 0.26
+  (`{"at":"EHV","front":true,"n":3,"of":6}`). Sealing and signing are 0.25's, unchanged.
+- Windows: the front on the right, the left window is `w` 1; the front on the left, the right window is `w` 1; `w`
+  16 of 22 drawn in 11 is the 8th.
+
+### The test friend
+- Its pretend train's coach (3 of 6 from the front) now has a window: an Intercity's upper deck, 8th from the back;
+  a Sprinter's 6th (`TestTripSim.coach`).
+
+### The friend's map: the bug, and the fix (`MapFrame.swift`, tested)
+- Seen: on the test friend's page, while it "travelled" on a Sprinter from Best to 's-Hertogenbosch, the map showed
+  Maastricht and Sittard. The state itself was right (its stops and position come from the same live data, lat and
+  lon in their places: `TestTripSim` and the box vectors check that). What went wrong was the camera: the map left it
+  to MapKit (`MapCameraPosition.automatic`), which frames the map's content **once**, when it first gets it, and the
+  code then "reframed" by assigning `.automatic` again, which is no change at all. So the page kept whatever region
+  the map had first: when the map was laid out before its pin and stop markers were in (inside the scrolling page,
+  the trip arriving or moving after the page opened), that was MapKit's own default region, not the trip.
+- Now (0.31): the region is always worked out by `MapFrame.fit` from the friend's position and the trip's from and to
+  (whichever are real coordinates: not missing, not 0,0, on the globe), with room around them (×1.35, at least
+  1.6 km), widened to the map's shape, and moved up so it sits in the part the sheet leaves free. It's set
+  (`.region`) when the map appears, when its size changes and whenever any of those points changes.
+- Routes: a friend's line is the bit of their vehicle's live trip shape between where they got on and where they get
+  off (`MapFrame.route`, the nearest points), else a straight line from, through where they are, to.
+
+### "Ride along" (`TripTake.rideAlong`, tested)
+- On a friend's page while they travel: their bus or train now as a card (on board: from where they are, so the way
+  found gets onto it further along; waiting or changing: from their stop; leaving now, there at their `eta`), taken
+  like "Take this trip" (0.27): Fastest trip with your way onto it, else Plan filled in. No vehicle id, or Home as
+  where they get off: no button.
+
+### App (0.31)
+- **Friends** (with an account): a full-screen map: travelling friends' faces where they are, ringed in their
+  vehicle's colour (Intercity indigo, Sprinter cyan, bus orange, as the line pills), friends on campus at your school
+  in the accent; their routes drawn; tap a face for their page. Over it a sheet with a handle (drag or tap it, "Show
+  more"/"Show less" for VoiceOver): "Friends" and "+ Add" (the add page: show my code, scan, send my link, paste, the
+  test friend), requests, a card per friend in a row (face, name, "IC 3512 to Breda", "arrives 08:43"; travelling
+  first, then on campus), **Chats · N** (all chats and "New group"), **Groups** (each group's chat, "New group"),
+  **Compare** (a group or a friend, then 0.28's compare and meet halfway), then what's going on now (waits for you,
+  your wait, on campus, delays, free time together, the live link), **More** (your name and picture, Your trips, Your
+  timetable, Extras, Requests you sent), the leaderboard, the live link note and when it last checked. "…" (name and
+  picture, backup code, delete) and Done float over the map. Without an account: 0.25's page, unchanged.
+- **A friend's page** while they travel: the map framed on their trip (their face, the line, where they got on and
+  get off), "‹ Friends", and a sheet: face, name, line pill, "3512 to Breda · 08:43", a green chat button (with the
+  count of new lines); the seat picker with their face in their window; "Sam is in coach 3 of 6 · upper deck · 8th
+  window from the back" and "Taking this train too? Wait near B, at the front end of the platform" (on the same train
+  as you) or "Coach 3 from the front"; Compare · Ride along · Wait for me (when they're at a stop); then on campus, the
+  test friend's controls, rides together, what they see (with its switches) and Remove. Not travelling: the same as a
+  page, "Friends since …".
+- **The seat picker** (`SeatPicker.swift`): the whole train on top (first and last coach shaped like noses, numbers
+  from the front, a dot where a friend or you sit); tap a coach and it opens below from the side: doors, 11 windows a
+  row (two rows on a double-deck coach: top the upper deck, bottom the lower), the line's colour stripe, wheels. Every
+  coach and window is a button for VoiceOver ("Coach 3 of 6, from the front, two decks"; "Coach 3, upper deck, window
+  8 from the back, your seat"). Yours to set on the ride screen ("Your seat", replacing 0.26's coach strip) and on a
+  friend's page when your trip takes that train; otherwise theirs to look at.

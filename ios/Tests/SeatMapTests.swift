@@ -159,6 +159,52 @@ final class SeatMapTests: XCTestCase {
         XCTAssertEqual(SeatMap.spoken(coach: 2, deck: .none, window: 6, front: true), "Coach 2, window 6 from the back")
     }
 
+    func test_cardWords() {
+        let utc = TimeZone(identifier: "UTC")!
+        var s = TravelState(state: "riding", mode: "train", from: .init(name: "Eindhoven Centraal"), to: .init(name: "Breda"))
+        s.line = "IC"
+        s.num = "3512"
+        s.eta = Date(timeIntervalSince1970: 1_800_003_780)
+        XCTAssertEqual(TravelWords.cardLine(s), "IC 3512 to Breda")
+        XCTAssertEqual(TravelWords.cardTime(s, zone: utc), "arrives 09:03")
+        XCTAssertEqual(TravelWords.headline(s, zone: utc), "3512 to Breda · 09:03")
+        s.num = nil
+        s.line = "SPR"
+        XCTAssertEqual(TravelWords.headline(s, zone: utc), "to Breda · 09:03")
+        s.state = "waiting"
+        XCTAssertEqual(TravelWords.cardLine(s), "Waiting at Eindhoven Centraal")
+        XCTAssertNil(TravelWords.cardTime(s, zone: utc))
+        s.state = "change"
+        XCTAssertEqual(TravelWords.cardLine(s), "Changing at Eindhoven Centraal")
+        let bus = TravelState(state: "riding", mode: "bus", from: .init(name: "Veghel"), to: .init(name: "Uden"))
+        XCTAssertEqual(TravelWords.headline(bus, zone: utc), "Bus to Uden")
+    }
+
+    func test_rideAlong() throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        var s = TravelState(state: "riding", mode: "train", from: .init(name: "Best", lat: 51.50972, lon: 5.39),
+                            to: .init(name: "'s-Hertogenbosch", lat: 51.69048, lon: 5.29362))
+        s.line = "SPR"
+        s.trip = "trip-1"
+        s.eta = now.addingTimeInterval(600)
+        s.pos = .init(lat: 51.6, lon: 5.34, acc: 12, at: now)
+        let c = try XCTUnwrap(TripTake.rideAlong(s, now: now))
+        XCTAssertEqual(c.rides.count, 1)
+        XCTAssertEqual(c.rides[0].trip, "trip-1")
+        XCTAssertEqual(c.rides[0].from.point, GeoPoint(lat: 51.6, lon: 5.34), "on board: from where they are")
+        XCTAssertEqual(c.rides[0].to.name, "'s-Hertogenbosch")
+        XCTAssertEqual(TripTake.way(c, now: now, home: nil, school: nil, calendar: Calendar(identifier: .gregorian)), .fastest)
+        XCTAssertNotNil(TripCard.valid(c))
+        s.state = "waiting"
+        XCTAssertEqual(TripTake.rideAlong(s, now: now)?.rides[0].from.name, "Best")
+        // no vehicle, or Home without a place: nothing to ride along with
+        s.trip = nil
+        XCTAssertNil(TripTake.rideAlong(s, now: now))
+        s.trip = "trip-1"
+        s.to = .init(name: "Home")
+        XCTAssertNil(TripTake.rideAlong(s, now: now))
+    }
+
     // MARK: the map (0.31's fix: a friend's page frames their trip)
 
     func test_friendMapFramesTheTrip() throws {
