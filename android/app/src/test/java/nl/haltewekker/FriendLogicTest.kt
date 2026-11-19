@@ -279,8 +279,8 @@ class FriendLogicTest {
         val week = ManualWeek(listOf(WeekDay(6, 8 * 60 + 45, 15 * 60 + 30, "Design")))
         val classes = week.friendClasses(t, 14, ZoneId.of("Europe/Amsterdam"))
         assertEquals(2, classes.size)
-        assertEquals(1800002700.0, classes[0].start, 0.0)
+        assertEquals(1799999100.0, classes[0].start, 0.0)   // today counts, all of it (08:45)
         assertEquals("Design", classes[0].title)
-        assertEquals(1800002700.0 + (6 * 60 + 45) * 60, classes[0].end!!, 0.0)
+        assertEquals(1799999100.0 + (6 * 60 + 45) * 60, classes[0].end!!, 0.0)
     }
 }
