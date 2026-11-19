@@ -301,6 +301,14 @@ object VehicleMatch {
         return Decision.Keep(shown) to s
     }
 
+    /** Enough fixes to judge by: of the usable ones of the last 30 s, at least 3 spanning 20 s. */
+    fun enoughFixes(fixes: List<Fix>): Boolean {
+        val recent = lastWindow(fixes)
+        val newest = recent.maxOfOrNull { it.t } ?: return false
+        val oldest = recent.minOf { it.t }
+        return recent.size >= MIN_FIXES && newest - oldest >= MIN_SPAN
+    }
+
     /** The ones with live times or a GPS fix that was judged by (for `decide`). */
     fun liveIds(judged: List<Judgement>): Set<String> = judged.filter { it.realTime || it.evidence?.gps == true }.map { it.id }.toSet()
 

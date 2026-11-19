@@ -22,11 +22,12 @@ object OnBoardRules {
 
     /**
      * The one you're on, or null: with one passed by its own GPS, a timetable-only one never comes before it; a
-     * timetable-only best counts only while you move like a vehicle.
+     * timetable-only best counts only while you move like a vehicle. `planned` (the ride's own trip, Android): ranked
+     * 45 s better, as the iOS ride's matcher does.
      */
-    fun best(judged: List<Judgement>, yourSpeed: Double): String? {
+    fun best(judged: List<Judgement>, yourSpeed: Double, planned: String? = null): String? {
         val byId = judged.associateBy { it.id }
-        var ranked = rank(judged, null)
+        var ranked = rank(judged, planned)
         if (judged.any { ChooseGPS.passedByGPS(it) }) ranked = ranked.filter { r -> byId[r.id]?.let { !timetableOnly(it) } ?: false }
         val first = ranked.firstOrNull() ?: return null
         val j = byId[first.id] ?: return null

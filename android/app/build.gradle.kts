@@ -34,6 +34,8 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "0.1.0"
+        // phones: ARM only (the map's native library is 11 MB per ABI; x86 is emulators and a few Chromebooks)
+        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
 
     signingConfigs {
@@ -65,6 +67,10 @@ android {
     }
     kotlinOptions {
         jvmTarget = "17"
+        freeCompilerArgs += listOf(
+            "-opt-in=androidx.compose.foundation.layout.ExperimentalLayoutApi",
+            "-opt-in=androidx.compose.material3.ExperimentalMaterial3Api",
+        )
     }
     buildFeatures {
         compose = true
@@ -72,6 +78,7 @@ android {
     }
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        jniLibs.useLegacyPackaging = true      // compressed in the APK: a smaller download
     }
     testOptions {
         unitTests.isReturnDefaultValues = true
