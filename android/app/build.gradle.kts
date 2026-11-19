@@ -21,6 +21,8 @@ val hasReleaseKey = keystorePath != null && file(keystorePath).exists()
 // The school list is the iOS app's own file (ios/App/Schools.json), copied in at build time: one list for both apps.
 val copySchools by tasks.registering(Copy::class) {
     from(rootProject.file("../ios/App/Schools.json"))
+    // (A3) NS's stations, for the coach picker and a friend's start area: the iOS app's own list too
+    from(rootProject.file("../ios/App/NSStations.json"))
     into(layout.buildDirectory.dir("generated/schools"))
 }
 

@@ -36,6 +36,9 @@ data class RideState(
     val note: String? = null,
     /** (A2) Started by itself, on leaving a home stop or School. */
     val auto: Boolean = false,
+    /** (A3) The last fix (5 decimals), for friends you show your trips to. */
+    val lastLat: Double? = null,
+    val lastLon: Double? = null,
 ) {
     val leg: Ride? get() = trip.rides.getOrNull(index)
     val wakeMetres: Double get() = (wakeKm.getOrNull(index) ?: WakeRules.BUS_KM) * 1000

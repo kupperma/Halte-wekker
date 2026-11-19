@@ -200,7 +200,8 @@ class RideService : Service() {
         val leg = s.leg ?: return
         val to = leg.to ?: return
         val d = Geo.metres(fix.p, to)
-        RideStore.update(this) { it.copy(distance = d, accuracy = fix.accuracy, speed = fix.speed.takeIf { v -> v >= 0 }, lastFixAt = now) }
+        RideStore.update(this) { it.copy(distance = d, accuracy = fix.accuracy, speed = fix.speed.takeIf { v -> v >= 0 }, lastFixAt = now,
+            lastLat = Math.round(fix.p.lat * 100_000) / 100_000.0, lastLon = Math.round(fix.p.lon * 100_000) / 100_000.0) }
         when (WakeRules.onFix(s.phase, d, fix.accuracy, now - s.legStart, s.wakeMetres)) {
             WakeRules.Action.RING -> ring("approach")
             WakeRules.Action.AWAKE_SILENTLY -> RideStore.update(this) {
@@ -247,6 +248,8 @@ class RideService : Service() {
                     scheduleBackup()
                 }
                 notifyRide(force = false)
+                // (A3) the ride's network tick: friends get your trip (and their trips and lines come in), no loop of its own
+                nl.haltewekker.friends.FriendTravelShare.tick(applicationContext)
             }
             delay(if (RideStore.state.value?.vehicleTripId == null) 15_000 else 30_000)
         }
