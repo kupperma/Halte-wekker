@@ -122,7 +122,9 @@ final class TestFriendTests: XCTestCase {
         XCTAssertEqual(r.state, "riding")
         XCTAssertEqual(r.pos?.lat ?? 0, 51.005, accuracy: 0.00001)
         XCTAssertEqual(r.pos?.lon ?? 0, 5.01, accuracy: 0.00001)
-        XCTAssertEqual(r.coach, TravelState.Coach(n: 3, of: 6, front: true, at: nil))
+        // (0.31) and a window: a Sprinter has one deck
+        XCTAssertEqual(r.coach, TravelState.Coach(n: 3, of: 6, front: true, at: nil, seat: .init(deck: "none", w: 6, of: 11)))
+        XCTAssertEqual(TestTripSim.coach(line: "IC").seat, .init(deck: "upper", w: 8, of: 11))
         XCTAssertEqual(r.trip, "x")
         XCTAssertEqual(r.dest?.name, "Zwolle")
         // over at the last stop

@@ -31,6 +31,19 @@ struct TravelState: Codable, Equatable {
         var of: Int
         var front: Bool
         var at: String?
+        /// (0.31) Where in the coach, roughly: the deck and the window (`SeatMap`). A 0.26–0.30 app leaves it out and
+        /// ignores it.
+        var seat: Seat? = nil
+    }
+
+    /// (0.31) Your window in your coach. `deck`: "upper" or "lower" in a double-deck coach, "none" in a single-deck
+    /// one (anything else reads as "none"). `w`: the window, 1-based, counted from the back of the coach (the end
+    /// nearer the back of the train) when the coach is counted from the front (`front`); else from the left of NS's
+    /// drawing at `at`, like the coach. `of`: windows in a row as the picker drew them (11).
+    struct Seat: Codable, Equatable {
+        var deck: String
+        var w: Int
+        var of: Int
     }
 
     enum Stage: String {
