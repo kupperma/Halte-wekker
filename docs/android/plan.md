@@ -3,7 +3,7 @@
 The Android version of Haltewekker, built from the iOS app (`ios/`, SwiftUI) as the reference. It lives in
 `android/` (one Gradle project), with this plan in `docs/android/`. The iOS app and the relay are not changed by it.
 
-Status: **A1 (0.1.0, version code 1) and A2 (0.2.0, version code 2) built.** A3 and A4 are planned below.
+Status: **A1 (0.1.0, version code 1), A2 (0.2.0, version code 2) and A3 (0.3.0, version code 3: Friends) built.** A4 is planned below.
 
 ## Architecture
 
@@ -40,6 +40,14 @@ Packages (`android/app/src/main/java/nl/haltewekker/`):
   (CalendarContract), `SchoolAlarm` (the store and the plan), `WakeAlarm`, `WakeReceiver`, `WakeService`, `WakeActivity`.
 - `auto/` (A2) — `AutoRules`, `TripResume` (pure); `Regions` (proximity alerts), `RegionReceiver`, `AutoStart`, `ResumeStore`.
 - `work/` (A2) — `Works`, `PlanWorker`, `CalendarWorker`, `BootReceiver`.
+- `friends/` (A3) — the formats and rules, pure and tested: `FriendJson` (sorted keys, plain numbers, base64url),
+  `FriendCrypto` (Bouncy Castle), `FriendKeys` (BIP-39, identity, card, `RelaySign`, `FriendLink`, names), `FriendBox`
+  (kinds, payload, seal/open, vault), `FriendBook`, `FriendInbox`, `FriendTravel` (`TravelState`, `TravelAge`,
+  `TravelShareRules`, `TravelWords`, `CoachMap`), `FriendChat`, `FriendGroup`, `TripCard` (`TripTake`, words),
+  `FriendTimetable`, `FriendCompare`, `FriendRides` (shared rides, meet halfway, `RequestBudget`); the platform side:
+  `FriendRelay` (OkHttp), `FriendSecrets` (Keystore), `FriendStore`, `FriendChats`, `FriendTimetables`,
+  `FriendTravelShare`, `FriendWork`, `NSTrains` (NS codes, the train drawing).
+- `ui/friends/` (A3) — the Friends screens, the scanner (CameraX + ZXing), the ride's friends card, the home button.
 - `map/` — `LiveMap` (MapLibre in Compose).
 - `ui/` — theme, components, `HomeModel`, `Locator`, `MainActivity` and the screens.
 
@@ -104,6 +112,7 @@ JUnit, run by CI before every build (`./gradlew testReleaseUnitTest`):
 - `OnBoardRulesTest` — the iOS `OnBoardRulesTests`, the track tests, `lookDue`, the backoff, the GPS run.
 - `WakeRulesTest` — the alarm distance rule, arrival, headphones-only, the backup time, texts, `RideGPS`.
 - `SchoolCatalogTest` — the shared `Schools.json` and its search.
+- (A3) `FriendVectorTest` (every spec test vector), `FriendLogicTest`, `FriendCompareTest`, `FriendLiveInteropTest` (live, opt-in): see "As built A3".
 
 ## CI and releases (`.github/workflows/android.yml`)
 
@@ -157,7 +166,7 @@ release is made once per name).
   ended at a change (`TripResume`).
 - Release build with R8 (minified) once there's a device test pass; Android 16 "Live Updates" notification style.
 
-### A3 — Friends 0.25–0.28 (0.3.x)
+### A3 — Friends 0.25–0.28 (0.3.0, code 3) — built (as planned below; "As built A3" says how)
 
 From the platform-neutral spec `docs/superpowers/specs/2026-11-18-friends-design.md`, its "As built" sections taken
 byte for byte, and its test vectors as JUnit tests before any screen:
@@ -178,6 +187,121 @@ byte for byte, and its test vectors as JUnit tests before any screen:
 - 0.30: free time together, the live link (`/live/<token>#<key>`), the leaderboard with friends, rides together.
 - Log sharing (`LogShare`, `docs/logs-export.md`): the field log and a share sheet, for tuning the matcher from Android
   rides.
+
+## As built A3 (0.3.0, version code 3): Friends
+
+Everything in the spec's "As built (0.25)" to "(0.28)" byte for byte, so an Android phone and an iPhone are friends,
+chat, share trips and compare timetables through the same live relay. The iOS app and the relay were not changed.
+
+**Formats and crypto** (`friends/`). Bouncy Castle 1.78.1's lightweight API (`bcprov-jdk18on`, pure Java) for Ed25519,
+X25519, HKDF-SHA256 and ChaCha20-Poly1305; SHA-256 from the platform. The seed → `sign`/`agree`/`vault` keys, the account
+id, the card and its packed `k`, BIP-39 (any case, any separators, the first four letters), signed requests (`HW1`
+canonical string), boxes (`0x01 ‖ ephPub ‖ nonce ‖ ChaCha20-Poly1305(sig ‖ payload)`, AAD the recipient's account,
+HKDF salt `haltewekker-box-v1`, info ephPub ‖ recipient agreeKey) and the vault (`hw-vault-v1\n` + account). JSON is
+written as iOS writes it: keys sorted, numbers plain (`1800000000`, `51.44306`, never `1.8E9`), nulls left out, UTF-8;
+read in any order with unknown keys ignored. Signatures are always checked over the bytes received. Kinds read:
+`request`, `accept`, `unfriend`, `profile`, `picture`, `travel`, `message`, `trip`, `seen`, `group`, `gpicture`,
+`gleave`, `timetable`, `area` (`KINDS_VERSION` 4, as iOS 0.28). iOS 0.29/0.30's kinds (`wait`, `delay`, `buddy`,
+`campus`, `scores`) open fine but are left on the relay unacknowledged, as the spec says for a kind not known (A4 reads
+them); an `answer` this version doesn't know (0.29's "wait") reads as the plain text it carries.
+
+**Account and storage.** The seed and device id are locked with an AES-256-GCM key in the Android Keystore and kept in
+`noBackupFilesDir/friends-keys` (never in a backup; a phone whose Keystore refuses keeps them as a plain file there,
+as iOS falls back to a protected file). The list, the pending queue, groups, chats, timetables and pictures are JSON
+files in `files/friends/` (the backup rules include only `haltewekker.xml`, so they aren't backed up). The vault holds
+`book`, `picture`, `groups`, `timetable` and keeps an iOS 0.29 vault's `extras` as it came, so a restore here and a
+backup from here don't lose it. Restore on Android of an account made on an iPhone (or the other way) works: same seed,
+same keys, the other phone gets 409 and is signed out.
+
+**Relay** (`FriendRelay`): every 0.25/0.26 route (`register`, `send` ≤ 20, `inbox`, `ack`, `drop`, `block`,
+`vault/put|get`, `state/put|get|clear`, `leave`), OkHttp with no retries of its own (a nonce works once), 409 → signed
+out (keys forgotten, a banner says so), 404 `unknown_account` → registered again, a 4xx refusal lets that box go.
+
+**Checks (no push):** the app to the front (≤ every 20 s), every 30 s while Friends is open, every 8 s while a chat is
+open (friends' trips every 30 s of those), the ride's network tick (`RideService.tickLoop` calls
+`FriendTravelShare.tick`: a whole check at most once a minute), and a WorkManager periodic check (`friends-refresh`,
+about hourly with a network, only while there's an account with someone in the list). Lines fetched in the
+background: one notification per chat (`friends-chat-<chat>`, channel "Friends"), tapping opens that chat; in front:
+the in-app banner (none for the chat on screen).
+
+**Screens** (`ui/friends/`): the home's round Friends button over the map (next to Settings) with a badge for requests
+and unread lines, and Settings › Friends. Friends: make an account (a name) or restore (12 words), the backup code shown
+once; the one-time screens (trips, then timetable); Travelling now (a map of friends' last fixes, a row each); requests
+(accept, decline, block); chats (recent, groups, New group); your friends; waiting for an answer (take back); Add a
+friend (Show my code = QR, ZXing, error correction M; Scan a code = CameraX + ZXing on the camera's Y plane, no Play
+services; Send my link = the share sheet; paste a link); Your trips / Share my timetable switches; You (name, picture
+from the photo picker, cropped square, 256 px JPEG ≤ 40 KB; backup code; delete the account). A friend's page: their
+trip, the coach hint when you're on the same train ("Wait near B, at the front end of the platform", from NS's drawing
+at *your* boarding station), Message, Compare timetables, "Show my trips to …", "Share my timetable with …", Remove.
+A chat: lines, quick replies ("On the 305" while you ride), trip cards with "Take this trip" / "I'm in" / "Can't", how
+far your last line got (waiting, sent, delivered, read; "n of m" in a group). A group's page: picture, name, members
+(the admin adds, removes, renames, sets the picture), Compare, Leave, "Share my timetable with this group". Compare:
+today to Sunday and next week, everyone's day, free time together, "Every class" of the open day, To school / Home rides
+together with who's missing, Meet halfway with "Send to …". Links: `haltewekker://friend?…` and (for phones where you
+let the app open it) `https://haltewekker-relay.tsfaw1.workers.dev/add`; the relay's /add page opens the app link.
+
+**Travelling now** (`FriendTravelShare`): reads `RideStore` (debounced 2 s) and the ride's tick, never changes the
+ride. Confirmed on board = started by hand (not auto-start), "I'm on it" (`BY_HAND`) or matched by GPS (`BY_GPS`; not
+`BY_TIMES`). Stage: no vehicle yet and the leg not left (a minute's slack) is `waiting` (first leg) or `change`; else
+`riding`. Sent every 55 s on the tick and at once on a new leg, vehicle, stage or coach; taken back with
+`state/clear` when the trip ends (again at the next check if that failed). The ride state now keeps its last fix
+(`lastLat`/`lastLon`, 5 decimals) for `pos`; Home goes as `{"name":"Home"}`. The ride screen gets a Friends card: the
+one-time question once on board, friends on the same vehicle, and on an NS train the coach picker (relay
+`/ns/train?num=&station=`; numbered from the front when NS gives `rijrichting`, else from the left at that station).
+NS station codes come from the iOS app's `NSStations.json`, copied into the assets at build time like `Schools.json`.
+
+**Timetables and areas** (`FriendTimetables`): calendar users send every non-all-day, non-cancelled event (≤ 12 h) of
+the calendars picked for the school alarm, with the location as room; week users one class per school day (first class
+to the end time, title). The area: the setup's home stops (non-rail, within 3 km), else three nearest non-rail stops
+within 1.2 km (one `/v1/map/stops` question, remembered until Home moves 300 m), the NS station nearest Home within
+5 km, the school (its name, 5 decimals, its first stop id) and the school alarm's "be there N min early". The send rules
+are `TimetableShareRules` (FNV-1a 64 fingerprint over the sorted JSON, 3 h / 20 h / 7 days, `off` boxes to whoever
+shouldn't have it any more).
+
+**Take this trip** (`TripTaker`): gone → says so; within the hour → your way: the card's rides when you're within 600 m
+of its first stop (or have no fix), else the planner from here (arrive by the card's time) picking the option with the
+shared ride's trip id, else onto the shared ride at a stop of its route within walking distance (< 900 m, leaving > 2
+min from now); shown with "I'm on it: start the ride". Later (today/tomorrow to School/Home, or anything else): the
+planner's ways there by the card's time with the friend's ride first. Taking it answers "I'm in". "Send to a friend"
+sits under Fastest trip's opened trip.
+
+**Tests** (JUnit; 111 in all, one skipped in CI: the live check):
+- `FriendVectorTest` — **every test vector in the spec passes**: Sam's, Lou's and Kim's keys, account ids, vault key and
+  `k`; Sam's backup code (and typed back loosely; a wrong checksum refused); the request (0.25), travel (0.26), message,
+  group list, Kim's fan-out to Lou and to Sam, trip card (0.27), timetable and area (0.28) boxes: signature (Node's
+  deterministic Ed25519, the same bytes), ephPub, box key and the box byte for byte, and opening it on the other side;
+  the 0.29/0.30 wait, campus and scores boxes open too (and are read as unknown kinds); the payloads of the 12 known
+  ones are rebuilt from the parsed box byte for byte; the answer payloads; the signed inbox request and the signed
+  `state/put` (body SHA-256 and signature); the vault byte for byte; Kim's group line opening only with the list's card.
+- `FriendLogicTest` — links and names, request/accept/rename/remove through real boxes, unknown kinds kept, groups (the
+  list before the lines in one batch, orphans kept and read later, leave and admin hand-over, a non-friend's list
+  refused), chats (delivery, marks due, answers, cleaning, quick replies), travel rules, words and freshness, the coach
+  map, Take this trip's ways and words, timetable/area cleaning and send rules, your week's classes.
+- `FriendCompareTest` — the iOS `FriendCompareTests` with the spec's worked example (Monday 18 January 2027).
+- `FriendLiveInteropTest` — `HW_LIVE_RELAY=1 ./gradlew testReleaseUnitTest --tests nl.haltewekker.FriendLiveInteropTest`:
+  an account made by the Android code and an "iOS-style" one written in the test from the spec alone with the JDK's
+  own crypto (SunEC Ed25519/X25519, the JDK's ChaCha20-Poly1305, HMAC HKDF, none of the app's code) register on the
+  live relay, exchange a request, an accept and a line (the Android side reads them with `FriendInbox`), a travel state
+  each way through the state routes, Android's vault round trip, then both `/f/v1/leave`. Passed from the build
+  container on 2026-11-19 (about 6 s). CI skips it (no network test in CI).
+
+### Calls made in A3 (the user can correct)
+
+- Bouncy Castle (`bcprov`, about 5 MB more in the APK, now about 20 MB) over Tink or hand-written curves: well known,
+  pure Java, works from API 26. ZXing core for QR in both directions, CameraX for the camera: no Play services.
+- The friend list and chats as JSON files (not SharedPreferences), the secrets Keystore-wrapped in `noBackupFilesDir`.
+- Friends' entry: a round button with a badge on the home map next to Settings (Android's home has no bottom bar), plus
+  Settings › Friends. The Friends screens use their own back stack inside one top-level screen.
+- "Waiting at the stop" / "at a change" are inferred (no vehicle yet and the leg hasn't left), since the Android ride
+  has no explicit waiting state; an auto-started ride is shared only once the ride matched its vehicle by GPS.
+- Take this trip doesn't make a Be-there-by plan with a reminder (Android has none yet): for later trips it shows the
+  ways there by the card's time, the friend's ride first, and you start the ride from Fastest trip or the card when it's
+  time. Meet halfway and the ride's "onto their ride" use Transitous `/v5/trip` stops without pickup rules (Android's
+  parse doesn't read `pickupType`): every stop counts as one you may board at.
+- The WorkManager check is its own periodic work (hourly, network), on whenever there's someone in the list, not only
+  with the school alarm on.
+- No read-mark switch, chats not in the vault (as iOS 0.27). Friends' pictures aren't in the vault (as iOS 0.25).
+- R8 stays off (no device test pass yet), so no keep rules were needed for kotlinx.serialization or Bouncy Castle.
 
 ## As built A2 (0.2.0, version code 2)
 
