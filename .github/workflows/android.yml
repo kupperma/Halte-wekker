@@ -34,6 +34,17 @@ jobs:
         with:
           path: ~/.android/debug.keystore
           key: android-debug-keystore-v1
+      # Maven Central now and then fails a download on the runners: fetch what the build needs first, three tries.
+      - name: Dependencies
+        run: |
+          for i in 1 2 3; do
+            if ./gradlew --no-daemon --quiet :app:dependencies --configuration releaseUnitTestRuntimeClasspath > /dev/null &&
+               ./gradlew --no-daemon --quiet :app:dependencies --configuration releaseRuntimeClasspath > /dev/null; then
+              exit 0
+            fi
+            echo "Try $i failed; again in 20 s."; sleep 20
+          done
+          echo "::warning::Dependencies could not all be fetched; the build will say which."
       - name: Unit tests
         run: ./gradlew --no-daemon testReleaseUnitTest
       - name: Release signing key (from the repository secrets, when there)
