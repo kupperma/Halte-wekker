@@ -78,7 +78,7 @@ struct LogScrubber {
 
     init(_ known: LogScrubKnown) {
         ids = known.ids.filter { $0.count >= 6 }
-        names = LogScrub.names(known).map { n in
+        names = LogScrub.names(known).map { (n: (name: String, with: String)) -> (NSRegularExpression, String) in
             let pattern = #"(?<![\p{L}\p{N}])"# + NSRegularExpression.escapedPattern(for: n.name) + #"(?![\p{L}\p{N}])"#
             // (people's names as written: "Max" goes, the log's own "max" stays; places in any case)
             let options: NSRegularExpression.Options = n.with == LogScrub.person ? [] : [.caseInsensitive]
@@ -242,7 +242,7 @@ struct LogShareState: Codable, Equatable, Sendable {
     }
 
     /// A new install id and secret; lines from `now` on.
-    static func fresh(now: Date, random: (Int) -> [UInt8] = randomBytes) -> LogShareState {
+    static func fresh(now: Date, random: (Int) -> [UInt8] = LogShareState.randomBytes) -> LogShareState {
         LogShareState(install: hex(random(16)), secret: hex(random(32)), through: now)
     }
 
