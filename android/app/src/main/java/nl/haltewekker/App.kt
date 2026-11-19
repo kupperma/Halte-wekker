@@ -39,5 +39,9 @@ class App : Application() {
         Works.update(this)
         Regions.update(this)
         Notifications.sweep(this)
+        // A3: Friends (what's on this phone; the relay only at the app's checks)
+        nl.haltewekker.friends.FriendStore.init(this)
+        nl.haltewekker.friends.FriendTravelShare.attach(this)
+        nl.haltewekker.friends.FriendWork.update(this)
     }
 }
