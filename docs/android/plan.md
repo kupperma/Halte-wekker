@@ -258,9 +258,11 @@ state rides that trip, or who are in on a card for it: one record per vehicle pe
 1000 at most, friends only). A friend's page: "You rode together 14 times this month" and the last 10.
 
 **Live link.** `LiveKeys` (32 random bytes each, `SecureRandom`), token = b64u(SHA-256("hw-live-token-v1" ‖ secret)[0..16)),
-link `…/live/<token>#<b64u(key)>`, AES-256-GCM from `javax.crypto` (every Android version the app runs on), AAD
+link `…/live/<token>#k=<b64u(key)>` (relay 0.30.1's form, which the page reads besides 0.30's `#<key>`; Android
+parses both), AES-256-GCM from `javax.crypto` (every Android version the app runs on), AAD
 `hw-live-v1\n<token>`, the state's JSON sorted with plain numbers. `LiveLinkStore`: made from the ride screen (also
-without a friends account; the name is your friends name or the one typed last), sent with the share sheet; puts by
+without a friends account; the name is your friends name or the one typed last), sent with the share sheet or copied
+("Copy link", which the page names when an app cut a link short); puts by
 `LiveRules` (55 s, or ≥ 6 s after a change; `until` now + 30 min, never past 4 h), "Arrived" at the last stop (15 min,
 tried again once after 6 s), ended when the ride ends otherwise, on "Stop sharing" or after 4 h (again at the next tick
 or start when the network was away). Lateness: the live arrival against the planned one while riding, the departure's
@@ -289,14 +291,16 @@ network, not in battery saver.
   `FriendExtrasBTests`: free together and the note, scores build/valid/due, the board, the scores box from a friend only,
   riders and the ride history).
 - `FriendLiveTest` — the live-link vector: token `2x1Ot-EFfLIivv_lmStBuw`, the link, the state's exact JSON, the
-  AES-GCM data byte for byte, opening, another token or key refused; the page's words and the posting rules.
+  AES-GCM data byte for byte, opening, another token or key refused; the link made as `#k=<key>` and both forms parsed;
+  the page's words and the posting rules.
 - `LogShareTest` (iOS `LogShareTests`: real lines kept, public stops kept, places/people/ids/coordinates/links/addresses
   out, one line ≤ 2000, the batch, the line format, the budget, when, the install id, the put's four fields, CRC-32,
   gzip).
 - `LiveLinkInteropTest` — `HW_LIVE_RELAY=1 ./gradlew testReleaseUnitTest --tests nl.haltewekker.LiveLinkInteropTest`: a
   throwaway link made by the Android code path (`LiveKeys`, `LiveRules.state`, `LiveCrypto.lock`, `LiveRelay.put`),
   fetched with `/live/v1/get?t=<token>` as the page does, opened with only the link's token and fragment key, then
-  `/live/v1/end` (the relay then answers 410). Passed from the build container on 2026-11-19.
+  `/live/v1/end` (the relay then answers 410). Passed from the build container on 2026-11-19, with both the `#<key>`
+  and the `#k=<key>` links.
 
 ### Calls made in A4 (the user can correct)
 

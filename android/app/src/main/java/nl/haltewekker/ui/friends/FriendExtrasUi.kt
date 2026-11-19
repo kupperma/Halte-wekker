@@ -216,6 +216,11 @@ fun LiveLinkCard(ride: RideState? = null) {
                 color = DS.t.secondary, style = MaterialTheme.typography.bodySmall)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 QuietButton("Send the link") { shareLiveLink(context, l.keys.link) }
+                // (relay 0.30.1's page points here when an app cut the link short)
+                QuietButton("Copy link") {
+                    context.getSystemService(android.content.ClipboardManager::class.java)
+                        ?.setPrimaryClip(android.content.ClipData.newPlainText("Live link", l.keys.link))
+                }
                 QuietButton("Stop sharing") { LiveLinkStore.stop() }
             }
         } else {

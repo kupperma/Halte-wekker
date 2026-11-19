@@ -12,7 +12,7 @@ import kotlin.math.min
 // Live link (0.30), the iOS `LiveLink.swift`: a web page with your trip's live times for someone without the app (a
 // parent), as plain values, the lock and the rules, tested without the relay or the ride.
 //
-//   link   = https://haltewekker-relay.tsfaw1.workers.dev/live/<token>#<key>
+//   link   = https://haltewekker-relay.tsfaw1.workers.dev/live/<token>#k=<key>   (0.30 made "#<key>": both read)
 //   secret = 32 random bytes (stays on the phone: it lets the phone write)   key = 32 random bytes (AES-256-GCM)
 //   token  = base64url(first 16 bytes of SHA-256("hw-live-token-v1" ‖ secret))
 //   data   = 0x01 ‖ nonce (12) ‖ AES-256-GCM(key, AAD "hw-live-v1\n" + token)(the state's JSON) ‖ tag (16)
@@ -71,15 +71,17 @@ object LiveCrypto {
         return B64u.encode(h.copyOfRange(0, 16))
     }
 
-    fun link(token: String, key: ByteArray) = "$RELAY/live/$token#${B64u.encode(key)}"
+    /** (relay 0.30.1) The key goes as `#k=<key>`: a fragment some apps keep whole where they cut a bare one short. */
+    fun link(token: String, key: ByteArray) = "$RELAY/live/$token#k=${B64u.encode(key)}"
 
-    /** A link back into its token and key (null: not a live link of this relay, or no key). */
+    /** A link back into its token and key, `#k=<key>` or 0.30's `#<key>` (null: not a live link of this relay, or no key). */
     fun parse(s: String): Pair<String, ByteArray>? {
         val prefix = "$RELAY/live/"
         if (!s.startsWith(prefix)) return null
         val parts = s.removePrefix(prefix).split("#", limit = 2)
         if (parts.size != 2 || parts[0].length != 22) return null
-        val key = B64u.decode(parts[1]) ?: return null
+        val k = Regex("(?:^|[&;?])k=([^&;]*)").find(parts[1])?.groupValues?.get(1) ?: parts[1]
+        val key = B64u.decode(k) ?: return null
         if (key.size != 32) return null
         return parts[0] to key
     }

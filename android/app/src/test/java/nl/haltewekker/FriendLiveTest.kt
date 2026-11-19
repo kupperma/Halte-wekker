@@ -36,10 +36,13 @@ class FriendLiveTest {
 
     @Test fun tokenAndLink() {
         assertEquals(TOKEN, keys.token)
-        assertEquals(LINK, keys.link)
-        val p = LiveCrypto.parse(LINK)!!
-        assertEquals(TOKEN, p.first)
-        assertArrayEquals(bytes(0x20, 32), p.second)
+        // (relay 0.30.1) the link carries the key as "#k=<key>"; 0.30's "#<key>" (the spec's vector) still reads
+        assertEquals(LINK_K, keys.link)
+        for (l in listOf(LINK, LINK_K)) {
+            val p = LiveCrypto.parse(l)!!
+            assertEquals(TOKEN, p.first)
+            assertArrayEquals(bytes(0x20, 32), p.second)
+        }
         assertNull(LiveCrypto.parse("https://haltewekker-relay.tsfaw1.workers.dev/live/2x1Ot-EFfLIivv_lmStBuw"))
         assertNull(LiveCrypto.parse("https://example.com/live/2x1Ot-EFfLIivv_lmStBuw#ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8"))
         val fresh = LiveKeys.make()
@@ -114,6 +117,7 @@ class FriendLiveTest {
     companion object {
         const val TOKEN = "2x1Ot-EFfLIivv_lmStBuw"
         const val LINK = "https://haltewekker-relay.tsfaw1.workers.dev/live/2x1Ot-EFfLIivv_lmStBuw#ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8"
+        const val LINK_K = "https://haltewekker-relay.tsfaw1.workers.dev/live/2x1Ot-EFfLIivv_lmStBuw#k=ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8"
         const val PLAIN = """{"dest":"Breda","end":1800004500,"eta":1800001260,"from":"Veghel","late":3,"line":"305","mode":"bus","name":"Sam","pos":{"at":1799999990,"lat":51.61672,"lon":5.54861},"state":"riding","t":1800000000,"to":"Den Bosch","v":1}"""
         const val DATA = "AUBBQkNERUZHSElKS7l22eQjAucxcHAiTeErc14x6_Pn13qW5l7OpDBU3_8y5jF6alf-mxd1pw20reGB2e60y1bPhb3fRMafBUHNMX0XzIrkdFdZINAvfQZc6wgCKn4B3YWG2r9jXEn0RXpeVbJnZrAQ2fH-jvvebSMWbiXub8wm-a4kw_nwp59f9VyUkXutBMfsSHUt3Agu3YlcN2wqOLT2L2x4rrqImgvKvsoulSwMAdncswKlNM9vKwSvq3RIztNMa-KL1guHyZLcJ5KPVhXxLPpZVMixIoV0J937rVtJ9dYWTJ1LJ0lsBKOwV_k08p4uVV-3ue-8vAw"
     }
