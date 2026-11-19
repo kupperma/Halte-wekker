@@ -61,6 +61,8 @@ struct HaltewekkerApp: App {
                     near.onPosition = { t.guessFromPlace($0); t.maybeAutoHome($0) }
                     // Friends (0.26): your trip to the friends you show it to, watched from the trip (it changes nothing)
                     FriendTravelShare.shared.attach(t)
+                    // (0.29) the Friends extras: region events (at school, leaving home) and the trip's start, read only
+                    FriendExtrasStore.shared.attach(t)
                     // (0.28.1) shared ride logs: a trip that ended is a moment to send (only when turned on)
                     LogShareStore.shared.attach(t)
                     Task { await NoticeLog.shared.collectDelivered() }

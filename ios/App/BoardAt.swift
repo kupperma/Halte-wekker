@@ -22,6 +22,8 @@ enum BoardAt {
         var boarding: Bool = true
         /// (0.28) When it gets there (the live time when there is one), for meeting halfway.
         var arrival: Date? = nil
+        /// (0.29) The live data says it's cancelled there (for the delay alarm of shared rides).
+        var cancelled: Bool = false
     }
 
     /// Where to get on instead, and the walk there in minutes.

@@ -228,6 +228,7 @@ final class FriendStore: ObservableObject {
         groups = GroupBook(groups: restored?.groups ?? [])
         state.groups = groups
         FriendTimetables.shared.restore(restored?.timetable)
+        FriendExtrasStore.shared.restore(restored?.extras)
         myPicture = restored?.picture
         Self.writePicture("me", myPicture)
         state.vaultDirty = restored == nil
@@ -284,6 +285,7 @@ final class FriendStore: ObservableObject {
         unread = 0
         FriendChats.shared.clearAll()
         FriendTimetables.shared.forgetAll()
+        FriendExtrasStore.shared.forgetAll()
         identity = nil
         device = ""
         state = Saved()
@@ -789,6 +791,28 @@ final class FriendStore: ObservableObject {
         }
     }
 
+    // MARK: the extras (0.29)
+
+    /// Locks one payload for each of these people (a friend, or someone in a group with you; the group's id as `g`)
+    /// and queues it in `slot` (a box still waiting there for them goes: only the newest matters).
+    func queueBox(_ m: FriendMessage, to ids: [String], slot: String, ttl: Int, group: String? = nil) {
+        guard let me = identity, !ids.isEmpty else { return }
+        let n: String = RelaySign.nonce()
+        guard let p = try? FriendBox.payload(m, from: me.account, at: Date(), id: n, group: group) else { return }
+        for id in ids where id != me.account {
+            guard let c = anyCard(id), let d = try? FriendBox.seal(payload: p, from: me, to: c) else { continue }
+            replacePending(FriendPending(op: .box, to: id, data: B64URL.encode(d), slot: slot, ttl: ttl))
+        }
+        save()
+    }
+
+    /// An extras switch changed: the vault keeps it, and what's shared follows at once.
+    func extrasSettingsChanged() {
+        state.vaultDirty = true
+        save()
+        Task { await sync(.now) }
+    }
+
     // MARK: checking the relay
 
     enum Why {
@@ -851,18 +875,22 @@ final class FriendStore: ObservableObject {
                 }
                 FriendChats.shared.take(r.chat)
                 FriendTimetables.shared.take(r)
+                FriendExtrasStore.shared.take(r)
                 state.cursor = inbox.cursor
                 save()
                 try await relay.ack(r.ack)
                 if !inbox.more { break }
             }
             await timetableDue(me, now: Date())
+            // (0.29) the extras: a wait on its way, at school, your plan for the wake-up buddy, delays on shared rides
+            await FriendExtrasStore.shared.due(now: Date())
             try await flush(relay)
             let statesDue = why != .chat || (travelChecked.map { now.timeIntervalSince($0) >= 30 } ?? true)
             if statesDue { await travelAfterSync(relay, lane: why == .now ? .urgent : .background) }
             if state.vaultDirty, let b = book,
                let plain = try? FriendJSON.encoder.encode(FriendVaultContents(book: b, picture: myPicture, groups: groups.groups.isEmpty ? nil : groups.groups,
-                                                                              timetable: vaultTimetable)) {
+                                                                              timetable: vaultTimetable,
+                                                                              extras: FriendExtrasStore.shared.vaultSettings)) {
                 let sealed = try FriendVault.seal(plain, me: me)
                 try await relay.vaultPut(sealed)
                 state.vaultDirty = false

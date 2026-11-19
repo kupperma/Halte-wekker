@@ -833,13 +833,18 @@ enum Transit {
             s.scheduledTrack = o["scheduledTrack"] as? String
             s.boarding = pickup != "NOT_ALLOWED" && !cancelled
             s.arrival = date(o["arrival"])
+            s.cancelled = cancelled
             return s
         }
+        var tripCancelled = false
         for l in legs {
             if out.isEmpty, let s = stop(l["from"] as? [String: Any]) { out.append(s) }
             for o in (l["intermediateStops"] as? [[String: Any]]) ?? [] { if let s = stop(o) { out.append(s) } }
             if let s = stop(l["to"] as? [String: Any]) { out.append(s) }
+            if ((l["cancelled"] as? Bool) ?? false) || ((l["tripCancelled"] as? Bool) ?? false) { tripCancelled = true }
         }
+        // (0.29) a trip cancelled as a whole: every stop is (only the delay alarm reads it)
+        if tripCancelled { for i in out.indices { out[i].cancelled = true } }
         return out.count >= 2 ? out : nil
     }
 

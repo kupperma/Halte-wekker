@@ -15,7 +15,8 @@ import CryptoKit
 // /f/v1/send), "b": the kind's body}.
 // 0.26 adds travel (sent through the state routes, not the mailbox); 0.27 message, trip, seen and the group kinds (group,
 // gpicture, gleave; a group's boxes carry `g` and are locked once per member); 0.28 timetable and area (slots `tt` and
-// `area`). New kinds only add a case and a body: an app that
+// `area`); 0.29 wait, delay, buddy and campus (the Friends extras, each in its own slot). New kinds only add a case and
+// a body: an app that
 // doesn't know a kind leaves that box on the relay (unacknowledged, until it expires), so a newer app can still read it.
 
 /// What a box says. 0.25 knows these; anything else comes back as `.unknown`.
@@ -49,6 +50,14 @@ enum FriendMessage: Equatable {
     case timetable(TimetableShare)
     /// (0.28) Where your trips start and your school (slot `area`): never your home address.
     case area(TimetableArea)
+    /// (0.29) "Wait for me": how far you are from the stop (slot `wait`; in a group with `g`).
+    case wait(WaitFor)
+    /// (0.29) A ride you share runs late or is cancelled, and the next one you can all take (slot `delay`).
+    case delay(RideDelay)
+    /// (0.29) "Tell Sam if I haven't left yet": your plan for the day and when you left (slot `buddy`).
+    case buddy(BuddyPlan)
+    /// (0.29) At school now (slot `campus`): no place, just since when.
+    case campus(CampusState)
     /// A kind this version doesn't know (from a newer app).
     case unknown(String)
 
@@ -68,16 +77,21 @@ enum FriendMessage: Equatable {
         case .groupLeave: return "gleave"
         case .timetable: return "timetable"
         case .area: return "area"
+        case .wait: return "wait"
+        case .delay: return "delay"
+        case .buddy: return "buddy"
+        case .campus: return "campus"
         case .unknown(let k): return k
         }
     }
 
     /// The kinds this version reads (and acknowledges, so the relay drops them).
     static let known: Set<String> = ["request", "accept", "unfriend", "profile", "picture", "travel",
-                                     "message", "trip", "seen", "group", "gpicture", "gleave", "timetable", "area"]
+                                     "message", "trip", "seen", "group", "gpicture", "gleave", "timetable", "area",
+                                     "wait", "delay", "buddy", "campus"]
     /// Raised whenever a release learns new kinds: boxes left on the relay are read again from the start once.
-    /// (2: 0.26, travel. 3: 0.27, messages, trips and groups. 4: 0.28, timetables and areas.)
-    static let kindsVersion = 4
+    /// (2: 0.26, travel. 3: 0.27, messages, trips and groups. 4: 0.28, timetables and areas. 5: 0.29, the extras.)
+    static let kindsVersion = 5
 
     /// The kinds that belong to a chat (read after the rest of a batch, so a group's list that came in the same batch
     /// is known first).
@@ -174,6 +188,14 @@ enum FriendBox {
             return try e.encode(BoxEnvelope(v: v, k: k, f: from, t: t, n: id, g: g, b: b))
         case .area(let b):
             return try e.encode(BoxEnvelope(v: v, k: k, f: from, t: t, n: id, g: g, b: b))
+        case .wait(let b):
+            return try e.encode(BoxEnvelope(v: v, k: k, f: from, t: t, n: id, g: g, b: b))
+        case .delay(let b):
+            return try e.encode(BoxEnvelope(v: v, k: k, f: from, t: t, n: id, g: g, b: b))
+        case .buddy(let b):
+            return try e.encode(BoxEnvelope(v: v, k: k, f: from, t: t, n: id, g: g, b: b))
+        case .campus(let b):
+            return try e.encode(BoxEnvelope(v: v, k: k, f: from, t: t, n: id, g: g, b: b))
         case .unfriend, .groupLeave, .unknown:
             return try e.encode(BoxEnvelope(v: v, k: k, f: from, t: t, n: id, g: g, b: NoBody()))
         }
@@ -199,6 +221,10 @@ enum FriendBox {
             case "gleave": return (h, .groupLeave)
             case "timetable": return (h, .timetable(try d.decode(BoxEnvelope<TimetableShare>.self, from: data).b))
             case "area": return (h, .area(try d.decode(BoxEnvelope<TimetableArea>.self, from: data).b))
+            case "wait": return (h, .wait(try d.decode(BoxEnvelope<WaitFor>.self, from: data).b))
+            case "delay": return (h, .delay(try d.decode(BoxEnvelope<RideDelay>.self, from: data).b))
+            case "buddy": return (h, .buddy(try d.decode(BoxEnvelope<BuddyPlan>.self, from: data).b))
+            case "campus": return (h, .campus(try d.decode(BoxEnvelope<CampusState>.self, from: data).b))
             default: return (h, .unknown(h.k))
             }
         } catch { throw FriendBoxError.badFormat }

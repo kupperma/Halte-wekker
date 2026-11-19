@@ -206,6 +206,11 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     private var headsignOf: [String: String] = [:]        // where the sheet's vehicles go, by trip id
     /// Friends (0.26): told on each ride network tick, to send what's due on the same wake (it only reads the trip).
     var onNetTick: (@MainActor () -> Void)?
+    /// Friends (0.29): told when you get to or leave a region (its id, true: got there), before the trip looks at it;
+    /// for "Show friends when I'm at school" and the wake-up buddy. It only reads.
+    var onRegion: (@MainActor (String, Bool) -> Void)?
+    /// (0.29) "Show friends when I'm at school" is on: School's region also tells when you get there and leave.
+    static let campusRegionKey = "friends.campusRegion"
 
     var leg: Leg? { index < legs.count ? legs[index] : nil }
     var wakeKm: Double { leg.map(km(for:)) ?? busKm }
@@ -852,8 +857,14 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
 
     nonisolated func locationManager(_ manager: CLLocationManager, didExitRegion region: CLRegion) {
         let center = (region as? CLCircularRegion)?.center
+        let id = region.identifier
         NoticeSweep.soon()
-        Task { @MainActor in self.leftRegion(region.identifier, center: center) }
+        Task { @MainActor in
+            self.onRegion?(id, false)
+            // (School's exit watched only for "at school" (0.29) starts nothing: the trip sees only the exits it asked for)
+            if id == RoleRegions.schoolId, !RoleRegions.exitStartsTrip(id, base: self.wantedRegions()) { return }
+            self.leftRegion(id, center: center)
+        }
     }
 
     /// A region iOS couldn't watch (it says so once): register them all again, at most every 10 minutes.
@@ -869,6 +880,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         NoticeSweep.soon()
         if region.identifier == Self.backstopId { Task { @MainActor in self.backstopEntered() }; return }
         guard region.identifier == RoleRegions.schoolId else { return }
+        let id = region.identifier
+        Task { @MainActor in self.onRegion?(id, true) }
         Task { @MainActor in self.maybeAutoHome(CLLocation(latitude: Place.school.coordinate.latitude, longitude: Place.school.coordinate.longitude)) }
     }
 
@@ -2520,11 +2533,12 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     private func updateWatching(force: Bool = false) {
         // On the corridor its stations' regions start your fixed routes (0.21's list exactly); off it, your home stops
         // and School start a door-to-door trip (0.24: `RoleRegions`).
-        let homeStops = StopsStore.shared.boardStops.compactMap { b in b.lat.flatMap { la in b.lon.map { GeoPoint(lat: la, lon: $0) } } }
-        let wanted: [RegionSpec] = location.authorizationStatus == .authorizedAlways
-            ? RoleRegions.wanted(roles: RoleSnapshot.current, homeStops: homeStops, autoStart: autoStart, autoHome: autoHome,
-                                 schoolRadius: NearMe.schoolRadius)
-            : []
+        var wanted: [RegionSpec] = wantedRegions()
+        // (0.29) "Show friends when I'm at school": School's region tells both ways too
+        if location.authorizationStatus == .authorizedAlways, UserDefaults.standard.bool(forKey: Self.campusRegionKey) {
+            let c = Place.school.coordinate
+            wanted = RoleRegions.withCampus(wanted, school: GeoPoint(lat: c.latitude, lon: c.longitude), radius: NearMe.schoolRadius)
+        }
         // (the far tier's backstop around a ride's stop is its own: `updateBackstop`)
         let current: [RegionSpec] = location.monitoredRegions.filter { $0.identifier != Self.backstopId }.map { r in
             let c = r as? CLCircularRegion
@@ -2543,6 +2557,20 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         if location.authorizationStatus != .authorizedAlways,
            autoStart && location.authorizationStatus == .authorizedWhenInUse { location.requestAlwaysAuthorization() }
     }
+
+    /// The regions the trip itself wants (auto-start, auto-home): as before 0.29.
+    private func wantedRegions() -> [RegionSpec] {
+        guard location.authorizationStatus == .authorizedAlways else { return [] }
+        let homeStops = StopsStore.shared.boardStops.compactMap { b in b.lat.flatMap { la in b.lon.map { GeoPoint(lat: la, lon: $0) } } }
+        return RoleRegions.wanted(roles: RoleSnapshot.current, homeStops: homeStops, autoStart: autoStart, autoHome: autoHome,
+                                  schoolRadius: NearMe.schoolRadius)
+    }
+
+    /// (0.29) A Friends switch that watches School's region changed: the regions again.
+    func regionsChanged() { updateWatching() }
+
+    /// (0.29) Whether location is allowed always (regions work only then).
+    var locationAlways: Bool { location.authorizationStatus == .authorizedAlways }
 
     func askForAlways() { location.requestAlwaysAuthorization() }
 

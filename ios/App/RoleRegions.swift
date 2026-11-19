@@ -53,6 +53,23 @@ enum RoleRegions {
         return out
     }
 
+    /// (0.29) "Show friends when I'm at school": the school's region also tells when you get there and leave (added
+    /// when it isn't watched; both ways when it is). The rest as `wanted` has it.
+    static func withCampus(_ base: [RegionSpec], school: GeoPoint, radius: Double) -> [RegionSpec] {
+        guard let i = base.firstIndex(where: { $0.id == schoolId }) else {
+            return base + [RegionSpec(id: schoolId, lat: school.lat, lon: school.lon, radius: radius, entry: true, exit: true)]
+        }
+        var out = base
+        let r = base[i]
+        out[i] = RegionSpec(id: r.id, lat: r.lat, lon: r.lon, radius: r.radius, entry: true, exit: true)
+        return out
+    }
+
+    /// (0.29) Leaving this region is one the trip watches for (auto-start): not one only "at school" added.
+    static func exitStartsTrip(_ id: String, base: [RegionSpec]) -> Bool {
+        base.contains { $0.id == id && $0.exit }
+    }
+
     /// The stops, one per spot: a stop within 150 m of one already kept is the same place (at most three).
     static func merged(_ stops: [GeoPoint]) -> [GeoPoint] {
         var out: [GeoPoint] = []

@@ -146,6 +146,13 @@ final class FriendChats: ObservableObject {
         return post(.message(body), content: .text(body), chat: chat)
     }
 
+    /// (0.29) "I'll wait" / "Let's take the next one together" to someone's wait (its id).
+    @discardableResult
+    func answerWait(_ a: WaitAnswer, wait id: String, in chat: String) -> Bool {
+        let body = ChatText(text: a.text, re: id, answer: a.rawValue)
+        return post(.message(body), content: .text(body), chat: chat)
+    }
+
     /// A trip card to each of these chats. Gives how many it went to.
     @discardableResult
     func sendTrip(_ c: TripCard, to chats: [String]) -> Int {

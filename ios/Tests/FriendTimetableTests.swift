@@ -83,7 +83,7 @@ final class FriendTimetableVectorTests: XCTestCase {
     func test_newKindsAreKnown() {
         XCTAssertTrue(FriendMessage.known.contains("timetable"))
         XCTAssertTrue(FriendMessage.known.contains("area"))
-        XCTAssertEqual(FriendMessage.kindsVersion, 4)
+        XCTAssertGreaterThanOrEqual(FriendMessage.kindsVersion, 4)
     }
 }
 

@@ -22,7 +22,7 @@ struct ChatText: Codable, Equatable {
     var text: String
     /// The `n` of the trip card this answers.
     var re: String? = nil
-    /// "in" or "cant" (with `re`).
+    /// "in" or "cant" (with `re`); (0.29) "wait" or "next" answering a wait's id.
     var answer: String? = nil
 
     /// As sent and shown: no control characters but line breaks, at most two line breaks in a row, trimmed, at most
@@ -234,6 +234,17 @@ struct ChatBook: Codable, Equatable {
         var out: [String: TripAnswer] = [:]
         for m in c.messages {
             guard let t = m.text, t.re == card, let a = t.answer.flatMap(TripAnswer.init(rawValue:)) else { continue }
+            out[m.from] = a
+        }
+        return out
+    }
+
+    /// (0.29) The answers to a "wait for me" (its id), the newest per person.
+    func waitAnswers(to wait: String, in key: String) -> [String: WaitAnswer] {
+        guard let c = chats[key] else { return [:] }
+        var out: [String: WaitAnswer] = [:]
+        for m in c.messages {
+            guard let t = m.text, t.re == wait, let a = t.answer.flatMap(WaitAnswer.init(rawValue:)) else { continue }
             out[m.from] = a
         }
         return out

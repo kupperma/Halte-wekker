@@ -53,6 +53,8 @@ struct FriendVaultContents: Codable, Equatable {
     var groups: [FriendGroup]? = nil
     /// (0.28) Your timetable switches (not the timetables).
     var timetable: TimetableSettings? = nil
+    /// (0.29) The extras' switches: "Show friends when I'm at school", who may hear you haven't left yet.
+    var extras: ExtrasSettings? = nil
 }
 
 /// Something to do on the relay, kept until it went through (so an accept isn't lost to a tunnel).
@@ -110,6 +112,15 @@ enum FriendInbox {
         var areas: [String: AreaSeen] = [:]
         /// People who took theirs back: forget their timetable and area.
         var timetablesOff: Set<String> = []
+        // 0.29
+        /// "Wait for me" (the newest per sender, by their time).
+        var waits: [String: WaitSeen] = [:]
+        /// Delays on rides you share, as they came.
+        var delays: [DelaySeen] = []
+        /// Friends' "tell you if I haven't left yet" (the newest per friend; `on: false` takes it back).
+        var buddies: [String: BuddySeen] = [:]
+        /// Friends on campus (the newest per friend; `on: false`: they left).
+        var campus: [String: CampusSeen] = [:]
     }
 
     /// How long a box nobody has the key for yet is kept on this phone.
@@ -211,6 +222,27 @@ enum FriendInbox {
                     r.timetablesOff.remove(id)
                 }
             }
+        case .wait(let w):
+            // (in a group from someone on its list while you're in it; else from a friend)
+            var chat: String? = nil
+            if let g {
+                if r.groups.accepts(g, from: id) { chat = ChatKey.group(g) }
+            } else if r.book.isFriend(id) {
+                chat = ChatKey.friend(id)
+            }
+            if let chat, id != me.account, let v = WaitFor.valid(w), (r.waits[id]?.t ?? Int.min) <= opened.header.t {
+                r.waits[id] = WaitSeen(from: id, chat: chat, wait: v, t: opened.header.t, got: now)
+            }
+        case .delay(let d):
+            if r.book.isFriend(id) || r.groups.shares(id), let v = RideDelay.valid(d) { r.delays.append(DelaySeen(from: id, delay: v, got: now)) }
+        case .buddy(let b):
+            if r.book.isFriend(id), (r.buddies[id]?.t ?? Int.min) <= opened.header.t {
+                r.buddies[id] = BuddySeen(plan: b, t: opened.header.t, got: now)
+            }
+        case .campus(let c):
+            if r.book.isFriend(id), (r.campus[id]?.t ?? Int.min) <= opened.header.t {
+                r.campus[id] = CampusSeen(state: c, t: opened.header.t, got: now)
+            }
         case .travel, .message, .trip, .seen:
             break
         case .request, .accept, .unfriend, .profile:
@@ -243,8 +275,12 @@ enum FriendInbox {
         case .message(let t):
             let text = ChatText.clean(t.text)
             let answer = t.answer.flatMap(TripAnswer.init(rawValue:))
-            guard !text.isEmpty || answer != nil else { return }
-            content = .text(ChatText(text: text.isEmpty ? (answer?.text ?? "") : text, re: answer == nil ? nil : t.re, answer: answer?.rawValue))
+            // (0.29) an answer to a "wait for me" ("I'll wait", "Let's take the next one together")
+            let waitAnswer = t.answer.flatMap(WaitAnswer.init(rawValue:))
+            guard !text.isEmpty || answer != nil || waitAnswer != nil else { return }
+            let shown: String = text.isEmpty ? (answer?.text ?? waitAnswer?.text ?? "") : text
+            let kept: String? = answer?.rawValue ?? waitAnswer?.rawValue
+            content = .text(ChatText(text: shown, re: kept == nil ? nil : t.re, answer: kept))
         case .trip(let c):
             guard let c = TripCard.valid(c) else { return }
             content = .trip(c)
