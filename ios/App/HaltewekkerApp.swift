@@ -57,6 +57,8 @@ struct HaltewekkerApp: App {
                         Watchdog.shared.mark("drawing the first screen")
                     }
                     near.onPosition = { t.guessFromPlace($0); t.maybeAutoHome($0) }
+                    // Friends (0.26): your trip to the friends you show it to, watched from the trip (it changes nothing)
+                    FriendTravelShare.shared.attach(t)
                     Task { await NoticeLog.shared.collectDelivered() }
                     Morning.shared.checkAfterAlarm()
                     // (Recomp is parked since 0.19: its data stays on the phone, untouched, and nothing in the app

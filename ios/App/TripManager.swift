@@ -202,6 +202,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     /// "Pick again" (on the ride screen or the notification): the ride screen opens the sheet, and sets it back.
     @Published var pickAgain = false
     private var headsignOf: [String: String] = [:]        // where the sheet's vehicles go, by trip id
+    /// Friends (0.26): told on each ride network tick, to send what's due on the same wake (it only reads the trip).
+    var onNetTick: (() -> Void)?
 
     var leg: Leg? { index < legs.count ? legs[index] : nil }
     var wakeKm: Double { leg.map(km(for:)) ?? busKm }
@@ -843,7 +845,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         // A ride's network on one clock (0.20.7): whatever is due goes on the same 30 s tick, so the radio wakes once.
         let now = Date()
         let tick = (phase == .transfer || phase == .sleeping || phase == .awake) && RideTick.due(last: lastNetTick, now: now)
-        if tick { lastNetTick = now }
+        if tick { lastNetTick = now; onNetTick?() }
         if phase == .transfer {
             transferAnchor = TransferPolicy.update(transferAnchor, with: Fix(loc))     // (standing at the change: for the hour's end)
             if tick { Task { await loadUpcoming() } }

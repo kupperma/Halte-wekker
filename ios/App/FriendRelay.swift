@@ -84,5 +84,28 @@ struct FriendRelay {
         let v: RelayVault = try await call("/f/v1/vault/get", [:], lane: .urgent)
         return v.data.flatMap(B64URL.decode)
     }
+    // MARK: latest states (0.26)
+
+    /// Puts your state at up to 50 friends (each a box locked for them); the relay answers for each.
+    func statePut(_ states: [(to: String, data: Data)], ttl: Int, lane: Lane = .background) async throws -> [RelaySendResult] {
+        let list: [[String: Any]] = states.map { ["to": $0.to, "data": B64URL.encode($0.data), "ttl": ttl] }
+        let r: RelaySent = try await call("/f/v1/state/put", ["states": list], lane: lane)
+        return r.results
+    }
+
+    /// The states friends left for you.
+    func stateGet(lane: Lane = .background) async throws -> [RelayState] {
+        let r: RelayStates = try await call("/f/v1/state/get", [:], lane: lane)
+        return r.states
+    }
+
+    /// Takes your state back: from these friends, or (nil) from everyone it went to.
+    @discardableResult
+    func stateClear(_ to: [String]? = nil) async throws -> Int {
+        let body: [String: Any] = to.map { ["to": $0] } ?? [:]
+        let r: RelayCleared = try await call("/f/v1/state/clear", body)
+        return r.cleared
+    }
+
     func leave() async throws { let _: OK = try await call("/f/v1/leave", [:], lane: .urgent) }
 }

@@ -13,7 +13,7 @@ import CryptoKit
 // The payload: {"v":1, "k": kind, "f": sender account, "t": unix seconds, "n": random id, "g": group id (optional,
 // for the group chats to come: the same message is locked once per member and posted to all their mailboxes in one
 // /f/v1/send), "b": the kind's body}.
-// New kinds (0.26 travel, 0.27 message and trip, 0.28 timetable and area) only add a case and a body: an app that
+// 0.26 adds travel (sent through the state routes, not the mailbox). New kinds (0.27 message and trip, 0.28 timetable and area) only add a case and a body: an app that
 // doesn't know a kind leaves that box on the relay (unacknowledged, until it expires), so a newer app can still read it.
 
 /// What a box says. 0.25 knows these; anything else comes back as `.unknown`.
@@ -28,6 +28,9 @@ enum FriendMessage: Equatable {
     case profile(FriendProfile)
     /// Your profile picture (a small square JPEG), kept in the relay's "picture" slot (the newest replaces the last).
     case picture(FriendPicture)
+    /// (0.26) Your trip right now, to a friend you show your trips to: through the relay's state routes (the newest
+    /// replaces the last; taken back when the trip ends), never the mailbox.
+    case travel(TravelState)
     /// A kind this version doesn't know (from a newer app).
     case unknown(String)
 
@@ -38,14 +41,16 @@ enum FriendMessage: Equatable {
         case .unfriend: return "unfriend"
         case .profile: return "profile"
         case .picture: return "picture"
+        case .travel: return "travel"
         case .unknown(let k): return k
         }
     }
 
     /// The kinds this version reads (and acknowledges, so the relay drops them).
-    static let known: Set<String> = ["request", "accept", "unfriend", "profile", "picture"]
+    static let known: Set<String> = ["request", "accept", "unfriend", "profile", "picture", "travel"]
     /// Raised whenever a release learns new kinds: boxes left on the relay are read again from the start once.
-    static let kindsVersion = 1
+    /// (2: 0.26, travel.)
+    static let kindsVersion = 2
 }
 
 struct FriendIntro: Codable, Equatable {
@@ -115,6 +120,8 @@ enum FriendBox {
             return try e.encode(BoxEnvelope(v: payloadVersion, k: m.kind, f: from, t: t, n: id, b: b))
         case .picture(let b):
             return try e.encode(BoxEnvelope(v: payloadVersion, k: m.kind, f: from, t: t, n: id, b: b))
+        case .travel(let b):
+            return try e.encode(BoxEnvelope(v: payloadVersion, k: m.kind, f: from, t: t, n: id, b: b))
         case .unfriend, .unknown:
             return try e.encode(BoxEnvelope(v: payloadVersion, k: m.kind, f: from, t: t, n: id, b: NoBody()))
         }
@@ -131,6 +138,7 @@ enum FriendBox {
             case "unfriend": return (h, .unfriend)
             case "profile": return (h, .profile(try d.decode(BoxEnvelope<FriendProfile>.self, from: data).b))
             case "picture": return (h, .picture(try d.decode(BoxEnvelope<FriendPicture>.self, from: data).b))
+            case "travel": return (h, .travel(try d.decode(BoxEnvelope<TravelState>.self, from: data).b))
             default: return (h, .unknown(h.k))
             }
         } catch { throw FriendBoxError.badFormat }

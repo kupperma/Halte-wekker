@@ -7,7 +7,10 @@ struct Friend: Codable, Equatable, Identifiable {
     var card: FriendCard
     var name: String
     var since: Date
+    /// (0.26) "Show my trips" to this friend: nil is the default, on. Kept in the vault as `"trips": false` when off.
+    var trips: Bool? = nil
     var id: String { card.account }
+    var showsTrips: Bool { trips ?? true }
 }
 
 /// A request waiting: one you got (incoming) or one you sent (outgoing).
@@ -99,6 +102,12 @@ struct FriendBook: Codable, Equatable {
         return [.drop(id), .send(f.card, .unfriend)]
     }
 
+    /// (0.26) "Show my trips" to one friend, on or off (on is kept as the default, nil).
+    mutating func showTrips(_ id: String, _ on: Bool) {
+        guard let i = friends.firstIndex(where: { $0.id == id }) else { return }
+        friends[i].trips = on ? nil : false
+    }
+
     /// Your new name, to every friend.
     mutating func rename(_ name: String) -> [Effect] {
         let n = FriendNames.clean(name)
@@ -162,7 +171,7 @@ struct FriendBook: Codable, Equatable {
             guard !n.isEmpty, let i = friends.firstIndex(where: { $0.id == id }) else { return ([], nil) }
             friends[i].name = n
             return ([], nil)
-        case .picture, .unknown:
+        case .picture, .travel, .unknown:
             // (a picture is kept beside the list, by FriendInbox; nothing here changes)
             return ([], nil)
         }

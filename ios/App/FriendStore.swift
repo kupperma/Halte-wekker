@@ -52,6 +52,15 @@ final class FriendStore: ObservableObject {
     /// Your own profile picture (a 256 px square JPEG), and friends' by account.
     @Published private(set) var myPicture: Data?
     @Published private(set) var pictures: [String: Data] = [:]
+    /// (0.26) Friends travelling now: their latest state, by account (read from the relay; old ones drop out).
+    @Published private(set) var travel: [String: FriendTravelSeen] = [:]
+    @Published private(set) var travelChecked: Date?
+    /// How many friends see your trip right now (0: none, or no trip).
+    @Published private(set) var sharingWith = 0
+    /// The one-time "Show my trips" screen was answered.
+    @Published private(set) var travelAnswered = false
+    /// "Show my trips" is paused for everyone (Friends › Your trips).
+    @Published private(set) var travelPaused = false
 
     struct OpenedCode: Identifiable, Equatable {
         let card: FriendCard
@@ -71,6 +80,12 @@ final class FriendStore: ObservableObject {
         var kindsVersion = 0
         var pending: [FriendPending] = []
         var vaultDirty = false
+        // 0.26 (optional, so a 0.25 file still reads): the one-time screen's answer, the pause, who has this trip's
+        // state, and a take-back that didn't go through yet
+        var travelAnswered: Bool?
+        var travelPaused: Bool?
+        var travelSentTo: [String]?
+        var travelClearDue: Bool?
     }
 
     nonisolated static let folder: URL? = {
@@ -93,6 +108,8 @@ final class FriendStore: ObservableObject {
             device = dev
             if let f = Self.file, let d = try? Data(contentsOf: f), let s = try? FriendJSON.decoder.decode(Saved.self, from: d) { state = s }
             book = state.book ?? FriendBook(myName: "")
+            travelAnswered = state.travelAnswered ?? false
+            travelPaused = state.travelPaused ?? false
             myPicture = Self.readPicture("me")
             for id in Self.ids(state.book) { if let p = Self.readPicture(id) { pictures[id] = p } }
         }
@@ -222,6 +239,10 @@ final class FriendStore: ObservableObject {
         for id in Array(pictures.keys) + ["me"] { Self.writePicture(id, nil) }
         pictures = [:]
         myPicture = nil
+        travel = [:]
+        sharingWith = 0
+        travelAnswered = false
+        travelPaused = false
         identity = nil
         device = ""
         state = Saved()
@@ -277,6 +298,7 @@ final class FriendStore: ObservableObject {
         if b != book { state.vaultDirty = true }
         book = b
         state.book = b
+        if travel.keys.contains(where: { !b.isFriend($0) }) { travel = travel.filter { b.isFriend($0.key) } }
         for e in effects {
             switch e {
             case .send(let card, let m):
@@ -298,6 +320,118 @@ final class FriendStore: ObservableObject {
     private func save() {
         guard let f = Self.file, let d = try? FriendJSON.encoder.encode(state) else { return }
         try? d.write(to: f, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+    }
+
+    // MARK: travelling now (0.26)
+
+    /// Each friend and their "Show my trips" switch.
+    var travelFriends: [(id: String, on: Bool)] { book?.friends.map { (id: $0.id, on: $0.showsTrips) } ?? [] }
+    var hasFriends: Bool { !(book?.friends.isEmpty ?? true) }
+    /// Rules' view of the one-time screen: nil, not answered yet.
+    var travelConsent: Bool? { travelAnswered ? true : nil }
+
+    /// The one-time screen, answered: show my trips (on) or not for now (paused; the switch in Friends turns it on).
+    func answerTravel(show: Bool) {
+        state.travelAnswered = true
+        state.travelPaused = !show
+        travelAnswered = true
+        travelPaused = !show
+        save()
+        FriendTravelShare.shared.settingsChanged()
+    }
+
+    func setTravelPaused(_ paused: Bool) {
+        state.travelPaused = paused
+        travelPaused = paused
+        save()
+        FriendTravelShare.shared.settingsChanged()
+    }
+
+    /// "Show my trips" to one friend (kept in the list, so the backup has it too).
+    func setShowTrips(_ id: String, _ on: Bool) {
+        change { b, _ in b.showTrips(id, on); return [] }
+        FriendTravelShare.shared.settingsChanged()
+        Task { await sync(.auto) }
+    }
+
+    /// Puts this trip's state at each of `ids` (a box locked for each), and takes it back from those it went to before
+    /// and doesn't now. One try (the next minute sends the next one anyway).
+    func putTravel(_ s: TravelState, to ids: [String]) async {
+        guard let me = identity, let b = book else { return }
+        let relay = FriendRelay(me: me, device: device)
+        let cards = ids.compactMap { b.friend($0)?.card }
+        var sealed: [(to: String, data: Data)] = []
+        for c in cards {
+            if let d = try? FriendBox.seal(.travel(s), from: me, to: c) { sealed.append((to: c.account, data: d)) }
+        }
+        var got: [String] = []
+        do {
+            for start in stride(from: 0, to: sealed.count, by: 50) {
+                let chunk = Array(sealed[start..<min(start + 50, sealed.count)])
+                let r = try await relay.statePut(chunk, ttl: TravelAge.ttl)
+                got += r.filter(\.ok).map(\.to)
+            }
+            let gone = TravelShareRules.toClear(sentTo: state.travelSentTo ?? [], now: ids)
+            if !gone.isEmpty { try await relay.stateClear(gone) }
+            state.travelSentTo = Array(Set((state.travelSentTo ?? []).filter { !gone.contains($0) } + got)).sorted()
+            state.travelClearDue = nil
+            sharingWith = got.count
+            save()
+        } catch FriendRelay.Failure.signedOut {
+            forget(moved: true)
+        } catch {
+            // offline: what it did put stays known, so the trip's end takes it back
+            if !got.isEmpty {
+                state.travelSentTo = Array(Set((state.travelSentTo ?? []) + got)).sorted()
+                save()
+            }
+        }
+    }
+
+    /// The trip ended (or sharing went off): your state goes from the relay, from everyone. If that can't go through
+    /// now, the next check tries again (and the relay lets it go by itself within minutes).
+    func clearTravel() async {
+        sharingWith = 0
+        guard let me = identity, !(state.travelSentTo ?? []).isEmpty || state.travelClearDue == true else { return }
+        do {
+            try await FriendRelay(me: me, device: device).stateClear(nil)
+            state.travelSentTo = nil
+            state.travelClearDue = nil
+        } catch {
+            state.travelClearDue = true
+        }
+        save()
+    }
+
+    /// Friends' states, read now (on the ride's tick, while Friends is open, as the app comes to the front).
+    func fetchTravel(lane: Lane = .background) async {
+        guard let me = identity else { return }
+        await travelRead(FriendRelay(me: me, device: device), lane: lane)
+    }
+
+    private func travelRead(_ relay: FriendRelay, lane: Lane) async {
+        guard let b = book, !b.friends.isEmpty else { travel = [:]; return }
+        guard let states = try? await relay.stateGet(lane: lane), let me = identity else { return }
+        travel = FriendInbox.readStates(states, book: b, me: me, now: Date())
+        travelChecked = Date()
+    }
+
+    /// (in a check of the relay) a take-back still due, then friends' states.
+    private func travelAfterSync(_ relay: FriendRelay, lane: Lane) async {
+        if state.travelClearDue == true, !FriendTravelShare.shared.sharing {
+            if (try? await relay.stateClear(nil)) != nil {
+                state.travelSentTo = nil
+                state.travelClearDue = nil
+                save()
+            }
+        }
+        await travelRead(relay, lane: lane)
+    }
+
+    /// Friends travelling now (fresh or a little old), the freshest first.
+    func travelling(now: Date = Date()) -> [FriendTravelSeen] {
+        travel.values.filter { TravelAge.freshness($0, now: now) != .gone && book?.isFriend($0.from) == true }
+            .sorted { $0.sent > $1.sent }
     }
 
     // MARK: checking the relay
@@ -344,6 +478,7 @@ final class FriendStore: ObservableObject {
                 if !inbox.more { break }
             }
             try await flush(relay)
+            await travelAfterSync(relay, lane: why == .now ? .urgent : .background)
             if state.vaultDirty, let b = book, let plain = try? FriendJSON.encoder.encode(FriendVaultContents(book: b, picture: myPicture)) {
                 let sealed = try FriendVault.seal(plain, me: me)
                 try await relay.vaultPut(sealed)

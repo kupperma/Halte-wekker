@@ -32,6 +32,16 @@ struct RelaySendResult: Codable, Equatable {
 }
 
 struct RelaySent: Codable, Equatable { let results: [RelaySendResult] }
+
+/// (0.26) A friend's latest state as the relay hands it out (/f/v1/state/get).
+struct RelayState: Codable, Equatable {
+    let from: String
+    let at: Int
+    let exp: Int
+    let data: String
+}
+struct RelayStates: Codable, Equatable { let states: [RelayState] }
+struct RelayCleared: Codable, Equatable { let cleared: Int }
 struct RelayVault: Codable, Equatable { let data: String?; let at: Int? }
 
 /// What the vault holds (locked with the backup code's vault key): the list, and your own picture.
@@ -95,6 +105,24 @@ enum FriendInbox {
             r.ack.append(box.id)
         }
         return r
+    }
+
+    /// (0.26) Friends' latest states, opened: only from friends, only `travel`, only while not too old; the newest
+    /// per friend. (A state that won't open is simply left: it goes by itself in minutes.)
+    static func readStates(_ states: [RelayState], book: FriendBook, me: FriendIdentity, now: Date) -> [String: FriendTravelSeen] {
+        var out: [String: FriendTravelSeen] = [:]
+        for st in states {
+            guard book.isFriend(st.from), let data = B64URL.decode(st.data) else { continue }
+            guard let o = try? FriendBox.open(data, me: me, from: st.from, known: { book.friend($0)?.card }) else { continue }
+            guard case .travel(let t) = o.message else { continue }
+            // (their clock, signed; never later than the relay got it)
+            let sent = Date(timeIntervalSince1970: TimeInterval(min(o.header.t, st.at)))
+            let seen = FriendTravelSeen(from: st.from, state: t, sent: sent, exp: Date(timeIntervalSince1970: TimeInterval(st.exp)))
+            guard TravelAge.freshness(seen, now: now) != .gone else { continue }
+            if let had = out[st.from], had.sent >= sent { continue }
+            out[st.from] = seen
+        }
+        return out
     }
 
     /// What a piece of news says, in a banner.
