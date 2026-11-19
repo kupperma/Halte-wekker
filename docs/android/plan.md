@@ -3,7 +3,7 @@
 The Android version of Haltewekker, built from the iOS app (`ios/`, SwiftUI) as the reference. It lives in
 `android/` (one Gradle project), with this plan in `docs/android/`. The iOS app and the relay are not changed by it.
 
-Status: **A1 (0.1.0, version code 1), A2 (0.2.0, version code 2), A3 (0.3.0, version code 3: Friends) and A4 (0.4.0, version code 4: Friends extras and shared ride logs) built.**
+Status: **A1 (0.1.0, version code 1), A2 (0.2.0, version code 2), A3 (0.3.0, version code 3: Friends), A4 (0.4.0, version code 4: Friends extras and shared ride logs) and A5 (0.5.0, version code 5: Friends map first, the seat picker, the test friend) built.**
 
 ## Architecture
 
@@ -121,6 +121,8 @@ JUnit, run by CI before every build (`./gradlew testReleaseUnitTest`):
 - (A3) `FriendVectorTest` (every spec test vector), `FriendLogicTest`, `FriendCompareTest`, `FriendLiveInteropTest` (live, opt-in): see "As built A3".
 - (A4) `FriendExtrasVectorTest`, `FriendExtrasTest`, `FriendExtrasBTest`, `FriendLiveTest`, `LogShareTest`,
   `LiveLinkInteropTest` (live, opt-in): see "As built A4".
+- (A5) `SeatMapTest` (the 0.31 seat vector byte for byte, older coaches, decks, windows, words, map framing, routes,
+  Ride along), `TestFriendTest` (the bot's rules), `TestFriendLiveTest` (live, opt-in): see "As built A5".
 
 ## CI and releases (`.github/workflows/android.yml`)
 
@@ -195,6 +197,125 @@ byte for byte, and its test vectors as JUnit tests before any screen:
 - 0.30: free time together, the live link (`/live/<token>#<key>`), the leaderboard with friends, rides together.
 - Log sharing (`LogShare`, `docs/logs-export.md`): the field log and a share sheet, for tuning the matcher from Android
   rides.
+
+### A5 — Friends map first, the seat picker, the test friend (0.5.0, code 5) — built ("As built A5" says how)
+
+- iOS 0.30.1's test friend, iOS 0.31's "Map first" Friends, a friend's page on the map, the seat (`coach.seat`) and the
+  whole-train / side-view seat picker.
+
+## As built A5 (0.5.0, version code 5): Friends map first, the seat picker, the test friend
+
+The spec's "As built (0.30.1)" (the test friend, with its note for Android) and "As built (0.31)" (the seat, the
+picker, the map's framing, Ride along, map first), from the iOS reference (`FriendsMapViews.swift`, `FriendPage.swift`,
+`SeatPicker.swift`, `SeatMap.swift`, `MapFrame.swift`, `TestFriendBrain.swift`, `TestFriendBot.swift`,
+`TestFriendViews.swift`) and the approved mockups (FriendsF2, WagonW6). No new box kind, no relay change,
+`KINDS_VERSION` stays 6. The iOS app and the relay were not changed.
+
+**The seat (`TravelState.Seat`, `friends/SeatMap.kt`).** `coach` gains an optional `seat` `{"deck","w","of"}` (all three
+required when it's there; `deck` "upper" | "lower" | "none", anything else reads as "none"; `w` 1-based from the back of
+the coach when the coach counts from the front, else from the left of NS's drawing; `of` 11). An older app (A3/A4, iOS
+0.26–0.30) skips it; without a seat the coach encodes exactly as 0.26. A seat with `of` outside 1–40 or `w` outside
+1–`of` is dropped (the coach stays); another `of` is scaled (rounded up). Words: "Coach 3 of 6 · upper deck · 8th window
+from the back"; TalkBack per window: "Coach 3, upper deck, window 8 from the back". It goes out with the next `travel`
+state, at once when it changes (the share key now includes the seat).
+
+**The train (`SeatMap.train`).** From the relay's `/ns/train` (as A3's coach map): `NSTrains.parse` now also keeps each
+unit's type (`materieeldelen[].type`, else `materieelType`, else the drawing's file name). Two decks: VIRM/VIRMm, DDZ/NID
+(DD-IRM), DD-AR/mDDM; one deck: SNG, SLT, FLIRT, SGM, GTW, ICM, ICNG, ICR, ICE and the international trains; unknown: by
+the line. Without NS: its length (`lengte`), else the friend's `of`, else 6 coaches, front on the right, an IC/ICD
+double-deck, anything else single; "this is a guess". At most 16 coaches.
+
+**The seat picker (`ui/friends/SeatPicker.kt`).** Compose `Canvas`: the whole train in a row (first and last coach shaped
+like noses, numbers from the front, a dot where you or a friend sit, "Double-deck IC · from the platform",
+"Driving to Breda →"); tap a coach and its side view opens below (doors at both ends, 11 windows a row, two rows on a
+double-deck coach, the line's colour stripe, wheels); a friend's face sits in their window. Every coach and window is a
+Compose node with a TalkBack label, role and selected state ("Coach 3 of 6, from the front, two decks"; "…, your
+seat"). Yours to set on the ride screen ("Your seat", replacing A3's coach strip, while riding a train) and on a friend's
+page when a leg of yours takes that train (`FriendTravelShare.boarding`); else theirs to look at. Tapping your window again
+takes the window away (the coach stays); "Take it away" takes both.
+
+**The map (`map/FriendsMap.kt`, `friends/MapFrame.kt`, `friends/FriendRoutes.kt`).** One MapLibre view (OpenFreeMap
+liberty) with three GeoJSON sources: routes (a line layer, the vehicle's colour, faded when stale), stops (where a friend
+got on, grey; where they get off, the accent; named) and faces (a symbol layer; each face a bitmap made on the phone:
+the picture or the initials in a circle ringed in the vehicle's colour, IC indigo, Sprinter cyan, bus orange; campus
+friends at your school ringed in the accent, side by side). Tapping a face opens that friend's page. The camera is
+always `MapFrame.fit` (the friend's position, from and to; ×1.35, at least 1.6 km, widened to the map's shape, moved up
+out of the sheet), set when the map lays out, when its size changes and whenever a point or the sheet's share changes;
+nobody on the map: your Home and School; nothing at all: the Netherlands. A friend's route is the bit of their vehicle's
+live trip shape (Transitous `/v5/trip`, asked once per trip id) between where they got on and get off, else a straight
+line through where they are. The map's credits sit top right, under Done (the sheet covers the bottom).
+
+**Friends (with an account).** The map full screen, "…" (Name and picture, Backup code, Delete my friends account) and
+Done floating over it, and a custom sheet (`MapSheet`: a handle to drag or tap, "Show more" / "Show less" for TalkBack;
+360 dp down, 92 % up): "Friends" and "+ Add" (Show my code, Scan, Send my link, paste a link, the test friend), the two
+one-time questions (trips, timetable) as cards, requests, a card per friend in a row (travelling first, then on campus,
+then the rest: face, name, "IC 3512 to Breda", "arrives 08:43"), Chats · N (every chat, every group, every friend, New
+group), Groups, Compare (a group or a friend, then A3's Compare and Meet halfway), what's going on now (A4's waits for
+you, your wait, on campus, delays, free together, the live link while a trip runs), More (you; Your trips; Your
+timetable; Extras = A4's At school card; Requests you sent), the leaderboard, the live link's idle line and when it last
+checked. Without an account: A3's page, unchanged.
+
+**A friend's page.** Travelling with a place to frame: the map on their trip, "‹ Friends", and a sheet (400 dp): face
+ringed in the vehicle's colour, name (and "TEST"), the line pill and "3512 to Breda · 08:43", a green chat button with
+the count of new lines; the age when stale; "From … · leg 1 of 2", where the trip ends; the seat picker (a train, not
+changing; the drawing at the coach's `at`, else your boarding station, else the NS station within 600 m of where they got
+on); "Sam is in coach 3 of 6 · upper deck · 8th window from the back" and, on the same train as you, "Taking this train
+too? Wait near B, at the front end of the platform." (else "Coach 3 from the front"); tiles Compare · Ride along (their
+vehicle as a card: `TripTake.rideAlong`, taken as A3's "Take this trip") · Wait for me (while they wait or change); then
+the test friend's controls, A4's on campus / wake-up buddy / rides together, what they see, Remove. Not travelling: the
+same as a plain page with "Friends since …".
+
+**The test friend (`TestFriendBrain.kt` pure, `TestFriendEngine.kt` plain JVM, `TestFriendBot.kt`).** A real second
+Friends account made on this phone: its own random seed and device id, its own `/f/v1/register`, kept in its own file
+`files/friends/testfriend.json` (not backed up, apart from the Keystore entries of yours), talking only through the live
+relay with the very boxes a friend's phone sends, read with `FriendInbox.process` on its own book and groups; its relay
+calls carry no log label (Android's relay calls never go in the field log). Its brain runs only inside `FriendStore`'s
+own checks: right after your waiting boxes went (`TestFriendBot.check()` in `syncNow`), it sends what it has waiting,
+reads one page of its mailbox, accepts you, says hello and shares its timetable (`TestFriendBrain.timetable`) and area
+(again after 20 h), answers every line from you (one-to-one, or yours in a group), trip cards ("I’m in" + "See you on
+the …"), your waits ("I’ll wait"), marks your lines read, says hello in groups once, acks, moves its pretend trip
+(`travel` through the state routes, ttl 360, every ≥ 20 s, a coach 3 of 6 with a window: an IC's upper deck 8th, a
+Sprinter's 6th; taken back at the end with "Made it to …!") and its wait on, and sends again, so its answers arrive in
+that same check. Its controls (its page: travel, wait, campus, scores, rode together, buddy) each change what it keeps
+and run a check at once; all of it on the Friends lane, one thing at a time. Adding: Settings › Friends or the empty
+friend list's card or "+ Add"; it registers and sends a `request` (note "A test friend made on your phone…") with its
+picture (a 256 px JPEG drawn on the phone: two test tubes on violet to teal, "TEST"). Removing (its page or Settings):
+your side removes it, its chat goes, it sends `gleave` to each group, takes back its state and leaves the relay (tried
+again at the next check without a network), then its file goes; also when you remove it as a friend or your own account
+is deleted or moved. Never in your backup: the vault goes through `TestFriendBrain.scrub`. Its "TEST" tag shows on its
+card, its page, the requests and the chat and compare lists.
+
+**Checks.** `SeatMapTest`: the 0.31 vector (`n` = `vector-31`) byte for byte, parsed back and rebuilt byte for byte,
+its words; read as 0.26's coach (the seat skipped); a coach without a seat encodes as 0.26
+(`{"at":"EHV","front":true,"n":3,"of":6}`); an old coach reads with no seat; odd decks, windows out of range; the decks
+from NS's types and a parsed `/ns/train` answer; the trains with and without NS; the windows both ways (the left window
+is `w` 1 with the front on the right, the right window with the front on the left; 16 of 22 is the 8th of 11); the card
+words, Ride along, the map's framing (Best to 's-Hertogenbosch never framed on Limburg), missing places, the route.
+A4's 0.26 travel vector (`vector-2`, a coach without a seat) still passes byte for byte. `TestFriendTest`: the iOS
+TestFriendTests (replies, trip card, timetable near yours, scores, buddy, the pretend trip by time and by distance, the
+fallback Sprinter, the wait, the scrubbed vault). `TestFriendLiveTest` (`HW_LIVE_RELAY=1`): the app's own
+`TestFriendEngine` registers on the live relay, sends a throwaway account its request, is accepted, says hello and
+shares a timetable, answers "Hello" and marks it read, puts a pretend train's state with its seat through the state
+routes, and leaves; passed from the build container on 2026-11-19.
+
+### Calls made in A5 (the user can correct)
+
+- The sheet is a custom draggable Compose sheet (not Material 3's `BottomSheetScaffold`): it peeks at a fixed 360 dp
+  (400 on a friend's page) so `MapFrame.fit` knows exactly what it covers; no pull-to-refresh (Friends checks every
+  30 s while open and at once on opening).
+- Faces are bitmaps in a MapLibre symbol layer (made on the phone, re-made when a picture changes), not Compose views
+  over the map: they stay glued to the map while it pans. TalkBack reads the map as "Map of friends: …"; every friend is
+  also a card in the sheet.
+- Material icons are the core set only (no extended icons library): Chats an envelope, Groups a face, Compare a
+  calendar, Ride along an arrow, Wait for me a place pin.
+- A friend's page uses its seat picker only for a train that isn't changing; the ride screen's "Your seat" shows while
+  riding a train (A3 showed the coach strip on every train leg).
+- The coach you set now carries `at` (your boarding station) even when it counts from the front, as iOS 0.31 does.
+- "Extras" in More is A4's At school card (the wake-up buddy switch stays on each friend's page).
+- The test friend's "Pretend I'm travelling" asks Transitous for a real departure as iOS does (`/v1/map/stops`,
+  `/v6/stoptimes`, `/v5/trip`); without an answer, the Sprinter to the next station.
+- A box from someone the bot doesn't know yet (a group line before its list) is let go, not kept for a week as yours
+  are: it's a test bot.
 
 ## As built A4 (0.4.0, version code 4): Friends extras and shared ride logs
 

@@ -77,7 +77,8 @@ class TestFriendEngine(var s: TestFriendSaved, private val env: TestFriendEnv) {
         }
     }
 
-    private val me: FriendIdentity get() = s.identity!!
+    /** (its seed never changes: its keys are worked out once per run) */
+    private val me: FriendIdentity by lazy { s.identity!! }
     private fun relay() = env.relay(me, s.device)
     val isFriend: Boolean get() = env.you?.let { s.book.isFriend(it.account) } == true
 
