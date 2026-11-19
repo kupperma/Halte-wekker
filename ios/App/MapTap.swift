@@ -69,6 +69,25 @@ enum MapTap {
         return firstRides.firstIndex(of: vehicleTrip)
     }
 
+    /// m (0.26.2): a bus this near your fresh fix while you move like one could be carrying you (a train: its marker
+    /// lags more, at its speed).
+    static let carryingBus = 300.0
+    static let carryingTrain = 600.0
+    static let freshFix: TimeInterval = 60
+
+    /// "I'm on this one" for a bus or train that isn't the first ride of any of your next trips (0.26.2): on 2026-11-19
+    /// on an Intercity, the home's trips were planned from the spot (an SPR from Eindhoven), so the Intercity at your
+    /// own position offered nothing. With no trip running: the one the home found you on (`onBoardTrip`); or, while
+    /// you move like a bus or train (`moving`), one within `carryingBus`/`carryingTrain` of your fix of the last minute.
+    /// The trip then starts from on board, planned on from it.
+    static func couldBeCarrying(vehicleTrip: String, isTrain: Bool, idle: Bool, onBoardTrip: String?, moving: Bool,
+                                metresFromYou: Double?, fixAge: TimeInterval?) -> Bool {
+        guard idle, !vehicleTrip.isEmpty else { return false }
+        if onBoardTrip == vehicleTrip { return true }
+        guard moving, let a = fixAge, a >= 0, a <= freshFix, let m = metresFromYou, m.isFinite, m >= 0 else { return false }
+        return m <= (isTrain ? carryingTrain : carryingBus)
+    }
+
     /// The stops still to come to list under its next one: after `next`, at most `limit` (none once it's done).
     static func ahead(next: Int, count: Int, done: Bool, limit: Int = 4) -> Range<Int> {
         guard !done, count > 0, next >= 0, next + 1 < count else { return 0..<0 }

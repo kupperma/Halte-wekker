@@ -35,7 +35,7 @@ struct RideViewNew: View {
                 if trip.phase == .awake && !trip.waitingToBoard {
                     DSPrimaryButton(title: "I’m off, end this leg", icon: "figure.walk.departure") { trip.legDone() }
                 }
-                DSHoldButton(title: "Hold to end trip", icon: "stop.circle", confirm: "End this trip?", confirmTitle: "End trip") { trip.endTrip() }
+                DSHoldButton(title: "Hold to end trip", icon: "stop.circle", confirm: "End this trip?", confirmTitle: "End trip") { trip.endTrip(byHand: true) }
             }
             .padding(.horizontal, DS.s16).padding(.top, 10).padding(.bottom, 6)
             .background(DS.page)
@@ -600,7 +600,7 @@ struct ArrivalViewNew: View {
             VStack(spacing: 6) {
                 if nextLeg != nil {
                     DSPrimaryButton(title: "Start next leg", icon: "play.fill") { trip.nextLeg() }
-                    Button { trip.endTrip() } label: {
+                    Button { trip.endTrip(byHand: true) } label: {
                         Text("End trip here").font(DS.bodyStrong).foregroundStyle(DS.secondary)
                             .frame(maxWidth: .infinity, minHeight: DS.hit).contentShape(Rectangle())
                     }

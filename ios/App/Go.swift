@@ -294,7 +294,9 @@ final class GoStore: ObservableObject {
         if onBoard != nil { return }
         // Going at train or bus speed (faster than a bike): a walk to a stop from here makes no sense. Find which one
         // you're on (beside this, not in the way) and plan from it; until then, say so. (In a car it plans once you stop.)
-        if LiveStore.movingFix(loc), loc.speed >= 8, loc.timestamp.timeIntervalSinceNow > -30, trip?.phase == .idle, !demo {
+        // (0.26.2: or by where your fixes went, at that speed: in a train the GPS's own speed is often unknown)
+        let byTrack: Bool = trip.map { OnBoardRules.movingByTrack($0.recentFixes, now: Date(), speed: 8) } ?? false
+        if (LiveStore.movingFix(loc) && loc.speed >= 8) || byTrack, loc.timestamp.timeIntervalSinceNow > -30, trip?.phase == .idle, !demo {
             lookAgain()
             movingUnknown = true
             best = nil; others = []; asOf = nil; error = nil
@@ -779,7 +781,9 @@ final class GoStore: ObservableObject {
             try? await Task.sleep(nanoseconds: 250_000_000)
             guard watching else { return }
         }
-        guard let f = fix ?? trip.lastFix, LiveStore.movingFix(f) || trip.movedRecently else { return }      // not moving like a bus
+        // (0.26.2: also by where your fixes went: in a train the GPS's own speed is often unknown or unsure)
+        guard let f = fix ?? trip.lastFix,
+              LiveStore.movingFix(f) || trip.movedRecently || OnBoardRules.movingByTrack(trip.recentFixes, now: Date()) else { return }      // not moving like a bus
         // moving like one: now it's really checking (and says so)
         lookingOnBoard = true
         defer { lookingOnBoard = false }

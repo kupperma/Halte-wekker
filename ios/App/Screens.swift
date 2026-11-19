@@ -1591,7 +1591,7 @@ struct RideView: View {
                             .shadow(color: .black.opacity(0.4), radius: 8, y: 5)
                     }.buttonStyle(.plain)
                 }
-                HoldButton(title: "Hold to end trip", pal: pal) { trip.endTrip() }
+                HoldButton(title: "Hold to end trip", pal: pal) { trip.endTrip(byHand: true) }
             }
             .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 6)
             WallSticker(text: "I ♥ BRABANT", fill: Paper.yellow, angle: 9).padding(.top, 4).padding(.trailing, 10)
@@ -2146,7 +2146,7 @@ struct ArrivalView: View {
                 VStack(spacing: 10) {
                     if nextLeg != nil {
                         BandButton(title: "Start next leg", pal: pal) { trip.nextLeg() }
-                        Button("End trip here") { trip.endTrip() }.font(HWFont.display(15)).foregroundStyle(Paper.muted).frame(maxWidth: .infinity)
+                        Button("End trip here") { trip.endTrip(byHand: true) }.font(HWFont.display(15)).foregroundStyle(Paper.muted).frame(maxWidth: .infinity)
                     } else {
                         BandButton(title: "Done", pal: pal) { trip.endTrip() }
                     }

@@ -101,6 +101,8 @@ struct VehiclePill: View {
 struct VehicleTap: Identifiable {
     let target: LiveTrackTarget
     let trip: DoorTrip?
+    /// Not the first ride of your trips, but it could be carrying you (0.26.2): "I'm on this one" plans from on board.
+    var carrying = false
     var id: String { target.tripId }
 }
 

@@ -366,6 +366,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     func start(_ r: RoutePlan, at legIndex: Int = 0, vehicle v: Vehicle? = nil, auto: Bool = false, kms: [Double]? = nil, backup: Int? = nil, stops: [TripStop]? = nil,
                alternatives: [DoorTrip] = [], couldBe: [Vehicle] = [], picked: Bool = false, onIt: Bool = false, how: String = "hand") {
         if !demo { BatteryMeter.rideStart() }             // (a ride already on ends there first)
+        resumable = nil                                   // (a new trip: the one you ended isn't gone on with)
         route = r
         boardAlternatives = alternatives
         legs = r.legs(direction)
@@ -574,7 +575,40 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         pushActivity(force: true)
     }
 
-    func endTrip() {
+    /// A trip you ended by hand before its last leg (0.26.2): the home offers to go on with it for a while, from that
+    /// leg (`TripResume`). Kept while the app runs; a new trip forgets it.
+    struct Resumable {
+        let route: RoutePlan
+        let direction: Direction
+        let leg: Int
+        let legs: [Leg]
+        let endedAt: Date
+        var from: Place { legs[leg].from }
+        var next: Leg { legs[leg] }
+        var destName: String { legs.last?.to.short ?? route.station.short }
+    }
+    @Published private(set) var resumable: Resumable?
+
+    /// Go on with the trip you ended by hand (`resumable`): from its leg, looking for the one you get on, as at a change.
+    func resumeTrip() {
+        guard phase == .idle, let r = resumable else { return }
+        resumable = nil
+        if direction != r.direction { pick(r.direction) }
+        start(r.route, at: r.leg, how: "go on after ending by hand")
+    }
+
+    /// "Not now" on the home's offer to go on with it.
+    func forgetResumable() { resumable = nil }
+
+    /// `byHand`: you ended it (Hold to end trip, End trip here): before its last leg it can be gone on with (`resumable`).
+    func endTrip(byHand: Bool = false) {
+        var resume: Resumable?
+        if byHand, phase != .idle, !demo {
+            rideLog(FieldFormat.rideEnd(phase == .transfer ? "by hand at a change" : "by hand"))
+            if let r = route, let n = TripResume.leg(atChange: phase == .transfer, finished: phase == .finished, index: index, count: legs.count) {
+                resume = Resumable(route: r, direction: direction, leg: n, legs: legs, endedAt: Date())
+            }
+        }
         if phase != .idle, !demo { BatteryMeter.rideEnd(legs: max(1, index - startedAtLeg + 1)) }   // its line in the field log
         if phase != .idle, let v = vehicle { HomeActions.rideEnded(on: v) }   // (the home doesn't start it again by itself)
         activityLater?.cancel(); activityLater = nil
@@ -598,6 +632,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             await a?.end(nil, dismissalPolicy: .immediate)
             await e?.end(nil, dismissalPolicy: .immediate)
         }
+        resumable = resume
         updateKeepAlive()                                 // GPS off, unless Fastest trip or a line watch wants it
         FieldLog.shared.flush(); DelayBook.shared.save()
     }
@@ -1381,7 +1416,10 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         var lane: String?
         if enough {
             judged = VehicleMatch.judgeAll(fixesNow, tracks)
-            ranked = VehicleMatch.top(VehicleMatch.rank(judged, planned: planned), keep: planned)
+            // (0.26.2) getting on: a train by its own GPS before one of about the same fit by its times (`trainGPSEdge`)
+            let byRank: [Ranked] = Self.fastLanePlaces.contains(place) ? OnBoardRules.rank(judged, planned: planned)
+                                                                         : VehicleMatch.rank(judged, planned: planned)
+            ranked = VehicleMatch.top(byRank, keep: planned)
         } else {
             // the fast lane: with 2 fixes over 8 s, only one by its own GPS right with you, nothing else near
             judged = VehicleMatch.judgeAll(fixesNow, tracks, minFixes: MatchRules.fastFixes, minSpan: MatchRules.fastSpan)

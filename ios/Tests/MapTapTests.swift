@@ -66,6 +66,31 @@ final class MapTapTests: XCTestCase {
         XCTAssertNil(MapTap.couldBeOn(vehicleTrip: "t2", firstRides: ["t1", "t2"], fresh: true, idle: true, metresFromYou: nil), "where you are isn't known")
     }
 
+    /// 0.26.2 · 08:20 on 2026-11-19, on an Intercity: the home's trips were planned from the spot (an SPR from Eindhoven),
+    /// so the Intercity marker right at your position offered no "I'm on this one". Now it does, planned from on board.
+    func test_couldBeCarryingYou() {
+        // the field case: moving, the IC 40 m from your fix of 3 s ago, the first ride of none of your trips
+        XCTAssertNil(MapTap.couldBeOn(vehicleTrip: "IC6632", firstRides: ["SPR8531"], fresh: true, idle: true, metresFromYou: 40))
+        XCTAssertTrue(MapTap.couldBeCarrying(vehicleTrip: "IC6632", isTrain: true, idle: true, onBoardTrip: nil, moving: true,
+                                             metresFromYou: 40, fixAge: 3))
+        // a train's marker lags more: 500 m still; a bus's not
+        XCTAssertTrue(MapTap.couldBeCarrying(vehicleTrip: "IC", isTrain: true, idle: true, onBoardTrip: nil, moving: true, metresFromYou: 500, fixAge: 3))
+        XCTAssertFalse(MapTap.couldBeCarrying(vehicleTrip: "305", isTrain: false, idle: true, onBoardTrip: nil, moving: true, metresFromYou: 500, fixAge: 3))
+        XCTAssertTrue(MapTap.couldBeCarrying(vehicleTrip: "305", isTrain: false, idle: true, onBoardTrip: nil, moving: true, metresFromYou: 250, fixAge: 3))
+        // the one the home found you on: always, moving or standing at a station
+        XCTAssertTrue(MapTap.couldBeCarrying(vehicleTrip: "IC", isTrain: true, idle: true, onBoardTrip: "IC", moving: false, metresFromYou: nil, fixAge: nil))
+    }
+
+    func test_notCarryingYou() {
+        // standing on a platform as it passes, a trip running, an old fix, far, nothing known
+        XCTAssertFalse(MapTap.couldBeCarrying(vehicleTrip: "IC", isTrain: true, idle: true, onBoardTrip: nil, moving: false, metresFromYou: 20, fixAge: 3))
+        XCTAssertFalse(MapTap.couldBeCarrying(vehicleTrip: "IC", isTrain: true, idle: false, onBoardTrip: "IC", moving: true, metresFromYou: 20, fixAge: 3))
+        XCTAssertFalse(MapTap.couldBeCarrying(vehicleTrip: "IC", isTrain: true, idle: true, onBoardTrip: nil, moving: true, metresFromYou: 20, fixAge: 120))
+        XCTAssertFalse(MapTap.couldBeCarrying(vehicleTrip: "IC", isTrain: true, idle: true, onBoardTrip: nil, moving: true, metresFromYou: 2000, fixAge: 3))
+        XCTAssertFalse(MapTap.couldBeCarrying(vehicleTrip: "IC", isTrain: true, idle: true, onBoardTrip: nil, moving: true, metresFromYou: nil, fixAge: 3))
+        XCTAssertFalse(MapTap.couldBeCarrying(vehicleTrip: "", isTrain: true, idle: true, onBoardTrip: "", moving: true, metresFromYou: 20, fixAge: 3))
+    }
+
     func test_aheadStops() {
         XCTAssertEqual(MapTap.ahead(next: 2, count: 10, done: false), 3..<7)
         XCTAssertEqual(MapTap.ahead(next: 8, count: 10, done: false), 9..<10)
