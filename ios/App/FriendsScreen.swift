@@ -2,16 +2,31 @@ import SwiftUI
 
 // Friends (0.25): the friend list, requests waiting, and adding someone. Opened from the home (Next trip first's
 // bar, Live around you's round button) and from Settings › Friends. Follows the phone's light or dark.
+//
+// (0.31, "Map first") With an account it's a map: friends' faces where they are (ringed in their vehicle's colour,
+// campus in the accent), their routes drawn, and a sheet over it: "Friends · + Add", requests, a card per friend,
+// Chats · Groups · Compare, what's going on now (waits, campus, delays, free time, the live link), and More (your
+// name and picture, your trips, your timetable, extras, the leaderboard, requests you sent). Nothing of 0.30 went:
+// it moved into the sheet, its tiles and More's pages.
+
+/// (0.31) A page of the Friends screen's More list (or its "+ Add").
+enum FriendsPage: String, Hashable {
+    case add, trips, timetable, extras, waiting
+}
 
 struct FriendsScreen: View {
     @ObservedObject private var store = FriendStore.shared
     @ObservedObject private var chats = FriendChats.shared
+    @ObservedObject private var extras = FriendExtrasStore.shared
+    @ObservedObject private var routes = FriendRoutes.shared
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scene
     @State private var sheet: Sheet?
     @State private var confirmDelete = false
     @State private var pasteWrong = false
     @State private var path: [FriendsRoute] = []
+    @State private var up = false
+    @ScaledMetric(relativeTo: .body) private var peek: CGFloat = 360
 
     enum Sheet: String, Identifiable {
         case myCode, scan, create, restore, backup, profile, travel, newGroup, timetable
@@ -20,19 +35,8 @@ struct FriendsScreen: View {
 
     var body: some View {
         NavigationStack(path: $path) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: DS.s12) {
-                    if store.movedAway { movedNote }
-                    if store.hasAccount { accountContent } else { FriendsIntroCard(make: { sheet = .create }, restore: { sheet = .restore }) }
-                }
-                .padding(.horizontal, DS.s16).padding(.top, DS.s8).padding(.bottom, DS.s24)
-            }
-            .background(DS.page.ignoresSafeArea())
-            .navigationTitle("Friends")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { toolbar }
-            .refreshable { await store.sync(.now) }
-            .navigationDestination(for: FriendsRoute.self) { r in destination(r) }
+            root
+                .navigationDestination(for: FriendsRoute.self) { r in destination(r) }
         }
         // (0.27) a chat to open (a notification tapped, a friend's "Message")
         .onChange(of: chats.toOpen, initial: true) { _, k in openChat(k) }
@@ -63,19 +67,21 @@ struct FriendsScreen: View {
         }
     }
 
-    @ToolbarContentBuilder private var toolbar: some ToolbarContent {
-        ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
-        ToolbarItem(placement: .topBarLeading) {
-            if store.hasAccount {
-                Menu {
-                    Button { sheet = .profile } label: { Label("Name and picture", systemImage: "person.crop.circle") }
-                    Button { sheet = .backup } label: { Label("Backup code", systemImage: "key") }
-                    Button(role: .destructive) { confirmDelete = true } label: { Label("Delete my friends account", systemImage: "trash") }
-                } label: {
-                    Image(systemName: "ellipsis.circle").frame(minWidth: DS.hit, minHeight: DS.hit)
+    @ViewBuilder private var root: some View {
+        if store.hasAccount {
+            mapHome
+        } else {
+            ScrollView {
+                VStack(alignment: .leading, spacing: DS.s12) {
+                    if store.movedAway { movedNote }
+                    FriendsIntroCard(make: { sheet = .create }, restore: { sheet = .restore })
                 }
-                .accessibilityLabel("Your friends account")
+                .padding(.horizontal, DS.s16).padding(.top, DS.s8).padding(.bottom, DS.s24)
             }
+            .background(DS.page.ignoresSafeArea())
+            .navigationTitle("Friends")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
         }
     }
 
@@ -101,6 +107,20 @@ struct FriendsScreen: View {
         case .compare(let key): CompareView(key: key)
         case .compareDay(let key, let day): CompareDayView(key: key, dayKey: day)
         case .leaderboard: FriendsLeaderboardScreen()
+        case .chats: FriendsSectionPage(title: "Chats") { FriendChatsCard(newGroup: { sheet = .newGroup }) }
+        case .groups: FriendsSectionPage(title: "Groups") { groupsCard }
+        case .compareWith: FriendsSectionPage(title: "Compare") { compareCard }
+        case .page(let p): page(p)
+        }
+    }
+
+    @ViewBuilder private func page(_ p: FriendsPage) -> some View {
+        switch p {
+        case .add: FriendsSectionPage(title: "Add a friend") { addCard }
+        case .trips: FriendsSectionPage(title: "Your trips") { MyTripsCard(explain: { sheet = .travel }) }
+        case .timetable: FriendsSectionPage(title: "Your timetable") { MyTimetableCard(explain: { sheet = .timetable }) }
+        case .extras: FriendsSectionPage(title: "Extras") { ExtrasSwitchesCard() }
+        case .waiting: FriendsSectionPage(title: "Requests you sent") { waitingCard(store.book?.outgoing ?? []) }
         }
     }
 
@@ -146,12 +166,103 @@ struct FriendsScreen: View {
         }
     }
 
-    // MARK: with an account
+    // MARK: the map (0.31)
 
-    @ViewBuilder private var accountContent: some View {
-        if let b = store.book {
-            let moving: [FriendTravelSeen] = store.travelling()
-            if !moving.isEmpty { FriendsTravellingCard(list: moving) }
+    /// Travelling friends where they are, and friends on campus at your school (when it's theirs).
+    private var pins: [FriendMapPin] {
+        let now = Date()
+        var out: [FriendMapPin] = []
+        var seen: Set<String> = []
+        for t in store.travelling(now: now) {
+            let s: TravelState = t.state
+            guard let p = s.pos, let g = MapFrame.point(lat: p.lat, lon: p.lon) else { continue }
+            let name: String = store.name(t.from)
+            let ring: Color = DS.mode(train: s.isTrain, mode: s.mode, line: s.line ?? "")
+            out.append(FriendMapPin(id: t.from, name: name, point: g, ring: ring, label: "\(name), \(TravelWords.summary(s))",
+                                    stale: TravelAge.freshness(t, now: now) == .stale, route: routes.route(s)))
+            seen.insert(t.from)
+        }
+        let school: GeoPoint = Place.school.point
+        let mine: String = RoleWords.current.school
+        if MapFrame.valid(school) {
+            let campus: [FriendExtrasStore.OnCampus] = extras.onCampus(now: now).filter { !seen.contains($0.id) }
+            for (i, c) in campus.enumerated() where c.state.school == nil || c.state.school == mine {
+                // side by side, a little apart, so each face can be tapped
+                let g = GeoPoint(lat: school.lat, lon: school.lon + Double(i) * 0.0012)
+                let name: String = store.name(c.id)
+                out.append(FriendMapPin(id: c.id, name: name, point: g, ring: DS.accent, label: "\(name), \(CampusWords.since(c.state))",
+                                        stale: false, route: []))
+            }
+        }
+        return out
+    }
+
+    /// What the map frames: each face, and where travelling friends got on and get off.
+    private var framePoints: [GeoPoint] {
+        var out: [GeoPoint] = pins.map(\.point)
+        for t in store.travelling() { out += MapFrame.points(t.state) }
+        return out
+    }
+
+    private var tripIds: [String] { store.travelling().compactMap(\.state.trip) }
+
+    private var mapHome: some View {
+        GeometryReader { g in
+            let cover: CGFloat = g.size.height > 0 ? min(0.8, peek / g.size.height) : 0.45
+            ZStack(alignment: .top) {
+                FriendsLiveMap(pins: pins, frame: framePoints, cover: cover, tap: { id in path.append(.friend(id)) })
+                    .ignoresSafeArea()
+                MapSheet(up: $up, peek: peek) { sheetContent }
+                    .ignoresSafeArea(edges: .bottom)
+                    .refreshable { await store.sync(.now) }
+                topButtons
+            }
+        }
+        .background(DS.page.ignoresSafeArea())
+        .navigationTitle("Friends")
+        .toolbar(.hidden, for: .navigationBar)
+        .task(id: tripIds.joined(separator: ",")) { await routes.load(tripIds) }
+    }
+
+    private var topButtons: some View {
+        HStack {
+            Menu {
+                Button { sheet = .profile } label: { Label("Name and picture", systemImage: "person.crop.circle") }
+                Button { sheet = .backup } label: { Label("Backup code", systemImage: "key") }
+                Button(role: .destructive) { confirmDelete = true } label: { Label("Delete my friends account", systemImage: "trash") }
+            } label: {
+                Image(systemName: "ellipsis").font(.body.weight(.bold)).foregroundStyle(DS.text)
+                    .frame(width: DS.hit, height: DS.hit)
+                    .background(DS.surface, in: Circle())
+                    .dsFloat()
+            }
+            .accessibilityLabel("Your friends account")
+            Spacer()
+            DSRoundButton(icon: "xmark", label: "Done") { dismiss() }
+        }
+        .padding(.horizontal, DS.s16).padding(.top, DS.s8)
+    }
+
+    // MARK: the sheet
+
+    @ViewBuilder private var sheetContent: some View {
+        let b: FriendBook? = store.book
+        let friends: [Friend] = b?.sortedFriends ?? []
+        VStack(alignment: .leading, spacing: DS.s12) {
+            if store.movedAway { movedNote }
+            HStack(alignment: .firstTextBaseline) {
+                Text("Friends").font(DS.largeTitle).foregroundStyle(DS.text).accessibilityAddTraits(.isHeader)
+                Spacer()
+                NavigationLink(value: FriendsRoute.page(.add)) {
+                    Label("Add", systemImage: "plus").font(DS.bodyStrong).foregroundStyle(DS.accentText)
+                        .frame(minHeight: DS.hit).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Add a friend")
+            }
+            if let b, !b.incoming.isEmpty { requestsCard(b.incoming) }
+            if friends.isEmpty { emptyCard } else { cardsRow(friends) }
+            if !friends.isEmpty { tiles }
             // (0.29) waits for you, your own wait, who's on campus, delays on rides you share
             WaitsForYouPanel()
             MyWaitCard(panel: true)
@@ -160,32 +271,121 @@ struct FriendsScreen: View {
             // (0.30) free time together today, and the live link while a trip runs
             FreeTodayCard()
             LiveLinkCard()
-            meCard(b)
-            if !b.incoming.isEmpty { requestsCard(b.incoming) }
-            if !b.friends.isEmpty { FriendChatsCard(newGroup: { sheet = .newGroup }) }
-            if !b.friends.isEmpty { MyTripsCard(explain: { sheet = .travel }) }
-            if !b.friends.isEmpty { MyTimetableCard(explain: { sheet = .timetable }) }
-            if !b.friends.isEmpty { ExtrasSwitchesCard() }
-            if !b.friends.isEmpty { FriendsTogetherCard() }
-            friendsCard(b.sortedFriends)
-            if !b.outgoing.isEmpty { waitingCard(b.outgoing) }
-            addCard
+            moreCard(b, friends: friends)
+            if !friends.isEmpty { FriendsTogetherCard() }
             LiveLinkCard(idleNote: true)
             statusLine
         }
+        .padding(.top, DS.s4)
     }
 
-    private func meCard(_ b: FriendBook) -> some View {
-        Button { sheet = .profile } label: {
-            FriendRowLabel(name: b.myName.isEmpty ? "You" : b.myName, id: "me", picture: store.myPicture,
-                           detail: "You · tap to change your name and picture") {
-                Image(systemName: "chevron.right").font(.footnote.weight(.bold)).foregroundStyle(DS.secondary)
+    private func cardsRow(_ friends: [Friend]) -> some View {
+        let now = Date()
+        let moving: [String: FriendTravelSeen] = Dictionary(store.travelling(now: now).map { ($0.from, $0) }, uniquingKeysWith: { a, _ in a })
+        let campus: Set<String> = Set(extras.onCampus(now: now).map(\.id))
+        // travelling first (newest first), then on campus, then the rest as the list has them
+        let going: [Friend] = friends.filter { moving[$0.id] != nil }
+            .sorted { (a: Friend, b: Friend) -> Bool in (moving[a.id]?.sent ?? .distantPast) > (moving[b.id]?.sent ?? .distantPast) }
+        let there: [Friend] = friends.filter { moving[$0.id] == nil && campus.contains($0.id) }
+        let others: [Friend] = friends.filter { moving[$0.id] == nil && !campus.contains($0.id) }
+        let order: [Friend] = going + there + others
+        return ScrollView(.horizontal, showsIndicators: false) {
+            LazyHStack(alignment: .top, spacing: DS.s8) {
+                ForEach(order) { f in
+                    NavigationLink(value: FriendsRoute.friend(f.id)) {
+                        FriendMiniCard(friend: f, travel: moving[f.id], campus: campus.contains(f.id))
+                    }
+                    .buttonStyle(DSPressStyle())
+                }
             }
-            .contentShape(Rectangle())
+            .padding(.vertical, 2)
         }
-        .buttonStyle(.plain)
+        .scrollClipDisabled()
+    }
+
+    private var emptyCard: some View {
+        VStack(alignment: .leading, spacing: DS.s8) {
+            Text("No friends yet. Show a friend your code, or send them your link.")
+                .font(DS.sub).foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
+            DSQuietButton(title: "Add a friend", icon: "person.badge.plus", full: true) { path.append(.page(.add)) }
+            // (0.30.1) a bot to try it all with
+            TestFriendAddCard()
+        }
+        .dsPanel()
+    }
+
+    private var tiles: some View {
+        let n: Int = store.unread
+        return HStack(spacing: DS.s8) {
+            NavigationLink(value: FriendsRoute.chats) {
+                FriendsTile(icon: "bubble.left.and.bubble.right.fill", title: n > 0 ? "Chats · \(n)" : "Chats")
+            }
+            .buttonStyle(DSPressStyle())
+            .accessibilityLabel(n > 0 ? "Chats, \(n) new" : "Chats")
+            NavigationLink(value: FriendsRoute.groups) { FriendsTile(icon: "person.3.fill", title: "Groups") }
+                .buttonStyle(DSPressStyle())
+            NavigationLink(value: FriendsRoute.compareWith) { FriendsTile(icon: "calendar", title: "Compare") }
+                .buttonStyle(DSPressStyle())
+                .accessibilityHint("Compare timetables with a friend or a group, and meet halfway")
+        }
+    }
+
+    /// More: your name and picture, your trips, your timetable, extras, requests you sent.
+    private func moreCard(_ b: FriendBook?, friends: [Friend]) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            DSHeader(title: "More").padding(.bottom, DS.s4)
+            Button { sheet = .profile } label: {
+                FriendRowLabel(name: (b?.myName ?? "").isEmpty ? "You" : (b?.myName ?? "You"), id: "me", picture: store.myPicture,
+                               detail: "You · your name and picture") { chevron }
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            if !friends.isEmpty {
+                moreRow("Your trips", icon: "location.north.line.fill", detail: tripsDetail, to: .trips)
+                moreRow("Your timetable", icon: "calendar", detail: FriendTimetables.shared.on ? "Shared with friends" : "Not shared", to: .timetable)
+                moreRow("Extras", icon: "switch.2", detail: "On campus, the wake-up buddy and more", to: .extras)
+            }
+            if let out = b?.outgoing, !out.isEmpty {
+                moreRow("Requests you sent", icon: "paperplane", detail: out.count == 1 ? "1 waiting for an answer" : "\(out.count) waiting for an answer", to: .waiting)
+            }
+        }
         .dsPanel(padding: DS.s12)
     }
+
+    private var tripsDetail: String {
+        if !store.travelAnswered { return "Off until you say yes" }
+        if store.travelPaused { return "Paused for everyone" }
+        return "Shown while a trip runs"
+    }
+
+    private var chevron: some View {
+        Image(systemName: "chevron.right").font(.footnote.weight(.bold)).foregroundStyle(DS.secondary)
+    }
+
+    private func moreRow(_ title: String, icon: String, detail: String, to p: FriendsPage) -> some View {
+        VStack(spacing: 0) {
+            Divider().overlay(DS.divider)
+            NavigationLink(value: FriendsRoute.page(p)) {
+                HStack(spacing: DS.s12) {
+                    Image(systemName: icon).font(.body.weight(.semibold)).foregroundStyle(DS.accentText)
+                        .frame(width: 44, height: 32).accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(title).font(DS.bodyStrong).foregroundStyle(DS.text)
+                        Text(detail).font(DS.footnote).foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: DS.s8)
+                    chevron
+                }
+                .padding(.vertical, DS.s8)
+                .frame(minHeight: DS.hit)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityElement(children: .combine)
+        }
+    }
+
+    // MARK: the cards (in the sheet, or on More's pages)
 
     private func requestsCard(_ list: [FriendRequest]) -> some View {
         VStack(alignment: .leading, spacing: DS.s8) {
@@ -195,39 +395,72 @@ struct FriendsScreen: View {
         .dsPanel()
     }
 
-    private func friendsCard(_ list: [Friend]) -> some View {
-        VStack(alignment: .leading, spacing: DS.s8) {
-            DSHeader(title: "Your friends", sub: list.isEmpty ? nil : "\(list.count)")
+    /// Groups: each one's chat, and making one.
+    private var groupsCard: some View {
+        let list: [FriendGroup] = store.groups.shown
+        return VStack(alignment: .leading, spacing: DS.s8) {
+            DSHeader(title: "Your groups", sub: list.isEmpty ? nil : "\(list.count)")
             if list.isEmpty {
-                Text("No friends yet. Show a friend your code, or send them your link.")
+                Text("No groups yet. Make one to chat, compare timetables and meet halfway with a few friends at once.")
                     .font(DS.sub).foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
-                // (0.30.1) a bot to try it all with
-                TestFriendAddCard()
             }
-            ForEach(list) { f in
-                NavigationLink(value: FriendsRoute.friend(f.id)) {
-                    FriendRowLabel(name: f.name, id: f.id, picture: store.pictures[f.id], detail: friendLine(f)) {
-                        Image(systemName: "chevron.right").font(.footnote.weight(.bold)).foregroundStyle(DS.secondary)
+            ForEach(list) { g in
+                NavigationLink(value: FriendsRoute.chat(ChatKey.group(g.id))) {
+                    FriendRowLabel(name: g.name, id: "g-\(g.id)", picture: store.groupPictures[g.id],
+                                   detail: g.out == .removed ? "You’re no longer in it" : "\(g.roster.members.count) people") {
+                        let n: Int = chats.unread(ChatKey.group(g.id))
+                        if n > 0 {
+                            Text("\(n)").font(DS.footnoteStrong).monospacedDigit().foregroundStyle(DS.onAccent)
+                                .padding(.horizontal, 8).padding(.vertical, 2).background(DS.accent, in: Capsule())
+                                .accessibilityLabel("\(n) new")
+                        } else {
+                            chevron
+                        }
                     }
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                if f.id != list.last?.id { Divider().overlay(DS.divider) }
+                if g.id != list.last?.id { Divider().overlay(DS.divider) }
+            }
+            DSQuietButton(title: "New group", icon: "person.3", full: true) { sheet = .newGroup }
+        }
+        .dsPanel()
+    }
+
+    /// Compare: with whom (a friend or a group), and the leaderboard.
+    private var compareCard: some View {
+        let friends: [Friend] = store.book?.sortedFriends ?? []
+        let groups: [FriendGroup] = store.groups.shown.filter { $0.out != .removed }
+        return VStack(alignment: .leading, spacing: DS.s8) {
+            DSHeader(title: "Compare timetables")
+            Text("Classes side by side this week and next, rides together, free time and meet halfway.")
+                .font(DS.sub).foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
+            ForEach(groups) { g in
+                NavigationLink(value: FriendsRoute.compare(ChatKey.group(g.id))) {
+                    FriendRowLabel(name: g.name, id: "g-\(g.id)", picture: store.groupPictures[g.id], detail: "Group · \(g.roster.members.count) people") { chevron }
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                Divider().overlay(DS.divider)
+            }
+            ForEach(friends) { f in
+                NavigationLink(value: FriendsRoute.compare(ChatKey.friend(f.id))) {
+                    FriendRowLabel(name: f.name, id: f.id, picture: store.pictures[f.id], detail: "Compare with \(f.name)") { chevron }
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                if f.id != friends.last?.id { Divider().overlay(DS.divider) }
             }
         }
         .dsPanel()
     }
 
-    /// Under a friend's name: what they're on now, else since when you're friends (and whether they see your trips).
-    private func friendLine(_ f: Friend) -> String {
-        if let t = store.travel[f.id], TravelAge.freshness(t, now: Date()) != .gone { return TravelWords.summary(t.state) }
-        let since = "Friends since \(FriendDates.day(f.since))"
-        return f.showsTrips ? since : since + " · doesn’t see your trips"
-    }
-
     private func waitingCard(_ list: [FriendRequest]) -> some View {
         VStack(alignment: .leading, spacing: DS.s8) {
             DSHeader(title: "Waiting for an answer")
+            if list.isEmpty {
+                Text("Nothing waiting.").font(DS.sub).foregroundStyle(DS.secondary)
+            }
             ForEach(list) { r in
                 FriendRowLabel(name: r.name, id: r.id, picture: store.pictures[r.id],
                                detail: "Asked \(FriendDates.day(r.at)) · arrives when \(r.name) opens Haltewekker") {
@@ -264,6 +497,8 @@ struct FriendsScreen: View {
             if pasteWrong {
                 Text("That isn’t a Haltewekker friend link.").font(DS.footnote).foregroundStyle(DS.warning)
             }
+            // (0.30.1) a bot to try it all with
+            if store.hasAccount { TestFriendAddCard() }
         }
         .dsPanel()
     }
@@ -296,6 +531,22 @@ struct FriendsScreen: View {
         return Text("\(checked) There are no push notifications: requests, messages and friends’ trips come in when Haltewekker is open (it checks every 30 seconds while this screen is open, every few seconds in a chat, and every minute on your own trips) and now and then in the background.")
             .font(DS.footnote).foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, DS.s4)
+    }
+}
+
+/// (0.31) A page pushed from the Friends sheet (Chats, Groups, Compare, More's): its card on the page's colour.
+struct FriendsSectionPage<Content: View>: View {
+    let title: String
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: DS.s12) { content() }
+                .padding(.horizontal, DS.s16).padding(.top, DS.s8).padding(.bottom, DS.s24)
+        }
+        .background(DS.page.ignoresSafeArea())
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
@@ -360,71 +611,6 @@ struct FriendRequestRow: View {
             }
             Text("\(request.name) isn’t told if you decline.").font(DS.footnote).foregroundStyle(DS.secondary)
         }
-    }
-}
-
-/// A friend: who they are, what they see, and removing them.
-struct FriendDetailView: View {
-    let id: String
-    @ObservedObject private var store = FriendStore.shared
-    @ObservedObject private var chats = FriendChats.shared
-    @ObservedObject private var extras = FriendExtrasStore.shared
-    @ObservedObject private var bot = TestFriendBot.shared
-    private var unread: Int { chats.unread(ChatKey.friend(id)) }
-    @Environment(\.dismiss) private var dismiss
-    @State private var asking = false
-
-    var body: some View {
-        ScrollView {
-            VStack(spacing: DS.s16) {
-                if let f = store.book?.friend(id) {
-                    FriendAvatar(name: f.name, id: f.id, picture: store.pictures[f.id], size: 112)
-                    Text(f.name).font(DS.title).foregroundStyle(DS.text).multilineTextAlignment(.center)
-                    if bot.isBot(f.id) { TestFriendTag() }
-                    Text("Friends since \(FriendDates.day(f.since))").font(DS.sub).foregroundStyle(DS.secondary)
-                    NavigationLink(value: FriendsRoute.chat(ChatKey.friend(f.id))) {
-                        HStack(spacing: 8) {
-                            Image(systemName: "bubble.left.and.bubble.right.fill").font(.body.weight(.semibold))
-                            Text(unread > 0 ? "Message · \(unread) new" : "Message").font(DS.bodyStrong)
-                        }
-                        .foregroundStyle(DS.onAccent)
-                        .frame(maxWidth: .infinity, minHeight: DS.cta)
-                        .background(DS.accent, in: Capsule())
-                    }
-                    .buttonStyle(DSPressStyle())
-                    CompareButton(key: ChatKey.friend(f.id))
-                    if let t = store.travel[f.id], TravelAge.freshness(t, now: Date()) != .gone {
-                        FriendTripCard(seen: t, name: f.name)
-                    }
-                    // (0.29) on campus now
-                    if let c = extras.onCampus().first(where: { $0.id == f.id }) {
-                        DSNote(icon: "building.columns.fill", tint: DS.accent, text: CampusWords.since(c.state))
-                    }
-                    // (0.30.1) the test friend's buttons (its own "Remove" among them)
-                    if bot.isBot(f.id) { TestFriendControls() }
-                    // (0.30) the rides you shared, counted on this phone
-                    RidesTogetherCard(friend: f)
-                    FriendSeesCard(friend: f)
-                    if !bot.isBot(f.id) {
-                        DSQuietButton(title: "Remove \(f.name)", icon: "person.badge.minus", full: true) { asking = true }
-                            .confirmationDialog("Remove \(f.name)?", isPresented: $asking, titleVisibility: .visible) {
-                                Button("Remove", role: .destructive) {
-                                    Task { await store.remove(f.id) }
-                                    dismiss()
-                                }
-                                Button("Cancel", role: .cancel) {}
-                            } message: {
-                                Text("Their keys go from this phone and the boxes between you from the relay. \(f.name)’s app forgets you too.")
-                            }
-                    }
-                }
-            }
-            .padding(.horizontal, DS.s16).padding(.vertical, DS.s24)
-            .frame(maxWidth: .infinity)
-        }
-        .background(DS.page.ignoresSafeArea())
-        .navigationTitle(store.book?.friend(id)?.name ?? "Friend")
-        .navigationBarTitleDisplayMode(.inline)
     }
 }
 

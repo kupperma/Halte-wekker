@@ -284,8 +284,16 @@ enum TestTripSim {
         s.legs = 1
         let p: GeoPoint = position(t, now: now)
         s.pos = TravelState.Position(lat: (p.lat * 100_000).rounded() / 100_000, lon: (p.lon * 100_000).rounded() / 100_000, acc: 12, at: now)
-        if t.isTrain, riding { s.coach = TravelState.Coach(n: 3, of: 6, front: true, at: nil) }
+        if t.isTrain, riding { s.coach = coach(line: t.line) }
         return s
+    }
+
+    /// Its coach on a train: 3 of 6 from the front, and (0.31) a window: an Intercity's upper deck, the 8th window from
+    /// the back; a Sprinter's 6th.
+    static func coach(line: String) -> TravelState.Coach {
+        let double: Bool = SeatMap.defaultDouble(line: line)
+        let seat = TravelState.Seat(deck: double ? SeatMap.Deck.upper.rawValue : SeatMap.Deck.none.rawValue, w: double ? 8 : 6, of: SeatMap.windows)
+        return TravelState.Coach(n: 3, of: 6, front: true, at: nil, seat: seat)
     }
 
     /// Between the two stops it's between now, by time (at the first stop while waiting, at the last when over).

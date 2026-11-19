@@ -31,6 +31,19 @@ struct TravelState: Codable, Equatable {
         var of: Int
         var front: Bool
         var at: String?
+        /// (0.31) Where in the coach, roughly: the deck and the window (`SeatMap`). A 0.26–0.30 app leaves it out and
+        /// ignores it.
+        var seat: Seat? = nil
+    }
+
+    /// (0.31) Your window in your coach. `deck`: "upper" or "lower" in a double-deck coach, "none" in a single-deck
+    /// one (anything else reads as "none"). `w`: the window, 1-based, counted from the back of the coach (the end
+    /// nearer the back of the train) when the coach is counted from the front (`front`); else from the left of NS's
+    /// drawing at `at`, like the coach. `of`: windows in a row as the picker drew them (11).
+    struct Seat: Codable, Equatable {
+        var deck: String
+        var w: Int
+        var of: Int
     }
 
     enum Stage: String {
@@ -222,6 +235,33 @@ enum TravelWords {
             var t = "\(v) to \(s.to.name)"
             if let e = s.eta { t += " · arrives \(clock(e, zone: zone))" }
             return t
+        }
+    }
+
+    /// (0.31) A friend's card on the Friends map's sheet: "IC 3512 to Breda", "Waiting at Best", "Changing at Eindhoven".
+    static func cardLine(_ s: TravelState) -> String {
+        switch s.stage {
+        case .waiting: return "Waiting at \(s.from.name)"
+        case .change: return "Changing at \(s.from.name)"
+        case .riding: return "\(vehicle(s)) to \(s.to.name)"
+        }
+    }
+
+    /// (0.31) Under it: "arrives 08:43" (nil: not known, or still waiting).
+    static func cardTime(_ s: TravelState, zone: TimeZone = .current) -> String? {
+        guard s.stage == .riding, let e = s.eta else { return nil }
+        return "arrives \(clock(e, zone: zone))"
+    }
+
+    /// (0.31) The friend's page, next to the line's pill: "to Breda · 08:43".
+    static func headline(_ s: TravelState, zone: TimeZone = .current) -> String {
+        switch s.stage {
+        case .waiting: return "waiting at \(s.from.name)"
+        case .change: return "changing at \(s.from.name)"
+        case .riding:
+            let v = vehicle(s)
+            let what: String = s.line == nil ? v + " " : (s.num.map { "\($0) " } ?? "")
+            return "\(what)to \(s.to.name)" + (s.eta.map { " · \(clock($0, zone: zone))" } ?? "")
         }
     }
 

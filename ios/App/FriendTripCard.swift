@@ -92,6 +92,19 @@ enum TripTake {
         case gone
     }
 
+    /// (0.31) "Ride along" on a friend's page: their bus or train now, as a card to take. On board, it starts from
+    /// where they are (so your way gets onto it further along); waiting or changing, from their stop. Nil: no vehicle
+    /// known, or nowhere to get off (Home goes without a place).
+    static func rideAlong(_ s: TravelState, now: Date) -> TripCard? {
+        guard let trip = s.trip, !trip.isEmpty, let tl = s.to.lat, let to = s.to.lon else { return nil }
+        var from = TripCard.Spot(name: s.from.name, lat: s.from.lat, lon: s.from.lon)
+        if s.stage == .riding, let p = s.pos { from = TripCard.Spot(name: "On the way to \(s.to.name)", lat: p.lat, lon: p.lon) }
+        let end = TripCard.Spot(name: s.to.name, lat: tl, lon: to)
+        let arr: Date = max(now, s.eta ?? now.addingTimeInterval(30 * 60))
+        let ride = TripCard.Ride(mode: s.mode, line: s.line ?? "", num: s.num, trip: trip, from: from, to: end, dep: now, arr: arr)
+        return TripCard(rides: [ride], to: end, end: arr)
+    }
+
     /// Fastest trip takes it when the shared ride leaves within this.
     static let soon: TimeInterval = 60 * 60
     /// Your start counts as the sender's (the rides as they are) within this of their first stop.

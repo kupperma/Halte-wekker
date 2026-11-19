@@ -8,6 +8,9 @@ struct TrainUnit: Hashable {
     let x: Double; let w: Double; let zones: [TrainZone]?
     /// Its coaches ("bakken"), 0 when NS didn't list them (0.26, the coach picker).
     var cars: Int = 0
+    /// (0.31) Its type as NS names it ("VIRM-6", "SNG-3"; else its drawing's name, "virm_6"), for the seat picker's
+    /// decks ("" not known).
+    var kind: String = ""
 }
 struct PlatformLetter: Hashable { let letter: String; let x: Double }
 
@@ -240,7 +243,9 @@ final class NSStore: ObservableObject {
                     return TrainZone(a: (x + a * w) / total, b: (x + b * w) / total)
                 }
             }
-            units.append(TrainUnit(x: x / total, w: w / total, zones: zones, cars: ((m["bakken"] as? [Any]) ?? []).count))
+            let type: String = (m["type"] as? String) ?? (m["materieelType"] as? String) ?? ""
+            units.append(TrainUnit(x: x / total, w: w / total, zones: zones, cars: ((m["bakken"] as? [Any]) ?? []).count,
+                                   kind: type.isEmpty ? key : type))
             x += w
         }
         let letters = ((d["perronVoorzieningen"] as? [[String: Any]]) ?? []).compactMap { p -> PlatformLetter? in

@@ -1,8 +1,8 @@
 import MapKit
 import SwiftUI
 
-// Friends (0.26): friends travelling now (the list on top of Friends, a map with their pictures, a friend's trip),
-// your own "Show my trips" switches and the one-time screen that explains them. Follows the phone's light or dark.
+// Friends (0.26): a friend's coach and where to wait for it, your own "Show my trips" switches and the one-time screen
+// that explains them. Follows the phone's light or dark.
 
 extension TrainLayout {
     /// The units as the coach sums take them.
@@ -10,204 +10,13 @@ extension TrainLayout {
     var coachLetters: [(letter: String, x: Double)] { letters.map { (letter: $0.letter, x: $0.x) } }
 }
 
-// MARK: the list
-
-/// Friends travelling now, on top of Friends: a map of where they are, and a row each.
-struct FriendsTravellingCard: View {
-    let list: [FriendTravelSeen]
-    @ObservedObject private var store = FriendStore.shared
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: DS.s8) {
-            DSHeader(title: "Travelling now", sub: "\(list.count)")
-            if list.contains(where: { $0.state.pos != nil }) {
-                FriendsTravelMap(list: list)
-                    .frame(height: 210)
-                    .clipShape(RoundedRectangle(cornerRadius: DS.inner(DS.cardRadius, padding: DS.s8), style: .continuous))
-            }
-            ForEach(list, id: \.from) { s in
-                NavigationLink { FriendDetailView(id: s.from) } label: { row(s) }
-                    .buttonStyle(.plain)
-                if s.from != list.last?.from { Divider().overlay(DS.divider) }
-            }
-        }
-        .dsPanel()
-    }
-
-    private func row(_ s: FriendTravelSeen) -> some View {
-        let name: String = store.book?.friend(s.from)?.name ?? "Friend"
-        return FriendTravelRow(seen: s, name: name, picture: store.pictures[s.from])
-    }
-}
-
-/// "Sam" and "IC 3512 to Breda · arrives 08:43" (greyed with "Last update 08:41" when it's a little old).
-struct FriendTravelRow: View {
-    let seen: FriendTravelSeen
-    let name: String
-    let picture: Data?
-
-    var body: some View {
-        TimelineView(.periodic(from: .now, by: 30)) { tl in
-            content(now: tl.date)
-        }
-    }
-
-    private static func spoken(_ parts: [String?]) -> String { parts.compactMap { $0 }.joined(separator: ". ") }
-
-    private func content(now: Date) -> some View {
-        let s = seen.state
-        let stale: Bool = TravelAge.freshness(seen, now: now) == .stale
-        let summary: String = TravelWords.summary(s)
-        let age: String? = TravelWords.age(seen, now: now)
-        return HStack(spacing: DS.s12) {
-            FriendAvatar(name: name, id: seen.from, picture: picture)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(name).font(DS.bodyStrong).foregroundStyle(DS.text).lineLimit(2)
-                Text(summary).font(DS.sub).monospacedDigit().foregroundStyle(DS.text).fixedSize(horizontal: false, vertical: true)
-                if let age { Text(age).font(DS.footnote).monospacedDigit().foregroundStyle(DS.secondary) }
-            }
-            .opacity(stale ? 0.6 : 1)
-            Spacer(minLength: DS.s8)
-            if let l = s.line { DSLinePill(line: l, train: s.isTrain) }
-            Image(systemName: "chevron.right").font(.footnote.weight(.bold)).foregroundStyle(DS.secondary)
-        }
-        .padding(.vertical, DS.s8)
-        .contentShape(Rectangle())
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Self.spoken([name, summary, age]))
-        .accessibilityHint("Shows \(name)’s trip")
-    }
-}
-
-// MARK: the map
-
-/// Friends' pictures where they are (and, for one friend, where they got on and get off).
-struct FriendsTravelMap: View {
-    let list: [FriendTravelSeen]
-    var showStops = false
-    @ObservedObject private var store = FriendStore.shared
-    @State private var camera: MapCameraPosition = .automatic
-
-    struct Pin: Identifiable {
-        let id: String
-        let name: String
-        let label: String
-        let coordinate: CLLocationCoordinate2D
-        let train: Bool
-        let stale: Bool
-    }
-
-    struct Stop: Identifiable {
-        let id: String
-        let name: String
-        let coordinate: CLLocationCoordinate2D
-    }
-
-    private var pins: [Pin] {
-        let now = Date()
-        return list.compactMap { s -> Pin? in
-            guard let p = s.state.pos else { return nil }
-            let name: String = store.book?.friend(s.from)?.name ?? "Friend"
-            return Pin(id: s.from, name: name, label: "\(name), \(TravelWords.summary(s.state))",
-                       coordinate: CLLocationCoordinate2D(latitude: p.lat, longitude: p.lon), train: s.state.isTrain,
-                       stale: TravelAge.freshness(s, now: now) == .stale)
-        }
-    }
-
-    private var stops: [Stop] {
-        guard showStops, let s = list.first?.state else { return [] }
-        var out: [Stop] = []
-        let ends: [(String, TravelState.Spot)] = [("from", s.from), ("to", s.to)]
-        for (k, spot) in ends {
-            if let lat = spot.lat, let lon = spot.lon {
-                out.append(Stop(id: k, name: spot.name, coordinate: CLLocationCoordinate2D(latitude: lat, longitude: lon)))
-            }
-        }
-        return out
-    }
-
-    private var key: String { pins.map { "\($0.id)\($0.coordinate.latitude)\($0.coordinate.longitude)" }.joined() }
-
-    var body: some View {
-        Map(position: $camera) {
-            ForEach(stops) { s in
-                Marker(s.name, systemImage: s.id == "to" ? "flag.fill" : "circle.fill", coordinate: s.coordinate)
-                    .tint(s.id == "to" ? DS.accent : DS.legQuiet)
-            }
-            ForEach(pins) { p in
-                Annotation(p.name, coordinate: p.coordinate, anchor: .center) { pin(p) }
-            }
-        }
-        .mapStyle(.standard(pointsOfInterest: .excludingAll))
-        .onChange(of: key) { _, _ in camera = .automatic }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(pins.isEmpty ? "Map" : "Map of friends travelling now")
-    }
-
-    private func pin(_ p: Pin) -> some View {
-        FriendAvatar(name: p.name, id: p.id, picture: store.pictures[p.id], size: 38)
-            .overlay(Circle().stroke(DS.mode(train: p.train), lineWidth: 3))
-            .overlay(Circle().stroke(Color.white, lineWidth: 1).padding(-2))
-            .opacity(p.stale ? 0.55 : 1)
-            .dsFloat()
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(p.label)
-    }
-}
+// (0.31) The list, the map and a friend's trip are now the Friends map (FriendsMapViews.swift, FriendsScreen.swift)
+// and the friend's page (FriendPage.swift).
 
 // MARK: a friend's trip
 
-/// A friend's trip right now, on their page: what they're on, to where and when, the map, their coach.
-struct FriendTripCard: View {
-    let seen: FriendTravelSeen
-    let name: String
-
-    var body: some View {
-        TimelineView(.periodic(from: .now, by: 30)) { tl in
-            content(now: tl.date)
-        }
-    }
-
-    private func content(now: Date) -> some View {
-        let s = seen.state
-        let age: String = TravelWords.age(seen, now: now) ?? "Updated \(TravelWords.clock(seen.sent))"
-        return VStack(alignment: .leading, spacing: DS.s12) {
-            DSHeader(title: "On the way now", sub: age)
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                if let l = s.line { DSLinePill(line: l, train: s.isTrain) }
-                Text(TravelWords.summary(s)).font(DS.bodyStrong).monospacedDigit().foregroundStyle(DS.text)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .accessibilityElement(children: .combine)
-            details(s)
-            if s.pos != nil {
-                FriendsTravelMap(list: [seen], showStops: true)
-                    .frame(height: 240)
-                    .clipShape(RoundedRectangle(cornerRadius: DS.inner(DS.cardRadius, padding: DS.s8), style: .continuous))
-            }
-            if let c = s.coach, s.isTrain { FriendCoachNote(coach: c, state: s, name: name) }
-            // (0.29) they're waiting at a stop (or changing there): ask them to wait for you
-            if s.stage != .riding, let lat = s.from.lat, let lon = s.from.lon {
-                WaitForMeButton(chat: ChatKey.friend(seen.from), stop: TripCard.Spot(name: s.from.name, lat: lat, lon: lon))
-            }
-        }
-        .opacity(TravelAge.freshness(seen, now: now) == .stale ? 0.75 : 1)
-        .dsPanel()
-    }
-
-    @ViewBuilder private func details(_ s: TravelState) -> some View {
-        let from: String = s.stage == .change ? "Changing at \(s.from.name)" : "From \(s.from.name)"
-        let legs: String? = (s.legs ?? 1) > 1 ? "leg \(s.leg ?? 1) of \(s.legs ?? 1)" : nil
-        let line: String = legs.map { "\(from) · \($0)" } ?? from
-        Text(line).font(DS.sub).foregroundStyle(DS.secondary)
-            .fixedSize(horizontal: false, vertical: true)
-        if let e = TravelWords.ending(s) {
-            Text(e).font(DS.sub).monospacedDigit().foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
-        }
-    }
-}
-
-/// A friend's coach: "Coach 3 of 6 · front"; on the same train as you, which end of the platform to wait at.
+/// A friend's coach: "Sam is in coach 3 of 6 · upper deck · 8th window from the back" (0.31; 0.26: "coach 3 of 6 ·
+/// front"); "Taking this train too?" and, on the same train as you, which end of the platform to wait at.
 struct FriendCoachNote: View {
     let coach: TravelState.Coach
     let state: TravelState
@@ -217,7 +26,7 @@ struct FriendCoachNote: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Label("\(name) is in \(CoachMap.label(coach).lowercasedFirst)", systemImage: "tram.fill")
+            Text("\(name) is in \(SeatMap.label(coach).lowercasedFirst)")
                 .font(DS.subStrong).foregroundStyle(DS.text).fixedSize(horizontal: false, vertical: true)
             if let hint {
                 Text(hint).font(DS.sub).foregroundStyle(DS.accentText).fixedSize(horizontal: false, vertical: true)
@@ -226,9 +35,7 @@ struct FriendCoachNote: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(DS.s12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DS.surface2, in: RoundedRectangle(cornerRadius: DS.inner(DS.cardRadius, padding: DS.s8), style: .continuous))
         .accessibilityElement(children: .combine)
         .task(id: "\(state.trip ?? "")|\(coach.n)") { await findHint() }
     }
@@ -240,7 +47,7 @@ struct FriendCoachNote: View {
         if num == nil { num = await share.number(id) }
         guard let num, !num.isEmpty, let size = await NSStore.shared.trainSize(num: num, code: code), let l = size.layout else { return }
         let h = CoachMap.platformHint(coach, units: l.coachUnits, totalCars: size.cars, letters: l.coachLetters, dir: l.dir, station: code)
-        hint = h.map { "You’re on this train too: \($0.lowercasedFirst)." }
+        hint = h.map { "Taking this train too? \($0)." }
     }
 }
 

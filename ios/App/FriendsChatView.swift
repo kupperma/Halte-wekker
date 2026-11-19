@@ -14,6 +14,12 @@ enum FriendsRoute: Hashable {
     case compareDay(String, String)
     /// (0.30) The leaderboard with friends.
     case leaderboard
+    /// (0.31) The Friends sheet's tiles: all chats, the groups, whom to compare with.
+    case chats
+    case groups
+    case compareWith
+    /// (0.31) A page of More (or "+ Add").
+    case page(FriendsPage)
 }
 
 struct FriendChatView: View {
