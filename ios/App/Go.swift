@@ -362,6 +362,12 @@ final class GoStore: ObservableObject {
         if GoPace.extras(inFront: UIApplication.shared.applicationState == .active) {
             async let late: [DoorTrip] = latestInTime(from: c, to: d, now: now)
             if asOf == nil, let top = best { more += await Transit.$urgent.withValue(true) { await Net.within(8) { await self.earlierWays(onto: top) } } ?? [] }
+            // …and onto the planner's own fastest (0.25.1): the one it watches may be an earlier bus onto that one's
+            // train (the 158 before the 306), which only ever comes up that way; without this it drops out of the next
+            // answer and is kept as a "Hurry", its times frozen
+            if asOf == nil, let base = found.min(by: Self.sooner), base.first.tripId != best?.first.tripId {
+                more += await Transit.$urgent.withValue(true) { await Net.within(8) { await self.earlierWays(onto: base) } } ?? []
+            }
             more += await late
             extrasKept = more
         } else {
@@ -420,7 +426,8 @@ final class GoStore: ObservableObject {
     /// it's watching came in with this answer. (One kept from before, while you're waiting for it or on your way to it,
     /// is older: the file keeps the answer it came with.)
     private func saveShown(_ list: [DoorTrip], loc: CLLocation, d: Place, at: Date) {
-        guard asOf == nil, dest == d, let b = best, list.contains(b) else { return }
+        // (by its rides: the one on screen may get on at another stop of its bus than the answer had, `reboarded`)
+        guard asOf == nil, dest == d, let b = best, list.contains(where: { $0.rides.map(\.tripId) == b.rides.map(\.tripId) }) else { return }
         SnapshotStore.shared.save(SavedGo(trips: [b] + others, lat: loc.coordinate.latitude, lon: loc.coordinate.longitude),
                                   key: "go|\(d.key)", at: at)
     }
@@ -458,7 +465,14 @@ final class GoStore: ObservableObject {
 
     /// Choose from what it found, put it on screen, and tell you what changed. `quiet`: the saved answer, put on screen
     /// with nothing to tell (only a live answer tells you things).
-    private func apply(_ found: [DoorTrip], loc: CLLocation, d: Place, now: Date, quiet: Bool = false) async {
+    private func apply(_ answer: [DoorTrip], loc: CLLocation, d: Place, now: Date, quiet: Bool = false) async {
+        // each way's first bus from the stop of its trip you walk to least and still make (0.25.1, `reboarded`)
+        // (the stops are looked up first: by then a newer answer may be on its way in, or the screen gone; that one wins)
+        applies += 1
+        let mine = applies
+        let found = await reboarded(answer, loc: loc, now: now, fetch: !quiet)
+        guard mine == applies, !Task.isCancelled, watching, dest == d, onBoard == nil else { return }
+        if let c = chosen, let k = await reboarded([c], loc: loc, now: now, fetch: false).first, k.id != c.id { chosen = k }
         // Nothing from here, and you were just going at train or bus speed (slowing down, or stopped at a signal between
         // stations): you're on board. Find which one, and don't say there's no way.
         if found.isEmpty, best == nil, trip?.movedRecently == true, onBoard == nil, trip?.phase == .idle, !demo {
@@ -580,16 +594,74 @@ final class GoStore: ObservableObject {
         }
     }
 
-    private var earlierCache: (id: String, at: Date, list: [DoorTrip])?
+    // MARK: where to get on (0.25.1)
+
+    /// The stops of the trips it looked up last (with when), for a look whose answer doesn't come in time (the same stop
+    /// as before: no flip back), and for the saved answer.
+    private var boardKept: [String: (at: Date, stops: [BoardAt.Stop])] = [:]
+    private var applies = 0               // the answers handed to `apply`, numbered
+    /// The first buses it looks up the stops of, per answer.
+    static let reboardMax = 6
+
+    /// Each way's first bus got on at the stop of its own trip you walk to least while you still make it (`BoardAt`).
+    /// The planner, and an earlier bus onto the same connection (`earlierWays`), take the stop that was asked about: in
+    /// Veghel that was the bus station, a 9 minute walk back, while the same 158 calls round the corner at Bolkenplein a
+    /// minute later. Buses only (not a train, not the one you're on), not when you're at its stop already. The ride and
+    /// its leg, the alarm, the Live Activity and the on-board look all go by this ride's stop and time.
+    /// `fetch`: false only uses the stops it has (the saved answer, put on screen at once).
+    private func reboarded(_ list: [DoorTrip], loc: CLLocation, now: Date, fetch: Bool) async -> [DoorTrip] {
+        guard !demo, !list.isEmpty else { return list }
+        let you = GeoPoint(lat: loc.coordinate.latitude, lon: loc.coordinate.longitude)
+        func wanted(_ t: DoorTrip) -> Bool {
+            let f = t.first
+            return !f.isTrain && f.fromId != "onboard" && f.walkBefore >= 2 && f.departure > now
+        }
+        var ids: [String] = []
+        for t in list where wanted(t) && !ids.contains(t.first.tripId) { ids.append(t.first.tripId) }
+        guard !ids.isEmpty else { return list }
+        if fetch {
+            let ask = Array(ids.prefix(Self.reboardMax))
+            let got: [(String, [BoardAt.Stop]?)] = await Transit.$urgent.withValue(true) {
+                await withTaskGroup(of: (String, [BoardAt.Stop]?).self) { g in
+                    for id in ask {
+                        g.addTask {
+                            let s: [BoardAt.Stop]? = await Net.within(3) { await Transit.boardStops(id, maxAge: RideTick.tripCache) } ?? nil
+                            return (id, s)
+                        }
+                    }
+                    var out: [(String, [BoardAt.Stop]?)] = []
+                    for await r in g { out.append(r) }
+                    return out
+                }
+            }
+            for (id, s) in got { if let s { boardKept[id] = (now, s) } }
+            boardKept = boardKept.filter { now.timeIntervalSince($0.value.at) < 600 }
+        }
+        var seen = Set<String>()          // (two answers' ways onto the same bus can now be one and the same)
+        return list.map { t -> DoorTrip in
+            guard wanted(t), let stops = boardKept[t.first.tripId]?.stops else { return t }
+            let f = t.first
+            let from: GeoPoint? = f.fromLat.flatMap { a in f.fromLon.map { GeoPoint(lat: a, lon: $0) } }
+            let to: GeoPoint? = f.toLat.flatMap { a in f.toLon.map { GeoPoint(lat: a, lon: $0) } }
+            guard let c = BoardAt.better(stops, fromId: f.fromId, from: from, departure: f.departure, to: to, toName: f.toStop,
+                                         you: you, now: now) else { return t }
+            return t.boardingFirst(at: c.stop, walk: c.walk)
+        }
+        .filter { seen.insert($0.id).inserted }
+    }
+
+    private var earlierCache: [String: (at: Date, list: [DoorTrip])] = [:]
 
     /// Earlier ways onto `t` (looked up again every minute and a half, or when the one it watches changes).
     private func earlierWays(onto t: DoorTrip) async -> [DoorTrip] {
         let now = Date()
-        if let c = earlierCache, c.id == t.id, now.timeIntervalSince(c.at) < 90 {
-            return c.list.filter { $0.first.departure > now.addingTimeInterval(Double($0.first.walkBefore) * 60) }
+        if let c = earlierCache[t.id], now.timeIntervalSince(c.at) < 90 {
+            // (still to come; whether you make it, and at which of its stops, `apply` decides: `reboarded`)
+            return c.list.filter { $0.first.departure > now }
         }
-        let list = await Transit.earlierWays(onto: t, now: now)
-        earlierCache = (t.id, now, list)
+        let list = await Transit.earlierWays(onto: t, now: now, further: true)
+        earlierCache = earlierCache.filter { now.timeIntervalSince($0.value.at) < 90 }
+        earlierCache[t.id] = (now, list)
         return list
     }
 
