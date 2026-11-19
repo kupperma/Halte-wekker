@@ -94,9 +94,13 @@ final class FriendExtrasStore: NSObject, ObservableObject, CLLocationManagerDele
         if campusShownTo != n { campusShownTo = n }
     }
 
+    private var lastWritten: Data?
+
+    /// (written only when it changed: the checks come every few seconds while a chat is open)
     private func save() {
-        guard let f = Self.file, let d = try? FriendJSON.encoder.encode(saved) else { return }
+        guard let f = Self.file, let d = try? FriendJSON.encoder.encode(saved), d != lastWritten else { return }
         try? d.write(to: f, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        lastWritten = d
     }
 
     private var store: FriendStore { FriendStore.shared }
