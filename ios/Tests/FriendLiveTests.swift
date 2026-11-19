@@ -12,7 +12,9 @@ final class FriendLiveTests: XCTestCase {
     private func bytes(from a: UInt8, count: Int) -> Data { Data((0..<count).map { a + UInt8($0) }) }
 
     static let token = "2x1Ot-EFfLIivv_lmStBuw"
-    static let link = "https://haltewekker-relay.tsfaw1.workers.dev/live/2x1Ot-EFfLIivv_lmStBuw#ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8"
+    static let link = "https://haltewekker-relay.tsfaw1.workers.dev/live/2x1Ot-EFfLIivv_lmStBuw#k=ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8"
+    /// 0.30's form (the key bare after the #): still read.
+    static let oldLink = "https://haltewekker-relay.tsfaw1.workers.dev/live/2x1Ot-EFfLIivv_lmStBuw#ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8"
     static let plain = "{\"dest\":\"Breda\",\"end\":1800004500,\"eta\":1800001260,\"from\":\"Veghel\",\"late\":3,\"line\":\"305\",\"mode\":\"bus\",\"name\":\"Sam\",\"pos\":{\"at\":1799999990,\"lat\":51.61672,\"lon\":5.54861},\"state\":\"riding\",\"t\":1800000000,\"to\":\"Den Bosch\",\"v\":1}"
     static let data = "AUBBQkNERUZHSElKS7l22eQjAucxcHAiTeErc14x6_Pn13qW5l7OpDBU3_8y5jF6alf-mxd1pw20reGB2e60y1bPhb3fRMafBUHNMX0XzIrkdFdZINAvfQZc6wgCKn4B3YWG2r9jXEn0RXpeVbJnZrAQ2fH-jvvebSMWbiXub8wm-a4kw_nwp59f9VyUkXutBMfsSHUt3Agu3YlcN2wqOLT2L2x4rrqImgvKvsoulSwMAdncswKlNM9vKwSvq3RIztNMa-KL1guHyZLcJ5KPVhXxLPpZVMixIoV0J937rVtJ9dYWTJ1LJ0lsBKOwV_k08p4uVV-3ue-8vAw"
 
@@ -37,6 +39,10 @@ final class FriendLiveTests: XCTestCase {
         let p = LiveCrypto.parse(Self.link)
         XCTAssertEqual(p?.token, Self.token)
         XCTAssertEqual(p?.key, bytes(from: 0x20, count: 32))
+        XCTAssertEqual(LiveCrypto.parse(Self.oldLink)?.key, bytes(from: 0x20, count: 32))
+        XCTAssertEqual(LiveCrypto.parse(" " + Self.link + "\n")?.token, Self.token)
+        XCTAssertNil(LiveCrypto.parse("https://haltewekker-relay.tsfaw1.workers.dev/live/2x1Ot-EFfLIivv_lmStBuw#k="))
+        XCTAssertEqual(LiveWords.shareText(Self.link), "Follow my trip live:\n" + Self.link)
         XCTAssertNil(LiveCrypto.parse("https://haltewekker-relay.tsfaw1.workers.dev/live/2x1Ot-EFfLIivv_lmStBuw"))
         XCTAssertNil(LiveCrypto.parse("https://example.com/live/2x1Ot-EFfLIivv_lmStBuw#ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8"))
         let fresh = LiveKeys.make()
