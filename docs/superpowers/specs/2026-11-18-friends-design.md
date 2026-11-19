@@ -811,3 +811,159 @@ Rides are 0.27's `ride` objects (`{"mode","line","trip","from","to","dep","arr",
   friend to wait for me", your wait and the delays on your rides.
 - Not yet: the waits' and delays' records aren't in the vault; "Wait for me" updates in the background only while a
   trip runs (its GPS and tick); the buddy and the delay alarm reach a phone only at its next check.
+
+## As built (0.30)
+
+What 0.30.0 (build 119) adds: the Friends extras' **part B**: **free hours together**, a **live link** for people
+without the app, the **leaderboard with friends** and the **ride history together**. Everything in "As built (0.25)" to
+"(0.29)" holds unchanged; this adds one box kind (`scores`), two optional vault fields, and one relay feature (live
+links, additive: new routes and a new Durable Object class, nothing else touched). `FriendMessage.kindsVersion` is 6.
+Times are unix seconds; days `yyyy-MM-dd` and months `yyyy-MM` in Europe/Amsterdam. No push still.
+
+### When anything is sent or read
+- The `scores` box and the free-time note only inside the app's existing checks of the relay (`FriendStore.sync`: app to
+  the front ≤ every 20 s, every 30 s while Friends is open, every 8 s while a chat is open, the ride's once-a-minute
+  check, the background refresh); scores are looked at most once a minute. The ride history and the live link only on
+  the ride's existing 30 s network tick (and, for the live link, 2 s after a leg, stage or vehicle change settles).
+  No loop of its own; the trip, alarm, wake-at-stop, Live Activity and matching are only read.
+
+### Free hours together (`FreeToday`, on the phone only)
+- From your own timetable (as read for sharing, or read without sending at most every 30 minutes) and each friend's
+  shared `timetable` (0.28) that covers today: for you and each friend, 0.28's "free together" (the gaps between
+  classes, overlapping classes merged, a class without an end running into the next; segments where both are free,
+  ≥ 30 min); only those that still end after now; the very same stretch with several friends is one line (friends
+  sorted by account); by start, then end; at most 3.
+- Words: "Today: you and Sam are both free 12:00–13:30", "Today: you, Kim and Lisa are all free 12:00–13:30", and once
+  it has begun "Now: you and Sam are both free until 13:30". Shown on Friends ("Free together today").
+- **Morning note** (Friends › At school, "Tell me in the morning when we're free together", **off by default**): one
+  local notification a day, "Free time together today", body the lines without "Today: " (capitalised, one per line),
+  at the first check from 06:00 until before 11:00 while the first free time is still ahead. In the app: a banner.
+
+### The `scores` box — the leaderboard with friends (slot `scores`, ttl 14 days)
+- Body: `{"on": bool (required), "month"?: "yyyy-MM", "best"?: [best] (0–8), "mbest"?: [best] (0–8), "rides"?: 0–1000}`;
+  best = `{"route": string (required), "home": bool (required), "mins": number (required, 5–600, one decimal), "at": t
+  (required, when that trip ended)}`. `best` is the fastest trip per route ever, `mbest` the fastest this `month`,
+  `rides` the rides together with friends this `month` (see the ride history). Each list: to school first, then the
+  fastest, then by route. `{"on": false}` takes it back.
+- Routes are the leaderboard's keys: `"home→school"` / `"school→home"` (door to door, 0.24's `DoorScore`; the `→` is
+  U+2192) or a corridor route's name ("Via Den Bosch"). Minutes: from starting the alarm to the last stop (as the
+  leaderboard has them).
+- Readers: only from a **friend**; the newest by `t` wins; routes cleaned as names (≤ 40, empty dropped), minutes
+  outside 5–600 dropped, at most 8 per list; a `month` that isn't `yyyy-MM` (01–12) drops `month`, `mbest` and `rides`;
+  `rides` outside 0–1000 dropped. Kept only while they're a friend.
+- **Opt-in**: "Share my scores" (Settings › Leaderboard › With friends, or Friends › Leaderboard with friends), **off by
+  default**, to all friends. On: every friend gets it when it changed (FNV-1a 64 over the body's JSON, sorted keys) and
+  the last went ≥ 12 h ago, or ≥ 7 days ago whatever; a new friend at once. Off: `{"on":false}` (ttl 14 days) to those
+  who had it.
+- **The board** (`ScoreBoard`, you and the friends who share): per route (to school first, then home; within each the
+  most people, then the route's name), each person's fastest on it, fastest first (then the earliest). "This month":
+  `mbest` of those whose `month` is this month; "All time": `best`. "Most rides together this month": everyone whose
+  `month` is this one with `rides` ≥ 1, the most first. Your own row is there whether or not you share. Labels:
+  "Home → school", "School → home", else "Via Den Bosch · to school" / "· home".
+
+### Ride history together (`RideHistory`, on the phone only: Friends/together.json, not backed up)
+- On the ride's tick while you're on board a bus or train (a vehicle, not waiting, not at a change, not the demo):
+  the friends on it with you are those whose `travel` state (0.26) has its trip id and is `riding`, and the others in on
+  a 0.27 trip card you're in (you sent it, or said "I'm in"; from the last 24 h) whose shared ride (first train, else
+  longest) is that vehicle. Only friends count.
+- One record per vehicle per day: `{"trip","day","label" ("Bus 305", "IC 3512"),"from","to" (your stops' names),"dep"
+  (when it left where you got on),"with": [account]}`; a later tick adds people to it. Kept 400 days, at most 1000,
+  only while someone in it is still a friend.
+- A friend's page: "You rode together 14 times this month" ("once", "twice", "No rides together this month yet")
+  counting this month's records with them, and the last 10: "Fri 15 Jan · 09:11 · IC 3512 · Eindhoven Centraal →
+  Breda". `rides` in the `scores` box = all of this month's records.
+
+### Live link (`LiveLink.swift`, relay `relay/live.js`)
+For someone without the app (a parent): a web page with your trip's live times, ending with the trip. Works without a
+friends account. From the ride screen ("Share a live link") or Friends while a trip runs (not the demo); sent with the
+iOS share sheet.
+- **Secrets**: `secret` = 32 random bytes (stays on the phone; it lets the phone write), `key` = 32 random bytes.
+  `token` = b64u(first 16 bytes of SHA-256(ASCII "hw-live-token-v1" ‖ secret)) — 22 characters.
+- **Link**: `https://haltewekker-relay.tsfaw1.workers.dev/live/<token>#<b64u(key)>`. The key is only in the fragment,
+  which browsers never send, so the relay can't read the trip.
+- **Lock** (chosen: **AES-256-GCM** with that random key, so the page can decrypt with WebCrypto in any browser):
+  `data` = `0x01 ‖ nonce (12, random) ‖ AES-256-GCM ciphertext ‖ tag (16)`, AAD = UTF-8 `"hw-live-v1\n" + token`,
+  plaintext the state's JSON (UTF-8, keys sorted by the app; readers take any order).
+- **State** (every key but `v`, `name`, `state`, `mode`, `t` optional): `{"v":1, "name": the sender's name (≤ 40),
+  "state": "waiting" | "riding" | "change" | "arrived" (unknown reads as riding), "mode": "train" | "bus" (or "tram",
+  "metro", "ferry"), "line", "num", "from", "to" (this ride's stops, names only), "dest" (the trip's end when it isn't
+  `to`), "dep" (when the ride leaves `from`: waiting, or the next ride at a change), "eta" (arrival at `to`; arrived:
+  when you got there), "end" (arrival at the trip's end), "late" (minutes, 0–600: the live arrival at your stop against
+  the scheduled one while riding, the departure's delay while waiting or at a change; absent when not known), "pos":
+  {"lat","lon","at"} (the phone's last fix, 5 decimals, ≤ 5 minutes old, as in 0.26), "t": when written}`. It's the
+  0.26 travel state cut down: no trip id, coach, accuracy, leg numbers or coordinates of stops; Home is "Home".
+- **Posting** (`LiveRules`): the first state when the link is made; then on the ride's network tick when 55 s went by,
+  or (≥ 6 s after the last) when the stage, mode, line, number, `from` or `to` changed. Each put asks `until` = now +
+  30 min (so a phone gone quiet lets it end by itself), never past 4 h after the link was made. At the last stop: an
+  `arrived` state (`to` = the last stop, `eta` = now, no position) with `until` = now + 15 min, then nothing more (tried
+  again once after 6 s if the relay said slow down). The trip ended any other way, "Stop sharing", or 4 hours: `end`
+  (tried again at the next tick or start if the network was away). A link left from a trip that ended while the app was
+  gone ends when the app starts. Kept in Friends/live.json (not backed up).
+- **Relay routes** (no account; JSON; `Cache-Control: no-store`; nothing logged):
+  - `POST /live/v1/put {"secret": b64u(32 bytes), "data": b64u(≤ 4096 bytes, first byte 1), "until": unix s}` →
+    `{"ok":true,"token","exp"}`. The token is worked out from the secret. The first put makes the link (≤ 20 new links
+    an hour per network address, hashed: else 429); `exp` = min(until, made + 4 h); `until` must be ≥ now + 30 s (400
+    `bad_until`). Puts ≥ 5 s apart and ≤ 240 an hour per link (429 `slow_down`). An ended link: 410 `ended`. 400
+    `bad_secret` / `bad_data` / `bad_json`, 413 over 16 KB.
+  - `POST /live/v1/end {"secret"}` → `{"ok":true}` (also when there's nothing): the data goes at once; the link is kept
+    without it until its 4 hours are up so the page can say it ended.
+  - `GET /live/v1/get?t=<token>` → `{"data","at","exp"}` (`at`: when the relay got it), 410 `ended`, 404 `gone`
+    (unknown or expired), 400 `bad_token`, 429 over 120 a minute per link.
+  - `GET /live/<token>`: the page (HTML; CSP `default-src 'none'; script-src 'self'; style-src 'unsafe-inline';
+    img-src https://tile.openstreetmap.org; connect-src 'self'; …`, `Referrer-Policy: strict-origin` so the map's tiles
+    never see the token, `noindex`). `GET /live/app.js`: its script (no other script anywhere).
+  - Storage: one Durable Object (SQLite-backed, key-value API) per link, `t:<token>`, deleted at `exp`; `ip:<hash>`
+    counts new links for an hour. Migration `v3`, class `Live`, binding `LIVE`.
+- **The page** (`relay/live.js`): reads the token from the path and the key from the fragment, polls `/live/v1/get`
+  every 15 s while visible (30 s after a 429, backing off on errors), decrypts with WebCrypto, and shows (times in the
+  viewer's clock):
+  - riding: "Sam is on bus 305 to Den Bosch · arrives 07:51 · 3 min late" ("· on time" at 0; nothing when not known);
+  - waiting: "Sam is waiting for the IC 3512 to Breda at Eindhoven Centraal · leaves 07:41";
+  - change: "Sam is changing at Eindhoven Centraal · then the IC 3512 to Breda at 08:03" (without a line: "Sam is
+    changing at Eindhoven Centraal");
+  - arrived: "Sam has arrived at Den Bosch · 07:52" with an "Arrived" badge;
+  - vehicle words: a train "the IC 3512" / "the IC" / "the train"; otherwise "bus 305" / "tram 1", without a line
+    "the bus"; an empty name reads "Your friend";
+  - under it "Then on to Breda · there around 08:45" (not when arrived, nor when `dest` is `to`), "Last update 07:41"
+    after 150 s ("· the phone may be out of reach" after 10 min), and a small map: OpenStreetMap tiles at zoom 15
+    around `pos` with a dot (no map without a position, or when arrived);
+  - 404/410: "This link has ended"; no or a bad key: "This link is missing its key…" / "This link's key doesn't fit…".
+  The app shows the same words (`LiveWords`).
+- `node relay/test-live.mjs [url]` checks the routes and limits, and runs the page's own script on a stand-in browser
+  so it decrypts a state with the key from the link.
+
+### The vault
+- `FriendVaultContents.extras` gains `"free"?: true` and `"scores"?: true` (the two switches). An older app ignores them.
+
+### Test vectors (Node's crypto; checked in `ios/Tests/FriendLiveTests.swift` and `ios/Tests/FriendExtrasBTests.swift`)
+- Live link: secret `000102…1f` (bytes 0x00–0x1f), key `202122…3f` (0x20–0x3f) → token `2x1Ot-EFfLIivv_lmStBuw`; link
+  `https://haltewekker-relay.tsfaw1.workers.dev/live/2x1Ot-EFfLIivv_lmStBuw#ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8`.
+  State (exact bytes) `{"dest":"Breda","end":1800004500,"eta":1800001260,"from":"Veghel","late":3,"line":"305","mode":"bus","name":"Sam","pos":{"at":1799999990,"lat":51.61672,"lon":5.54861},"state":"riding","t":1800000000,"to":"Den Bosch","v":1}`,
+  nonce `404142434445464748494a4b` → data (b64u)
+  `AUBBQkNERUZHSElKS7l22eQjAucxcHAiTeErc14x6_Pn13qW5l7OpDBU3_8y5jF6alf-mxd1pw20reGB2e60y1bPhb3fRMafBUHNMX0XzIrkdFdZINAvfQZc6wgCKn4B3YWG2r9jXEn0RXpeVbJnZrAQ2fH-jvvebSMWbiXub8wm-a4kw_nwp59f9VyUkXutBMfsSHUt3Agu3YlcN2wqOLT2L2x4rrqImgvKvsoulSwMAdncswKlNM9vKwSvq3RIztNMa-KL1guHyZLcJ5KPVhXxLPpZVMixIoV0J937rVtJ9dYWTJ1LJ0lsBKOwV_k08p4uVV-3ue-8vAw`.
+  Shown (Amsterdam): "Sam is on bus 305 to Den Bosch · arrives 09:21 · 3 min late", "Then on to Breda · there around 10:15".
+- Sam's scores to Lou (keys as in 0.25): payload (exact bytes)
+  `{"b":{"best":[{"at":1799996400,"home":false,"mins":48.5,"route":"home→school"},{"at":1799910000,"home":true,"mins":52,"route":"school→home"}],"mbest":[{"at":1799996400,"home":false,"mins":48.5,"route":"home→school"}],"month":"2027-01","on":true,"rides":14},"f":"3c157621a97cf055f5804a9826c6d1e1","k":"scores","n":"vector-16","t":1800000000,"v":1}`;
+  signature (b64u) `6rLh_QChtON4H7TK4hzq8a0UxhBkm55Zq67PCwiZFCholCtVlWmo5R_13XRlGu7Vb3wcZU9wVpqMKxKcSoqcDQ`; eph_priv
+  `9192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0` (ephPub
+  `9cced751b301bbd16c4fb8deddd82f18925d71ed90c844fa0158f845b0fa7f4b`); nonce `d1d2d3d4d5d6d7d8d9dadbdd`; box key
+  `a656690c6bb10400c938ea7f1888af6f348a47c5d7f09d7317eaee094ff8a41e`; box (b64u):
+  `AZzO11GzAbvRbE-43t3YLxiSXXHtkMhE-gFY-EWw-n9L0dLT1NXW19jZ2tvd2yVEWneoEWqLeQL9E6U4tx_P1PQUZHFE0SJnGsrRekEFLdfQJJ5WTl07a8y-r1W9TrD3wY0xRFCfEXBmplz4mbB53BKkqZiLX1r8JAtjw4gc3cCshJuxPi5wI6VyWk0syVe7ZR6lvKJVRH9hMzJtULbGBPzrLoZSB9OXwcj5PnVuQUZcc6tJiAi8C6pFIfu05GXTXY97-zshmL0FOGC7GmeF2WBWojbxnt4SHwxt0VX4zc625bdH-6DVzm-mNejIBbheioXp_XLn39U4-tf3dhUMB8aarwPDxeQKawwjQjgXC2ZMVveb5jvkKqLEvjEv7zSVITyNma_T9cjEgvmZQi1Drlfv5TGcVOzF8Zlli2sWQFAtU6tdXEiqw_PW-jqIYHH7psu0FGzeLPbO_HWKJ__71nlMtqW9VptFYoHTdOjNjDHStEm5x8fMsXwAOW2thjzBvyctDHCJk0LZCgHQBCGgAt45xCgHTDViqG97IYH-qzRN6VNIavLbEhvui4514nG_Usol_5kP2S0j2gpM_B59rPMkNF4cTFLygK7GN9AXWtLKkTO5zMqD0dF4V4vm`
+- Rules, worked (Friday 15 January 2027): you 10:15–12:00 and 13:30–15:45, Sam 09:00–11:30 and 13:00–14:00, Lisa
+  10:00–12:00 and 13:30–16:00 → "Today: you and Sam are both free 12:00–13:00", "Today: you and Lisa are both free
+  12:00–13:30"; the note at 06:00–10:59 once; your trips 48.5 (today) and 52.34 min to school, 52 and 55 (December)
+  home → `best`/`mbest` as in the payload; a ride shared twice in a day is one record.
+
+### App (0.30)
+- Pure, tested: `FreeToday`, `ScoresShare`/`ScoresRules`/`ScoreBoard`, `RideHistory`/`RideHistoryWords`
+  (`FriendExtrasB.swift`); `LiveState`/`LiveKeys`/`LiveCrypto`/`LiveRules`/`LiveWords` (`LiveLink.swift`);
+  `FriendInbox.process` reads `scores`.
+- `FriendTogetherStore` (Friends/together.json: rides together, friends' scores, what you sent; `due` in every check,
+  `take` with each batch, `rideTick` on the ride's tick), `LiveLinkStore` (Friends/live.json; the ride's tick through
+  `FriendTravelShare`, the trip's phase), `FriendTravelShare.currentState()` (the travel state, for the live link).
+- Screens: Friends gets "Free together today", the live link card (while a trip runs or a link is shared; a line
+  otherwise), "Leaderboard with friends", and in At school the morning-note switch; a friend's page "Rides together";
+  the ride screen "Share a live link" (also without friends), the link's "Send the link" / "Stop sharing"; Settings ›
+  Leaderboard gets "You / With friends" (with "Share my scores").
+- Not yet: rides together and friends' scores aren't in the vault; the live link's page is English only and shows the
+  viewer's clock; a trip longer than 4 hours ends its link.

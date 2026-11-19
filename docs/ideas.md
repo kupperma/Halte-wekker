@@ -13,7 +13,8 @@ Travel comes first. These wait until the travel part is great.
   the same relay and encrypted boxes. Likely a native Kotlin (Jetpack Compose) app; free to share as an APK from the
   GitHub releases, built on Linux CI (no Mac needed). The Friends box format is kept platform-neutral for this.
 
-- **Friends extras (on both apps; 1–4 built in 0.29 "part A" on iPhone, see the friends design's "As built (0.29)"):**
+- **Friends extras (on both apps; all eight built on iPhone: 1–4 in 0.29 "part A", 5–8 in 0.30 "part B", see the
+  friends design's "As built (0.29)" and "(0.30)"; Android still to do):**
   1. "Wait for me": a friend sees how far you are from the stop and can wait or take the next ride with you.
   2. Delay alarm for shared rides: everyone on a shared ride hears about a delay or cancellation, with the next ride
      you can all take.
