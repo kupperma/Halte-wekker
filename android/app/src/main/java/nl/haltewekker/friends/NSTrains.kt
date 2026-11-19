@@ -92,7 +92,21 @@ class NSCodes(val stations: List<NSStation>) {
 /** NS's drawing of one train at a station (relay `/ns/train`): its units with their coaches, platform letters, direction. */
 data class TrainDrawing(val units: List<CoachMap.Unit>, val letters: List<Pair<String, Double>>, val dir: String?, val cars: Int,
                         /** (A5) Each unit's type as NS names it ("VIRM-6"; else its drawing's name, "virm_6"), for the seat picker's decks. */
-                        val kinds: List<String> = emptyList())
+                        val kinds: List<String> = emptyList(),
+                        /** (A5.1) Each unit's drawing's name ("virmm1_6"), for where 1st class is in each coach (`SeatClass`). */
+                        val drawings: List<String> = emptyList(),
+                        /** (A5.1) Each unit's 1st-class seats as NS counts them (`zitplaatsen.zitplaatsEersteKlas`; null: not said). */
+                        val firstSeats: List<Int?> = emptyList()) {
+    /** (A5.1) The seat picker's train from this drawing (with its decks and 1st class). */
+    fun seatTrain(line: String?, coaches: Int = 0): SeatMap.Train =
+        SeatMap.train(units, kinds, if (cars > 0) cars else coaches, dir, line, drawings, firstSeats)
+
+    companion object {
+        /** (A5.1) The seat picker's train: from NS's drawing, else the guess (`coaches` long, else 6). */
+        fun seatTrain(d: TrainDrawing?, line: String?, coaches: Int = 0): SeatMap.Train =
+            d?.seatTrain(line, coaches) ?: SeatMap.train(emptyList(), emptyList(), coaches, null, line)
+    }
+}
 
 object NSTrains {
     private val kept = HashMap<String, Pair<Double, TrainDrawing?>>()
@@ -127,8 +141,10 @@ object NSTrains {
             val pl = num(p["paddingLeft"])
             if (pl < -0.03 * total || pl > 1.03 * total) null else l to pl / total
         }
+        val drawings = parts.map { m -> SeatClass.imageKey((m["afbeelding"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: "") }
+        val firstSeats = parts.map { m -> ((m["zitplaatsen"] as? JsonObject)?.get("zitplaatsEersteKlas") as? JsonPrimitive)?.content?.toDoubleOrNull()?.toInt() }
         val rr = (d["rijrichting"] as? JsonPrimitive)?.content
-        return TrainDrawing(units, letters, if (rr == "LINKS") "left" else if (rr == "RECHTS") "right" else null, cars, kinds)
+        return TrainDrawing(units, letters, if (rr == "LINKS") "left" else if (rr == "RECHTS") "right" else null, cars, kinds, drawings, firstSeats)
     }
 
     /** The drawing of train `num` at station `code` (kept 15 minutes; null: NS doesn't know it). */

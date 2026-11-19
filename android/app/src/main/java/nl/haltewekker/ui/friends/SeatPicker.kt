@@ -52,7 +52,11 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import nl.haltewekker.friends.SeatClass
 import nl.haltewekker.data.VehicleKind
 import nl.haltewekker.friends.CoachMap
 import nl.haltewekker.friends.FriendStore
@@ -69,6 +73,11 @@ import nl.haltewekker.ui.theme.DS
 // (the top row the upper deck, the bottom row the lower), a single-deck one a row. Tap your window: that's your seat. A
 // friend's face sits in their window. The sums are in SeatMap.kt. The same picker on the ride screen (yours to set) and
 // on a friend's page (theirs to see; yours too when you take that train).
+//
+// (A5.1, iOS 0.31.1) 1st class, as NS's drawings show it (`SeatClass`): its windows gold glass in a gold frame with a
+// "1" at the start of each run (per deck), a gold bar in the train strip where it is; a coach that's 1st class all
+// through gold in the strip (a "1" by its number) and cream in the side view, "1st class" on it. Derived from the
+// train on the phone, never sent.
 
 /** Someone shown in the picker: a friend (their face in their window). */
 data class SeatMark(val id: String, val name: String, val coach: TravelState.Coach)
@@ -78,6 +87,23 @@ private data class SeatColours(val shell: Color, val glass: Color, val door: Col
 @Composable
 private fun seatColours(): SeatColours = if (isSystemInDarkTheme())
     SeatColours(Color(0xFFD3D8DD), Color(0xFF2B3640), Color(0xFF8B949D)) else SeatColours(Color(0xFFE6E9EC), Color(0xFF33404D), Color(0xFF9AA3AC))
+
+/** (A5.1) 1st class's colours: NS's yellow (iOS `FirstClassLook`). */
+private data class FirstClassLook(val gold: Color, val body: Color, val bodyOpen: Color, val bodyInk: Color, val shell: Color, val glass: Color, val ink: Color)
+
+@Composable
+private fun firstClassLook(): FirstClassLook = if (isSystemInDarkTheme())
+    FirstClassLook(Color(0xFFFFC917), Color(0xFFB8962A), Color(0xFFD9A90F), Color(0xFF2E2400), Color(0xFFCDBB7E), Color(0xFF463A12), Color(0xFF2A2100))
+else FirstClassLook(Color(0xFFD9A300), Color(0xFFF2D46A), Color(0xFFE3AE12), Color(0xFF5A4600), Color(0xFFF7E9B8), Color(0xFF4E4217), Color(0xFF3A2E00))
+
+/** (A5.1) The "1" badge: in the legend, by an all-1st coach's number, and on the first window of each 1st-class run. */
+@Composable
+private fun FirstClassBadge(size: Dp = 14.dp) {
+    val look = firstClassLook()
+    Box(Modifier.size(size).clip(RoundedCornerShape(3.dp)).background(look.gold).clearAndSetSemantics {}, contentAlignment = Alignment.Center) {
+        Text("1", color = look.ink, fontSize = (size.value * 0.72f).sp, lineHeight = (size.value * 0.8f).sp, fontWeight = FontWeight.Black)
+    }
+}
 
 /** The line's colour ("IC" indigo, "SPR" cyan). */
 @Composable
@@ -90,7 +116,7 @@ fun trainColour(line: String?): Color = DS.t.kind(VehicleKind.of("", line ?: "",
  */
 @Composable
 fun TrainSeatPicker(tripId: String, num: String?, station: String?, line: String?, towards: String?, friends: List<SeatMark> = emptyList(),
-                    editable: Boolean = true, coaches: Int = 0) {
+                    editable: Boolean = true, coaches: Int = 0, onMineFirst: ((Boolean) -> Unit)? = null) {
     val context = LocalContext.current
     val coach by FriendTravelShare.coach.collectAsState()
     val coachTrip by FriendTravelShare.coachTrip.collectAsState()
@@ -100,9 +126,7 @@ fun TrainSeatPicker(tripId: String, num: String?, station: String?, line: String
     var open by remember(tripId) { mutableStateOf<Int?>(null) }
     val mine = if (coachTrip == tripId) coach else null
     val colour = trainColour(line)
-    val d = drawing
-    val cars = if ((d?.cars ?: 0) > 0) d!!.cars else coaches
-    val t = SeatMap.train(d?.units ?: emptyList(), d?.kinds ?: emptyList(), if (cars > 0) cars else coaches, d?.dir, line)
+    val t = TrainDrawing.seatTrain(drawing, line, coaches)
 
     fun drawn(c: TravelState.Coach): Int? {
         CoachMap.drawn(c, t.count, t.dir, station)?.let { return it }
@@ -121,8 +145,7 @@ fun TrainSeatPicker(tripId: String, num: String?, station: String?, line: String
         } finally {
             loaded = true
             if (open == null) {
-                val tt = SeatMap.train(drawing?.units ?: emptyList(), drawing?.kinds ?: emptyList(),
-                    ((drawing?.cars ?: 0).takeIf { it > 0 } ?: coaches).let { if (it > 0) it else coaches }, drawing?.dir, line)
+                val tt = TrainDrawing.seatTrain(drawing, line, coaches)
                 fun dr(c: TravelState.Coach) = CoachMap.drawn(c, tt.count, tt.dir, station)
                     ?: if (!tt.fromNS && c.front && c.n in 1..tt.count) tt.count - c.n else null
                 open = friends.firstOrNull()?.let { dr(it.coach) } ?: mine?.let { dr(it) }
@@ -145,6 +168,10 @@ fun TrainSeatPicker(tripId: String, num: String?, station: String?, line: String
         val same = mine != null && drawn(mine) == c.drawn && mine.seat == seat
         FriendTravelShare.setCoach(context, value(c, if (same) null else seat), tripId)
     }
+
+    // (A5.1) whether your own pick (coach, or window) is in 1st class, for your seat's line
+    val mineFirst = mine?.let { m -> drawn(m)?.let { d -> t.coaches.firstOrNull { it.drawn == d } }?.let { SeatMap.isFirst(SeatMap.valid(m.seat), it, t.dir) } } ?: false
+    LaunchedEffect(mineFirst) { onMineFirst?.invoke(mineFirst) }
 
     val marked = HashMap<Int, MutableList<String>>()
     for (f in friends) drawn(f.coach)?.let { marked.getOrPut(it) { mutableListOf() }.add(f.id) }
@@ -193,8 +220,24 @@ fun TrainSeatPicker(tripId: String, num: String?, station: String?, line: String
                 Text("Take it away", color = DS.t.accentText, fontWeight = FontWeight.SemiBold)
             }
         }
+        if (t.anyFirst) FirstClassLegend(t)
         if (!t.fromNS && loaded) Text("NS hasn’t said how this train is made up: this is a guess (${t.count} coaches).", color = DS.t.secondary,
             style = MaterialTheme.typography.bodySmall)
+        else if (t.fromNS && loaded && !t.anyFirst && t.firstUnknown) Text("Where 1st class is in this train isn’t known.", color = DS.t.secondary,
+            style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+/** (A5.1) "[1] = 1st class (about here)", and "gold coach: all 1st class" when one is. */
+@Composable
+private fun FirstClassLegend(t: SeatMap.Train) {
+    val whole = t.coaches.any { it.kind == SeatClass.Kind.FIRST }
+    val part = t.coaches.any { it.kind == SeatClass.Kind.PART }
+    val spoken = SeatClass.spokenLegend(part, whole)
+    Row(Modifier.fillMaxWidth().clearAndSetSemantics { contentDescription = spoken }, verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        FirstClassBadge()
+        Text(SeatClass.legend(part, whole), color = DS.t.secondary, style = MaterialTheme.typography.bodySmall)
     }
 }
 
@@ -206,12 +249,19 @@ private fun TrainStrip(t: SeatMap.Train, colour: Color, open: Int?, marked: Map<
     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
         .semantics { contentDescription = if (t.dir == null) "The train’s coaches" else "The train’s coaches, numbered from the front" },
         horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+        val look = firstClassLook()
         t.coaches.forEach { c ->
             val isOpen = open == c.drawn
             val who = marked[c.drawn] ?: emptyList()
             val spoken = SeatMap.spokenCoach(c, t.count) + (if ("me" in who) ", your coach" else "") + (if (who.any { it != "me" }) ", a friend is here" else "")
-            val fill = if (isOpen) colour else DS.t.legQuiet.copy(alpha = 0.45f)
-            val ink = if (isOpen) Color.White.copy(alpha = 0.85f) else DS.t.secondary.copy(alpha = 0.7f)
+            // (A5.1) an all-1st coach is gold; a part-1st one has a gold bar where its 1st class is
+            val all1 = c.kind == SeatClass.Kind.FIRST
+            val plain = if (isOpen) colour else DS.t.legQuiet.copy(alpha = 0.45f)
+            val fill = if (all1) (if (isOpen) look.bodyOpen else look.body) else plain
+            val plainInk = if (isOpen) Color.White.copy(alpha = 0.85f) else DS.t.secondary.copy(alpha = 0.7f)
+            val ink = if (all1) look.bodyInk.copy(alpha = 0.75f) else plainInk
+            val mark = if (c.kind == SeatClass.Kind.PART) c.first?.let { SeatClass.span(it) } else null
+            val gold = look.gold
             val accent = DS.t.accent
             val warn = DS.t.warning
             Column(Modifier.heightIn(min = DS.hit).clip(RoundedCornerShape(8.dp)).clickable(onClickLabel = "Shows its windows") { tap(c) }
@@ -234,11 +284,21 @@ private fun TrainStrip(t: SeatMap.Train, colour: Color, open: Int?, marked: Map<
                         val gap = 4.dp.toPx()
                         val top = (size.height - (rows * h + (rows - 1) * gap)) / 2
                         for (r in 0 until rows) drawRoundRect(ink, Offset(pad, top + r * (h + gap)), Size(size.width - 2 * pad, h), CornerRadius(h / 2))
+                        if (mark != null) {
+                            val x0 = size.width * mark.start.toFloat(); val x1 = size.width * mark.endInclusive.toFloat()
+                            val bw = maxOf(5.dp.toPx(), x1 - x0); val bh = 4.dp.toPx()
+                            val cx = (x0 + x1) / 2
+                            val left = minOf(maxOf(0f, cx - bw / 2), size.width - bw)
+                            drawRoundRect(gold, Offset(left, size.height - 3.dp.toPx() - bh / 2), Size(bw, bh), CornerRadius(bh / 2))
+                        }
                     }
                     if (who.isNotEmpty()) Box(Modifier.align(Alignment.TopCenter).offset(y = (-4).dp).size(8.dp).clip(CircleShape)
                         .background(if ("me" in who) accent else warn))
                 }
-                Text("${c.n}", color = if (isOpen) DS.t.accentText else DS.t.secondary, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("${c.n}", color = if (isOpen) DS.t.accentText else DS.t.secondary, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                    if (all1) FirstClassBadge(12.dp)
+                }
             }
         }
     }
@@ -256,8 +316,13 @@ private fun CoachSideView(coach: SeatMap.Coach, t: SeatMap.Train, colour: Color,
     val rows = if (coach.double) 2 else 1
     val quiet = DS.t.legQuiet
     val wheelFill = DS.t.surface3
+    val look = firstClassLook()
+    // (A5.1) all 1st class: a cream body and a "1st class" tag; else 1st-class windows gold, a "1" at each run's start
+    val all1 = coach.kind == SeatClass.Kind.FIRST
+    val sections = coach.first ?: emptyList()
+    fun isFirst(i: Int, r: Int) = all1 || SeatClass.isFirst(i, r, coach.double, sections)
     Column(Modifier.fillMaxWidth().semantics { contentDescription = SeatMap.spokenCoach(coach, t.count) }) {
-        Box(Modifier.fillMaxWidth().height(if (coach.double) 104.dp else 72.dp).clip(RoundedCornerShape(14.dp)).background(k.shell)) {
+        Box(Modifier.fillMaxWidth().height(if (coach.double) 104.dp else 72.dp).clip(RoundedCornerShape(14.dp)).background(if (all1) look.shell else k.shell)) {
             Column(Modifier.fillMaxSize()) {
                 Row(Modifier.fillMaxWidth().weight(1f).padding(start = 8.dp, end = 8.dp, top = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Box(Modifier.width(12.dp).fillMaxHeight().padding(vertical = 2.dp).clip(RoundedCornerShape(3.dp)).background(k.door))
@@ -268,14 +333,21 @@ private fun CoachSideView(coach: SeatMap.Coach, t: SeatMap.Train, colour: Color,
                                 val isMine = mine?.first == i && mine.second == r
                                 val w = SeatMap.window(i, dir = t.dir)
                                 val deck = if (coach.double) (if (r == 0) SeatMap.Deck.UPPER else SeatMap.Deck.LOWER) else SeatMap.Deck.NONE
+                                val first = isFirst(i, r)
+                                // the "1": on the first window of each run (the left one), when nobody sits there
+                                val startsRun = first && (i == 0 || !isFirst(i - 1, r))
                                 var spoken = SeatMap.spoken(coach.n, deck, w, coach.front)
+                                if (first) spoken += ", 1st class"
                                 if (here != null) spoken += ", ${here.name} sits here"
                                 if (isMine) spoken += ", your seat"
-                                val base = Modifier.weight(1f).height(30.dp).clip(RoundedCornerShape(4.dp)).background(if (isMine) DS.t.accent else k.glass)
+                                val glass = if (isMine) DS.t.accent else if (first) look.glass else k.glass
+                                val framed = Modifier.weight(1f).height(30.dp).clip(RoundedCornerShape(4.dp)).background(glass)
+                                val base = if (first) framed.border(2.dp, look.gold, RoundedCornerShape(4.dp)) else framed
                                 val m = if (editable) base.clickable(onClickLabel = if (isMine) "Takes your window away" else "Marks it as your seat") { tap(i, r) }
                                     .semantics { contentDescription = spoken; selected = isMine; role = Role.Button }
                                     else base.semantics { contentDescription = spoken }
                                 Box(m, contentAlignment = Alignment.Center) {
+                                    if (startsRun && here == null && !isMine) FirstClassBadge(13.dp)
                                     if (here != null) Box(Modifier.size(20.dp).border(1.dp, Color.White, CircleShape).padding(1.dp)) { Avatar(here.name, here.picture, 18.dp) }
                                 }
                             }
@@ -286,6 +358,9 @@ private fun CoachSideView(coach: SeatMap.Coach, t: SeatMap.Train, colour: Color,
                 Box(Modifier.fillMaxWidth().padding(start = 2.dp, end = 2.dp, top = 6.dp).height(5.dp).background(colour))
                 Spacer(Modifier.height(8.dp))
             }
+            if (all1) Text("1st class", color = look.ink, fontSize = 11.sp, lineHeight = 13.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier.align(Alignment.BottomStart).padding(start = 26.dp, bottom = 1.dp).clip(CircleShape).background(look.gold)
+                    .padding(horizontal = 6.dp, vertical = 1.dp).clearAndSetSemantics {})
         }
         // the wheels
         Canvas(Modifier.fillMaxWidth().height(14.dp).offset(y = (-6).dp)) {
@@ -310,7 +385,18 @@ fun FriendCoachNote(coach: TravelState.Coach, state: TravelState, name: String) 
         val d = NSTrains.drawing(num, code) ?: return@LaunchedEffect
         hint = CoachMap.platformHint(coach, d.units, d.cars, d.letters, d.dir, code)?.let { "Taking this train too? $it." }
     }
-    val label = SeatMap.label(coach)
+    // (A5.1) whether their pick is in 1st class: NS's drawing of the train at the station their coach is counted at
+    var firstClass by remember(state.trip, coach) { mutableStateOf(false) }
+    LaunchedEffect(state.trip, coach) {
+        val id = state.trip ?: return@LaunchedEffect
+        val at = coach.at?.takeIf { it.isNotEmpty() } ?: return@LaunchedEffect
+        val num = state.num ?: FriendTravelShare.number(id) ?: return@LaunchedEffect
+        if (num.isEmpty()) return@LaunchedEffect
+        val d = NSTrains.drawing(num, at) ?: return@LaunchedEffect
+        val t = TrainDrawing.seatTrain(d, state.line, coach.of)
+        firstClass = t.fromNS && SeatMap.isFirst(coach, t, at)
+    }
+    val label = SeatMap.label(coach, firstClass)
     Column(Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}, verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text("$name is in ${label.take(1).lowercase() + label.drop(1)}", color = DS.t.text, fontWeight = FontWeight.SemiBold)
         val h = hint

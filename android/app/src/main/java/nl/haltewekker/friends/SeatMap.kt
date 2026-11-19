@@ -49,21 +49,33 @@ object SeatMap {
     fun defaultDouble(line: String?): Boolean =
         (line ?: "").uppercase().trim() in setOf("IC", "ICD", "INTERCITY", "INTERCITY DIRECT", "IC DIRECT")
 
-    /** One coach as the picker draws it. `drawn`: from the left, 0-based; `n`: its number as friends get it. */
-    data class Coach(val drawn: Int, val n: Int, val front: Boolean, val double: Boolean)
+    /**
+     * One coach as the picker draws it. `drawn`: from the left, 0-based; `n`: its number as friends get it. (A5.1)
+     * `first`: its 1st-class parts (`SeatClass`): empty none; null not known.
+     */
+    data class Coach(val drawn: Int, val n: Int, val front: Boolean, val double: Boolean, val first: List<SeatClass.Section>? = null) {
+        /** 2nd, part 1st, all 1st (null: not known). */
+        val kind: SeatClass.Kind? get() = first?.let { SeatClass.kind(it) }
+    }
 
     /** The whole train, left to right. `dir`: the side the front is drawn on ("left"/"right"; null: not known). */
     data class Train(val coaches: List<Coach>, val dir: String?, val fromNS: Boolean) {
         val count: Int get() = coaches.size
         val anyDouble: Boolean get() = coaches.any { it.double }
+        /** (A5.1) Some coach has 1st class drawn in. */
+        val anyFirst: Boolean get() = coaches.any { !it.first.isNullOrEmpty() }
+        /** (A5.1) Some coach's 1st class isn't known (NS's drawing isn't one the table has). */
+        val firstUnknown: Boolean get() = coaches.any { it.first == null }
     }
 
     /**
      * The train from NS's drawing: its units (with each one's type in `kinds`, the same order) and `totalCars` (NS's
      * length), going `dir`. Without units: `totalCars` coaches (or 6), front on the right (so you can still say
-     * "third from the front"), decks by the line.
+     * "third from the front"), decks by the line. (A5.1) Each unit's drawing's name in `drawings` and its 1st-class
+     * seats in `firstSeats` (the same order) give each coach its 1st class (`SeatClass`); the guess has none known.
      */
-    fun train(units: List<CoachMap.Unit>, kinds: List<String>, totalCars: Int, dir: String?, line: String?): Train {
+    fun train(units: List<CoachMap.Unit>, kinds: List<String>, totalCars: Int, dir: String?, line: String?,
+              drawings: List<String> = emptyList(), firstSeats: List<Int?> = emptyList()): Train {
         val fallbackDouble = defaultDouble(line)
         val spots = if (units.isEmpty()) emptyList() else CoachMap.spots(units, totalCars)
         if (spots.isEmpty()) {
@@ -75,15 +87,23 @@ object SeatMap {
             return Train(list, "right", false)
         }
         val shown = spots.take(MAX_COACHES)
+        // the unit each coach is in: the one its middle falls in
+        val unitOf = spots.map { s ->
+            val u = units.indexOfLast { it.x <= s.mid + 1e-9 }
+            minOf(maxOf(0, u), units.size - 1)
+        }
         val list = shown.map { s ->
-            // the unit it's in: the one its middle falls in
-            var u = units.indexOfLast { it.x <= s.mid + 1e-9 }
-            if (u < 0) u = 0
-            u = minOf(maxOf(0, u), units.size - 1)
+            val u = unitOf[s.drawn]
             val kind = if (u < kinds.size) kinds[u] else ""
             val double = doubleDeck(kind) ?: fallbackDouble
             val (num, front) = CoachMap.number(s.drawn, shown.size, dir)
-            Coach(s.drawn, num, front, double)
+            // its place in its unit, and the unit's coaches (as drawn)
+            val inUnit = unitOf.subList(0, s.drawn).count { it == u }
+            val cars = unitOf.count { it == u }
+            val image = if (u < drawings.size) drawings[u] else ""
+            val seats = if (u < firstSeats.size) firstSeats[u] else null
+            val first = SeatClass.sections(SeatClass.drawing(image, kind), inUnit, cars, seats)
+            Coach(s.drawn, num, front, double, first)
         }
         return Train(list, dir, true)
     }
@@ -114,6 +134,22 @@ object SeatMap {
         return s
     }
 
+    /** (A5.1) Whether a seat in coach `c` is in its 1st class: the whole coach is, or its window (in its row) is. */
+    fun isFirst(s: TravelState.Seat?, c: Coach, dir: String?): Boolean {
+        val first = c.first ?: return false
+        if (SeatClass.kind(first) == SeatClass.Kind.FIRST) return true
+        if (s == null) return false
+        val w = drawnWindow(s, dir) ?: return false
+        return SeatClass.isFirst(w, row(s, c.double), c.double, first)
+    }
+
+    /** (A5.1) Whether someone's coach (with its seat, if any) is in 1st class in this train (as drawn at `station`). */
+    fun isFirst(c: TravelState.Coach, t: Train, station: String?): Boolean {
+        val d = CoachMap.drawn(c, t.count, t.dir, station) ?: return false
+        val coach = t.coaches.firstOrNull { it.drawn == d } ?: return false
+        return isFirst(valid(c.seat), coach, t.dir)
+    }
+
     /** Which row a seat is drawn in: 0 the top (upper deck, or the only row), 1 the bottom (lower deck). */
     fun row(s: TravelState.Seat, double: Boolean): Int = if (double && deck(s) == Deck.LOWER) 1 else 0
 
@@ -140,10 +176,14 @@ object SeatMap {
         return deck(s).words?.let { "$it · $win" } ?: win
     }
 
-    /** "Coach 3 of 6 · upper deck · 8th window from the back"; without a seat 0.26's "Coach 3 of 6 · front". */
-    fun label(c: TravelState.Coach): String {
-        val s = valid(c.seat) ?: return CoachMap.label(c)
-        return "Coach ${c.n} of ${c.of} · ${seatWords(s, c.front)}"
+    /**
+     * "Coach 3 of 6 · upper deck · 8th window from the back"; without a seat 0.26's "Coach 3 of 6 · front". (A5.1)
+     * `firstClass`: it's in 1st class (worked out from the train, never sent): "… · 1st class".
+     */
+    fun label(c: TravelState.Coach, firstClass: Boolean = false): String {
+        val tail = if (firstClass) " · 1st class" else ""
+        val s = valid(c.seat) ?: return CoachMap.label(c) + tail
+        return "Coach ${c.n} of ${c.of} · ${seatWords(s, c.front)}$tail"
     }
 
     /** For TalkBack: "Coach 3, upper deck, window 8 from the back". */
@@ -153,9 +193,13 @@ object SeatMap {
         return "Coach $coach$d, window $window $end"
     }
 
-    /** For TalkBack, a coach: "Coach 3 of 6, from the front, two decks". */
+    /**
+     * For TalkBack, a coach: "Coach 3 of 6, from the front, two decks" (A5.1: ", 1st class" all through, ", part 1st
+     * class" for a part).
+     */
     fun spokenCoach(c: Coach, total: Int): String {
         val from = if (c.front) ", from the front" else ""
-        return "Coach ${c.n} of $total$from${if (c.double) ", two decks" else ""}"
+        val cls = when (c.kind) { SeatClass.Kind.FIRST -> ", 1st class"; SeatClass.Kind.PART -> ", part 1st class"; else -> "" }
+        return "Coach ${c.n} of $total$from${if (c.double) ", two decks" else ""}$cls"
     }
 }

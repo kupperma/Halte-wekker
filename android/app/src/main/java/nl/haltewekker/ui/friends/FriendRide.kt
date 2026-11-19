@@ -8,6 +8,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -57,12 +60,15 @@ fun RideFriendsCard(s: RideState) {
             // (A5, iOS 0.31) the seat picker: your coach, and your window in it
             val code = NSCodes.get(context).code(leg.fromId, leg.fromStop)
             val mine = if (FriendTravelShare.coachTrip.collectAsState().value == tripId) coach else null
+            // (A5.1) "… · 1st class" when your pick is (the picker works it out from the train)
+            var mineFirst by remember(tripId) { mutableStateOf(false) }
             Header("Your seat")
-            if (mine != null) Text(SeatMap.label(mine), color = DS.t.text, fontWeight = FontWeight.SemiBold)
+            if (mine != null) Text(SeatMap.label(mine, mineFirst), color = DS.t.text, fontWeight = FontWeight.SemiBold)
             else Text("Tap your coach, then your window: friends on this trip see it, and friends who get on later know where to wait.",
                 color = DS.t.secondary, style = MaterialTheme.typography.bodySmall)
             TrainSeatPicker(tripId, leg.num.ifEmpty { null }, code, TransitLabel.train(s.vehicleLine ?: leg.line, leg.name), leg.toStop,
-                same.mapNotNull { f -> f.state.coach?.let { SeatMark(f.from, FriendStore.name(f.from), it) } }, editable = true)
+                same.mapNotNull { f -> f.state.coach?.let { SeatMark(f.from, FriendStore.name(f.from), it) } }, editable = true,
+                onMineFirst = { mineFirst = it })
         }
         Text("Last check ${FriendStore.lastChecked.collectAsState().value?.let { TravelWords.clock(it) } ?: "not yet"}.", color = DS.t.secondary,
             style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 2.dp))
