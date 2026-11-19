@@ -125,7 +125,11 @@ struct FriendRowLabel<Trailing: View>: View {
         HStack(spacing: DS.s12) {
             FriendAvatar(name: name, id: id, picture: picture)
             VStack(alignment: .leading, spacing: 2) {
-                Text(name).font(DS.bodyStrong).foregroundStyle(DS.text).lineLimit(2)
+                HStack(spacing: 6) {
+                    Text(name).font(DS.bodyStrong).foregroundStyle(DS.text).lineLimit(2)
+                    // (0.30.1) the test friend, wherever it shows
+                    if TestFriendBot.shared.isBot(id) { TestFriendTag() }
+                }
                 Text(detail).font(DS.footnote).foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
             }
             .accessibilityElement(children: .combine)

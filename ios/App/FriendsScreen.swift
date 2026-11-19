@@ -201,6 +201,8 @@ struct FriendsScreen: View {
             if list.isEmpty {
                 Text("No friends yet. Show a friend your code, or send them your link.")
                     .font(DS.sub).foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
+                // (0.30.1) a bot to try it all with
+                TestFriendAddCard()
             }
             ForEach(list) { f in
                 NavigationLink(value: FriendsRoute.friend(f.id)) {
@@ -367,6 +369,7 @@ struct FriendDetailView: View {
     @ObservedObject private var store = FriendStore.shared
     @ObservedObject private var chats = FriendChats.shared
     @ObservedObject private var extras = FriendExtrasStore.shared
+    @ObservedObject private var bot = TestFriendBot.shared
     private var unread: Int { chats.unread(ChatKey.friend(id)) }
     @Environment(\.dismiss) private var dismiss
     @State private var asking = false
@@ -377,6 +380,7 @@ struct FriendDetailView: View {
                 if let f = store.book?.friend(id) {
                     FriendAvatar(name: f.name, id: f.id, picture: store.pictures[f.id], size: 112)
                     Text(f.name).font(DS.title).foregroundStyle(DS.text).multilineTextAlignment(.center)
+                    if bot.isBot(f.id) { TestFriendTag() }
                     Text("Friends since \(FriendDates.day(f.since))").font(DS.sub).foregroundStyle(DS.secondary)
                     NavigationLink(value: FriendsRoute.chat(ChatKey.friend(f.id))) {
                         HStack(spacing: 8) {
@@ -396,19 +400,23 @@ struct FriendDetailView: View {
                     if let c = extras.onCampus().first(where: { $0.id == f.id }) {
                         DSNote(icon: "building.columns.fill", tint: DS.accent, text: CampusWords.since(c.state))
                     }
+                    // (0.30.1) the test friend's buttons (its own "Remove" among them)
+                    if bot.isBot(f.id) { TestFriendControls() }
                     // (0.30) the rides you shared, counted on this phone
                     RidesTogetherCard(friend: f)
                     FriendSeesCard(friend: f)
-                    DSQuietButton(title: "Remove \(f.name)", icon: "person.badge.minus", full: true) { asking = true }
-                        .confirmationDialog("Remove \(f.name)?", isPresented: $asking, titleVisibility: .visible) {
-                            Button("Remove", role: .destructive) {
-                                Task { await store.remove(f.id) }
-                                dismiss()
+                    if !bot.isBot(f.id) {
+                        DSQuietButton(title: "Remove \(f.name)", icon: "person.badge.minus", full: true) { asking = true }
+                            .confirmationDialog("Remove \(f.name)?", isPresented: $asking, titleVisibility: .visible) {
+                                Button("Remove", role: .destructive) {
+                                    Task { await store.remove(f.id) }
+                                    dismiss()
+                                }
+                                Button("Cancel", role: .cancel) {}
+                            } message: {
+                                Text("Their keys go from this phone and the boxes between you from the relay. \(f.name)’s app forgets you too.")
                             }
-                            Button("Cancel", role: .cancel) {}
-                        } message: {
-                            Text("Their keys go from this phone and the boxes between you from the relay. \(f.name)’s app forgets you too.")
-                        }
+                    }
                 }
             }
             .padding(.horizontal, DS.s16).padding(.vertical, DS.s24)
@@ -576,9 +584,11 @@ struct FriendsSettingsSection: View {
                 }
             }
             .sheet(isPresented: $open) { FriendsScreen() }
+            // (0.30.1) a bot to try Friends with
+            if store.hasAccount { TestFriendSettingsRow() }
         } footer: {
             Text(store.hasAccount
-                 ? "Your friends, chats and groups, requests, your code and your backup code."
+                 ? "Your friends, chats and groups, requests, your code and your backup code. A test friend is a bot on this phone to try every Friends feature with; it never goes in your backup."
                  : "Add friends with a code or a link. Locked end to end; nothing to sign up for.")
         }
     }

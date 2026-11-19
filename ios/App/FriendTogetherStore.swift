@@ -185,6 +185,13 @@ final class FriendTogetherStore: ObservableObject {
         publish()
     }
 
+    /// (0.30.1) The test friend's "Pretend we rode together": a ride in the history as if it had been on yours.
+    func addPretend(_ r: RideTogether) {
+        saved.rides = RideHistory.add(saved.rides, r, now: Date())
+        save()
+        publish()
+    }
+
     /// Times you rode with a friend this month, and the last rides.
     func count(with id: String, now: Date = Date()) -> Int { RideHistory.count(rides, with: id, now: now) }
     func last(with id: String) -> [RideTogether] { RideHistory.last(rides, with: id) }

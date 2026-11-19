@@ -1,4 +1,6 @@
 import SwiftUI
+import UIKit
+import UniformTypeIdentifiers
 
 // Friends extras, part B (0.30) on screen: free time together today, the live link for people without the app, rides
 // together on a friend's page, and the friends leaderboard. New look; follows the phone's light or dark.
@@ -61,8 +63,8 @@ struct LiveLinkCard: View {
                         .font(DS.footnote).foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
                         .padding(.horizontal, DS.s4)
                 }
-            } else if let l = live.link, let url = live.url {
-                shared(l, url)
+            } else if let l = live.link {
+                shared(l, l.keys.link)
             } else if running {
                 makeButton
             }
@@ -85,7 +87,7 @@ struct LiveLinkCard: View {
         .accessibilityHint("A web page with this trip’s live times, for someone without the app")
     }
 
-    private func shared(_ l: LiveLinkStore.Link, _ url: URL) -> some View {
+    private func shared(_ l: LiveLinkStore.Link, _ link: String) -> some View {
         let until: String = l.exp.map { TimetableDays.hhmm($0) } ?? ""
         let text: String = l.arrived
             ? "The page says you’ve arrived\(until.isEmpty ? "" : " until \(until)"), then the link ends."
@@ -95,14 +97,15 @@ struct LiveLinkCard: View {
             Text(text).font(DS.sub).foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: DS.s8) {
-                    sendButton(url)
-                    stopButton
+                    sendButton(link)
+                    LiveLinkCopyButton(link: link)
                 }
                 VStack(spacing: DS.s8) {
-                    sendButton(url)
-                    stopButton
+                    sendButton(link)
+                    LiveLinkCopyButton(link: link)
                 }
             }
+            stopButton
         }
         .dsPanel()
         .confirmationDialog("Stop sharing the live link?", isPresented: $asking, titleVisibility: .visible) {
@@ -113,8 +116,9 @@ struct LiveLinkCard: View {
         }
     }
 
-    private func sendButton(_ url: URL) -> some View {
-        ShareLink(item: url, subject: Text("My trip, live"), message: Text("Follow my trip live:")) {
+    /// (0.30.1) The link goes as text: a link handed over as a link can come back without its key (the part after #).
+    private func sendButton(_ link: String) -> some View {
+        ShareLink(item: LiveWords.shareText(link), subject: Text("My trip, live")) {
             Label("Send the link", systemImage: "square.and.arrow.up").font(DS.subStrong)
                 .foregroundStyle(DS.onAccent)
                 .padding(.horizontal, 14)
@@ -132,6 +136,36 @@ struct LiveLinkCard: View {
                 .background(DS.surface3, in: Capsule())
         }
         .buttonStyle(DSPressStyle())
+    }
+}
+
+/// (0.30.1) "Copy link": the whole link on the clipboard, as text and as a link, to paste into any app.
+struct LiveLinkCopyButton: View {
+    let link: String
+    var big = false
+    @State private var copied = false
+
+    var body: some View {
+        Button {
+            var item: [String: Any] = [UTType.plainText.identifier: link]
+            if let u = URL(string: link) { item[UTType.url.identifier] = u }
+            UIPasteboard.general.items = [item]
+            copied = true
+        } label: {
+            Label(copied ? "Copied" : "Copy link", systemImage: copied ? "checkmark" : "doc.on.doc")
+                .font(big ? DS.bodyStrong : DS.subStrong)
+                .foregroundStyle(DS.accentText)
+                .padding(.horizontal, 14)
+                .frame(maxWidth: .infinity, minHeight: big ? DS.cta : DS.hit)
+                .background(DS.surface3, in: Capsule())
+        }
+        .buttonStyle(DSPressStyle())
+        .accessibilityHint("Puts the whole link on the clipboard, to paste in any app")
+        .task(id: copied) {
+            guard copied else { return }
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            copied = false
+        }
     }
 }
 
@@ -156,12 +190,14 @@ struct LiveLinkSheet: View {
                     point("lock.fill", "Locked with a key that is only in the link: the Haltewekker relay can’t read it. Anyone you send the link to can.")
                     if let made {
                         DSNote(icon: "checkmark.circle.fill", tint: DS.accent, text: "Your link is ready. Send it, then put the phone away: it updates by itself on the ride.")
-                        ShareLink(item: made, subject: Text("My trip, live"), message: Text("Follow my trip live:")) {
+                        let link: String = live.link?.keys.link ?? made.absoluteString
+                        ShareLink(item: LiveWords.shareText(link), subject: Text("My trip, live")) {
                             Label("Send the link", systemImage: "square.and.arrow.up").font(DS.bodyStrong)
                                 .foregroundStyle(DS.onAccent)
                                 .frame(maxWidth: .infinity, minHeight: DS.cta)
                                 .background(DS.accent, in: Capsule())
                         }
+                        LiveLinkCopyButton(link: link, big: true)
                         DSQuietButton(title: "Done", full: true) { dismiss() }
                     } else {
                         TextField("Your name on the page", text: $name)

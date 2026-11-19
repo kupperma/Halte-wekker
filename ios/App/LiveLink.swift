@@ -4,7 +4,7 @@ import Foundation
 // Live link (0.30): a web page with your trip's live times for someone without the app (a parent), as plain values,
 // the lock and the rules, tested without the relay, the trip or the UI. Foundation and CryptoKit only.
 //
-//   link   = https://haltewekker-relay.tsfaw1.workers.dev/live/<token>#<key>
+//   link   = https://haltewekker-relay.tsfaw1.workers.dev/live/<token>#k=<key>   (0.30: #<key>; both read)
 //   secret = 32 random bytes (stays on the phone: it lets the phone write)   key = 32 random bytes (AES-256-GCM)
 //   token  = base64url(first 16 bytes of SHA-256("hw-live-token-v1" ‖ secret))
 //   data   = 0x01 ‖ nonce (12) ‖ AES-256-GCM(key, AAD "hw-live-v1\n" + token)(the state's JSON) ‖ tag (16)
@@ -82,16 +82,24 @@ enum LiveCrypto {
         return B64URL.encode(Data(h).prefix(16))
     }
 
-    static func link(token: String, key: Data) -> String { "\(relay)/live/\(token)#\(B64URL.encode(key))" }
+    /// (0.30.1) The key after `#k=` (0.30 put it bare after the `#`: the page and `parse` read both). Only ever in the
+    /// fragment, which no browser sends: the relay never sees it.
+    static func link(token: String, key: Data) -> String { "\(relay)/live/\(token)#k=\(B64URL.encode(key))" }
 
-    /// A link back into its token and key (nil: not a live link of this relay, or no key).
+    /// A link back into its token and key (nil: not a live link of this relay, or no key). The fragment may be the key
+    /// itself or `k=<key>` among other fields.
     static func parse(_ s: String) -> (token: String, key: Data)? {
         let prefix = "\(relay)/live/"
-        guard s.hasPrefix(prefix) else { return nil }
-        let rest: Substring = s.dropFirst(prefix.count)
+        let t: String = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard t.hasPrefix(prefix) else { return nil }
+        let rest: Substring = t.dropFirst(prefix.count)
         let parts: [Substring] = rest.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false)
-        guard parts.count == 2, parts[0].count == 22, let key = B64URL.decode(String(parts[1])), key.count == 32 else { return nil }
-        return (String(parts[0]), key)
+        guard parts.count == 2 else { return nil }
+        let token: String = String(parts[0]).hasSuffix("/") ? String(parts[0].dropLast()) : String(parts[0])
+        var keyText: String = String(parts[1])
+        for field in parts[1].split(separator: "&") where field.hasPrefix("k=") { keyText = String(field.dropFirst(2)) }
+        guard token.count == 22, let key = B64URL.decode(keyText), key.count == 32 else { return nil }
+        return (token, key)
     }
 
     static func aad(_ token: String) -> Data { Data("hw-live-v1\n\(token)".utf8) }
@@ -242,4 +250,8 @@ enum LiveWords {
         let there: String = s.end.map { " · there around " + TravelWords.clock($0, zone: zone) } ?? ""
         return "Then on to \(d)" + there
     }
+
+    /// (0.30.1) What "Send the link" hands the share sheet: plain text, the whole link on a line of its own. Text is kept
+    /// as it is; a link handed over as a link can be turned into a preview that opens without its # part (its key).
+    static func shareText(_ link: String) -> String { "Follow my trip live:\n\(link)" }
 }
