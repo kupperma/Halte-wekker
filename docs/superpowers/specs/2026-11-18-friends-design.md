@@ -315,7 +315,7 @@ standard: Ed25519 (RFC 8032), X25519 (RFC 7748), HKDF-SHA256 (RFC 5869), ChaCha2
 
 ## As built (0.26)
 
-What 0.26.0 (build 111) adds: "Travelling now" and the coach. Everything in "As built (0.25)" holds unchanged; this
+What 0.26.0 (build 112) adds: "Travelling now" and the coach. Everything in "As built (0.25)" holds unchanged; this
 only adds a box kind, three relay routes and one field in the friend list.
 
 ### When a trip is shared (`FriendTravel.swift`, `TravelShareRules`)
