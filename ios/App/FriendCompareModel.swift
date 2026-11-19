@@ -114,7 +114,7 @@ final class CompareModel: ObservableObject {
     func reload() async {
         let store = FriendStore.shared
         let tt = FriendTimetables.shared
-        _ = await tt.readMine()
+        _ = await tt.readMine(sharing: false)
         var list: [ComparePerson] = [ComparePerson(id: me, name: "You", isMe: true, timetable: tt.mine, area: tt.myArea)]
         let others: [(String, String)]
         if let gid = groupId, let g = store.group(gid) {

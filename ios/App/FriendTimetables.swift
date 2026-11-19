@@ -182,9 +182,12 @@ final class FriendTimetables: ObservableObject {
     }
 
     /// Reads your timetable and area now (no network but, once, the stops near your home).
-    func readMine(now: Date = Date()) async -> (TimetableShare?, TimetableArea?) {
-        lastLook = now
-        dirty = false
+    /// `sharing`: read for sending (the next look is then 30 minutes on); the compare screen's read doesn't count.
+    func readMine(now: Date = Date(), sharing: Bool = true) async -> (TimetableShare?, TimetableArea?) {
+        if sharing {
+            lastLook = now
+            dirty = false
+        }
         var share: TimetableShare?
         if let got = await SchoolAlarm.shared.friendClasses(days: TimetableShare.days) {
             let w = TimetableDays.window(now: now)
