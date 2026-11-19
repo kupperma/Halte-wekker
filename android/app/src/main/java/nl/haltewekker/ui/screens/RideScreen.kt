@@ -121,6 +121,8 @@ fun RideScreen(s: RideState, onBack: () -> Unit) {
         }
         // A3: friends on this ride, the one-time question, the coach picker
         if (s.phase != Phase.FINISHED) nl.haltewekker.ui.friends.RideFriendsCard(s)
+        // A4: ask a friend to wait, delays on your rides, the live link (also without friends)
+        nl.haltewekker.ui.friends.RideExtrasCards(s)
         if (s.lastFixAt == null && s.phase == Phase.SLEEPING) Note("No GPS yet. The backup alarm still rings by time before your stop.")
         if (s.phase != Phase.FINISHED) HoldButton("Hold to end the trip") { RideService.send(context, RideService.ACTION_END); onBack() }
         Spacer(Modifier.height(24.dp))

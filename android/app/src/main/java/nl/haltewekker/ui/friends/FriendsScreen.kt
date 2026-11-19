@@ -62,6 +62,7 @@ import nl.haltewekker.friends.ChatWords
 import nl.haltewekker.friends.CoachMap
 import nl.haltewekker.friends.FriendBook
 import nl.haltewekker.friends.FriendChats
+import nl.haltewekker.friends.FriendExtrasStore
 import nl.haltewekker.friends.FriendLink
 import nl.haltewekker.friends.FriendStore
 import nl.haltewekker.friends.FriendTimetables
@@ -213,6 +214,8 @@ private fun FriendsHub(push: (FriendsRoute) -> Unit, back: () -> Unit) {
                 }
             }
         }
+        // (A4) the extras: waits, on campus, delays, free together, the live link, the leaderboard, at school
+        ExtrasHubCards(push)
         // chats
         Card {
             val unread = FriendStore.unread.collectAsState().value
@@ -469,8 +472,12 @@ private fun FriendPage(id: String, push: (FriendsRoute) -> Unit, back: () -> Uni
                 FriendsMap(listOf(s))
                 TravelRow(s, f.name, pictures[id], now, null)
                 CoachHint(s)
+                // (0.29) while they wait at a stop or change there: "Wait for me" at their stop
+                if (s.state.stage != nl.haltewekker.friends.TravelState.Stage.RIDING && s.state.from.lat != null)
+                    QuietButton("Wait for me") { FriendExtrasStore.startWait(id, nl.haltewekker.friends.DelayAlarm.spot(s.state.from), null) }
             }
         }
+        FriendExtrasOnPage(id, f.name)
         Card {
             Header("What ${f.name} sees")
             Text("Your name and picture, and what you write to them.", color = DS.t.secondary)

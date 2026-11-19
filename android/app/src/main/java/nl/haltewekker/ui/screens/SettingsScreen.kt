@@ -85,6 +85,8 @@ fun SettingsScreen(onBack: () -> Unit, onSetup: () -> Unit, onTestSetup: () -> U
         }
         AutoStartCard()
         PermissionsCard(showExtras = true)
+        // A4: Help improve Haltewekker › Share ride logs (off unless turned on)
+        nl.haltewekker.ui.friends.LogShareCard()
         Card {
             Text("Your places", fontWeight = FontWeight.Bold, color = DS.t.text)
             Text("School: ${p.school?.name ?: "not set"}", color = DS.t.text)

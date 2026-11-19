@@ -99,6 +99,8 @@ fun ChatScreen(key: String, push: (FriendsRoute) -> Unit, back: () -> Unit) {
                 Text("Lines arrive when the other phone opens Haltewekker or is on a trip (there are no push notifications).",
                     color = DS.t.secondary, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(8.dp))
             }
+            // (0.29) waits in this chat, and yours, on top
+            item { Column(verticalArrangement = Arrangement.spacedBy(6.dp)) { WaitsForYouCard(key); YourWaitCard(key) } }
             items(lines, key = { it.id }) { m -> Line(m, key, me, gid != null, lines.lastOrNull { it.from == me }?.id == m.id, pictures, push) }
         }
         if (canWrite) {
@@ -133,6 +135,7 @@ private fun Line(m: ChatMessage, key: String, me: String, group: Boolean, lastMi
                     color = DS.t.secondary, style = MaterialTheme.typography.bodySmall)
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     QuietButton("Take this trip") { push(FriendsRoute.Take(c, key)) }
+                    WaitForMeOnCard(c, m.n, m.from, key)
                     if (!mine) {
                         QuietButton("I’m in") { FriendChats.answer(TripAnswer.YES, m.n, key) }
                         QuietButton("Can’t") { FriendChats.answer(TripAnswer.NO, m.n, key) }
