@@ -246,6 +246,45 @@ final class SchoolAlarm: ObservableObject {
         }.value
     }
 
+    /// (0.28) Every class of the next `days` days (today counts, all of it), for friends to compare with: from the
+    /// calendars you picked (all-day and cancelled ones don't count, nor anything over 12 hours), or your week (one
+    /// per school day, to its end time). Nil: no timetable to share (not set up, or no calendar access).
+    func friendClasses(days: Int) async -> (classes: [TimetableClass], src: String)? {
+        switch Self.schedule {
+        case .manual(let w):
+            let tz = TimeZone(identifier: "Europe/Amsterdam") ?? .current
+            return (w.classes(from: Date(), days: days, tz: tz), "week")
+        case .calendars:
+            guard EKEventStore.authorizationStatus(for: .event) == .fullAccess, !calendarIds.isEmpty else { return nil }
+            let st = await calendarStore(), ids = calendarIds
+            let list = await Task.detached { () -> [TimetableClass] in
+                let cals = st.calendars(for: .event).filter { ids.contains($0.calendarIdentifier) }
+                guard !cals.isEmpty else { return [] }
+                let start = TimetableDays.calendar.startOfDay(for: Date())
+                let end = TimetableDays.calendar.date(byAdding: .day, value: days, to: start) ?? start.addingTimeInterval(Double(days) * 86400)
+                let evs = st.events(matching: st.predicateForEvents(withStart: start, end: end, calendars: cals))
+                    .filter { !$0.isAllDay && $0.status != .canceled && !SchoolAlarm.isCancelled($0.title ?? "") }
+                var seen = Set<String>()
+                var out: [TimetableClass] = []
+                for e in evs {
+                    let sa: Date? = e.startDate, sb: Date? = e.endDate
+                    guard let a = sa, let b = sb, b > a, b.timeIntervalSince(a) <= TimetableClass.maxLength, a >= start else { continue }
+                    let rawTitle: String? = e.title
+                    let rawRoom: String? = e.location
+                    let title: String? = (rawTitle ?? "").isEmpty ? nil : rawTitle
+                    let room: String? = (rawRoom ?? "").isEmpty ? nil : rawRoom
+                    let key = "\(a.timeIntervalSince1970)|\(b.timeIntervalSince1970)|\(title ?? "")"
+                    guard seen.insert(key).inserted else { continue }
+                    out.append(TimetableClass(start: a, end: b, title: title, room: room))
+                }
+                return out.sorted { $0.start < $1.start }
+            }.value
+            return (list, "calendar")
+        case .none:
+            return nil
+        }
+    }
+
     nonisolated static func isCancelled(_ t: String) -> Bool {
         let l = t.lowercased()
         return ["cancelled", "canceled", "geannuleerd", "vervalt", "vervallen"].contains { l.contains($0) }

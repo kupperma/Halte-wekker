@@ -753,7 +753,8 @@ private struct SetupTimetableStep: View {
     }
 }
 
-/// Same times every week: a first-class time per weekday, or none that day.
+/// Same times every week: a first-class time per weekday, or none that day; (0.28) and, if you like, when the day
+/// ends and what it is (for comparing timetables with friends and riding home together).
 struct ManualWeekEditor: View {
     @Binding var week: ManualWeek
     private static let order = [2, 3, 4, 5, 6, 7, 1]
@@ -763,29 +764,90 @@ struct ManualWeekEditor: View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(Self.order.enumerated()), id: \.element) { i, wd in
                 if i > 0 { Divider() }
-                let on = week.minutes(weekday: wd) != nil
-                HStack(spacing: DS.s8) {
-                    Toggle(isOn: Binding(get: { on }, set: { week.set(weekday: wd, minutes: $0 ? 8 * 60 + 30 : nil) })) {
-                        Text(Self.names[wd - 1]).font(DS.bodyStrong).foregroundStyle(DS.text)
-                    }
-                    if on {
-                        DatePicker("\(Self.names[wd - 1])’s first class", selection: time(wd), displayedComponents: .hourAndMinute)
-                            .labelsHidden()
-                    }
-                }
-                .frame(minHeight: DS.hit + 4)
+                dayRow(wd)
             }
         }
     }
 
+    @ViewBuilder private func dayRow(_ wd: Int) -> some View {
+        let on: Bool = week.minutes(weekday: wd) != nil
+        let name: String = Self.names[wd - 1]
+        VStack(alignment: .leading, spacing: DS.s4) {
+            HStack(spacing: DS.s8) {
+                Toggle(isOn: Binding(get: { on }, set: { week.set(weekday: wd, minutes: $0 ? 8 * 60 + 30 : nil) })) {
+                    Text(name).font(DS.bodyStrong).foregroundStyle(DS.text)
+                }
+                if on {
+                    DatePicker("\(name)’s first class", selection: time(wd), displayedComponents: .hourAndMinute)
+                        .labelsHidden()
+                }
+            }
+            .frame(minHeight: DS.hit + 4)
+            if on { extras(wd, name: name) }
+        }
+        .padding(.bottom, on ? DS.s8 : 0)
+    }
+
+    @ViewBuilder private func extras(_ wd: Int, name: String) -> some View {
+        let end: Int? = week.end(weekday: wd)
+        HStack(spacing: DS.s8) {
+            Text("Ends").font(DS.sub).foregroundStyle(DS.secondary)
+            Spacer(minLength: DS.s8)
+            if end != nil {
+                DatePicker("\(name)’s last class ends", selection: endTime(wd), displayedComponents: .hourAndMinute)
+                    .labelsHidden()
+                Button { week.setEnd(weekday: wd, minutes: nil) } label: {
+                    Image(systemName: "xmark.circle.fill").font(.body).foregroundStyle(DS.secondary)
+                        .frame(minWidth: DS.hit, minHeight: DS.hit)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("No end time on \(name)")
+            } else {
+                Button { week.setEnd(weekday: wd, minutes: defaultEnd(wd)) } label: {
+                    Text("Add end time").font(DS.subStrong).foregroundStyle(DS.accentText)
+                        .frame(minHeight: DS.hit)
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("For riding home together with friends")
+            }
+        }
+        TextField("What it is (optional)", text: title(wd))
+            .font(DS.sub)
+            .textInputAutocapitalization(.sentences)
+            .padding(.horizontal, DS.s12).padding(.vertical, 8)
+            .frame(minHeight: DS.hit)
+            .background(DS.surface, in: RoundedRectangle(cornerRadius: DS.fieldRadius, style: .continuous))
+            .accessibilityLabel("What \(name) is, optional")
+    }
+
+    private func defaultEnd(_ wd: Int) -> Int {
+        let start: Int = week.minutes(weekday: wd) ?? 510
+        return min(23 * 60 + 30, max(15 * 60, start + 6 * 60))
+    }
+
+    private func clock(_ m: Int) -> Date {
+        Calendar.current.date(bySettingHour: m / 60, minute: m % 60, second: 0, of: Date()) ?? Date()
+    }
+
+    private func minutes(_ d: Date, or fallback: Int) -> Int {
+        let c = Calendar.current.dateComponents([.hour, .minute], from: d)
+        guard let h = c.hour, let m = c.minute else { return fallback }
+        return h * 60 + m
+    }
+
     private func time(_ wd: Int) -> Binding<Date> {
-        Binding(get: {
-            let m = week.minutes(weekday: wd) ?? 510
-            return Calendar.current.date(bySettingHour: m / 60, minute: m % 60, second: 0, of: Date()) ?? Date()
-        }, set: { d in
-            let c = Calendar.current.dateComponents([.hour, .minute], from: d)
-            week.set(weekday: wd, minutes: (c.hour ?? 8) * 60 + (c.minute ?? 30))
-        })
+        Binding(get: { clock(week.minutes(weekday: wd) ?? 510) },
+                set: { d in week.set(weekday: wd, minutes: minutes(d, or: 510)) })
+    }
+
+    private func endTime(_ wd: Int) -> Binding<Date> {
+        Binding(get: { clock(week.end(weekday: wd) ?? defaultEnd(wd)) },
+                set: { d in week.setEnd(weekday: wd, minutes: minutes(d, or: defaultEnd(wd))) })
+    }
+
+    private func title(_ wd: Int) -> Binding<String> {
+        Binding(get: { week.title(weekday: wd) ?? "" },
+                set: { t in week.setTitle(weekday: wd, t) })
     }
 }
 
@@ -1100,7 +1162,7 @@ struct ManualWeekScreen: View {
         Form {
             Section {
                 ManualWeekEditor(week: $week)
-            } footer: { Text("Your first class each day. The school alarm plans the trip there and sets the alarm from it.") }
+            } footer: { Text("Your first class each day: the school alarm plans the trip there and sets the alarm from it. When the day ends and what it is are only for comparing timetables with friends (and riding home together); you choose who sees them in Friends.") }
         }
         .scrollContentBackground(newLook ? .automatic : .hidden)
         .background(PaperFill().ignoresSafeArea().opacity(newLook ? 0 : 1))

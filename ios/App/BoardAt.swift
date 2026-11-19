@@ -20,6 +20,8 @@ enum BoardAt {
         var scheduledTrack: String? = nil
         /// You may get on there: not "drop off only", not cancelled.
         var boarding: Bool = true
+        /// (0.28) When it gets there (the live time when there is one), for meeting halfway.
+        var arrival: Date? = nil
     }
 
     /// Where to get on instead, and the walk there in minutes.

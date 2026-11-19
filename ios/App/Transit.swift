@@ -832,6 +832,7 @@ enum Transit {
             s.track = o["track"] as? String
             s.scheduledTrack = o["scheduledTrack"] as? String
             s.boarding = pickup != "NOT_ALLOWED" && !cancelled
+            s.arrival = date(o["arrival"])
             return s
         }
         for l in legs {

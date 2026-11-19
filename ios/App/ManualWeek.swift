@@ -8,7 +8,41 @@ struct ManualWeek: Codable, Equatable, Sendable {
         var weekday: Int
         /// The first class, in minutes after midnight.
         var minutes: Int
+        /// (0.28) When the last class ends, in minutes after midnight (nil: not said; a week saved before 0.28).
+        var end: Int? = nil
+        /// (0.28) What it is, if you like ("Design", "Lectures").
+        var title: String? = nil
+        /// The title as shared: single spaces, trimmed (nil: none).
+        var shownTitle: String? {
+            guard let t = title else { return nil }
+            let s = t.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+            return s.isEmpty ? nil : s
+        }
+
+        init(weekday: Int, minutes: Int, end: Int? = nil, title: String? = nil) {
+            self.weekday = weekday; self.minutes = minutes; self.end = end; self.title = title
+        }
+
+        // Postel: a week saved before 0.28 has no end or title; an end that isn't after the start is none.
+        enum CodingKeys: String, CodingKey { case weekday, minutes, end, title }
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            weekday = try c.decode(Int.self, forKey: .weekday)
+            minutes = try c.decode(Int.self, forKey: .minutes)
+            end = try? c.decodeIfPresent(Int.self, forKey: .end)
+            title = try? c.decodeIfPresent(String.self, forKey: .title)
+        }
+
+        func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode(weekday, forKey: .weekday)
+            try c.encode(minutes, forKey: .minutes)
+            try c.encodeIfPresent(end, forKey: .end)
+            try c.encodeIfPresent(title, forKey: .title)
+        }
     }
+
+    static let maxTitle = 40
 
     /// At most one per weekday, in weekday order.
     private(set) var days: [Day]
@@ -27,8 +61,38 @@ struct ManualWeek: Codable, Equatable, Sendable {
 
     private static func clean(_ l: [Day]) -> [Day] {
         var by: [Int: Day] = [:]
-        for d in l where (1...7).contains(d.weekday) && (0..<1440).contains(d.minutes) { by[d.weekday] = d }
+        for d in l where (1...7).contains(d.weekday) && (0..<1440).contains(d.minutes) {
+            var k = d
+            if let e = d.end, !(e > d.minutes && e < 1440) { k.end = nil }
+            if let t = d.title {
+                // (kept as typed, so a space can be typed; trimmed where it's shared: `shownTitle`)
+                let c = String(t.replacingOccurrences(of: "\n", with: " ").prefix(maxTitle))
+                k.title = c.isEmpty ? nil : c
+            }
+            by[d.weekday] = k
+        }
         return by.keys.sorted().compactMap { by[$0] }
+    }
+
+    /// (0.28) A day's last class ends, in minutes after midnight (nil: not said, or no school).
+    func end(weekday: Int) -> Int? { days.first { $0.weekday == weekday }?.end }
+    /// (0.28) What a day is called, as typed (nil: not said).
+    func title(weekday: Int) -> String? { days.first { $0.weekday == weekday }?.title }
+
+    /// (0.28) Sets a day's end time (nil: none). Ignored for a day without school, or an end not after its start.
+    mutating func setEnd(weekday: Int, minutes e: Int?) {
+        guard let i = days.firstIndex(where: { $0.weekday == weekday }) else { return }
+        var l = days
+        l[i].end = e
+        days = Self.clean(l)
+    }
+
+    /// (0.28) Sets a day's title (empty: none).
+    mutating func setTitle(weekday: Int, _ t: String?) {
+        guard let i = days.firstIndex(where: { $0.weekday == weekday }) else { return }
+        var l = days
+        l[i].title = t
+        days = Self.clean(l)
     }
 
     // MARK: the lessons it makes (0.23)
@@ -62,10 +126,11 @@ struct ManualWeek: Codable, Equatable, Sendable {
     /// Monday to Friday at 08:30: where "Same times every week" starts.
     static let workdays = ManualWeek(days: (2...6).map { Day(weekday: $0, minutes: 8 * 60 + 30) })
 
-    /// Sets (or clears, with nil) a weekday's first class.
+    /// Sets (or clears, with nil) a weekday's first class. A day that had an end time and a title keeps them.
     mutating func set(weekday: Int, minutes: Int?) {
+        let had = days.first { $0.weekday == weekday }
         var l = days.filter { $0.weekday != weekday }
-        if let minutes { l.append(Day(weekday: weekday, minutes: minutes)) }
+        if let minutes { l.append(Day(weekday: weekday, minutes: minutes, end: had?.end, title: had?.title)) }
         days = Self.clean(l)
     }
 

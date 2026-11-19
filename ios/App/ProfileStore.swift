@@ -42,6 +42,7 @@ final class ProfileStore: ObservableObject {
         profile.schedule = s
         persist()
         Task { await SchoolAlarm.shared.refresh(force: true, now: true) }
+        FriendTimetables.shared.changed()           // (0.28) friends see the new one at the next check
     }
 
     /// The saved profile again (your own put back after "Test the setup as a new user").

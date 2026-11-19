@@ -225,17 +225,18 @@ enum SetupLogic {
 
     // MARK: words
 
-    /// "Mon–Fri 08:30", "Mon 08:30 · Wed 10:15".
+    /// "Mon–Fri 08:30", "Mon 08:30 · Wed 10:15", with an end time "Mon–Fri 08:30–15:00" (0.28).
     static func weekWords(_ w: ManualWeek) -> String {
         let names = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
         let clock = { (m: Int) in String(format: "%02d:%02d", m / 60, m % 60) }
+        let span = { (d: ManualWeek.Day) -> String in d.end.map { clock(d.minutes) + "–" + clock($0) } ?? clock(d.minutes) }
         guard !w.days.isEmpty else { return "No days yet" }
-        let times = Set(w.days.map(\.minutes))
+        let times = Set(w.days.map(span))
         let wds = w.days.map(\.weekday)
         if times.count == 1, wds.count >= 3, wds == Array(wds.first!...wds.last!) {
-            return "\(names[wds.first! - 1])–\(names[wds.last! - 1]) \(clock(w.days[0].minutes))"
+            return "\(names[wds.first! - 1])–\(names[wds.last! - 1]) \(span(w.days[0]))"
         }
-        return w.days.map { "\(names[$0.weekday - 1]) \(clock($0.minutes))" }.joined(separator: " · ")
+        return w.days.map { "\(names[$0.weekday - 1]) \(span($0))" }.joined(separator: " · ")
     }
 
     /// The timetable line of the summary.

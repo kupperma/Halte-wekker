@@ -208,6 +208,8 @@ struct IdentifiedCard: Identifiable {
 /// Pick who gets the trip (friends and groups), add a line if you like, send.
 struct SendTripSheet: View {
     let card: TripCard
+    /// (0.28) Who's picked to begin with (a chat key: from a friend's or a group's compare screen).
+    var preselect: Set<String> = []
     @ObservedObject private var store = FriendStore.shared
     @Environment(\.dismiss) private var dismiss
     @State private var picked: Set<String> = []
@@ -241,6 +243,7 @@ struct SendTripSheet: View {
         .tint(DS.accentText)
         .dynamicTypeSize(...DynamicTypeSize.accessibility2)
         .followsSystemScheme()
+        .onAppear { if picked.isEmpty, !preselect.isEmpty { picked = preselect } }
     }
 
     private var noteField: some View {

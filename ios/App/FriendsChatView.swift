@@ -8,6 +8,10 @@ enum FriendsRoute: Hashable {
     case friend(String)
     case chat(String)
     case group(String)
+    /// (0.28) Compare timetables: a friend's account, or `g.<group id>`.
+    case compare(String)
+    /// (0.28) One day of it in full.
+    case compareDay(String, String)
 }
 
 struct FriendChatView: View {

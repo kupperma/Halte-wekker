@@ -14,7 +14,7 @@ struct FriendsScreen: View {
     @State private var path: [FriendsRoute] = []
 
     enum Sheet: String, Identifiable {
-        case myCode, scan, create, restore, backup, profile, travel, newGroup
+        case myCode, scan, create, restore, backup, profile, travel, newGroup, timetable
         var id: String { rawValue }
     }
 
@@ -52,6 +52,8 @@ struct FriendsScreen: View {
         .sheet(item: $sheet) { s in sheetView(s) }
         // (0.26) with the first friend, once: what friends see of your trips, and the switch
         .task(id: store.book?.friends.count ?? 0) { await askAboutTripsOnce() }
+        // (0.28) then, once: what friends see of your timetable, and the switch
+        .task(id: "\(store.book?.friends.count ?? 0)|\(store.travelAnswered)|\(sheet == nil)") { await askAboutTimetableOnce() }
         .sheet(item: $store.opened) { code in FriendAddSheet(code: code) }
         .confirmationDialog("Delete your friends account?", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("Delete my friends account", role: .destructive) { Task { await store.deleteAccount() } }
@@ -87,6 +89,7 @@ struct FriendsScreen: View {
         case .profile: FriendProfileSheet()
         case .travel: TravelConsentSheet()
         case .newGroup: NewGroupSheet(made: { id in openLaterChat(ChatKey.group(id)) })
+        case .timetable: TimetableConsentSheet()
         }
     }
 
@@ -95,6 +98,8 @@ struct FriendsScreen: View {
         case .friend(let id): FriendDetailView(id: id)
         case .chat(let key): FriendChatView(key: key)
         case .group(let id): GroupInfoView(id: id)
+        case .compare(let key): CompareView(key: key)
+        case .compareDay(let key, let day): CompareDayView(key: key, dayKey: day)
         }
     }
 
@@ -116,6 +121,13 @@ struct FriendsScreen: View {
         try? await Task.sleep(nanoseconds: 700_000_000)
         guard store.hasFriends, !store.travelAnswered, sheet == nil, store.opened == nil else { return }
         sheet = .travel
+    }
+
+    private func askAboutTimetableOnce() async {
+        guard store.hasFriends, store.travelAnswered, !FriendTimetables.shared.answered, sheet == nil else { return }
+        try? await Task.sleep(nanoseconds: 900_000_000)
+        guard store.hasFriends, store.travelAnswered, !FriendTimetables.shared.answered, sheet == nil, store.opened == nil else { return }
+        sheet = .timetable
     }
 
     /// (after the scanner's sheet has gone, so the next one can come up)
@@ -143,6 +155,7 @@ struct FriendsScreen: View {
             if !b.incoming.isEmpty { requestsCard(b.incoming) }
             if !b.friends.isEmpty { FriendChatsCard(newGroup: { sheet = .newGroup }) }
             if !b.friends.isEmpty { MyTripsCard(explain: { sheet = .travel }) }
+            if !b.friends.isEmpty { MyTimetableCard(explain: { sheet = .timetable }) }
             friendsCard(b.sortedFriends)
             if !b.outgoing.isEmpty { waitingCard(b.outgoing) }
             addCard
@@ -284,7 +297,7 @@ struct FriendsIntroCard: View {
                 .frame(width: 56, height: 56).background(DS.accent, in: Circle())
                 .accessibilityHidden(true)
             Text("Travel with friends").font(DS.title).foregroundStyle(DS.text).accessibilityAddTraits(.isHeader)
-            Text("Add friends with a code or a link, see when they’re on their way, chat (in groups too) and send each other trips. Coming next: compare timetables.")
+            Text("Add friends with a code or a link, see when they’re on their way, chat (in groups too), send each other trips, compare timetables and meet halfway.")
                 .font(DS.body).foregroundStyle(DS.text).fixedSize(horizontal: false, vertical: true)
             point("lock.fill", "Locked end to end: only you and your friends can read what you share. Not even the Haltewekker relay can.")
             point("person.crop.circle", "Just a name and a picture you choose. No email, no phone number, nobody can search for you.")
@@ -362,6 +375,7 @@ struct FriendDetailView: View {
                         .background(DS.accent, in: Capsule())
                     }
                     .buttonStyle(DSPressStyle())
+                    CompareButton(key: ChatKey.friend(f.id))
                     if let t = store.travel[f.id], TravelAge.freshness(t, now: Date()) != .gone {
                         FriendTripCard(seen: t, name: f.name)
                     }
@@ -391,6 +405,18 @@ struct FriendDetailView: View {
 struct FriendSeesCard: View {
     let friend: Friend
     @ObservedObject private var store = FriendStore.shared
+    @ObservedObject private var tt = FriendTimetables.shared
+
+    private var timetableOn: Binding<Bool> {
+        Binding(get: { !tt.off.contains(friend.id) }, set: { tt.setShares(friend.id, $0) })
+    }
+
+    private var timetableNote: String {
+        if tt.off.contains(friend.id) { return "\(friend.name) doesn’t see your timetable." }
+        if !tt.answered { return "Not shared with anyone until you say yes in Friends › Your timetable." }
+        if !tt.on { return "Off for everyone in Friends › Your timetable." }
+        return "Your classes for the next two weeks (when, what, which room), the stops and station nearest your home and your school. Never your address."
+    }
 
     private var on: Binding<Bool> {
         Binding(get: { friend.showsTrips }, set: { store.setShowTrips(friend.id, $0) })
@@ -406,7 +432,7 @@ struct FriendSeesCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: DS.s8) {
             DSHeader(title: "What \(friend.name) sees")
-            Text("Your name and picture, and what you write to them. Timetables come in the next version, and you’ll choose what you share.")
+            Text("Your name and picture, and what you write to them.")
                 .font(DS.sub).foregroundStyle(DS.text).fixedSize(horizontal: false, vertical: true)
             Toggle(isOn: on) {
                 Text("Show my trips to \(friend.name)").font(DS.bodyStrong).foregroundStyle(DS.text)
@@ -414,6 +440,13 @@ struct FriendSeesCard: View {
             .tint(DS.accent)
             .frame(minHeight: DS.hit)
             Text(note).font(DS.sub).foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
+            Divider().overlay(DS.divider)
+            Toggle(isOn: timetableOn) {
+                Text("Share my timetable with \(friend.name)").font(DS.bodyStrong).foregroundStyle(DS.text)
+            }
+            .tint(DS.accent)
+            .frame(minHeight: DS.hit)
+            Text(timetableNote).font(DS.sub).foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
         }
         .dsPanel()
     }

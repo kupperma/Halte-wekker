@@ -51,6 +51,8 @@ struct FriendVaultContents: Codable, Equatable {
     var picture: Data?
     /// (0.27) The groups you're in (their lists; not their chats or pictures).
     var groups: [FriendGroup]? = nil
+    /// (0.28) Your timetable switches (not the timetables).
+    var timetable: TimetableSettings? = nil
 }
 
 /// Something to do on the relay, kept until it went through (so an accept isn't lost to a tunnel).
@@ -102,6 +104,12 @@ enum FriendInbox {
         var orphans: [RelayBox] = []
         /// Groups whose list changed (their pictures may be due to new members).
         var groupsChanged: Set<String> = []
+        // 0.28
+        /// Timetables and start areas that came (the newest per person), from friends and people in a group with you.
+        var timetables: [String: TimetableSeen] = [:]
+        var areas: [String: AreaSeen] = [:]
+        /// People who took theirs back: forget their timetable and area.
+        var timetablesOff: Set<String> = []
     }
 
     /// How long a box nobody has the key for yet is kept on this phone.
@@ -181,6 +189,27 @@ enum FriendInbox {
             if let g, let line = r.groups.receiveLeave(g, from: id, me: me.account) {
                 r.groupsChanged.insert(g)
                 note(line, group: g, n: opened.header.n, into: &r, now: now)
+            }
+        case .timetable(let tt):
+            // (from a friend, or someone in a group with you; the newest by their own time)
+            if r.book.isFriend(id) || r.groups.shares(id), let v = TimetableShare.valid(tt) {
+                let t = opened.header.t
+                if v.isOff {
+                    r.timetablesOff.insert(id)
+                    r.timetables[id] = nil
+                    r.areas[id] = nil
+                } else if (r.timetables[id]?.t ?? Int.min) <= t {
+                    r.timetables[id] = TimetableSeen(share: v, t: t, at: now)
+                    r.timetablesOff.remove(id)
+                }
+            }
+        case .area(let a):
+            if r.book.isFriend(id) || r.groups.shares(id), let v = TimetableArea.valid(a) {
+                let t = opened.header.t
+                if (r.areas[id]?.t ?? Int.min) <= t {
+                    r.areas[id] = AreaSeen(area: v, t: t, at: now)
+                    r.timetablesOff.remove(id)
+                }
             }
         case .travel, .message, .trip, .seen:
             break

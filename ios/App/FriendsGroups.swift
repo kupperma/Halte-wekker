@@ -173,6 +173,7 @@ struct GroupInfoView: View {
             VStack(spacing: DS.s16) {
                 if let g = group {
                     header(g)
+                    if g.isIn { CompareButton(key: ChatKey.group(g.id)) }
                     if g.out == .removed {
                         DSNote(icon: "person.crop.circle.badge.xmark", text: "You were taken off this group. Its chat stays here to read.")
                     }

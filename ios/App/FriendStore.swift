@@ -227,6 +227,7 @@ final class FriendStore: ObservableObject {
         adopt(me, device: dev, book: b)
         groups = GroupBook(groups: restored?.groups ?? [])
         state.groups = groups
+        FriendTimetables.shared.restore(restored?.timetable)
         myPicture = restored?.picture
         Self.writePicture("me", myPicture)
         state.vaultDirty = restored == nil
@@ -282,6 +283,7 @@ final class FriendStore: ObservableObject {
         groupPictures = [:]
         unread = 0
         FriendChats.shared.clearAll()
+        FriendTimetables.shared.forgetAll()
         identity = nil
         device = ""
         state = Saved()
@@ -703,6 +705,90 @@ final class FriendStore: ObservableObject {
             .sorted { $0.sent > $1.sent }
     }
 
+    // MARK: timetables (0.28)
+
+    /// The switches as the vault keeps them (nil: never touched).
+    private var vaultTimetable: TimetableSettings? {
+        let s = FriendTimetables.shared.settings
+        return s == TimetableSettings() ? nil : s
+    }
+
+    /// A timetable switch changed: what's shared follows at once (and the vault keeps the switches).
+    func timetableSettingsChanged() {
+        state.vaultDirty = true
+        save()
+        Task { await sync(.now) }
+    }
+
+    /// The people in groups you share your timetable with who aren't your friends.
+    private func timetableGroupMembers(_ b: FriendBook, on: Set<String>) -> [String] {
+        groups.groups.filter { $0.isIn && on.contains($0.id) }.flatMap { $0.roster.members.map(\.id) }.filter { !b.isFriend($0) }
+    }
+
+    /// A card for a friend, else for someone in a group with you.
+    private func anyCard(_ id: String) -> FriendCard? { book?.friend(id)?.card ?? groups.card(id) }
+
+    /// Who your timetable goes to now (`TimetableShareRules.recipients`).
+    var timetableRecipients: [String] {
+        guard let me = identity?.account, let b = book else { return [] }
+        let tt = FriendTimetables.shared
+        return TimetableShareRules.recipients(friends: b.friends.map(\.id), off: tt.off,
+                                              groupMembers: timetableGroupMembers(b, on: tt.groupsOn), me: me, on: tt.answered && tt.on)
+    }
+
+    /// In a check of the relay: your timetable and area to whoever should have them and doesn't (`TimetableShareRules`),
+    /// taken back from whoever shouldn't any more; friends' kept only while they're friends or in a group with you.
+    private func timetableDue(_ me: FriendIdentity, now: Date) async {
+        guard let b = book else { return }
+        let tt = FriendTimetables.shared
+        tt.keep(Set(b.friends.map(\.id) + Self.memberIds(groups)))
+        let recipients: [String] = timetableRecipients
+        var sent: TimetableShareRules.Sent? = tt.sent
+        var areaSent: TimetableShareRules.Sent? = tt.areaSent
+        var changed = false
+        // taken back from those who shouldn't have it any more
+        let gone: [String] = TimetableShareRules.takeBack(last: sent, recipients: recipients)
+        if !gone.isEmpty {
+            for id in gone {
+                guard let c = anyCard(id), let d = try? FriendBox.seal(.timetable(.takenBack(at: now)), from: me, to: c) else { continue }
+                replacePending(FriendPending(op: .box, to: id, data: B64URL.encode(d), slot: TimetableShareRules.timetableSlot,
+                                             ttl: TimetableShareRules.timetableTTL))
+            }
+            sent = TimetableShareRules.afterTakeBack(sent, gone: gone)
+            areaSent = TimetableShareRules.afterTakeBack(areaSent, gone: gone)
+            changed = true
+        }
+        let had = Set(sent?.to ?? [])
+        let fresh: Bool = recipients.contains { !had.contains($0) }
+        if !recipients.isEmpty, tt.lookDue(now: now, newRecipients: fresh) {
+            let (share, area) = await tt.readMine(now: now)
+            if let share, let data = try? FriendJSON.encoder.encode(share) {
+                let hash = TimetableShareRules.fingerprint(data)
+                let due = TimetableShareRules.due(last: sent, hash: hash, recipients: recipients, at: now)
+                for id in due {
+                    guard let c = anyCard(id), let d = try? FriendBox.seal(.timetable(share), from: me, to: c) else { continue }
+                    replacePending(FriendPending(op: .box, to: id, data: B64URL.encode(d), slot: TimetableShareRules.timetableSlot,
+                                                 ttl: TimetableShareRules.timetableTTL))
+                }
+                if !due.isEmpty { sent = TimetableShareRules.after(sent, hash: hash, sent: due, everyone: recipients, at: now); changed = true }
+            }
+            if let area, let data = try? FriendJSON.encoder.encode(area) {
+                let hash = TimetableShareRules.fingerprint(data)
+                let due = TimetableShareRules.due(last: areaSent, hash: hash, recipients: recipients, at: now, every: TimetableShareRules.areaRefresh)
+                for id in due {
+                    guard let c = anyCard(id), let d = try? FriendBox.seal(.area(area), from: me, to: c) else { continue }
+                    replacePending(FriendPending(op: .box, to: id, data: B64URL.encode(d), slot: TimetableShareRules.areaSlot,
+                                                 ttl: TimetableShareRules.areaTTL))
+                }
+                if !due.isEmpty { areaSent = TimetableShareRules.after(areaSent, hash: hash, sent: due, everyone: recipients, at: now); changed = true }
+            }
+        }
+        if changed {
+            tt.didSend(sent, area: areaSent)
+            save()
+        }
+    }
+
     // MARK: checking the relay
 
     enum Why {
@@ -764,16 +850,19 @@ final class FriendStore: ObservableObject {
                     Notices.shared.show(title: t.title, body: t.body, kind: "ok")
                 }
                 FriendChats.shared.take(r.chat)
+                FriendTimetables.shared.take(r)
                 state.cursor = inbox.cursor
                 save()
                 try await relay.ack(r.ack)
                 if !inbox.more { break }
             }
+            await timetableDue(me, now: Date())
             try await flush(relay)
             let statesDue = why != .chat || (travelChecked.map { now.timeIntervalSince($0) >= 30 } ?? true)
             if statesDue { await travelAfterSync(relay, lane: why == .now ? .urgent : .background) }
             if state.vaultDirty, let b = book,
-               let plain = try? FriendJSON.encoder.encode(FriendVaultContents(book: b, picture: myPicture, groups: groups.groups.isEmpty ? nil : groups.groups)) {
+               let plain = try? FriendJSON.encoder.encode(FriendVaultContents(book: b, picture: myPicture, groups: groups.groups.isEmpty ? nil : groups.groups,
+                                                                              timetable: vaultTimetable)) {
                 let sealed = try FriendVault.seal(plain, me: me)
                 try await relay.vaultPut(sealed)
                 state.vaultDirty = false
