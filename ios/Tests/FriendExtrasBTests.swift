@@ -166,7 +166,9 @@ final class FriendExtrasBTests: XCTestCase {
         XCTAssertEqual(FriendMessage.kindsVersion, 6)
         let sam = FriendIdentity(seed: hex("000102030405060708090a0b0c0d0e0f"))!
         let lou = FriendIdentity(seed: hex("101112131415161718191a1b1c1d1e1f"))!
-        let body = ScoresRules.build(trips: myTrips, rides: 14, now: t0)
+        // (this month's best to school only: as if the trip home on the 14th hadn't been this month)
+        var body = ScoresRules.build(trips: myTrips, rides: 14, now: t0)
+        body.mbest = ScoresRules.bests(myTrips.filter { !$0.home && ScoresRules.month($0.at) == "2027-01" })
         let p = try FriendBox.payload(.scores(body), from: sam.account, at: t0, id: "vector-16")
         XCTAssertEqual(String(decoding: p, as: UTF8.self), Self.scoresPayload)
         let s = try XCTUnwrap(B64URL.decode(Self.scoresSig))
