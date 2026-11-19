@@ -357,7 +357,7 @@ struct NewHome: View {
                 .presentationDragIndicator(.visible)
         }
         .sheet(item: $vehicleTap) { v in
-            LiveBusSheet(target: v.target, newLook: true, onIt: v.trip.map { t -> () -> Void in { HomeActions.startOnThisOne(t, live: live, trip: trip) } })
+            LiveBusSheet(target: v.target, newLook: true, onIt: onIt(v))
                 .presentationDetents([.large])
         }
         .sheet(item: $wakeAt) { WakeAtStopNew(preset: $0) }
@@ -423,9 +423,7 @@ struct NewHome: View {
                 }
                 ForEach(moving) { v in
                     Annotation(v.line, coordinate: shownAt(v), anchor: .center) {
-                        let mine = couldBeOn(v)
-                        VehicleMark(v: v, tap: { tapVehicle(v) },
-                                    onIt: mine.map { t -> () -> Void in { HomeActions.startOnThisOne(t, live: live, trip: trip) } })
+                        VehicleMark(v: v, tap: { tapVehicle(v) }, onIt: markOnIt(v))
                     }
                     .annotationTitles(.hidden)
                 }
@@ -698,8 +696,9 @@ struct NewHome: View {
     /// A bus or train tapped: its live sheet, with "I'm on this one" when it could be yours.
     private func tapVehicle(_ v: LiveVehiclesModel.Moving) {
         centre(on: v.coordinate)
+        let t = couldBeOn(v)
         vehicleTap = VehicleTap(target: LiveTrackTarget(tripId: v.id, line: v.line, headsign: "", stopName: "", time: Date(), rail: v.isTrain),
-                                trip: couldBeOn(v))
+                                trip: t, carrying: t == nil && couldBeCarrying(v))
     }
 
     /// The trip of yours this bus or train starts, if you could be on it (`MapTap.couldBeOn`).
@@ -720,6 +719,33 @@ struct NewHome: View {
         let i = MapTap.couldBeOn(vehicleTrip: v.id, firstRides: live.next.map(\.first.tripId), fresh: live.nextAsOf == nil && !live.onTheMove,
                                  idle: trip.phase == .idle, metresFromYou: m)
         return i.flatMap { live.next[safe: $0] }
+    }
+
+    /// Not the first ride of your trips, but it could be carrying you (`MapTap.couldBeCarrying`, 0.26.2): "I'm on this
+    /// one" starts the trip from on board.
+    private func couldBeCarrying(_ v: LiveVehiclesModel.Moving) -> Bool {
+        let p: CLLocation? = near.position ?? trip.lastFix
+        let m: Double? = p.map { $0.distance(from: CLLocation(latitude: v.coordinate.latitude, longitude: v.coordinate.longitude)) }
+        let moving: Bool = (live.vehicleMovedAgo ?? .infinity) < OnBoardRules.movedLately
+        let age: TimeInterval? = p.map { Date().timeIntervalSince($0.timestamp) }
+        return MapTap.couldBeCarrying(vehicleTrip: v.id, isTrain: v.isTrain, idle: trip.phase == .idle, onBoardTrip: live.onBoard?.vehicle.tripId,
+                                      moving: moving, metresFromYou: m, fixAge: age)
+    }
+
+    /// VoiceOver's "I'm on this one" on a vehicle's mark, as its sheet's.
+    private func markOnIt(_ v: LiveVehiclesModel.Moving) -> (() -> Void)? {
+        let t = couldBeOn(v)
+        return onIt(VehicleTap(target: LiveTrackTarget(tripId: v.id, line: v.line, headsign: "", stopName: "", time: Date(), rail: v.isTrain),
+                               trip: t, carrying: t == nil && couldBeCarrying(v)))
+    }
+
+    /// "I'm on this one" in a tapped vehicle's sheet: one of your trips that starts with it, or (0.26.2) from on board.
+    private func onIt(_ v: VehicleTap) -> (() -> Void)? {
+        if let t = v.trip { return { HomeActions.startOnThisOne(t, live: live, trip: trip) } }
+        guard v.carrying else { return nil }
+        let target = v.target
+        return { HomeActions.startOnBoardByHand(Vehicle(tripId: target.tripId, line: target.line, isTrain: target.rail),
+                                                live: live, trip: trip, near: near) }
     }
 
     /// Plan from or to a stop you tapped (once its sheet has gone).
@@ -850,16 +876,31 @@ struct NewHome: View {
     /// Else, going to a place you picked (0.20.2: searched in Plan): its next trip, as Next trip first's big card, with
     /// the chip to pick another place or go back to your schedule.
     private var nudge: AnyView? {
+        // (0.26.2) on a bus or train, or with a trip you ended to go on with: that, not a time to leave from elsewhere
+        if trip.phase == .idle, nudgeOwnCard(Date()) {
+            return AnyView(TimelineView(.periodic(from: .now, by: 15)) { tl in
+                NextTripCard(content: heroContent(now: tl.date), now: tl.date, chip: AnyView(destinationChip), start: startHero,
+                             otherTimes: heroOtherTimes, plan: { openPlan(to: nil, when: .now) }, notNow: { trip.forgetResumable() })
+            })
+        }
         guard let d = HomeActions.due(trip: trip, planner: planner, now: Date()) else {
             guard live.custom != nil, trip.phase == .idle else { return nil }
             return AnyView(TimelineView(.periodic(from: .now, by: 15)) { tl in
                 NextTripCard(content: heroContent(now: tl.date), now: tl.date, chip: AnyView(destinationChip), start: startHero,
-                             otherTimes: heroOtherTimes, plan: { openPlan(to: nil, when: .now) })
+                             otherTimes: heroOtherTimes, plan: { openPlan(to: nil, when: .now) }, notNow: { trip.forgetResumable() })
             })
         }
         return AnyView(NudgeCard(leave: d.leave, ride: d.trip.first, sub: d.sub) {
             HomeActions.openPlanGo(school: d.school, trip: trip, planner: planner, goStore: goStore, near: near)
         })
+    }
+
+    /// Live around you: the big card instead of the nudge while the home found you on board, a trip you ended is
+    /// offered to go on with, or the due trip leaves from somewhere you aren't while you move like a bus or train.
+    private func nudgeOwnCard(_ now: Date) -> Bool {
+        if HomeActions.onBoardTrip(live: live) != nil || resumeOffer(now) != nil { return true }
+        if let d = HomeActions.due(trip: trip, planner: planner, now: now) { return leaveHidden(d.trip) }
+        return false
     }
 
     // MARK: Next trip first (concept B)
@@ -881,7 +922,7 @@ struct NewHome: View {
                             // the trip picked again with the countdown's clock, so a trip that has gone makes way
                             TimelineView(.periodic(from: .now, by: 15)) { tl in
                                 NextTripCard(content: heroContent(now: tl.date), now: tl.date, chip: AnyView(destinationChip), start: startHero, otherTimes: heroOtherTimes,
-                                             plan: { openPlan(to: nil, when: .now) })
+                                             plan: { openPlan(to: nil, when: .now) }, notNow: { trip.forgetResumable() })
                             }
                         }
                     }
@@ -939,6 +980,10 @@ struct NewHome: View {
             return .onBoard(.init(vehicle: ob.vehicle, trip: t, destName: placeName(live.destination(trip.direction)),
                                   startsSoon: live.onBoardLooks == 1 && HomeActions.mayAutoStart(ob.vehicle)))
         }
+        // a trip you ended by hand before its last leg, while you're still on the way (0.26.2): go on with it
+        if let r = resumeOffer(now) {
+            return .goOn(.init(destName: r.destName, next: r.next.title, from: r.from.short, train: r.next.mode == .train))
+        }
         let due = HomeActions.due(trip: trip, planner: planner, now: now)
         let dest = live.destination(trip.direction).key
         let pick = NextTrip.pick(dest: dest, dueDest: due?.dest.key, schoolDue: due?.school == true, plannedDue: due.map { !$0.school } ?? false,
@@ -946,16 +991,40 @@ struct NewHome: View {
         switch pick.source {
         case .school, .planned:
             guard let d = due else { return .empty(note: nil) }
+            if leaveHidden(d.trip) { return .empty(note: Self.onTheMoveNote) }
             return .trip(.init(title: d.sub, leave: d.leave, trip: d.trip, destName: placeName(d.dest), asOf: nil))
         case .live:
             guard let i = pick.index, let t = live.next[safe: i] else { return .empty(note: nil) }
+            if leaveHidden(t) { return .empty(note: Self.onTheMoveNote) }
             let dest = placeName(live.destination(trip.direction))
             return .trip(.init(title: "", leave: t.start, trip: t, destName: dest, asOf: live.nextAsOf, startTitle: "Start"))
         case .none:
-            if live.onTheMove { return .empty(note: "You’re on the move: finding the bus or train you’re on.") }
+            if live.onTheMove { return .empty(note: Self.onTheMoveNote) }
             if live.updated == nil && live.nextError == nil { return .loading }
             return .empty(note: live.nextError)
         }
+    }
+
+    static let onTheMoveNote = "You’re on the move: finding the bus or train you’re on."
+
+    /// Moving like a bus or train and not at its first stop (0.26.2): no "time to leave" for this trip
+    /// (`OnBoardRules.leaveCardHidden`).
+    private func leaveHidden(_ t: DoorTrip) -> Bool {
+        let f = t.first
+        let at: CLLocation? = near.position ?? trip.lastFix
+        let m: Double? = f.fromLat.flatMap { la in f.fromLon.flatMap { lo in at?.distance(from: CLLocation(latitude: la, longitude: lo)) } }
+        return OnBoardRules.leaveCardHidden(onBoard: live.onBoard != nil, vehicleMovedAgo: live.vehicleMovedAgo, firstStopMetres: m)
+    }
+
+    /// The trip you ended by hand, while it's offered to go on with (`TripResume.offer`): moving like a bus or train, or
+    /// near its next leg's stop, within half an hour.
+    private func resumeOffer(_ now: Date) -> TripManager.Resumable? {
+        guard let r = trip.resumable else { return nil }
+        let moving: Bool = (live.vehicleMovedAgo ?? .infinity) < OnBoardRules.movedLately
+        let at: CLLocation? = near.position ?? trip.lastFix
+        let c = r.from.coordinate
+        let m: Double? = at.map { $0.distance(from: CLLocation(latitude: c.latitude, longitude: c.longitude)) }
+        return TripResume.offer(endedAt: r.endedAt, now: now, idle: trip.phase == .idle, moving: moving, metresToItsStop: m) ? r : nil
     }
 
     /// The due trip, when it goes where the card is going.
@@ -1022,6 +1091,8 @@ struct NewHome: View {
         guard trip.phase == .idle else { return }
         if let t = HomeActions.onBoardTrip(live: live) {
             HomeActions.startOnThisOne(t, live: live, trip: trip)
+        } else if resumeOffer(Date()) != nil {
+            trip.resumeTrip()
         } else if let d = dueHere(Date()) {
             HomeActions.openPlanGo(school: d.school, trip: trip, planner: planner, goStore: goStore, near: near)
         } else {

@@ -217,6 +217,23 @@ enum HomeActions {
         }
     }
 
+    /// "I'm on this one" for a bus or train no trip of yours starts with (0.26.2: on 2026-11-19 the Intercity you were
+    /// on, while the home's trips were planned from the spot): planned on from it as the on-board looks do (its next
+    /// stop, from when it gets there, to where you're going), and started by hand on it.
+    static func startOnBoardByHand(_ v: Vehicle, live: LiveStore, trip: TripManager, near: NearMe) {
+        guard trip.phase == .idle, let f = near.position ?? trip.lastFix else { return }
+        let dest = live.destination(trip.direction)
+        Task { @MainActor in
+            let ob = await LiveStore.onBoardTrips(f, to: dest, tripId: v.tripId)
+            guard trip.phase == .idle else { return }
+            guard let ob, let t = ob.1.first, let r = RoutePlan.from(t) else {
+                trip.toast = "Couldn’t find the way on from the \(v.title) just now. Try again in a moment."
+                return
+            }
+            trip.start(r, vehicle: ob.0.vehicle, alternatives: ob.1, picked: true, how: "Home map hand, on board")
+        }
+    }
+
     /// The hands-free Fastest trip to where you're going now, seeded with the home's trips from here (as `HomeView.openGo`).
     static func openGo(live: LiveStore, trip: TripManager, goStore: GoStore, near: NearMe) {
         var seed: [DoorTrip] = []

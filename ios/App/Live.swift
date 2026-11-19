@@ -81,6 +81,8 @@ final class LiveStore: ObservableObject {
     private var lastSeen: CLLocation?
     private var plannedFrom: CLLocation?
     private var lastMoving: Date?               // when you last went at bus or train speed
+    /// How long ago you last went at bus or train speed (nil: not lately known).
+    var vehicleMovedAgo: TimeInterval? { lastMoving.map { Date().timeIntervalSince($0) } }
     /// The bus or train you're on now (you're moving, and its live position is right where you are).
     @Published private(set) var onBoard: OnBoard? { didSet { if onBoard == nil { onBoardLooks = 0 } } }
     /// A trip runs (0.26.1, set by `TripManager`): the home doesn't look for the bus or train you're on then.
@@ -485,6 +487,9 @@ final class LiveStore: ObservableObject {
                 fixes.append(Fix(loc))
                 fixes.removeAll { loc.timestamp.timeIntervalSince($0.t) > 240 }
             }
+            // (0.26.2) or by where your fixes went: in a train the GPS's speed is often unknown or unsure, and the two
+            // positions above are never 20 s apart while the home asks on every fix
+            if OnBoardRules.movingByTrack(fixes, now: loc.timestamp) { lastMoving = loc.timestamp }
         }
         // Away from your usual start (or going somewhere you picked): trips start from where you are.
         // Going to school, anywhere in Veghel counts as home (your Veghel bus board); going home, only the BUas campus
@@ -501,7 +506,9 @@ final class LiveStore: ObservableObject {
         if loadedFor != key { keyChanged(from: loadedKey, to: plan, dir: dir, at: from) }
         // (on board already, it looks again on the minute, not every 300 m; just started moving, it looks now)
         let startedMoving = !wasMoving && (lastMoving.map { Date().timeIntervalSince($0) < 180 } ?? false)
-        let moved = startedMoving || (onBoard == nil && (from.flatMap { f in plannedFrom.map { f.distance(from: $0) > 300 } } ?? false))
+        let movedMetres: Double? = from.flatMap { f in plannedFrom.map { f.distance(from: $0) } }
+        let moved = OnBoardRules.lookDue(startedMoving: startedMoving, onBoard: onBoard != nil, movedMetres: movedMetres,
+                                         sinceLast: updated.map { Date().timeIntervalSince($0) })
         if !force, !moved, loadedFor == key, let u = updated, Date().timeIntervalSince(u) < 60 { return }
         busy = true; loadedFor = key; loadedKey = plan; here = from
         // (an older one, for a key it switched away from, ending first mustn't let the same refresh start twice)

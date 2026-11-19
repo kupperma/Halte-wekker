@@ -52,11 +52,19 @@ struct NextTripCard: View {
         let destName: String
         let startsSoon: Bool        // seen on it once: one more look and the trip starts by itself
     }
+    /// A trip you ended by hand before its last leg (0.26.2): go on with it from its next leg (`TripResume`).
+    struct GoOn {
+        let destName: String        // "BUas"
+        let next: String            // "Train to Breda"
+        let from: String            // "Den Bosch"
+        let train: Bool
+    }
     enum Content {
         case loading
         case empty(note: String?)
         case trip(Shown)
         case onBoard(Aboard)
+        case goOn(GoOn)
     }
 
     let content: Content
@@ -67,6 +75,8 @@ struct NextTripCard: View {
     let start: () -> Void
     let otherTimes: () -> Void
     let plan: () -> Void
+    /// "Not now" on going on with a trip you ended (0.26.2).
+    var notNow: () -> Void = {}
     @ScaledMetric(relativeTo: .largeTitle) private var big: CGFloat = 52
 
     var body: some View {
@@ -76,6 +86,7 @@ struct NextTripCard: View {
             case .empty(let note): empty(note)
             case .trip(let s): shown(s)
             case .onBoard(let a): aboard(a)
+            case .goOn(let g): goOn(g)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -103,6 +114,32 @@ struct NextTripCard: View {
                     .background(DS.accentSoft, in: Capsule())
             }
             .buttonStyle(DSPressStyle())
+        }
+    }
+
+    /// "Continue your trip to BUas": the trip you ended goes on from its next leg, looking for the one you get on.
+    private func goOn(_ g: GoOn) -> some View {
+        let kind: String = g.train ? "train" : "bus"
+        return VStack(alignment: .leading, spacing: 12) {
+            Text("Continue your trip to \(g.destName)")
+                .font(DS.headline).foregroundStyle(DS.text).lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityAddTraits(.isHeader)
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Image(systemName: g.train ? "tram.fill" : "bus.fill").foregroundStyle(DS.accentText).accessibilityHidden(true)
+                Text("Next: \(g.next) from \(g.from)").font(DS.calloutStrong).foregroundStyle(DS.text)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .accessibilityElement(children: .combine)
+            Text("It finds the \(kind) you’re on and wakes you before your stop.")
+                .font(DS.footnote).foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
+            DSPrimaryButton(title: "Continue your trip", icon: "play.fill", lines: 2, action: start)
+                .accessibilityHint("Goes on with the trip you ended, from the \(kind)")
+            Button(action: notNow) {
+                Text("Not now").font(DS.bodyStrong).foregroundStyle(DS.secondary)
+                    .frame(maxWidth: .infinity, minHeight: DS.hit).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
         }
     }
 
