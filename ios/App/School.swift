@@ -486,6 +486,26 @@ enum WakeAlarm {
         return false
     }
 
+    /// A school alarm still ringing stops: you opened the app, so you're up (0.24.6). The notification fallback's
+    /// "(again)" ones for today go too.
+    static func stopRinging() {
+        #if canImport(AlarmKit)
+        if #available(iOS 26.0, *), let all = try? AlarmManager.shared.alarms {
+            for a in all where a.state == .alerting { try? AlarmManager.shared.stop(id: a.id) }
+        }
+        #endif
+    }
+
+    /// The fallback's notifications for a day ("wake-<day>-0…2"): once you open or swipe away one, the rest don't come.
+    static func cancelRepeats(of id: String) {
+        guard id.hasPrefix("wake-"), let cut = id.lastIndex(of: "-") else { return }
+        let base = String(id[..<cut])
+        let ids = (0..<3).map { "\(base)-\($0)" }
+        let c = UNUserNotificationCenter.current()
+        c.removePendingNotificationRequests(withIdentifiers: ids)
+        c.removeDeliveredNotifications(withIdentifiers: ids)
+    }
+
     /// Set the alarm for a day. Returns its id (the alarm's, or "notifications").
     static func schedule(at date: Date, day: String, title: String, body: String) async -> String? {
         #if canImport(AlarmKit)
@@ -497,7 +517,8 @@ enum WakeAlarm {
             let attributes = AlarmAttributes<WakeMetadata>(presentation: AlarmPresentation(alert: alert), metadata: WakeMetadata(), tintColor: Color(hex: 0xF0D722))
             let id = UUID()
             do {
-                _ = try await AlarmManager.shared.schedule(id: id, configuration: .alarm(schedule: .fixed(date), attributes: attributes, secondaryIntent: OpenMorningIntent()))
+                // (the intent stops this alarm itself: a custom button only runs it, the alarm would keep ringing, 0.24.6)
+                _ = try await AlarmManager.shared.schedule(id: id, configuration: .alarm(schedule: .fixed(date), attributes: attributes, secondaryIntent: OpenMorningIntent(alarmID: id.uuidString)))
                 return id.uuidString
             } catch {}
         }
@@ -511,6 +532,7 @@ enum WakeAlarm {
             n.sound = .default
             n.interruptionLevel = .timeSensitive
             n.userInfo = ["kind": "go"]
+            n.categoryIdentifier = "WAKE"                 // swiping it away is reported, so the repeats stop
             let at = date.addingTimeInterval(Double(i) * 120)
             c.add(UNNotificationRequest(identifier: "wake-\(day)-\(i)", content: n, trigger: UNTimeIntervalNotificationTrigger(timeInterval: max(1, at.timeIntervalSinceNow), repeats: false))) { _ in }
         }

@@ -332,7 +332,9 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         let yes = UNNotificationAction(identifier: "STILL_YES", title: "Yes", options: [])
         let again = UNNotificationAction(identifier: "STILL_PICK", title: "Pick again", options: [.foreground])
         UNUserNotificationCenter.current().setNotificationCategories([
-            UNNotificationCategory(identifier: "ALARM", actions: [stop], intentIdentifiers: [], options: []),
+            // (customDismissAction: swiping the alarm away is reported, and stops it, 0.24.6)
+            UNNotificationCategory(identifier: "ALARM", actions: [stop], intentIdentifiers: [], options: [.customDismissAction]),
+            UNNotificationCategory(identifier: "WAKE", actions: [], intentIdentifiers: [], options: [.customDismissAction]),
             UNNotificationCategory(identifier: Self.stillOnCategory, actions: [yes, again], intentIdentifiers: [], options: []),
         ])
         UNUserNotificationCenter.current().delegate = self
@@ -782,6 +784,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         Watchdog.shared.mark("coming back to the screen")
         always = location.authorizationStatus == .authorizedAlways
         Task { await NoticeLog.shared.collectDelivered() }       // off the lock screen, into the app's list
+        WakeAlarm.stopRinging()                                   // the school alarm still ringing: you're up (0.24.6)
         Task { await SchoolAlarm.shared.refresh() }               // the timetable may have changed: plan again (5 minutes apart at most)
         Morning.shared.checkAfterAlarm()                          // just woke up from the school alarm: the morning screen
         if let a = awaySince, Date().timeIntervalSince(a) > 30 * 60 { guessDirection = true }
@@ -995,7 +998,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler done: @escaping () -> Void) {
         let id = response.notification.request.identifier, action = response.actionIdentifier
         Task { @MainActor in
-            if action == "STOP" || (id == "alarm" && action == UNNotificationDefaultActionIdentifier) { self.stopAlarm() }
+            if action == "STOP" || (id == "alarm" && (action == UNNotificationDefaultActionIdentifier || action == UNNotificationDismissActionIdentifier)) { self.stopAlarm() }
+            if id.hasPrefix("wake-") { WakeAlarm.cancelRepeats(of: id) }
             if id == Self.stillOnId, action == "STILL_YES" || action == "STILL_PICK" {
                 self.answerStillOn(yes: action == "STILL_YES", fromNotification: true)
             }
