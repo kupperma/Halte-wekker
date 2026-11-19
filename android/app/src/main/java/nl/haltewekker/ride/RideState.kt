@@ -39,6 +39,8 @@ data class RideState(
     /** (A3) The last fix (5 decimals), for friends you show your trips to. */
     val lastLat: Double? = null,
     val lastLon: Double? = null,
+    /** (A4) The leg the ride started at (0: from the start, so a finished trip counts on the leaderboard). */
+    val firstLeg: Int? = null,
 ) {
     val leg: Ride? get() = trip.rides.getOrNull(index)
     val wakeMetres: Double get() = (wakeKm.getOrNull(index) ?: WakeRules.BUS_KM) * 1000

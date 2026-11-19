@@ -80,7 +80,7 @@ object FriendStore {
         val groups: List<FriendGroup>? = null,
         val orphans: List<RelayBox>? = null,
         val picturesTo: List<String>? = null,
-        /** An iOS 0.29+ vault's `extras`, kept as it came. */
+        /** (A3) An iOS 0.29+ vault's `extras`, kept as it came (A4 hands it to `FriendExtrasStore` once). */
         val vaultExtras: JsonElement? = null,
     )
 
@@ -114,6 +114,14 @@ object FriendStore {
         }
         FriendChats.init(ctx)
         FriendTimetables.init(ctx)
+        FriendExtrasStore.init(ctx)
+        FriendTogetherStore.init(ctx)
+        // (A4) an iOS 0.29+ vault's switches restored by A3 were kept as they came: now they're the extras' own
+        state.vaultExtras?.let { e ->
+            if (FriendExtrasStore.vaultSettings == null) FriendExtrasStore.restore(FriendJson.decode(ExtrasSettings.serializer(), e))
+            state = state.copy(vaultExtras = null)
+            save()
+        }
     }
 
     private fun save() {
@@ -183,7 +191,8 @@ object FriendStore {
         val pic = restored?.picture?.let { B64u.decode(it) }
         myPicture.value = pic
         writePicture("me", pic)
-        state = state.copy(groups = g.groups, vaultDirty = restored == null, vaultExtras = restored?.extras)
+        FriendExtrasStore.restore(restored?.extras)
+        state = state.copy(groups = g.groups, vaultDirty = restored == null)
         save()
         syncNow(Why.NOW)
         restored != null
@@ -228,6 +237,8 @@ object FriendStore {
         unread.value = 0
         FriendChats.clearAll()
         FriendTimetables.forgetAll()
+        FriendExtrasStore.forgetAll()
+        FriendTogetherStore.forgetAll()
         identity = null
         device = ""
         state = Saved()
@@ -632,7 +643,7 @@ object FriendStore {
     private fun timetableGroupMembers(b: FriendBook, on: Set<String>): List<String> =
         groups.value.groups.filter { it.isIn && it.id in on }.flatMap { g -> g.roster.members.map { it.id } }.filter { !b.isFriend(it) }
 
-    private fun anyCard(id: String): FriendCard? = book.value?.friend(id)?.card ?: groups.value.card(id)
+    internal fun anyCard(id: String): FriendCard? = book.value?.friend(id)?.card ?: groups.value.card(id)
 
     val timetableRecipients: List<String>
         get() {
@@ -699,6 +710,31 @@ object FriendStore {
         }
     }
 
+    // MARK: the extras (0.29/0.30)
+
+    /**
+     * Locks one payload for each of these people (a friend, or someone in a group with you; the group's id as `g`) and
+     * queues it in `slot` (a box still waiting there for them goes: only the newest matters).
+     */
+    fun queueBox(m: FriendMessage, ids: List<String>, slot: String, ttl: Int, group: String? = null) {
+        val me = identity ?: return
+        if (ids.isEmpty()) return
+        val p = FriendBox.payload(m, me.account, now().toLong(), RelaySign.nonce(), group)
+        for (id in ids) {
+            if (id == me.account) continue
+            val c = anyCard(id) ?: continue
+            try { replacePending(FriendPending(FriendPending.BOX, id, B64u.encode(FriendBox.seal(p, me, c)), slot, ttl)) } catch (_: Exception) {}
+        }
+        save()
+    }
+
+    /** An extras switch changed: the vault keeps it, and what's shared follows at once. */
+    fun extrasSettingsChanged() = launch {
+        state = state.copy(vaultDirty = true)
+        save()
+        syncNow(Why.NOW)
+    }
+
     // MARK: checking the relay
 
     enum class Why { NOW, SCREEN, AUTO, CHAT, TICK }
@@ -739,12 +775,18 @@ object FriendStore {
                 for (n in r.news) { val t = FriendInbox.banner(n); banners.tryEmit(FriendBanner(t.first, t.second)); FriendChats.notifyNews(ctx, t.first, t.second) }
                 FriendChats.take(ctx, r.chat)
                 FriendTimetables.take(r)
+                FriendExtrasStore.take(r)
+                FriendTogetherStore.take(r)
                 state = state.copy(cursor = inbox.cursor)
                 save()
                 relay.ack(r.ack)
                 if (!inbox.more) break
             }
             timetableDue(me, now())
+            // (0.29) the extras: a wait on its way, at school, your plan for the wake-up buddy, delays on shared rides
+            FriendExtrasStore.due(now())
+            // (0.30) part B: your scores for the leaderboard with friends, free time together today
+            FriendTogetherStore.due(now())
             flush(relay)
             val statesDue = why != Why.CHAT || (travelChecked.value?.let { now - it >= 30 } ?: true)
             if (statesDue) travelAfterSync(relay)
@@ -752,7 +794,7 @@ object FriendStore {
             if (state.vaultDirty && b != null) {
                 val s = FriendTimetables.settings
                 val plain = FriendJson.encode(FriendVaultContents.serializer(), FriendVaultContents(book = b, picture = myPicture.value?.let { B64u.encode(it) },
-                    groups = groups.value.groups.ifEmpty { null }, timetable = if (s == TimetableSettings()) null else s, extras = state.vaultExtras))
+                    groups = groups.value.groups.ifEmpty { null }, timetable = if (s == TimetableSettings()) null else s, extras = FriendExtrasStore.vaultSettings))
                 relay.vaultPut(FriendVault.seal(plain, me))
                 state = state.copy(vaultDirty = false)
                 save()

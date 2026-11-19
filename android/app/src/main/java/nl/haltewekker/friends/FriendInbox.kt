@@ -1,7 +1,6 @@
 package nl.haltewekker.friends
 
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.JsonElement
 
 // Friends (0.25–0.28), the iOS `FriendInbox.swift`: the relay's answers, and reading a batch of boxes into the friend
 // list, the groups, the chats and the timetables. Plain values, tested.
@@ -18,7 +17,7 @@ import kotlinx.serialization.json.JsonElement
 
 /**
  * What the vault holds (locked with the vault key): the list, your picture, the groups (0.27), the timetable switches
- * (0.28). `extras` (iOS 0.29's switches) is kept as it came, so a restore here and a backup from here don't lose it.
+ * (0.28), the extras' switches (0.29/0.30: campus, buddy, free, scores; an older app ignores them).
  */
 @Serializable
 data class FriendVaultContents(
@@ -27,7 +26,7 @@ data class FriendVaultContents(
     val picture: String? = null,
     val groups: List<FriendGroup>? = null,
     val timetable: TimetableSettings? = null,
-    val extras: JsonElement? = null,
+    val extras: ExtrasSettings? = null,
 )
 
 /** Something to do on the relay, kept until it went through. */
@@ -65,6 +64,13 @@ object FriendInbox {
         val timetables = HashMap<String, TimetableSeen>()
         val areas = HashMap<String, AreaSeen>()
         val timetablesOff = HashSet<String>()
+        /** (0.29) Waits for you (the newest per sender), delays on shared rides, buddies' plans, friends on campus. */
+        val waits = HashMap<String, WaitSeen>()
+        val delays = mutableListOf<DelaySeen>()
+        val buddies = HashMap<String, BuddySeen>()
+        val campus = HashMap<String, CampusSeen>()
+        /** (0.30) Friends' scores (the newest per friend; `on: false` takes them back). */
+        val scores = HashMap<String, ScoresSeen>()
     }
 
     const val ORPHAN_DAYS = 7
@@ -174,6 +180,24 @@ object FriendInbox {
                     }
                 }
             }
+            is FriendMessage.Wait -> {
+                // (in a group from someone on its list while you're in it; else from a friend)
+                val chat = if (g != null) { if (r.groups.accepts(g, id)) ChatKey.group(g) else null }
+                    else if (r.book.isFriend(id)) ChatKey.friend(id) else null
+                val v = WaitFor.valid(m.wait)
+                if (chat != null && id != me.account && v != null && (r.waits[id]?.t ?: Long.MIN_VALUE) <= opened.header.t)
+                    r.waits[id] = WaitSeen(id, chat, v, opened.header.t, now)
+            }
+            is FriendMessage.Delay -> {
+                val v = RideDelay.valid(m.delay)
+                if ((r.book.isFriend(id) || r.groups.shares(id)) && v != null) r.delays.add(DelaySeen(id, v, now))
+            }
+            is FriendMessage.Buddy -> if (r.book.isFriend(id) && (r.buddies[id]?.t ?: Long.MIN_VALUE) <= opened.header.t)
+                r.buddies[id] = BuddySeen(m.plan, opened.header.t, now)
+            is FriendMessage.Campus -> if (r.book.isFriend(id) && (r.campus[id]?.t ?: Long.MIN_VALUE) <= opened.header.t)
+                r.campus[id] = CampusSeen(m.state, opened.header.t, now)
+            is FriendMessage.Scores -> if (r.book.isFriend(id) && (r.scores[id]?.t ?: Long.MIN_VALUE) <= opened.header.t)
+                r.scores[id] = ScoresSeen(ScoresShare.valid(m.share), opened.header.t, now)
             is FriendMessage.Travel, is FriendMessage.Message, is FriendMessage.Trip, is FriendMessage.Seen -> {}
             is FriendMessage.Request, is FriendMessage.Accept, FriendMessage.Unfriend, is FriendMessage.Profile -> {
                 val (effects, news) = r.book.receive(m, opened.sender, me.card, now)
@@ -206,8 +230,11 @@ object FriendInbox {
             is FriendMessage.Message -> {
                 val t = ChatText.clean(m.text.text)
                 val answer = TripAnswer.of(m.text.answer)
-                if (t.isEmpty() && answer == null) return
-                text = ChatText(t.ifEmpty { answer?.text ?: "" }, if (answer == null) null else m.text.re, answer?.raw)
+                // (0.29) an answer to a "wait for me" ("I'll wait", "Let's take the next one together")
+                val waitAnswer = WaitAnswer.of(m.text.answer)
+                if (t.isEmpty() && answer == null && waitAnswer == null) return
+                val kept = answer?.raw ?: waitAnswer?.raw
+                text = ChatText(t.ifEmpty { answer?.text ?: waitAnswer?.text ?: "" }, if (kept == null) null else m.text.re, kept)
             }
             is FriendMessage.Trip -> trip = TripCard.valid(m.card) ?: return
             is FriendMessage.Seen -> { r.chat.add(ChatIn(key, seen = m.seen, seenFrom = from)); return }

@@ -37,6 +37,8 @@ import nl.haltewekker.core.Geo
 import nl.haltewekker.core.GeoPoint
 import nl.haltewekker.core.Iso
 import nl.haltewekker.data.DoorTrip
+import nl.haltewekker.logs.FieldFormat
+import nl.haltewekker.logs.FieldLog
 import nl.haltewekker.match.Fix
 import nl.haltewekker.match.OnBoardRules
 import kotlin.math.abs
@@ -64,7 +66,8 @@ class RideService : Service() {
         private fun newState(context: Context, trip: DoorTrip, destination: String, index: Int): RideState {
             val st = (context.applicationContext as App).store.settings.value
             val now = Iso.now()
-            return RideState(trip = trip, destination = destination, index = index.coerceIn(0, maxOf(0, trip.rides.size - 1)),
+            val i = index.coerceIn(0, maxOf(0, trip.rides.size - 1))
+            return RideState(trip = trip, destination = destination, index = i, firstLeg = i,
                 startedAt = now, legStart = now, wakeKm = trip.rides.map { WakeRules.wakeKm(it.isTrain, st.busKm, st.trainKm) })
         }
 
@@ -119,6 +122,7 @@ class RideService : Service() {
         super.onCreate()
         Notifications.channels(this)
         RideStore.load(this)
+        FieldLog.init(this)
         AlarmPlayer.warmUp(this)
     }
 
@@ -138,6 +142,7 @@ class RideService : Service() {
         }
         if (RideStore.state.value == null) { lookJob?.cancel(); stopRide(); return START_NOT_STICKY }
         lookJob?.cancel(); lookJob = null
+        if (intent?.action == ACTION_START) logStart(if (RideStore.state.value?.auto == true) "auto (station left)" else "hand")
         when (intent?.action) {
             ACTION_STOP_ALARM -> stopAlarm()
             ACTION_END -> { end(byHand = intent.getBooleanExtra(EXTRA_BY_HAND, true)); return START_NOT_STICKY }
@@ -147,6 +152,22 @@ class RideService : Service() {
         }
         begin()
         return START_STICKY
+    }
+
+    // MARK: (A4) the field log's ride lines (only "Share ride logs" reads them, when on)
+
+    private fun vehicleText(s: RideState): String? {
+        val leg = s.leg ?: return null
+        val id = s.vehicleTripId ?: return null
+        return FieldFormat.vehicle(s.vehicleLine ?: leg.line, id, leg.isTrain)
+    }
+
+    private fun logStart(how: String) {
+        val s = RideStore.state.value ?: return
+        val leg = s.leg ?: return
+        val here = fixes.lastOrNull()?.p ?: nl.haltewekker.ui.Locator.last(this)
+        val m = if (here != null && leg.from != null) Geo.metres(here, leg.from!!) else null
+        FieldLog.ride(FieldFormat.rideStart(how, vehicleText(s), m, s.index + 1, s.trip.rides.size))
     }
 
     private fun goForeground(looking: Boolean = false): Boolean {
@@ -204,8 +225,9 @@ class RideService : Service() {
             lastLat = Math.round(fix.p.lat * 100_000) / 100_000.0, lastLon = Math.round(fix.p.lon * 100_000) / 100_000.0) }
         when (WakeRules.onFix(s.phase, d, fix.accuracy, now - s.legStart, s.wakeMetres)) {
             WakeRules.Action.RING -> ring("approach")
-            WakeRules.Action.AWAKE_SILENTLY -> RideStore.update(this) {
-                it.copy(phase = Phase.AWAKE, note = "You started close to your stop: it tells you when you're there.")
+            WakeRules.Action.AWAKE_SILENTLY -> {
+                FieldLog.ride(FieldFormat.rideWake(d))
+                RideStore.update(this) { it.copy(phase = Phase.AWAKE, note = "You started close to your stop: it tells you when you're there.") }
             }
             WakeRules.Action.ARRIVE -> arrive()
             WakeRules.Action.NONE -> {}
@@ -235,9 +257,12 @@ class RideService : Service() {
                         val mine = fixes.toList()
                         val real = app.store.settings.value.realPositions
                         val f = withContext(Dispatchers.Default) { look.look(mine, leg, now, real) }
-                        if (f != null) RideStore.update(this) {
-                            it.copy(vehicleTripId = f.tripId, vehicleLine = f.line,
-                                vehicleSource = if (f.byGPS || moving) VehicleSource.BY_GPS else VehicleSource.BY_TIMES)
+                        if (f != null) {
+                            RideStore.update(this) {
+                                it.copy(vehicleTripId = f.tripId, vehicleLine = f.line,
+                                    vehicleSource = if (f.byGPS || moving) VehicleSource.BY_GPS else VehicleSource.BY_TIMES)
+                            }
+                            FieldLog.match(FieldFormat.detect(mine.size, "${f.line}·${f.tripId.takeLast(4)}", f.byGPS, f.tripId == leg.tripId))
                         }
                     }
                 }
@@ -261,6 +286,7 @@ class RideService : Service() {
         val st = app.store.settings.value
         val quiet = WakeRules.quiet(st.headphonesOnly, AudioRoute.privateOutput(this))
         val leg = s.leg
+        FieldLog.ride(FieldFormat.rideRing(why, s.distance, Iso.now() - s.legStart, null))
         RideStore.update(this) { it.copy(phase = Phase.ALARM, quiet = quiet, note = why, roughGPS = false) }
         cancelBackup()
         requestLocation(RideGPS.intervalMs(false))
@@ -283,6 +309,7 @@ class RideService : Service() {
         val leg = s.leg ?: return
         val st = app.store.settings.value
         val next = s.trip.rides.getOrNull(s.index + 1)
+        FieldLog.ride(FieldFormat.rideArrive("by GPS", s.distance, s.accuracy, Iso.now() - s.legStart, null))
         legDone()
         val quiet = WakeRules.quiet(st.headphonesOnly, AudioRoute.privateOutput(this))
         AlarmPlayer.chime(this, if (st.announce) WakeRules.announcement(leg.toStop, leg.isTrain, false) else null, quiet)
@@ -306,6 +333,8 @@ class RideService : Service() {
             scheduleBackup()
         } else {
             RideStore.update(this) { it.copy(phase = Phase.FINISHED) }
+            // (A4) a trip from Home to School (or back) on your own board, for the leaderboard with friends
+            RideStore.state.value?.let { nl.haltewekker.friends.ScoreLog.finished(this, it, now) }
             cancelBackup()
             scope.launch { delay(90_000); if (RideStore.state.value?.finished == true) end(byHand = false) }
         }
@@ -313,7 +342,9 @@ class RideService : Service() {
     }
 
     private fun onIt() {
-        val leg = RideStore.state.value?.leg ?: return
+        val s0 = RideStore.state.value ?: return
+        val leg = s0.leg ?: return
+        FieldLog.ride(FieldFormat.handPick(FieldFormat.vehicle(leg.line, leg.tripId, leg.isTrain), vehicleText(s0), s0.distance, null))
         RideStore.update(this) { it.copy(vehicleTripId = leg.tripId, vehicleLine = leg.line, vehicleSource = VehicleSource.BY_HAND) }
         notifyRide(force = true)
     }
@@ -330,6 +361,8 @@ class RideService : Service() {
     }
 
     private fun end(byHand: Boolean) {
+        RideStore.state.value?.let { s -> FieldLog.ride(FieldFormat.rideEnd(if (s.finished) "after the last stop" else if (byHand) "by hand" else "by itself")) }
+        FieldLog.flush()
         RideStore.state.value?.let { s ->
             AutoStart.noteEnd(this, fixes.lastOrNull()?.p ?: if (s.finished) s.trip.last.to else null)
             if (byHand && !s.finished) {
@@ -433,6 +466,7 @@ class RideService : Service() {
                 RideStore.set(this, newState(this, trip, destName, 0).copy(vehicleTripId = f.tripId, vehicleLine = f.line,
                     vehicleSource = VehicleSource.BY_GPS, auto = true))
                 ResumeStore.set(this, null)
+                logStart("auto (station left)")
                 lookJob = null
                 intervalMs = 0
                 begin()

@@ -222,21 +222,25 @@ object TransitParse {
             o ?: return null
             val la = o.d("lat") ?: return null
             val lo = o.d("lon") ?: return null
-            return TripStop(o.s("name") ?: "", GeoPoint(la, lo), o.t("arrival"), o.t("departure"))
+            return TripStop(o.s("name") ?: "", GeoPoint(la, lo), o.t("arrival"), o.t("departure"), o.t("scheduledDeparture"), o.b("cancelled") ?: false)
         }
+        var tripCancelled = false
         for (l in legs) {
             line = l.s("routeShortName") ?: line
             head = l.s("headsign") ?: head
             mode = l.s("mode") ?: mode
             if (num.isEmpty()) num = l["tripShortName"].text
             live = live || (l.b("realTime") ?: false)
+            if ((l.b("cancelled") ?: false) || (l.b("tripCancelled") ?: false)) tripCancelled = true
             if (stops.isEmpty()) stop(l.o("from"))?.let(stops::add)
             for (o in l.a("intermediateStops")) stop(o.obj)?.let(stops::add)
             stop(l.o("to"))?.let(stops::add)
             l.o("legGeometry")?.let { g -> g.s("points")?.let { path += Polyline.decode(it, g.d("precision")?.toInt() ?: 5) } }
         }
         if (stops.size < 2) return null
-        return LiveTrip(line, head, mode, num, live, stops, path)
+        // (A4) a trip cancelled as a whole: every stop is (only the delay alarm reads it)
+        val all = if (tripCancelled) stops.map { it.copy(cancelled = true) } else stops
+        return LiveTrip(line, head, mode, num, live, all, path)
     }
 
     /** The trip's stop nearest `p` (within `maxMetres`), for the live arrival at your stop. */

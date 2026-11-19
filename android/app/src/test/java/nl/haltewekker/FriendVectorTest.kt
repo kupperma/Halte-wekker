@@ -27,7 +27,7 @@ import org.junit.Test
  * Every test vector in docs/superpowers/specs/2026-11-18-friends-design.md (As built 0.25–0.30), made with Node's crypto
  * from the spec and checked by the iOS app's FriendVectorTests, FriendTravelVectorTests, FriendChatVectorTests,
  * FriendTimetableTests and FriendExtrasVectorTests: the same numbers here are the interop guarantee.
- * For the kinds A3 knows (0.25–0.28) the payload is also rebuilt from the parsed box and must come out byte for byte.
+ * Every kind (0.25–0.30, A4 reads them all) is also rebuilt from the parsed box and must come out byte for byte.
  */
 class FriendVectorTest {
     private fun hex(s: String) = Hex.decode(s)!!
@@ -112,11 +112,11 @@ class FriendVectorTest {
         for (v in vectors) {
             val p = v.payload.toByteArray(Charsets.UTF_8)
             val (h, m) = FriendBox.parse(p)
-            if (m is FriendMessage.Unknown) { assertTrue(h.k in setOf("wait", "campus", "buddy", "delay", "scores")); continue }
+            assertTrue("a known kind: ${h.k}", m !is FriendMessage.Unknown)
             n++
             assertEquals(v.payload, String(FriendBox.payload(m, h.f, h.t, h.n, h.g), Charsets.UTF_8))
         }
-        assertEquals(12, n)
+        assertEquals(17, n)
     }
 
     @Test fun kindsAsRead() {
@@ -137,8 +137,12 @@ class FriendVectorTest {
         val area = (msg("vector-9") as FriendMessage.Area).area
         assertEquals("EHV", area.station!!.code); assertEquals("vector-stop-1", area.start!!.id)
         assertTrue((msg("vector-10") as FriendMessage.Timetable).share.isOff)
-        // an iOS 0.29 answer to a wait reads as plain text here
-        assertNull(TripAnswer.of((msg("vector-15") as FriendMessage.Message).text.answer))
+        // an iOS 0.29 answer to a wait: not a trip card's answer, a wait's
+        val wa = (msg("vector-15") as FriendMessage.Message).text
+        assertNull(TripAnswer.of(wa.answer)); assertEquals(nl.haltewekker.friends.WaitAnswer.WAIT, nl.haltewekker.friends.WaitAnswer.of(wa.answer))
+        assertEquals("vector-wait-1", wa.re)
+        assertEquals("BUas", (msg("vector-12") as FriendMessage.Campus).state.school)
+        assertEquals(14, (msg("vector-16") as FriendMessage.Scores).share.rides)
     }
 
     @Test fun kimsGroupLineOpensFromTheList() {

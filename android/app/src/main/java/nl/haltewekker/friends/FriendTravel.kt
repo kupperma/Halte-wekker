@@ -110,7 +110,7 @@ object TravelWords {
     fun clock(t: Double, zone: ZoneId = ZoneId.systemDefault()): String =
         DateTimeFormatter.ofPattern("HH:mm").withZone(zone).format(Instant.ofEpochMilli((t * 1000).toLong()))
 
-    private fun capitalFirst(t: String) = t.take(1).uppercase() + t.drop(1)
+    fun capitalFirst(t: String) = t.take(1).uppercase() + t.drop(1)
     private fun lowerFirst(t: String) = t.take(1).lowercase() + t.drop(1)
 
     /** "IC 3512", "Bus 306", "Train" (no line yet). */

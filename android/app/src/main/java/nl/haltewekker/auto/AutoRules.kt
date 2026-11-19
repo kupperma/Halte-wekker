@@ -33,6 +33,16 @@ object AutoRules {
         return out
     }
 
+    /** (0.29) "Show friends when I'm at school": School's region also tells on entry and exit (added when it isn't there). */
+    fun withCampus(base: List<RegionSpec>, school: GeoPoint, radius: Double = SCHOOL_RADIUS): List<RegionSpec> {
+        val i = base.indexOfFirst { it.id == SCHOOL_ID }
+        if (i < 0) return base + RegionSpec(SCHOOL_ID, school.lat, school.lon, radius, entry = true, exit = true)
+        return base.toMutableList().also { it[i] = it[i].copy(entry = true, exit = true) }
+    }
+
+    /** (0.29) Leaving this region is one a trip starts from: not one only "at school" asked for. */
+    fun exitStartsTrip(id: String, base: List<RegionSpec>): Boolean = base.any { it.id == id && it.exit }
+
     /** One stop per spot: a stop within 150 m of one already kept is the same place (at most three). */
     fun merged(stops: List<GeoPoint>): List<GeoPoint> {
         val out = ArrayList<GeoPoint>()

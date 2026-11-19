@@ -114,6 +114,11 @@ object FriendChats {
     /** A request or "you're friends now" fetched in the background. */
     fun notifyNews(c: Context, title: String, body: String) { if (!foreground) notify(c, "friends-news", title, body, null) }
 
+    /** (A4) The extras' news (a wait, a delay, the buddy, free time): a banner in front, else a notification. */
+    fun tell(c: Context, tag: String, title: String, body: String, chat: String?) {
+        if (foreground) FriendStore.banners.tryEmit(FriendBanner(title, body, chat)) else notify(c, tag, title, body, chat)
+    }
+
     private fun notify(c: Context, tag: String, title: String, body: String, chat: String?) {
         val i = Intent().setClassName(c, "nl.haltewekker.ui.MainActivity").addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
             .putExtra(EXTRA_FRIENDS, true).apply { if (chat != null) putExtra(EXTRA_CHAT, chat) }
@@ -153,6 +158,14 @@ object FriendChats {
         if (t.isEmpty()) return@launch
         val body = ChatText(t)
         post(FriendMessage.Message(body), chat) { m -> m.copy(text = body) }
+    }
+
+    /** (0.29) "I'll wait" / "Let's take the next one together" to a wait (its id). */
+    fun answerWait(a: WaitAnswer, wait: String, chat: String) = FriendStore.launch { answerWaitNow(a, wait, chat) }
+
+    fun answerWaitNow(a: WaitAnswer, wait: String, chat: String) {
+        val body = ChatText(a.text, wait, a.raw)
+        post(FriendMessage.Message(body), chat) { it.copy(text = body) }
     }
 
     fun answer(a: TripAnswer, card: String, chat: String) = FriendStore.launch {

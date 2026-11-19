@@ -112,7 +112,7 @@ class FriendLogicTest {
 
     @Test fun unknownKindsStayOnTheRelay() {
         val b = friends(lou, sam)
-        val r = FriendInbox.process(listOf(box(FriendMessage.Unknown("wait"), sam, lou)), b, me = lou, now = t)
+        val r = FriendInbox.process(listOf(box(FriendMessage.Unknown("streak"), sam, lou)), b, me = lou, now = t)
         assertEquals(1, r.kept.size); assertTrue(r.ack.isEmpty())
     }
 

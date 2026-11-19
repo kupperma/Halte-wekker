@@ -176,6 +176,18 @@ data class ChatBook(val v: Int = 1, val chats: Map<String, Chat> = emptyMap()) {
         return out
     }
 
+    /** (0.29) The answers to a "wait for me" (its id), the newest per person. */
+    fun waitAnswers(wait: String, key: String): Map<String, WaitAnswer> {
+        val c = chats[key] ?: return emptyMap()
+        val out = HashMap<String, WaitAnswer>()
+        for (m in c.messages) {
+            val t = m.text ?: continue
+            if (t.re != wait) continue
+            out[m.from] = WaitAnswer.of(t.answer) ?: continue
+        }
+        return out
+    }
+
     val recent: List<Chat> get() = chats.values.filter { it.messages.isNotEmpty() }.sortedByDescending { it.last?.at ?: 0.0 }
 
     fun remove(key: String) = copy(chats = chats - key)

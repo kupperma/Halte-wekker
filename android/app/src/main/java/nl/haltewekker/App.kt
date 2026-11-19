@@ -43,5 +43,9 @@ class App : Application() {
         nl.haltewekker.friends.FriendStore.init(this)
         nl.haltewekker.friends.FriendTravelShare.attach(this)
         nl.haltewekker.friends.FriendWork.update(this)
+        // A4: the live link (works without a friends account) and "Share ride logs" (off unless turned on)
+        nl.haltewekker.logs.FieldLog.init(this)
+        nl.haltewekker.friends.LiveLinkStore.attach(this)
+        nl.haltewekker.logs.LogShareStore.attach(this)
     }
 }

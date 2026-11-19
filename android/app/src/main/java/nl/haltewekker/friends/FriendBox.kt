@@ -16,7 +16,7 @@ import kotlinx.serialization.json.put
 //   inside = Ed25519 signature (64) over "HWBOX1\n" + recipient account + "\n" + payload ‖ payload
 //   payload = {"v":1, "k": kind, "f": sender, "t": unix s, "n": random id, "g"?: group id, "b": body}
 
-/** What a box says. A3 reads the kinds of iOS 0.25–0.28; anything else is `Unknown` (left on the relay). */
+/** What a box says. A3 read the kinds of iOS 0.25–0.28, A4 those of 0.29–0.30; anything else is `Unknown` (left on the relay). */
 sealed class FriendMessage {
     abstract val kind: String
 
@@ -38,6 +38,16 @@ sealed class FriendMessage {
     data class Timetable(val share: TimetableShare) : FriendMessage() { override val kind get() = "timetable" }
     /** (0.28) Where your trips start and your school (slot `area`): never the home address. */
     data class Area(val area: TimetableArea) : FriendMessage() { override val kind get() = "area" }
+    /** (0.29) "Wait for me" (slot `wait`), one-to-one or in a group with `g`. */
+    data class Wait(val wait: WaitFor) : FriendMessage() { override val kind get() = "wait" }
+    /** (0.29) A ride you share runs late or is cancelled (slot `delay`). */
+    data class Delay(val delay: RideDelay) : FriendMessage() { override val kind get() = "delay" }
+    /** (0.29) The wake-up buddy's plan (slot `buddy`). */
+    data class Buddy(val plan: BuddyPlan) : FriendMessage() { override val kind get() = "buddy" }
+    /** (0.29) On campus now (slot `campus`): never a position. */
+    data class Campus(val state: CampusState) : FriendMessage() { override val kind get() = "campus" }
+    /** (0.30) Your fastest trips and rides together, for the leaderboard with friends (slot `scores`). */
+    data class Scores(val share: ScoresShare) : FriendMessage() { override val kind get() = "scores" }
     data class Unknown(override val kind: String) : FriendMessage()
 
     /** Belongs to a chat (read after the rest of a batch, so a group's list in the same batch is known first). */
@@ -46,9 +56,9 @@ sealed class FriendMessage {
     companion object {
         /** The kinds this version reads (and acknowledges). */
         val known = setOf("request", "accept", "unfriend", "profile", "picture", "travel", "message", "trip", "seen", "group",
-            "gpicture", "gleave", "timetable", "area")
-        /** As iOS 0.28: raised when a release learns kinds, so the mailbox is read again from the start once. */
-        const val KINDS_VERSION = 4
+            "gpicture", "gleave", "timetable", "area", "wait", "delay", "buddy", "campus", "scores")
+        /** As iOS 0.30: raised when a release learns kinds, so the mailbox is read again from the start once. */
+        const val KINDS_VERSION = 6
     }
 }
 
@@ -95,6 +105,11 @@ object FriendBox {
             is FriendMessage.Group -> e(GroupRoster.serializer(), m.roster)
             is FriendMessage.Timetable -> e(TimetableShare.serializer(), m.share)
             is FriendMessage.Area -> e(TimetableArea.serializer(), m.area)
+            is FriendMessage.Wait -> e(WaitFor.serializer(), m.wait)
+            is FriendMessage.Delay -> e(RideDelay.serializer(), m.delay)
+            is FriendMessage.Buddy -> e(BuddyPlan.serializer(), m.plan)
+            is FriendMessage.Campus -> e(CampusState.serializer(), m.state)
+            is FriendMessage.Scores -> e(ScoresShare.serializer(), m.share)
             FriendMessage.Unfriend, FriendMessage.GroupLeave, is FriendMessage.Unknown -> JsonObject(emptyMap())
         }
     }
@@ -138,6 +153,11 @@ object FriendBox {
             "gleave" -> { noBody(); FriendMessage.GroupLeave }
             "timetable" -> FriendMessage.Timetable(need(TimetableShare.serializer()))
             "area" -> FriendMessage.Area(need(TimetableArea.serializer()))
+            "wait" -> FriendMessage.Wait(need(WaitFor.serializer()))
+            "delay" -> FriendMessage.Delay(need(RideDelay.serializer()))
+            "buddy" -> FriendMessage.Buddy(need(BuddyPlan.serializer()))
+            "campus" -> FriendMessage.Campus(need(CampusState.serializer()))
+            "scores" -> FriendMessage.Scores(need(ScoresShare.serializer()))
             else -> FriendMessage.Unknown(h.k)
         }
         return h to m

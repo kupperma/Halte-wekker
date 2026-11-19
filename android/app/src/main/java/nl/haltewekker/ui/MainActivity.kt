@@ -73,6 +73,7 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         nl.haltewekker.friends.FriendChats.foreground = true
+        nl.haltewekker.logs.LogShareStore.tick()          // (A4) shared ride logs: at most once an hour
     }
 
     override fun onStop() {

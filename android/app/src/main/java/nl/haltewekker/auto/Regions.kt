@@ -50,6 +50,19 @@ object Regions {
         val p = app.store.profile.value
         val s = app.store.settings.value
         if (!p.setupDone) return emptyList()
+        val base = base(c)
+        val school = p.school?.point
+        // (A4) "Show friends when I'm at school": School's region tells on leaving too (it never starts a trip by itself)
+        return if (school != null && app.store.prefs.getBoolean(nl.haltewekker.friends.FriendExtrasStore.CAMPUS_REGION_KEY, false))
+            AutoRules.withCampus(base, school) else base
+    }
+
+    /** The regions the trips by themselves want (without "at school"). */
+    fun base(c: Context): List<RegionSpec> {
+        val app = c.applicationContext as App
+        val p = app.store.profile.value
+        val s = app.store.settings.value
+        if (!p.setupDone) return emptyList()
         return AutoRules.wanted(p.home?.point, p.school?.point, p.homeStops.map { GeoPoint(it.lat, it.lon) }, s.autoStart, s.autoHome)
     }
 
@@ -93,6 +106,8 @@ object AutoStart {
         val s = store(c).settings.value
         val role = AutoRules.role(id) ?: return
         val spec = Regions.current(c).firstOrNull { it.id == id } ?: return
+        // (A4) the friends extras hear it first: at school (campus), leaving home (the wake-up buddy)
+        try { nl.haltewekker.friends.FriendStore.init(c); nl.haltewekker.friends.FriendExtrasStore.region(id, entering) } catch (_: Exception) {}
         if (entering) {
             if (role == AutoRules.Role.SCHOOL && spec.entry && s.autoHome && RideStore.state.value == null) {
                 val today = LocalDate.now().toString()
@@ -102,7 +117,7 @@ object AutoStart {
             }
             return
         }
-        if (!spec.exit || !s.autoStart) return
+        if (!spec.exit || !s.autoStart || !AutoRules.exitStartsTrip(id, Regions.base(c))) return
         RideStore.load(c)
         if (RideStore.state.value != null) return
         val (place, at) = lastEnd(c)

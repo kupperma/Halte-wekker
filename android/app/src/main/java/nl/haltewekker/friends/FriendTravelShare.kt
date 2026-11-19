@@ -50,6 +50,10 @@ object FriendTravelShare {
         FriendStore.scope.launch {
             RideStore.state.map { it?.let { s -> key(s) } ?: "none" }.distinctUntilChanged().debounce(2000).collect { changed(app) }
         }
+        // (0.29) a trip started: you set off today (for the friends who watch you as a wake-up buddy)
+        FriendStore.scope.launch {
+            RideStore.state.map { running(it) }.distinctUntilChanged().collect { if (it) FriendExtrasStore.tripStarted() }
+        }
         // a trip that ended while the app was gone: its state is taken back (nothing happens if none went out)
         if (RideStore.state.value == null) FriendStore.launch { FriendStore.clearTravel() }
     }
@@ -77,6 +81,8 @@ object FriendTravelShare {
     private fun key(s: RideState) = "${s.index}|${s.vehicleTripId ?: "-"}|${stage(s, now()).name}|${s.phase == Phase.FINISHED}|${coach.value?.n ?: 0}"
 
     private fun changed(c: Context) {
+        // (0.30) the live link: at once on a new leg, stage or vehicle (it has its own rules)
+        LiveLinkStore.tick()
         val s = RideStore.state.value
         val sig = signals(s)
         confirmed = if (sig.running) TravelShareRules.confirmed(confirmed, sig) else false
@@ -90,6 +96,9 @@ object FriendTravelShare {
         val s = RideStore.state.value
         confirmed = if (signals(s).running) TravelShareRules.confirmed(confirmed, signals(s)) else false
         evaluate(app, force = false)
+        // (0.30) the live link's next state, and the ride history (friends on this bus or train with you)
+        LiveLinkStore.tick()
+        FriendTogetherStore.rideTick(s)
         if (!FriendStore.hasFriends || sending || !TravelAge.due(lastFetch, now())) return@launch
         lastFetch = now()
         FriendStore.sync(FriendStore.Why.TICK)
