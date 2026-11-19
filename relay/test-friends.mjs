@@ -216,6 +216,41 @@ async function run() {
   assert.equal((await signed(b, "/f/v1/state/get", {})).json.states.length, 1);
   console.log("states ok");
 
+  // groups (0.27): one send fans a line out to several mailboxes; a group's list replaces itself in its slot
+  const c = await makeAccount();
+  r = await signed(c, "/f/v1/register", { signKey: b64url(c.pub) });
+  assert.equal(r.status, 200);
+  const gid = "0123456789abcdef01234567";
+  const beforeB = (await signed(b, "/f/v1/inbox", {})).json.boxes.length;
+  const line = (s) => b64url(new TextEncoder().encode(s));
+  r = await signed(a, "/f/v1/send", { boxes: [
+    { to: b.id, data: line("list 1 for b"), slot: `gr.${gid}`, ttl: 30 * 86400 },
+    { to: c.id, data: line("list 1 for c"), slot: `gr.${gid}`, ttl: 30 * 86400 },
+  ] });
+  assert.ok(r.json.results.every((x) => x.ok), JSON.stringify(r.json));
+  r = await signed(a, "/f/v1/send", { boxes: [{ to: b.id, data: line("line for b") }, { to: c.id, data: line("line for c") }] });
+  assert.ok(r.json.results.every((x) => x.ok), JSON.stringify(r.json));
+  r = await signed(a, "/f/v1/send", { boxes: [
+    { to: b.id, data: line("list 2 for b"), slot: `gr.${gid}`, ttl: 30 * 86400 },
+    { to: c.id, data: line("list 2 for c"), slot: `gr.${gid}`, ttl: 30 * 86400 },
+  ] });
+  assert.ok(r.json.results.every((x) => x.ok));
+  r = await signed(c, "/f/v1/send", { boxes: [{ to: a.id, data: line("seen 1"), slot: `se.${gid}` }] });
+  r = await signed(c, "/f/v1/send", { boxes: [{ to: a.id, data: line("seen 2"), slot: `se.${gid}` }] });
+  assert.ok(r.json.results[0].ok);
+  const inC = (await signed(c, "/f/v1/inbox", {})).json.boxes.map((x) => Buffer.from(x.data, "base64url").toString());
+  assert.deepEqual(inC, ["line for c", "list 2 for c"], "the newest list only, after the line it replaced");
+  const inB = (await signed(b, "/f/v1/inbox", {})).json.boxes;
+  assert.equal(inB.length - beforeB, 2);
+  const seenA = (await signed(a, "/f/v1/inbox", {})).json.boxes.filter((x) => x.slot === `se.${gid}`);
+  assert.equal(seenA.length, 1);
+  assert.equal(Buffer.from(seenA[0].data, "base64url").toString(), "seen 2");
+  r = await signed(a, "/f/v1/send", { boxes: Array.from({ length: 21 }, () => ({ to: b.id, data: line("x") })) });
+  assert.equal(r.status, 400, "at most 20 boxes in one send");
+  r = await signed(c, "/f/v1/leave", {});
+  assert.equal(r.status, 200);
+  console.log("groups/fan-out ok");
+
   // vault
   r = await signed(a, "/f/v1/vault/get", {});
   assert.equal(r.json.data, null);

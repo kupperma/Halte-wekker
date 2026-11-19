@@ -395,3 +395,131 @@ only adds a box kind, three relay routes and one field in the friend list.
 - Friends: "Travelling now" on top (a map with their pictures, a row each: "Sam · IC 3512 to Breda · arrives 08:43"),
   Your trips (the switch for everyone), a friend's page with their trip on the map, their coach, and "Show my trips to
   Sam". The ride screen (new look): the question once on board, friends on the same vehicle, the coach picker on a train.
+
+## As built (0.27)
+
+What 0.27.0 (build 114) adds: chats (one-to-one and groups), trip cards, and "Take this trip". Everything in "As built
+(0.25)" and "As built (0.26)" holds unchanged; this only adds box kinds and one optional header use. **No relay change**:
+the 0.25 routes already carry all of it (`/f/v1/send` takes up to 20 boxes to any mix of mailboxes, which is a group
+message's fan-out; slots replace the newest box per sender per mailbox). `FriendMessage.kindsVersion` is 3.
+
+### The header's `g`
+- A group's boxes carry `"g": <group id>` in the payload header (the 0.25 field, until now unused). A group id is 12
+  random bytes as 24 lowercase hex characters (so `gr.<id>` fits the relay's 32-character slot).
+- **Opening** (0.25 rule extended): the signing key is the friend's card, or (for a sender who isn't your friend) the
+  card a **group list** you're in gives for that account (the account id is always SHA-256 of the signKey, so a list
+  can't put a wrong signKey on someone). What's then accepted:
+  - without `g`: `message`, `trip`, `seen` only from a friend;
+  - with `g`: `message`, `trip`, `seen` only from someone on that group's list while you're on it; `group`, `gpicture`
+    by the rules below; `gleave` from anyone on the list.
+- A box that can't be opened because the sender's card isn't known yet (a group's list may still be on its way) is
+  taken off the relay and kept on the phone for 7 days (at most 100), and tried again with each new batch.
+- **Order in a batch**: everything but `message`/`trip`/`seen` is read first (in the relay's order), then those (in the
+  relay's order), so a list that came in the same batch is known before the lines it lets in.
+
+### Kinds (bodies; every key optional unless said)
+- `message` — `b = {"text": string (required), "re": n, "answer": "in" | "cant"}`. Text: UTF-8, no control characters
+  but line breaks, at most two line breaks in a row, trimmed, at most 1000 characters (readers clean it the same way and
+  drop an empty one). An **answer to a trip card** says the card's `n` in `re` and `answer`; its `text` is the words
+  ("I’m in", "Can’t make it") so an app that doesn't know answers still shows something; an `answer` value you don't
+  know reads as plain text. Quick replies are plain `message`s ("On the 305", "Running 5 min late", "Save me a seat",
+  "Wait for me", "I’m at the stop").
+- `trip` — a trip card, `b = {"rides": [ride] (1–8, required), "to": spot (required: where it ends), "from": spot (where
+  the sender starts), "start", "end" (leave the door / arrive, unix s), "by" (a planned trip's "be there by", unix s),
+  "note" (the sender's line, ≤ 200 characters; absent: the app says "Take the 07:41 with me?" / "Thursday: be at BUas by
+  09:00, this way")}`.
+  - ride = `{"mode": "train" | "bus" (a newer app may add others; unknown reads as train), "line" (as shown: "IC",
+    "305"), "trip" (required: the vehicle's trip id as Transitous names it), "from", "to" (spots), "dep", "arr" (unix s,
+    required, arr ≥ dep), "name" ("Intercity"), "num" (a train's number), "head" (headsign), "sdep", "sarr" (scheduled,
+    when they differ), "plat", "walk" (minutes of walking before it)}`.
+  - spot = `{"name" (required; a stop's name as Transitous gives it), "id" (Transitous stop id), "lat", "lon"}`. Home is
+    never sent as a place: `{"name":"Home"}` without coordinates (the friend plans to the last ride's stop instead).
+  - A card that breaks these (no rides, more than 8, an arrival before its departure, an empty trip id) is dropped.
+- `seen` — `b = {"got": t, "read": t}`: the newest of the *recipient's* lines in that chat (by the recipient's own `t`)
+  that the sender has on their phone / has read. Sent with slot `seen` (one-to-one) or `se.<group id>` (with `g`), so
+  only the newest waits on the relay; one per writer, only when it moved on. A line of yours counts as delivered/read
+  when a mark's value is ≥ its `t`.
+- `group` — a group's list, `b = {"name" (required, a cleaned name ≤ 40), "admin" (account, required, on the list), "rev"
+  (integer ≥ 1, required, one higher with each change), "members": [{"card": card, "name"}] (required, 1–20 people,
+  everyone including the admin, each account once)}`, with `g`, slot `gr.<group id>`, ttl 30 days, sent by the admin to
+  every member (on a change: to the old and the new members, so someone taken off learns it).
+  - A list for a group you don't have: taken only if the sender is your **friend**, is its `admin`, and you're on it
+    (members must be the admin's friends; they needn't be each other's).
+  - A list for a group you have: taken only from its current `admin` and only with a higher `rev`. Not on it any more:
+    you were **removed** (the chat stays to read; a later list with you on it puts you back). After you **left**, no
+    list is taken for that group again (to come back, someone makes a new group).
+  - Member names in the list are the admin's names for them (the admin's app updates the list when a friend renames).
+- `gpicture` — `b = {"jpeg": b64u}` as `picture` (256×256 baseline JPEG ≤ 40 KB; an empty string takes it away), with
+  `g`, slot `gp.<group id>`, only from the admin (others' are ignored).
+- `gleave` — `b = {}`, with `g`, from a member to every other member: they're off the list on every phone at once (no
+  `rev` change). If they ran it, the first member left on the list runs it now (every phone works this out the same
+  way; that member's next list has `rev` + 1).
+- Pictures in groups: each member sends their own `picture` (slot `picture`, as 0.25) to the members who aren't their
+  friends, when they first share a group; `picture` is accepted from anyone you share a group with.
+
+### Fan-out
+- A group line is **one payload** (the same `n`, `t` and `g`) **locked once per member** (signed for each recipient, as
+  every box), all posted in one `/f/v1/send` (≤ 20 boxes: a group has at most 20 people, so 19 others). The relay sees
+  only N boxes from you to N mailboxes.
+- Line ids are `<from>|<n>` (the same box twice is the same line).
+
+### Fetching (no push)
+- No new loop: the app's checks of the relay (app to the front, every 30 s while Friends is open, the background
+  refresh) now read lines too; **every 8 s while a chat is open** and the app is in front (friends' trips every 30 s of
+  those); and the ride's 30 s network tick during a trip does a whole check at most once a minute (it already read
+  friends' trips there). The UI says plainly that a line arrives when the other phone opens the app or is on a trip.
+- A line that comes in while the app is open: the in-app banner (none for the chat on screen). Fetched in the
+  background (a trip's tick, the background refresh): one local notification per chat (`friends-chat-<chat>`); tapping
+  it opens that chat.
+
+### "Take this trip" (`TripTake`, tested)
+- The **shared ride** is the card's first train, else its longest ride.
+- It has left (more than a minute ago): "That bus or train has left already".
+- It leaves **within the hour**: Fastest trip opens with the trip as your pick (it watches it and starts the ride when
+  you're on board). Your way: the card's rides if you're within 600 m of its first stop; else the planner from where you
+  are, arriving by the card's "by" (or its arrival), taking an option that has the shared ride's trip id; else onto the
+  shared ride at a stop of its route nearest you (its stops before you'd get off that you may board and it leaves
+  more than 2 minutes from now; the nearest two), walking there (< 900 m) or with the planner's way there. Nothing
+  fits: Plan opens with where to and "there by" filled in.
+- Later **today or tomorrow, to your School or Home** (the card's end within 500 m of it): a Be there by plan at the
+  card's "by" (or its arrival), with the option that has the shared ride picked first.
+- Anything else (another place, another day): Plan opens with where to and "there by" filled in.
+- Taking it answers "I’m in" if you hadn't answered.
+
+### Test vectors (Node's crypto; checked in `ios/Tests/FriendChatVectorTests.swift`)
+- Keys as in 0.25, plus **Kim**: seed `202122232425262728292a2b2c2d2e2f`; signKey
+  `42dc39acb9621b6cae51150c70a8c2d08bd484060fe11bf1f99a4a21dc9f9582`; agreeKey
+  `8494a0fe797543f6b743070880154198b41ce5ca71dccb3f74f1ce8e050d3a4c`; account `9bc64cbb2dab5f14d76c61166b324b98`.
+- A message from Sam to Lou: payload (exact bytes) `{"b":{"text":"On the 305"},"f":"3c157621a97cf055f5804a9826c6d1e1","k":"message","n":"vector-3","t":1800000000,"v":1}`; eph_priv
+  `a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf`, nonce `c0c1c2c3c4c5c6c7c8c9cacb` → signature (b64u) `C-Wt4CDWC_JyBVNuBtPk1-FVV0yP9g5FRScvJjRJ0SgkyfRf6VjOUIxh-SOHDwcn9Gwb0HB3yYABiE1vVttEDg`; ephPub `605a725d2a4adfeeb1a29e17edd621c1b7593ee8cdbc44ac6c4ab6e2f805d23c`; box key `3efcf6f8bda00486b5377490e2b37b82d3cc3ed26739c9f8d05edf327b356d93`; box (b64u):
+  `AWBacl0qSt_usaKeF-3WIcG3WT7ozbxErGxKtuL4BdI8wMHCw8TFxsfIycrLRqFOo-EkGjQPOnM4XKXDadlG8WQ5tpTwi_0U5Uns-Z1xBiFtYMaIN79Cr8oXgKvrJKpNshS2dROPnVqMF4ZKWKh9X26BUeS2PAG57uU0JIwrOkT31H0vHyJLExZLEdgc8G8V6vIfcUMGLzBBzlP3F08iDF01gGFFCVZ1wpQLZ_rebRG0027r_zRGQrqduN2jMcme7z31aWLls0bxjcI1WO7CRPhIz51mRqY6BHNTiftUnyUDY3ZU2HUHj3EBO1Y2cDIbJg`
+- Sam's group list to Lou (group `0123456789abcdef01234567`, slot `gr.0123456789abcdef01234567`): payload
+  `{"b":{"admin":"3c157621a97cf055f5804a9826c6d1e1","members":[{"card":{"a":"4BkenPteSyzMhZGAEzxCVDtPbsYAfktcUGCFY_f6wTQ","s":"Pimf5pXMDZx03fVhlCwafY9i6il4P1yqNBRkQCW0IMI"},"name":"Sam"},{"card":{"a":"mJcwSQIqMduIElgAV4WiNQyNWrNO9pXpcmuy_ro-H14","s":"jovYuOL-kNKocNr5m2ZGyLdEWYo8qECxLRmVm84HQ_8"},"name":"Lou"},{"card":{"a":"hJSg_nl1Q_a3QwcIgBVBmLQc5cpx3Ms_dPHOjgUNOkw","s":"Qtw5rLliG2yuURUMcKjC0IvUhAYP4Rvx-ZpKIdyflYI"},"name":"Kim"}],"name":"Uni crew","rev":1},"f":"3c157621a97cf055f5804a9826c6d1e1","g":"0123456789abcdef01234567","k":"group","n":"vector-4","t":1800000000,"v":1}`; eph_priv `d0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeef`, nonce
+  `f0f1f2f3f4f5f6f7f8f9fafb` → signature (b64u) `pBsY4bQds41vtaz4g7u3p-_hoHtfyVx84qyUzxpHU_IUKWHSP8h9jZ3ryGMMvaGqf80SDXz04W2GHbnaz3r8Cw`; ephPub `6b3ee67463583cbe3dc08fe9d0765c2666ff5210dd527c9d8705e44927c80d55`; box key `758ec218842a5fd19f9e05fea11e7753846f76f522134946b9709f4d2ebadee6`; box (b64u):
+  `AWs-5nRjWDy-PcCP6dB2XCZm_1IQ3VJ8nYcF5EknyA1V8PHy8_T19vf4-fr7kQajN_ueiSFAQU_1PF_phMn7SqcyQOUkHfuuVVyQb3zCY_Q78mmKFMHYUmhGAX1ghsvUdKUoBBG-EvRBuUKUtIx3K37SJa8BKVsrFT6yhtBic79k3gLb2E_y7r1Fh5PgpVI8o5b3JyiWjk0aTBOEEXncwES2AHJmkR44GDRdpVad9xr_8pVFOuHgXdfV8piLGKp5K0GSPaFzNZ25jG1ZNtEeXT25aBag_LEEPJZsOyaOHXYMHddtGnFsokBFh12AaG42Lyr_IvAgluB-LETEKwCMEfiFGBtl-SOi9vrYh-4D78UZMRWjw6GRbK79Y2pgkU_BLN03OZxvO7mjHzzcrnB6FpHRM1BUeP8ftOzLVva4p1dV3sSGWcYy8V9eDeL5G8-BFlVq7lTiKV9ccDPliEOYKeXO2uS1GS3piSzbWsXRMGed9_Kt8Hiv0IeoaiGky-VJV2QtU_Jt0YRu7BbOLr4FuMUNKG7I2C4F3PzKsAkylxyCVUw3dUSR2qGoWcu2sY85bHlHoq_3BYCbGiNNPCDeEbsi6UUApGBeWUmn_xaO6i1ISh8X8-IonqYcc3Fve1Ye6wn5wWaeL_ql6QBsSogf74idv-jjQ_TPXypJN0VSEWvaElcsAv-KQj56SeebJtH1FC-cSvuD43y9QJZueL0gs4xS1J9h82NtAIaiVAppbNDl9GfNde2msMqJNbxaLvEQbOwIDlBi2yLVnlgGPdHlZ4V7myrnMK-3eywOnebPrc61CQfP1LBM8jhQomMYA4unx5xtyx02awDDGnlx8Q-jNCotQTTj1N0EjsU4PApiwaAtEUIhy4thnujUFBzIe0dCreXmLRJlnQm-ESrwfZ1zrGJkiRIPLVPVkFBbPbLikA`
+- Kim's line in that group, fanned out (one payload, two boxes): payload `{"b":{"text":"Save me a seat"},"f":"9bc64cbb2dab5f14d76c61166b324b98","g":"0123456789abcdef01234567","k":"message","n":"vector-5","t":1800000060,"v":1}`.
+  - To Lou (who isn't Kim's friend: Kim's card from the list): eph_priv
+    `0001020304050607080910111213141516171819202122232425262728293031`, nonce `a1a2a3a4a5a6a7a8a9aaabac` →
+    signature (b64u) `Jhg6KmEvwF4SdBCDObQIeS3uq8-ZIiQlc0-Q2n2dKTVExpkQTr7xvdUmMeSAgu93_M-AWm_SsLvSIxfaU4Q3Cg`; ephPub `c1e0c8f5681ecdbdfeed4aaa5499ce9754d0f4719a9e0c1781cd78fed23da714`; box key `5079c9de688bad36d193a73ab98f2f54678828ee64965e988768abefe4ad4f97`; box (b64u):
+  `AcHgyPVoHs29_u1KqlSZzpdU0PRxmp4MF4HNeP7SPacUoaKjpKWmp6ipqqusROmx4BC81O-NVmsLma46Q0CUd3NKmrHkOWfkSa8yKCHm1OZDiTViVTjXcXkSa7WDl2FS6BBd-h-Hpro_8R6nAHlgfo9-4g_1xrwCZ-Nw_os6KQFFKACdfSxBWOx7oci5R2mtdBslgqqxTNRHbQRb1_ih-J2eCqYDWZolXh9qys-UlU6ErdtHPUMkyLRmhMXGfmC8LcZ6x7mbQiDQYlV7ZcF7FMXyfeIEYqWZsACSGSzaSHOS8F2GDu4UcU1ytROhPpBDj2Dy1p69Xc1MfFVTWGaU0Gs7m9uwFp846SpdQ8mucHtIRXR6`
+  - To Sam: eph_priv `3132333435363738394041424344454647484950515253545556575859606162`, nonce
+    `b1b2b3b4b5b6b7b8b9babbbc` → signature (b64u) `bAKqe-KrGg2v1BNSYti8EiCsyMWjgU6FWhqZzWZXuUFvkHdyMHEBlEK9ejv5ZQncm0wj_E437snlsUn-SHv9AQ`; ephPub `670e9ff7441bdd5ca886e26ad4e18e9bd9b4edf52219efc071cdc13eee9d8e43`; box key `c753e93d8362807e72e785f78fa0ad24c43947d0c15d497b73aa1e5330f9fc19`; box (b64u):
+  `AWcOn_dEG91cqIbiatThjpvZtO31IhnvwHHNwT7unY5DsbKztLW2t7i5uru8X_0tIgokGLQwviDssVFErIKZLgBN4n9Ft_NgAecydT0R0HNxCU-aObfKdaOHukE72nxbw9Gy8Q5KgMc6ZhUbCUZ0p5V_IIN_5IuXJyp1dml47nVifyi9BPswrJao7VRp4BDGYtq5c79B7SAYdDwJxGhrnEyw1aaln2YiZ2BRAf69RN97XCfh0embpOOcsUIBeg07-syRxm5dwbV_XKwhAd3uKBoYD_TXZxI2cqKzDcepW2_IjIP7QRJOlj8nYp30DkWKrvc5hORftcKsUzX14znV2qdVqOJ9rC3TEOqkYenWhZWCScal`
+- A trip card from Sam to Lou: payload `{"b":{"by":1800006000,"end":1800005400,"note":"Take the 07:41 with me?","rides":[{"arr":1800004200,"dep":1800001260,"from":{"id":"vector-stop-ehv","lat":51.44306,"lon":5.47917,"name":"Eindhoven Centraal"},"line":"IC","mode":"train","name":"Intercity","num":"3512","plat":"4","to":{"lat":51.59556,"lon":4.78,"name":"Breda"},"trip":"vector-trip-3512"}],"start":1800000900,"to":{"lat":51.5866,"lon":4.7745,"name":"BUas"}},"f":"3c157621a97cf055f5804a9826c6d1e1","k":"trip","n":"vector-6","t":1800000000,"v":1}`; eph_priv
+  `4142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f60`, nonce `d1d2d3d4d5d6d7d8d9dadbdc` → signature (b64u) `_YY3pPeiv3WsTZ3ZZeygo1iajicOqqoD0_w6TwlMRBgIy81h1jlkHHAb_-XcQ_uUaxb9vmdUW6rcP3EB1zGQCA`; ephPub `64b101b1d0be5a8704bd078f9895001fc03e8e9f9522f188dd128d9846d48466`; box key `8f2c28ea802e79215bdb91f010e5b080b7aed30f50c3f2a036a86a1176891f7f`; box (b64u):
+  `AWSxAbHQvlqHBL0Hj5iVAB_APo6flSLxiN0SjZhG1IRm0dLT1NXW19jZ2tvcpaSNBO2NCnxoHbkx--22UkdLqhhsh635p0DInyf9QvRoR1cpULartizgPTxXhw1XJpxxnvKFqjs1ha4LCODhIuaxG6DtiYR3fAhainRDLsW0alzRKpSOi8GTm5XfR9CEFIpY-t1K-4NCeSqQmij51Cy1REq4SAd1-b94OekuxLgorNquCM8DTWdhPjTef3HmdAyj1wmaJyXGDbHT162MzM1t5gg1VgJ9Jt4DPu1mBkNE5neZ7PywC3aqmWhb999D7vhHXabuWPzFQGTbheixFbyfBltcHxU-idHXWVaq1uRFZA9VFJatwOQRHQoCTK8tK9akQAWP9B675E9FswCbHxy-9Xp6otJstsA2VuxwimjDcpQ6qb6NbH7hkbIXWCGpCKUNFjo37-ifvvO6zzmILfSlU5oRfGkVLUsA_Yi8rH-HxX0y7FqJHg6wn-LmWEmjZkoqeRn-nWhu4FUqASz1bgA4cuy1F-4JSJoZqBCQXYvzR1Qmpxn22eHBO9JF2UiXmP2HlKglZ59NB10CDDRJfmttE3K4jdDG4WVVyE9h6P17MfAZWSPUfl3i-56IbFsqrsTvslYZtY0h4NaB_aELuMxppojQVdy2TxvSfcjIm2WmNx9VUxYA24JnodKoazK4GP9VAQqCEVGombnhzwgnFzQPMq22fVeUyeqM6U2eW6k-aQH1A8YYGRb4ADeOx8xr9WMkqrpPaaPeBtDSZNUKRaxDjmLGN4dzIgElHXLC9IvilHR0-dOu2ONt-mCKaLcSM13AqwGKxHYW`
+- Lou's answer to it (payload only): `{"b":{"answer":"in","re":"vector-6","text":"I’m in"},"f":"65392c81aa86e697083b0960bf107afb","k":"message","n":"vector-7","t":1800000120,"v":1}` (the `’` is U+2019, UTF-8).
+
+### App (0.27)
+- Pure, tested: `ChatBook` (lines, unread, marks due, delivery, answers), `GroupBook` (list rules, admin changes,
+  leave), `TripCard`/`TripTake`/`TripCardWords`; `FriendInbox.process` reads groups, lines and marks and keeps the
+  boxes without a key yet.
+- `FriendChats` (the chats file, banners and notifications, sending), `FriendStore` (groups in its file and in the vault
+  as `"groups": [{"id","roster","since","out"?}]`, which an older app ignores; fan-out sealing; seen boxes replace
+  their slot in the queue), `TripCards`/`TripTaker` (cards from the planner's trips, taking them).
+- Screens: Friends › Chats (each chat with what's new, New group), a chat (lines, quick replies, trip cards with "Take
+  this trip" / "I’m in" / "Can’t", how far your last line got), a group's page (picture, name, who's in it; the admin
+  adds, removes, renames; anyone leaves), a friend's page gets "Message". "Send to a friend" under Fastest trip's trip,
+  under Plan's options, on a Be there by plan and on the friend's train. The Friends button's badge counts requests and
+  unread lines.
+- Not yet: chats aren't in the vault (a restore brings back the friends and groups, not the lines); no read-mark switch.
