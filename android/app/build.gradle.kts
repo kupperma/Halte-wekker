@@ -32,8 +32,8 @@ android {
         applicationId = "nl.haltewekker.android"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.2.0"
+        versionCode = 3
+        versionName = "0.3.0"
         // phones: ARM only (the map's native library is 11 MB per ABI; x86 is emulators and a few Chromebooks)
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
@@ -103,6 +103,13 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.maplibre)
     implementation(libs.androidx.work)
+    // A3 Friends: Ed25519, X25519, HKDF and ChaCha20-Poly1305 (pure Java: the platform has them only from API 31/33)
+    implementation(libs.bouncycastle)
+    // the friend code's QR: drawn and read with ZXing (no Play services), the camera through CameraX
+    implementation(libs.zxing.core)
+    implementation(libs.camerax.camera2)
+    implementation(libs.camerax.lifecycle)
+    implementation(libs.camerax.view)
 
     testImplementation(libs.junit)
 }
