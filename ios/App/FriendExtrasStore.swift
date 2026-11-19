@@ -82,14 +82,16 @@ final class FriendExtrasStore: NSObject, ObservableObject, CLLocationManagerDele
         publish()
     }
 
+    /// (only what changed, so the screens aren't drawn again at every check)
     private func publish() {
-        settings = saved.settings
-        waits = saved.waits
-        campus = saved.campus
-        buddies = saved.buddies
-        delays = saved.delays
-        myWait = saved.myWait
-        campusShownTo = saved.campusPosted?.to.count ?? 0
+        if settings != saved.settings { settings = saved.settings }
+        if waits != saved.waits { waits = saved.waits }
+        if campus != saved.campus { campus = saved.campus }
+        if buddies != saved.buddies { buddies = saved.buddies }
+        if delays != saved.delays { delays = saved.delays }
+        if myWait != saved.myWait { myWait = saved.myWait }
+        let n: Int = saved.campusPosted?.to.count ?? 0
+        if campusShownTo != n { campusShownTo = n }
     }
 
     private func save() {
@@ -150,8 +152,9 @@ final class FriendExtrasStore: NSObject, ObservableObject, CLLocationManagerDele
         save()
     }
 
-    /// Your position now: the trip's last fix when fresh, else one asked for now (while the app is in front).
-    private func position(maxAge: TimeInterval) -> CLLocation? {
+    /// Your position now: the trip's last fix when fresh, else one asked for (while the app is in front, at most every
+    /// `askEvery`: 15 s for a wait, 5 minutes for "at school" and the buddy).
+    private func position(maxAge: TimeInterval, askEvery: TimeInterval = 300) -> CLLocation? {
         let fresh: (CLLocation?) -> CLLocation? = { l in
             guard let l, -l.timestamp.timeIntervalSinceNow <= maxAge, l.horizontalAccuracy >= 0, l.horizontalAccuracy < 300 else { return nil }
             return l
@@ -160,12 +163,12 @@ final class FriendExtrasStore: NSObject, ObservableObject, CLLocationManagerDele
         let b: CLLocation? = fresh(oneShot)
         if let a, let b { return a.timestamp > b.timestamp ? a : b }
         if let p = a ?? b { return p }
-        askPosition()
+        askPosition(every: askEvery)
         return nil
     }
 
-    private func askPosition() {
-        guard UIApplication.shared.applicationState == .active, Date().timeIntervalSince(lastAsk) > 15 else { return }
+    private func askPosition(every: TimeInterval) {
+        guard UIApplication.shared.applicationState == .active, Date().timeIntervalSince(lastAsk) > every else { return }
         let st = locator.authorizationStatus
         guard st == .authorizedAlways || st == .authorizedWhenInUse else { return }
         lastAsk = Date()
@@ -302,7 +305,7 @@ final class FriendExtrasStore: NSObject, ObservableObject, CLLocationManagerDele
 
     private func waitDue(_ now: Date) {
         guard var w = saved.myWait, let stopPoint = w.stop.point else { return }
-        let fix: CLLocation? = position(maxAge: 90)
+        let fix: CLLocation? = position(maxAge: 90, askEvery: 15)
         let dist: Double? = fix.map { Geo.metres(GeoPoint(lat: $0.coordinate.latitude, lon: $0.coordinate.longitude), stopPoint) }
         guard let phase = WaitRules.phase(dist: dist, started: w.started, rideDep: w.ride?.dep, now: now) else {
             sendWaitOff(w)
