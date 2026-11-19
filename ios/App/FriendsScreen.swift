@@ -769,9 +769,10 @@ struct FriendsSettingsSection: View {
                     }
                 }
             }
+            .settingsAnchor("friends.open")
             .sheet(isPresented: $open) { FriendsScreen() }
             // (0.30.1) a bot to try Friends with
-            if store.hasAccount { TestFriendSettingsRow() }
+            if store.hasAccount { TestFriendSettingsRow().settingsAnchor("friends.test") }
         } footer: {
             Text(store.hasAccount
                  ? "Your friends, chats and groups, requests, your code and your backup code. A test friend is a bot on this phone to try every Friends feature with; it never goes in your backup."

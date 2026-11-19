@@ -395,9 +395,10 @@ struct NewHome: View {
         .sheet(item: $sheet) { s in
             switch s {
             case .settings:
-                SettingsView(tryDemo: {
+                // (0.32.1: topics with a search; the old look keeps `SettingsView`)
+                SettingsHub(tryDemo: {
                     Task { @MainActor in try? await Task.sleep(nanoseconds: 500_000_000); sheet = .demo }
-                }, newLook: true).presentationDetents([.large])
+                }).presentationDetents([.large])
             case .demo: DemoSheetNew().presentationDetents([.large])
             case .weather: OutfitSheetNew().presentationDetents([.medium, .large])
             case .addPlace: PlaceSearchSheet(title: "Add a place") { hit in places.add(name: Fmt.place(hit.name), lat: hit.lat, lon: hit.lon, stopIds: [hit.id]) }

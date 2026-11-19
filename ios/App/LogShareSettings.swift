@@ -20,11 +20,15 @@ struct LogShareSection: View {
     var body: some View {
         Section {
             Toggle(ShareAsk.logsTitle, isOn: share)
+                .settingsAnchor("share.logs")
             Toggle(ShareAsk.fixesTitle, isOn: fixes)
+                .settingsAnchor("share.fixes")
             NavigationLink("What’s sent") { LogShareDetails() }
+                .settingsAnchor("share.what")
             if store.state != nil {
                 Button(store.busy ? "Deleting…" : "Delete what I sent", role: .destructive) { confirmDelete = true }
                     .disabled(store.busy)
+                    .settingsAnchor("share.delete")
                     .confirmationDialog("Delete the ride logs and GPS points this phone sent?", isPresented: $confirmDelete, titleVisibility: .visible) {
                         Button("Delete what I sent", role: .destructive) { Task { await store.deleteSent() } }
                         Button("Cancel", role: .cancel) {}

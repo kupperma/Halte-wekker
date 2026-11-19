@@ -207,6 +207,7 @@ struct FreezeSection: View {
                     copied = true
                 }
                 .foregroundStyle(ink.link)
+                .settingsAnchor("adv.freeze")
                 Button("Clear") { Watchdog.clear(); list = [] }.foregroundStyle(ink.link)
             } header: { Text("When the app froze") } footer: {
                 Text("If the app stops responding for more than a few seconds, it notes what it was doing and where. Time with your phone locked doesn’t count. Send a screenshot, or copy the details, to get it fixed.")
@@ -221,7 +222,9 @@ struct FieldLogSection: View {
     var body: some View {
         Section {
             Toggle("Classic vehicle matching", isOn: $classic)
+                .settingsAnchor("adv.classic")
             NavigationLink("Connection and matching log") { FieldLogScreen() }
+                .settingsAnchor("adv.log")
         } header: { Text("Vehicle matching") } footer: {
             Text("Picks buses and trains the way the app did before version 0.18. Turn it on only if the new way keeps choosing the wrong one, and send the log.")
         }
