@@ -138,7 +138,8 @@ enum SeatMap {
     /// A seat drawn in a coach of `n` windows: its window scaled to `n` when the friend's app drew another number.
     static func drawnWindow(_ s: TravelState.Seat, dir: String?, n: Int = windows) -> Int? {
         guard let v = valid(s) else { return nil }
-        let w: Int = v.of == n ? v.w : max(1, min(n, Int((Double(v.w) / Double(v.of) * Double(n)).rounded(.up))))
+        // (rounded up, in whole numbers)
+        let w: Int = v.of == n ? v.w : max(1, min(n, (v.w * n + v.of - 1) / v.of))
         return drawnWindow(w, of: n, dir: dir)
     }
 

@@ -192,9 +192,9 @@ struct TrainSeatPicker: View {
             if open == nil { open = firstOpen() }
         }
         guard let station else { return }
-        var n: String? = num
-        if n == nil || n?.isEmpty == true { n = await share.number(tripId) }
-        guard let n, !n.isEmpty else { return }
+        var known: String? = num
+        if known == nil || known?.isEmpty == true { known = await share.number(tripId) }
+        guard let n = known, !n.isEmpty else { return }
         size = await NSStore.shared.trainSize(num: n, code: station)
     }
 
