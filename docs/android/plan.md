@@ -3,7 +3,7 @@
 The Android version of Haltewekker, built from the iOS app (`ios/`, SwiftUI) as the reference. It lives in
 `android/` (one Gradle project), with this plan in `docs/android/`. The iOS app and the relay are not changed by it.
 
-Status: **A1 (0.1.0, version code 1), A2 (0.2.0, version code 2) and A3 (0.3.0, version code 3: Friends) built.** A4 is planned below.
+Status: **A1 (0.1.0, version code 1), A2 (0.2.0, version code 2), A3 (0.3.0, version code 3: Friends) and A4 (0.4.0, version code 4: Friends extras and shared ride logs) built.**
 
 ## Architecture
 
@@ -47,7 +47,13 @@ Packages (`android/app/src/main/java/nl/haltewekker/`):
   `FriendTimetable`, `FriendCompare`, `FriendRides` (shared rides, meet halfway, `RequestBudget`); the platform side:
   `FriendRelay` (OkHttp), `FriendSecrets` (Keystore), `FriendStore`, `FriendChats`, `FriendTimetables`,
   `FriendTravelShare`, `FriendWork`, `NSTrains` (NS codes, the train drawing).
-- `ui/friends/` (A3) — the Friends screens, the scanner (CameraX + ZXing), the ride's friends card, the home button.
+- `ui/friends/` (A3) — the Friends screens, the scanner (CameraX + ZXing), the ride's friends card, the home button;
+  (A4) `FriendExtrasUi` (the extras' cards, the live link card, Settings › Help improve Haltewekker).
+- `friends/` (A4) — `FriendExtras` (wait, delay, buddy, campus), `FriendExtrasB` (free together, scores, the board,
+  rides together, `DoorScore`), `LiveLink` (state, keys, AES-GCM lock, rules, words), pure and tested; the platform side:
+  `FriendExtrasStore`, `FriendTogetherStore` (with `ScoreLog`, your own door-to-door trips), `LiveLinkStore`/`LiveRelay`.
+- `logs/` (A4) — `FieldLog` (the ride's `match`/`ride` lines, iOS `FieldFormat` wording), `LogShare` (scrubbing, batches,
+  rules, gzip; pure and tested), `LogShareStore`.
 - `map/` — `LiveMap` (MapLibre in Compose).
 - `ui/` — theme, components, `HomeModel`, `Locator`, `MainActivity` and the screens.
 
@@ -113,6 +119,8 @@ JUnit, run by CI before every build (`./gradlew testReleaseUnitTest`):
 - `WakeRulesTest` — the alarm distance rule, arrival, headphones-only, the backup time, texts, `RideGPS`.
 - `SchoolCatalogTest` — the shared `Schools.json` and its search.
 - (A3) `FriendVectorTest` (every spec test vector), `FriendLogicTest`, `FriendCompareTest`, `FriendLiveInteropTest` (live, opt-in): see "As built A3".
+- (A4) `FriendExtrasVectorTest`, `FriendExtrasTest`, `FriendExtrasBTest`, `FriendLiveTest`, `LogShareTest`,
+  `LiveLinkInteropTest` (live, opt-in): see "As built A4".
 
 ## CI and releases (`.github/workflows/android.yml`)
 
@@ -181,12 +189,130 @@ byte for byte, and its test vectors as JUnit tests before any screen:
 - An `android/` test module mirrors `FriendVectorTests`, `FriendTravelVectorTests`, `FriendChatVectorTests`,
   `FriendTimetableTests`; a phone with each app must read the other's boxes.
 
-### A4 — Friends extras 0.29–0.30 and log sharing (0.4.x)
+### A4 — Friends extras 0.29–0.30 and log sharing (0.4.0, code 4) — built ("As built A4" says how)
 
 - 0.29: "Wait for me", the delay alarm for shared rides, the wake-up buddy, who's on campus.
 - 0.30: free time together, the live link (`/live/<token>#<key>`), the leaderboard with friends, rides together.
 - Log sharing (`LogShare`, `docs/logs-export.md`): the field log and a share sheet, for tuning the matcher from Android
   rides.
+
+## As built A4 (0.4.0, version code 4): Friends extras and shared ride logs
+
+Everything in the spec's "As built (0.29)" and "(0.30)" byte for byte, so the extras work between an Android phone and
+an iPhone through the same live relay, and the relay's live-link page decrypts links made on Android; plus iOS 0.28.1's
+opt-in "Share ride logs" (`docs/logs-export.md`, `ios/App/LogShare*.swift`) with the same scrubbing. The iOS app and the
+relay were not changed.
+
+**Formats.** The five box kinds `wait`, `delay`, `buddy`, `campus` (0.29) and `scores` (0.30) are read and written
+(`KINDS_VERSION` 6, as iOS 0.30, so the mailbox is read once more from the start and the boxes A3 left on the relay are
+read now). Slots and ttls as the spec: `wait` 900 s, `delay` 3 h, `buddy` 36 h, `campus` until − now (60 s – 10 h; off
+3600), `scores` 14 days. A `wait` comes one-to-one or in a group (`g`); the answers `"wait"` / `"next"` are kept with
+their `re` (an A3 phone showed them as text). Every box goes through `FriendStore.queueBox` (one payload, `n` and `t`,
+locked per person, replacing what's waiting in that slot). The vault's `extras` is now typed (`{"campus","buddy","free",
+"scores"}`, the switches only); an iOS vault A3 kept as it came is handed to the extras once.
+
+**Checks (no new loops).** All of it runs inside `FriendStore`'s existing checks (app to the front ≤ every 20 s, 30 s
+while Friends is open, 8 s in a chat, the ride's once-a-minute tick, the WorkManager `friends-refresh` about hourly):
+`FriendExtrasStore.take`/`FriendTogetherStore.take` with each batch, then `due` (a wait on its way, at school, your
+buddy plan, the buddy watch, the delay look at most every 2 minutes, scores at most once a minute, free time). The live
+link and the ride history ride on `RideService`'s network tick (through `FriendTravelShare.tick`) and on a leg, stage or
+vehicle change (2 s debounce). Region events (`AutoStart.onRegion`) tell the extras first: School's region (with
+"at school" on, `AutoRules.withCampus` makes it tell on leaving too; `exitStartsTrip` keeps that exit from starting a
+trip) and leaving home (the buddy's "left").
+
+**Wait for me.** From a trip card you're in whose shared ride leaves within the hour (its first stop and shared ride), a
+friend's page while they wait or change (their stop, no ride), or the ride screen while not on board ("Running late?" →
+pick a friend or a group; the leg's stop and planned ride). Position: the ride's last fix (≤ 90 s, < 300 m), else the
+phone's last known fix (no location is asked for just for this). Friends' waits: "Waiting for you to wait" on Friends
+and on top of the chat, "I’ll wait" / "Take the next one with you" (one planner question, `WaitNext`, a trip card with the
+answer), a banner or a notification for the first box of a wait.
+
+**Delay alarm.** Shared rides by `DelayAlarm.shared` (your trip's rides with friends' `travel` states on that vehicle,
+and trip cards from the last 24 h you're in); lateness from Transitous `/v5/trip` (the parse now reads each stop's
+`scheduledDeparture` and `cancelled`, and a leg's `cancelled`/`tripCancelled`); told once per vehicle (and again at 2+
+minutes more), the next ride all of you can take (≤ 4 planner questions), a `delay` box to the others. Shown as "Rides
+with friends" on Friends and "Delays on your rides" on the ride screen.
+
+**Wake-up buddy.** "Tell Sam if I haven’t left yet" on a friend's page (off by default). Your plan: the school alarm's
+next planned day (leave, its first ride) within 24 h, else your shared timetable and area's way to the next first class
+(Compare's cached question, asked at most once a day); `left` on a trip start, on leaving a home region, or at a check
+> 400 m from Home from an hour before leaving. Watching: `BuddyRules`, once per friend per day, a notification that
+opens their chat.
+
+**On campus.** "Show friends when I'm at school" (Friends › At school, off by default): inside by School's region or the
+last fix (≤ 10 min, 350 m in, 500 m out), posted once per stay to all friends, taken back on leaving, off, or after 10 h.
+"On campus now" on Friends; "At BUas since 09:05" on the friend's page (the school's short name from `Schools.json`).
+
+**Free together today.** `FreeToday` from your timetable (as read for sharing, or read without sending at most every
+30 min) and friends' shared ones; on Friends; the morning note (off by default) once a day 06:00–11:00 as a notification
+(a banner in front).
+
+**Leaderboard with friends.** The Android app has no leaderboard of its own, so `ScoreLog` keeps your door-to-door
+trips (iOS `DoorScore`: started within 2.5 km of Home and ended within 1.5 km of School, or back; ridden from the first
+leg; minutes from starting the ride to the last stop, one decimal, ≥ 5; at most 300). "Share my scores" (off by
+default) sends `ScoresRules.build` by the spec's rules. The board on Friends: This month / All time per route, your own
+row always, "Most rides together this month".
+
+**Rides together.** On the ride's tick, on board (a vehicle known, not waiting or changing) with friends whose `travel`
+state rides that trip, or who are in on a card for it: one record per vehicle per day (Friends/together.json, 400 days,
+1000 at most, friends only). A friend's page: "You rode together 14 times this month" and the last 10.
+
+**Live link.** `LiveKeys` (32 random bytes each, `SecureRandom`), token = b64u(SHA-256("hw-live-token-v1" ‖ secret)[0..16)),
+link `…/live/<token>#<b64u(key)>`, AES-256-GCM from `javax.crypto` (every Android version the app runs on), AAD
+`hw-live-v1\n<token>`, the state's JSON sorted with plain numbers. `LiveLinkStore`: made from the ride screen (also
+without a friends account; the name is your friends name or the one typed last), sent with the share sheet; puts by
+`LiveRules` (55 s, or ≥ 6 s after a change; `until` now + 30 min, never past 4 h), "Arrived" at the last stop (15 min,
+tried again once after 6 s), ended when the ride ends otherwise, on "Stop sharing" or after 4 h (again at the next tick
+or start when the network was away). Lateness: the live arrival against the planned one while riding, the departure's
+delay while waiting or changing. Kept in `files/friends/live.json`.
+
+**Share ride logs** (Settings › Help improve Haltewekker, off by default). Android had no field log: `FieldLog` now keeps
+the ride's lines worded as iOS's `FieldFormat` (`start · hand · bus 305·7821 · its stop 180 m from you · leg 1/3`,
+`detect …`, `wake`, `ring`, `arrive`, `hand pick`, `end`; 200 match / 100 ride lines, `files/fieldlog.json`, written at
+most every 30 s), never coordinates or place names. `LogScrub` (the same patterns and name rules: Home and School by
+their names and the home stops, people and account ids from Friends) on every line; `LogShareRules` (200 KB a time, 2 MB
+a day, an hour apart, a minute after a trip; never during a trip); gzipped (`Deflater` raw + the same gzip member) to
+`/logs/v1/put` with the app field `0.4.0 (4) Android`; a random install id and secret (not the Friends account);
+"What’s sent" shows your newest line as it would go; "Delete what I sent" (`/logs/v1/delete`, then a new id). Uploads
+after a ride ends (3 s later) and when the app comes to the front (at most hourly); not with Data Saver on a metered
+network, not in battery saver.
+
+**Tests** (JUnit; 176 in all, two skipped in CI: the live checks):
+- `FriendVectorTest` now rebuilds all 17 vector payloads byte for byte (the 0.29/0.30 kinds included) and reads the
+  wait's answer as a wait answer.
+- `FriendExtrasVectorTest` — **every 0.29/0.30 vector passes**: the wait, campus, buddy, delay and scores payloads made
+  here from values (not from the parsed bytes) equal the spec's, the signatures equal Node's (deterministic Ed25519), the
+  wait, campus and scores boxes lock byte for byte (ephPub, box) and open to the same values; the wait's answer payload.
+- `FriendExtrasTest` (iOS `FriendExtrasTests`: wait ids, validity, phase, eta, due, words, age, next; the delay's tell,
+  watch, read, next together, shared rides, card riders, words; the buddy's plan, alert, moving, due, words; campus
+  inside, decide, seen, words; the campus region; the inbox reading all four and the answer), `FriendExtrasBTest` (iOS
+  `FriendExtrasBTests`: free together and the note, scores build/valid/due, the board, the scores box from a friend only,
+  riders and the ride history).
+- `FriendLiveTest` — the live-link vector: token `2x1Ot-EFfLIivv_lmStBuw`, the link, the state's exact JSON, the
+  AES-GCM data byte for byte, opening, another token or key refused; the page's words and the posting rules.
+- `LogShareTest` (iOS `LogShareTests`: real lines kept, public stops kept, places/people/ids/coordinates/links/addresses
+  out, one line ≤ 2000, the batch, the line format, the budget, when, the install id, the put's four fields, CRC-32,
+  gzip).
+- `LiveLinkInteropTest` — `HW_LIVE_RELAY=1 ./gradlew testReleaseUnitTest --tests nl.haltewekker.LiveLinkInteropTest`: a
+  throwaway link made by the Android code path (`LiveKeys`, `LiveRules.state`, `LiveCrypto.lock`, `LiveRelay.put`),
+  fetched with `/live/v1/get?t=<token>` as the page does, opened with only the link's token and fragment key, then
+  `/live/v1/end` (the relay then answers 410). Passed from the build container on 2026-11-19.
+
+### Calls made in A4 (the user can correct)
+
+- Defaults as iOS: buddy (nobody), at school, share my scores, the morning note and Share ride logs all off.
+- The delay alarm reads lateness from Transitous `/v5/trip` only (Android has no NS departure board client yet; iOS
+  asks NS first for a numbered train at an NS station).
+- Positions for the extras are the ride's last fix or the phone's last known fix; the app doesn't switch GPS on just for
+  a wait or "at school" (iOS asks for one fix while in front).
+- The leaderboard with friends feeds on a new `ScoreLog` of door-to-door Home↔School trips (Android has no own
+  leaderboard and no corridor routes); its board lives on Friends, not in Settings.
+- Ride logs: Android's own `FieldLog`, with the ride's lines worded as iOS's; its matcher is the simpler A1 rule, so the
+  `detect` lines are fewer and simpler than iOS's. "Low Data Mode" is Android's Data Saver on a metered network; "Low
+  Power Mode" is battery saver. The app field says `… Android` so exports tell the two apps apart.
+- Notifications for the extras go on the existing "Friends" channel (a banner while the app is in front), with
+  `friends-wait-…`, `friends-delay-…`, `friends-buddy-…`, `friends-free` tags.
+- A live link ended at a 4xx other than 410 isn't retried (only a network failure is), so a broken request can't loop.
 
 ## As built A3 (0.3.0, version code 3): Friends
 
