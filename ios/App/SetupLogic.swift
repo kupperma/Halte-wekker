@@ -1,8 +1,8 @@
 import Foundation
 
-/// The first-run setup's steps, in order (0.23).
+/// The first-run setup's steps, in order (0.23; "Help improve Haltewekker" before Done since 0.32).
 enum SetupStep: Int, CaseIterable, Sendable {
-    case welcome, school, home, places, timetable, arrival, done
+    case welcome, school, home, places, timetable, arrival, improve, done
 
     var title: String {
         switch self {
@@ -12,6 +12,7 @@ enum SetupStep: Int, CaseIterable, Sendable {
         case .places: return "Other places"
         case .timetable: return "Your timetable"
         case .arrival: return "Mornings"
+        case .improve: return "Help improve Haltewekker"
         case .done: return "All set"
         }
     }
@@ -86,6 +87,9 @@ struct SetupDraft: Equatable, Sendable {
     var earlyMinutes = 10
     var wakeMinutes = 60
     var wakeOn = false
+    /// Help improve Haltewekker (0.32): both off unless turned on.
+    var shareLogs = false
+    var shareFixes = false
 
     /// A new student's: nothing yet, today's defaults for the times.
     static let empty = SetupDraft()
@@ -237,6 +241,16 @@ enum SetupLogic {
             return "\(names[wds.first! - 1])–\(names[wds.last! - 1]) \(span(w.days[0]))"
         }
         return w.days.map { "\(names[$0.weekday - 1]) \(span($0))" }.joined(separator: " · ")
+    }
+
+    /// The sharing line of the summary (0.32).
+    static func shareWords(_ d: SetupDraft) -> String {
+        switch (d.shareLogs, d.shareFixes) {
+        case (false, false): return "Nothing shared"
+        case (true, false): return "Ride logs"
+        case (false, true): return "GPS points during rides"
+        case (true, true): return "Ride logs and GPS points during rides"
+        }
     }
 
     /// The timetable line of the summary.

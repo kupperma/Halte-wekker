@@ -12,6 +12,9 @@ struct RootView: View {
     @ObservedObject private var profile = ProfileStore.shared
     @ObservedObject private var setup = SetupStore.shared
     @ObservedObject private var friends = FriendStore.shared
+    @ObservedObject private var share = LogShareStore.shared
+    /// The one-time "Help improve Haltewekker" card (0.32).
+    private var askShare: Bool { ShareAsk.showCard(setupDone: profile.profile.setupDone, asked: share.asked, testLive: setup.testLive) }
     /// A new install before its setup (0.23): nothing behind the setup plans for a home and school not chosen yet.
     private var firstRun: Bool { !profile.profile.setupDone && setup.mode == nil }
     /// The first-run setup: a new install's by itself (not over a trip), or opened from Settings.
@@ -88,6 +91,13 @@ struct RootView: View {
             if setup.testLive && trip.phase == .idle && !go.isOpen { TestSetupBanner().transition(.move(edge: .top).combined(with: .opacity)) }
         }
         .animation(DS.quick, value: setup.testLive)
+        // (0.32) once, for someone whose setup was done before it asked: Help improve Haltewekker
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if askShare && trip.phase == .idle && !go.isOpen && !firstRun && setup.mode == nil {
+                ShareAskCard().transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(DS.quick, value: askShare)
         .fullScreenCover(isPresented: Binding(get: { setupShown }, set: { _ in })) {
             let m = setup.mode ?? .firstRun
             SetupFlow(mode: m, draft: setup.draft(for: m))

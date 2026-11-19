@@ -194,12 +194,15 @@ final class SetupLogicTests: XCTestCase {
     }
 
     func test_stepOrderAndWhatsRequired() {
-        XCTAssertEqual(SetupStep.allCases, [.welcome, .school, .home, .places, .timetable, .arrival, .done])
+        XCTAssertEqual(SetupStep.allCases, [.welcome, .school, .home, .places, .timetable, .arrival, .improve, .done])
         XCTAssertEqual(SetupLogic.next(.welcome), .school)
         XCTAssertNil(SetupLogic.next(.done))
         XCTAssertNil(SetupLogic.previous(.welcome))
-        XCTAssertEqual(SetupLogic.counter(.school), "Step 1 of 6")
-        XCTAssertEqual(SetupLogic.counter(.done), "Step 6 of 6")
+        XCTAssertEqual(SetupLogic.counter(.school), "Step 1 of 7")
+        XCTAssertEqual(SetupLogic.counter(.improve), "Step 6 of 7")
+        XCTAssertEqual(SetupLogic.counter(.done), "Step 7 of 7")
+        XCTAssertEqual(SetupLogic.next(.arrival), .improve)
+        XCTAssertTrue(SetupLogic.canContinue(.improve, .empty), "sharing is optional")
         var d = SetupDraft.empty
         XCTAssertFalse(SetupLogic.canContinue(.school, d))
         XCTAssertTrue(SetupLogic.canContinue(.places, d))
@@ -374,7 +377,7 @@ final class SetupBackupTests: XCTestCase {
         XCTAssertTrue(SetupBackup.keys.contains(ProfileLogic.storageKey))
         XCTAssertTrue(SetupBackup.keys.contains(PlacesLogic.storageKey))
         for k in ["boardStops", "boardLines", "school.on", "school.cals", "school.early", "school.wake", "kmMem", "lastMode",
-                  "school.homeLat", "school.homeLon", "ui.homeStyle"] { XCTAssertTrue(SetupBackup.keys.contains(k), k) }
+                  "school.homeLat", "school.homeLon", "ui.homeStyle", "logShare.on", "gpsShare.on", ShareAsk.askedKey] { XCTAssertTrue(SetupBackup.keys.contains(k), k) }
         XCTAssertFalse(SetupBackup.keys.contains(SetupBackup.storageKey))
     }
 }

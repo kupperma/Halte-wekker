@@ -886,6 +886,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     }
 
     private func handle(_ loc: CLLocation) {
+        // (0.32: Help improve Haltewekker › GPS points during rides, only when turned on and a trip runs; it only reads)
+        if LogShareStore.shared.fixesOn { LogShareStore.shared.heard(loc, trip: self) }
         samples.append(loc)
         samples.removeAll { $0.timestamp < Date().addingTimeInterval(-240) }
         if loc.speed >= 0 {

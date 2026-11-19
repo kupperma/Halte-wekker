@@ -53,6 +53,8 @@ final class SetupStore: ObservableObject {
         dr.earlyMinutes = school.earlyMinutes
         dr.wakeMinutes = school.wakeMinutes
         dr.wakeOn = school.on
+        dr.shareLogs = LogShareStore.shared.on
+        dr.shareFixes = LogShareStore.shared.fixesOn
         return dr
     }
 
@@ -98,6 +100,8 @@ final class SetupStore: ObservableObject {
         }
         PlacesStore.shared.replaceAll(SetupLogic.places(dr))
         SchoolAlarm.shared.apply(calendarIds: SetupLogic.calendarIds(dr), early: dr.earlyMinutes, wake: dr.wakeMinutes, on: dr.wakeOn)
+        // (0.32) Help improve Haltewekker: as the step left it (both off unless turned on), and asked
+        LogShareStore.shared.answer(logs: dr.shareLogs, fixes: dr.shareFixes)
         // a new student (and the test of one) lands on Next trip first; Set up again keeps the home you picked
         if m != .again { d.set(HomeStyle.nextTrip.rawValue, forKey: HomeStyle.key) }
         if m == .test {
@@ -132,6 +136,7 @@ final class SetupStore: ObservableObject {
         PlacesStore.shared.reload()
         StopsStore.shared.reload()
         SchoolAlarm.shared.reloadSaved()
+        LogShareStore.shared.reload()
         ProfileStore.shared.rolesSwitched(clearingLearnt: false)
     }
 
