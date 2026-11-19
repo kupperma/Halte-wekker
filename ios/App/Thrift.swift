@@ -247,3 +247,35 @@ enum RideGPS {
         return d > line + (i.wasFar ? 0 : hysteresis)
     }
 }
+
+/// The home's on-board look while you move like a bus or train and it hasn't found the one you're on (0.28): 0.26.2
+/// looks every ~20 s (`OnBoardRules.lookDue`). After `emptyRun` looks in a row that find nothing (a car, a bike, a
+/// train it can't see), it looks every `slowEvery` instead, until you stop moving or start again (or it finds one).
+/// Nothing else changes: the look itself, the trips it shows and a running trip's own matching are as they were.
+enum OnBoardBackoff {
+    static let emptyRun = 6
+    static let slowEvery: TimeInterval = 120
+
+    struct State: Equatable {
+        /// Looks in a row that found nothing.
+        var empty = 0
+        /// When the last look ran.
+        var last: Date?
+    }
+
+    /// One look ran: found one (from scratch) or not (one more in the row).
+    static func looked(_ s: State, found: Bool, at now: Date) -> State {
+        State(empty: found ? 0 : s.empty + 1, last: now)
+    }
+
+    /// You stopped moving, or just started: from scratch.
+    static func reset() -> State { State() }
+
+    /// Backing off: six empty looks in a row and the last under two minutes ago (a clock that stepped back doesn't
+    /// hold it).
+    static func holding(_ s: State, now: Date) -> Bool {
+        guard s.empty >= emptyRun, let last = s.last else { return false }
+        let age = now.timeIntervalSince(last)
+        return age >= 0 && age < slowEvery
+    }
+}

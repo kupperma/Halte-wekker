@@ -292,4 +292,34 @@ final class ThriftTests: XCTestCase {
         d.set(true, forKey: RideGPS.settingKey)
         XCTAssertTrue(RideGPS.enabled(d))
     }
+
+    // MARK: the home's on-board look backs off (0.28)
+
+    /// Six looks in a row that find nothing (in a car, say): then one every two minutes, until you stop or start again.
+    func test_onBoardBackoff() {
+        var s = OnBoardBackoff.State()
+        var t = t0
+        for k in 1...5 {
+            s = OnBoardBackoff.looked(s, found: false, at: t)
+            XCTAssertEqual(s.empty, k)
+            XCTAssertFalse(OnBoardBackoff.holding(s, now: t + 20), "only \(k) empty looks: every 20 s still")
+            t += 20
+        }
+        s = OnBoardBackoff.looked(s, found: false, at: t)
+        XCTAssertEqual(s.empty, 6)
+        XCTAssertTrue(OnBoardBackoff.holding(s, now: t + 20))
+        XCTAssertTrue(OnBoardBackoff.holding(s, now: t + 119))
+        XCTAssertFalse(OnBoardBackoff.holding(s, now: t + 120))          // two minutes on: the next look
+        XCTAssertFalse(OnBoardBackoff.holding(s, now: t - 5))            // the clock stepped back: don't hold
+        // the next empty one keeps it slow
+        s = OnBoardBackoff.looked(s, found: false, at: t + 120)
+        XCTAssertTrue(OnBoardBackoff.holding(s, now: t + 180))
+        // found one: from scratch
+        let found = OnBoardBackoff.looked(s, found: true, at: t + 240)
+        XCTAssertEqual(found.empty, 0)
+        XCTAssertFalse(OnBoardBackoff.holding(found, now: t + 250))
+        // stopped (or started) moving: from scratch
+        XCTAssertEqual(OnBoardBackoff.reset(), OnBoardBackoff.State())
+        XCTAssertFalse(OnBoardBackoff.holding(OnBoardBackoff.reset(), now: t + 250))
+    }
 }

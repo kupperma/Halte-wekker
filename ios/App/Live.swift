@@ -81,6 +81,8 @@ final class LiveStore: ObservableObject {
     private var lastSeen: CLLocation?
     private var plannedFrom: CLLocation?
     private var lastMoving: Date?               // when you last went at bus or train speed
+    /// (0.28) The on-board looks that found nothing, in a row: after six, one every two minutes (`OnBoardBackoff`).
+    private var lookBackoff = OnBoardBackoff.State()
     /// How long ago you last went at bus or train speed (nil: not lately known).
     var vehicleMovedAgo: TimeInterval? { lastMoving.map { Date().timeIntervalSince($0) } }
     /// The bus or train you're on now (you're moving, and its live position is right where you are).
@@ -470,6 +472,13 @@ final class LiveStore: ObservableObject {
         return Array(l.prefix(showEarlier ? 24 : 12))
     }
 
+    /// The on-board look, counted for the back-off (0.28): found one, or one more that found nothing.
+    private func lookOnBoard(_ f: CLLocation, to: Place, history: [Fix]) async -> (OnBoard, [DoorTrip])? {
+        let ob = await Net.within(7, { await Self.onBoardTrips(f, to: to, wasMoving: true, history: { history }) }) ?? nil
+        lookBackoff = OnBoardBackoff.looked(lookBackoff, found: ob != nil, at: Date())
+        return ob
+    }
+
     func refresh(_ dir: Direction, at loc: CLLocation? = nil, force: Bool = false) async {
         scheduleTakesOver()
         let wasMoving = lastMoving.map { Date().timeIntervalSince($0) < 180 } ?? false
@@ -507,9 +516,15 @@ final class LiveStore: ObservableObject {
         // (on board already, it looks again on the minute, not every 300 m; just started moving, it looks now)
         let startedMoving = !wasMoving && (lastMoving.map { Date().timeIntervalSince($0) < 180 } ?? false)
         let movedMetres: Double? = from.flatMap { f in plannedFrom.map { f.distance(from: $0) } }
+        let movingNow: Bool = lastMoving.map { Date().timeIntervalSince($0) < 180 } ?? false
+        // (0.28) stopped moving, or just started: the back-off starts over
+        if startedMoving || !movingNow { lookBackoff = OnBoardBackoff.reset() }
         let moved = OnBoardRules.lookDue(startedMoving: startedMoving, onBoard: onBoard != nil, movedMetres: movedMetres,
                                          sinceLast: updated.map { Date().timeIntervalSince($0) })
         if !force, !moved, loadedFor == key, let u = updated, Date().timeIntervalSince(u) < 60 { return }
+        // (0.28) six looks in a row found nothing while you move: one every two minutes until you stop or start again
+        if !force, loadedFor == key, from != nil, onBoard == nil, movingNow, !Self.rideOn,
+           OnBoardBackoff.holding(lookBackoff, now: Date()) { return }
         busy = true; loadedFor = key; loadedKey = plan; here = from
         // (an older one, for a key it switched away from, ending first mustn't let the same refresh start twice)
         refreshes += 1
@@ -527,7 +542,7 @@ final class LiveStore: ObservableObject {
             let history = fixes.filter { Date().timeIntervalSince($0.t) < 120 }     // (as the trip's: the last 2 minutes)
             // (0.26.1: not while a trip runs, e.g. walking at a change with the home in front: the ride has its own)
             if !Self.rideOn, let m = lastMoving, Date().timeIntervalSince(m) < 180,
-               let ob = await Net.within(7, { await Self.onBoardTrips(f, to: to, wasMoving: true, history: { history }) }) ?? nil {
+               let ob = await lookOnBoard(f, to: to, history: history) {
                 let same = onBoard?.vehicle.tripId == ob.0.vehicle.tripId
                 onBoard = ob.0; trips = ob.1; onTheMove = false
                 onBoardLooks = same ? onBoardLooks + 1 : 1
