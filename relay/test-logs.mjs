@@ -93,8 +93,9 @@ async function local() {
   assert.deepEqual(cleanFix({ t: 1763534038, lat: 51.1, lon: 5.1, spd: -1, crs: -1, extra: "dropped" }), { t: 1763534038, lat: 51.1, lon: 5.1, spd: -1, crs: -1 });
   assert.equal(cleanFix({ t: 1763534038, lat: 91, lon: 5 }), null);
   assert.equal(cleanFix({ t: 12, lat: 51, lon: 5 }), null);
-  assert.equal(cleanFix({ t: 1763534038, lat: 51, lon: 5, veh: "<script>" }), null);
-  assert.equal(cleanFix({ t: 1763534038, lat: 51, lon: 5, leg: "first" }), null);
+  assert.deepEqual(cleanFix({ t: 1763534038, lat: 51, lon: 5, veh: "<script>", leg: "first", ride: 3 }), { t: 1763534038, lat: 51, lon: 5 });
+  assert.deepEqual(cleanFix({ t: 1763534038, lat: 51, lon: 5, veh: "bus ?·1234" }).veh, "bus ?·1234");
+  assert.equal(cleanFix({ t: 1763534038, lat: 51, lon: 5, acc: "x" }), null);
   assert.equal(cleanFix([1, 2]), null);
   const fixes = [fix, { ...fix, t: fix.t + 3, lat: 51.44133 }];
   r = await call("/logs/v1/put", { body: { install, secret, app: "0.32.0 (123)", lines: ["2026-11-19 07:34:01 ride gps"], fixes, tz: 3600 }, gzip: true });
@@ -104,7 +105,15 @@ async function local() {
   r = await call("/logs/v1/put", { body: { install, secret, app: "0.32.0 (123)", lines: [], fixes: [fix] } });
   assert.equal(r.status, 200, r.text);
   assert.equal((await call("/logs/v1/put", { body: { install, secret, app: "a", lines: [], fixes: [] } })).status, 400);
-  assert.equal((await call("/logs/v1/put", { body: { install, secret, app: "a", lines, fixes: [{ t: 1 }] } })).status, 400);
+  assert.equal((await call("/logs/v1/put", { body: { install, secret, app: "a", lines: [], fixes: [{ t: 1 }] } })).status, 400);
+  r = await call("/logs/v1/put", { body: { install, secret, app: "a", lines, fixes: [{ t: 1 }, fix] } });
+  assert.equal(r.json.fixes, 1, "an odd point is left out, the rest kept");
+  // (start again, for the export below: the same 4 uploads as above, without the one with the odd point)
+  assert.equal((await call("/logs/v1/delete", { body: { install, secret } })).json.deleted, 5);
+  for (const body of [{ app: "0.28.1 (117)", lines }, { app: "0.28.1 (117)", lines: ["x 52.123456"] },
+    { app: "0.32.0 (123)", lines: ["2026-11-19 07:34:01 ride gps"], fixes, tz: 3600 }, { app: "0.32.0 (123)", lines: [], fixes: [fix] }]) {
+    assert.equal((await call("/logs/v1/put", { body: { install, secret, ...body }, gzip: true })).status, 200);
+  }
   assert.equal((await call("/logs/v1/put", { body: { install, secret, app: "a", lines, fixes: "no" } })).status, 400);
   assert.equal((await call("/logs/v1/put", { body: { install, secret, app: "a", lines, fixes: [fix], tz: 99999999 } })).status, 400);
   assert.equal((await call("/logs/v1/put", { body: { install, secret, app: "a", lines, fixes: Array(8001).fill({ t: fix.t, lat: 51.1, lon: 5.1 }) }, gzip: true })).status, 400);

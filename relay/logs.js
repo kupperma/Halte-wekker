@@ -40,7 +40,7 @@ const HEX32 = /^[0-9a-f]{32}$/;
 const HEX64 = /^[0-9a-f]{64}$/;
 const APP = /^[0-9A-Za-z .()_-]{1,40}$/;
 const LEG = /^\d{1,2}\/\d{1,2}$/;
-const VEH = /^[\p{L}\p{N} ·.+\/_'()-]{1,40}$/u;
+const VEH = /^[\p{L}\p{N} ·.+\/_'()?-]{1,40}$/u;
 const RIDE = /^[0-9a-f]{8,16}$/;
 
 const enc = new TextEncoder();
@@ -64,20 +64,19 @@ const num = (x, lo, hi) => typeof x === "number" && Number.isFinite(x) && x >= l
 
 /// One GPS point as it's kept: its time (unix seconds, to 0.1 s), where (5 decimals, about a metre), its accuracy (m),
 /// speed (m/s) and course (degrees; -1 when not known, as the phone has them), and the tags that line it up with the log
-/// lines (the leg "1/3", the vehicle "bus 305·7821", the trip's random id). Null: not a point (the whole put is refused).
+/// lines (the leg "1/3", the vehicle "bus 305·7821", the trip's random id; one that doesn't look like that is left off).
+/// Null: not a point (no time, or not a place on earth): it's left out, the rest of the put is kept.
 export function cleanFix(f) {
   if (typeof f !== "object" || f === null || Array.isArray(f)) return null;
   if (!num(f.t, 1.5e9, 4.1e9) || !num(f.lat, -90, 90) || !num(f.lon, -180, 180)) return null;
   const out = { t: round(f.t, 1), lat: round(f.lat, 5), lon: round(f.lon, 5) };
   for (const [k, hi, d] of [["acc", 10000, 0], ["spd", 200, 1], ["crs", 360, 0]]) {
     if (f[k] === undefined || f[k] === null) continue;
-    if (!num(f[k], -1, hi)) return null;
-    out[k] = f[k] < 0 ? -1 : round(f[k], d);
+    if (!num(f[k], -1e9, 1e9)) return null;
+    out[k] = f[k] < 0 ? -1 : round(Math.min(f[k], hi), d);
   }
   for (const [k, re] of [["leg", LEG], ["veh", VEH], ["ride", RIDE]]) {
-    if (f[k] === undefined || f[k] === null) continue;
-    if (typeof f[k] !== "string" || !re.test(f[k])) return null;
-    out[k] = f[k];
+    if (typeof f[k] === "string" && re.test(f[k])) out[k] = f[k];
   }
   return out;
 }
@@ -153,11 +152,11 @@ export async function logs(request, env, url) {
     let fixes = [];
     if (input.fixes !== undefined && input.fixes !== null) {
       if (!Array.isArray(input.fixes) || input.fixes.length > MAX_FIXES) return fail("bad_fixes", 400);
-      fixes = input.fixes.map(cleanFix);
-      if (fixes.some((f) => f === null)) return fail("bad_fixes", 400);
+      // (one odd point is left out, not the whole put: the phone would only send the same again)
+      fixes = input.fixes.map(cleanFix).filter((f) => f !== null);
     }
     // (lines may be empty only when GPS points come)
-    if (lines.length === 0 && fixes.length === 0) return fail("bad_lines", 400);
+    if (lines.length === 0 && fixes.length === 0) return fail(Array.isArray(input.fixes) && input.fixes.length ? "bad_fixes" : "bad_lines", 400);
     const tz = input.tz;
     if (tz !== undefined && tz !== null && !(Number.isInteger(tz) && Math.abs(tz) <= 18 * 3600)) return fail("bad_tz", 400);
     const ip = request.headers.get("CF-Connecting-IP") || "unknown";
