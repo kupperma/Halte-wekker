@@ -6,6 +6,9 @@ struct FriendRelay {
     static let base = NSStore.relay
     let me: FriendIdentity
     let device: String
+    /// The field log's name for these calls ("friends/inbox"); nil: not written there at all (the test friend's own
+    /// calls, 0.30.1, so they're never in a shared log).
+    var label: String? = "friends"
 
     enum Failure: Error, Equatable {
         /// The account moved to another phone (restored there with the backup code).
@@ -33,7 +36,7 @@ struct FriendRelay {
         for (k, v) in headers { req.setValue(v, forHTTPHeaderField: k) }
         let answer: NetAnswer
         do {
-            answer = try await Net.response(req, lane: lane, budget: Self.budget, label: "friends" + String(path.dropFirst(5)))
+            answer = try await Net.response(req, lane: lane, budget: Self.budget, label: label.map { $0 + String(path.dropFirst(5)) })
         } catch {
             throw Failure.offline
         }

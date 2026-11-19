@@ -287,6 +287,8 @@ final class FriendStore: ObservableObject {
         FriendTimetables.shared.forgetAll()
         FriendExtrasStore.shared.forgetAll()
         FriendTogetherStore.shared.forgetAll()
+        // (0.30.1) the test friend goes with your account
+        TestFriendBot.shared.userGone()
         identity = nil
         device = ""
         state = Saved()
@@ -854,6 +856,9 @@ final class FriendStore: ObservableObject {
         let relay = FriendRelay(me: me, device: device)
         do {
             try await flush(relay)
+            // (0.30.1) the test friend's brain, if there is one: it reads what just went and answers, so its answers
+            // come in with this very check
+            await TestFriendBot.shared.check()
             if state.kindsVersion < FriendMessage.kindsVersion {
                 state.cursor = 0
                 state.kindsVersion = FriendMessage.kindsVersion
@@ -891,10 +896,13 @@ final class FriendStore: ObservableObject {
             try await flush(relay)
             let statesDue = why != .chat || (travelChecked.map { now.timeIntervalSince($0) >= 30 } ?? true)
             if statesDue { await travelAfterSync(relay, lane: why == .now ? .urgent : .background) }
-            if state.vaultDirty, let b = book,
-               let plain = try? FriendJSON.encoder.encode(FriendVaultContents(book: b, picture: myPicture, groups: groups.groups.isEmpty ? nil : groups.groups,
-                                                                              timetable: vaultTimetable,
-                                                                              extras: FriendExtrasStore.shared.vaultSettings)) {
+            if state.vaultDirty, let b = book {
+                let gs: [FriendGroup]? = groups.groups.isEmpty ? nil : groups.groups
+                let contents = FriendVaultContents(book: b, picture: myPicture, groups: gs, timetable: vaultTimetable,
+                                                   extras: FriendExtrasStore.shared.vaultSettings)
+                // (0.30.1) never the test friend
+                let kept: FriendVaultContents = TestFriendBot.shared.scrubbed(contents)
+                let plain: Data = try FriendJSON.encoder.encode(kept)
                 let sealed = try FriendVault.seal(plain, me: me)
                 try await relay.vaultPut(sealed)
                 state.vaultDirty = false

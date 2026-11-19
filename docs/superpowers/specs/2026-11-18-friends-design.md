@@ -968,3 +968,98 @@ iOS share sheet.
   Leaderboard gets "You / With friends" (with "Share my scores").
 - Not yet: rides together and friends' scores aren't in the vault; the live link's page is English only and shows the
   viewer's clock; a trip longer than 4 hours ends its link.
+
+## As built (0.30.1)
+
+What 0.30.1 (build 120) adds: a **test friend** (iOS only for now; Android should get the same, built from this text)
+and a sturdier **live link**. Everything in "As built (0.25)" to "(0.30)" holds unchanged: no new box kind, no new
+relay route, `FriendMessage.kindsVersion` stays 6. One relay change, in the live link's page only (`relay/live.js`).
+
+### The live link: why the key went missing
+- Seen: a shared link opened in Safari said "This link is missing its key…" with an "Ended" badge while the trip ran.
+  The page only says that when the part after `#` (the key) didn't reach it: the relay doesn't redirect `/live/<token>`
+  (a redirect would keep the fragment anyway), the app makes the link with its first state already on the relay
+  (`LiveLinkStore.make` puts the state before it hands out the link, so the page says "… is waiting for …" from the
+  first second), and `relay/test-live.mjs` decrypts a state with the page's own script. What lost it was the way it
+  was handed on: 0.30 gave the share sheet the link **as a URL**, which Messages (and others) turn into a link preview
+  made by fetching the page; a fetch never carries the fragment, and the preview can open the address it fetched rather
+  than the one sent. The "Ended" badge was the page's missing-key message wearing the ended look, not the link ending.
+- So (app): "Send the link" hands the share sheet **plain text** (`LiveWords.shareText`: "Follow my trip live:" and the
+  whole link on its own line); "**Copy link**" next to it puts the whole link on the clipboard as text and as a URL; the
+  link carries the key as `#k=<key>` (`LiveCrypto.link`; the vector link is now
+  `https://haltewekker-relay.tsfaw1.workers.dev/live/2x1Ot-EFfLIivv_lmStBuw#k=ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8`);
+  `LiveCrypto.parse` reads `#k=<key>` (among `&`-separated fields) and 0.30's bare `#<key>`.
+- So (page): the key is read from the fragment only (never a query: the relay must never see it) as `#k=<key>` or
+  `#<key>`, %-encoded or not, with anything an app glued on after its 43 characters, standard base64 (`+` `/`) too. A key
+  that decrypted once is kept in that browser's `localStorage` (`hw-live:<token>`) until the link ends (404/410), so
+  the same link opened again without its fragment still works (the page then puts `#k=<key>` back in the address). No
+  key: the headline "This link is missing its key. Ask for the link again (all of it, with the part after the #).", a
+  **"Key missing"** badge (not "Ended") and "Some apps cut a link short. In Haltewekker, “Copy link” gives the whole link
+  to paste."; it asks `/live/v1/get` once and says "This link has ended" if it has.
+
+### The test friend (`TestFriendBrain.swift` pure and tested; `TestFriendBot.swift`; `TestFriendViews.swift`)
+- **What it is**: a bot that is a real second Friends account made on this phone: its own random seed and device id,
+  its own `/f/v1/register`, kept in its own file `Friends/testfriend.json` (the Friends folder: not backed up), apart
+  from your account's Keychain entries. It talks to you only through the live relay with the very boxes a friend's
+  phone sends (0.25–0.30 formats, sealed with its keys, read with `FriendInbox.process` on its own book and groups). Its
+  relay calls go without a field-log label, so they never show in a shared ride log.
+- **When it runs**: only inside your app's own checks (`FriendStore.sync`): right after your waiting boxes went, it
+  sends what it has waiting, reads one page of its mailbox, answers, acks, moves its pretend trip or wait on (at most
+  every 20 s) and sends again, so its answers arrive in that same check. No loop of its own. Each of its controls does
+  one thing and then runs a check at once.
+- **Adding** (Settings › Friends "Add a test friend", or the empty friend list's card): it registers and sends you a
+  `request` (name "Test friend", note "A test friend made on your phone…") with its `picture` (a 256 px JPEG: a test
+  tube on violet to teal, "TEST"); you accept it like anyone's. A request from you it accepts at once. Once friends it
+  says hello, and sends a `timetable` (`TestFriendBrain.timetable`: each weekday of the 14-day window a first class when
+  yours starts that day, else 08:45, Friday 10:30, clamped to 07:30–13:00; then +120 and +270 minutes, 90/90/120
+  minutes long, Wednesday without the third; no weekends; `src: "week"`) and an `area` (the stops near Home and the NS
+  station nearest Home that your own area has, else that station; your school; `early` 10; never an address); both
+  again after 20 h.
+- **What it answers**: every line from you (one-to-one, or in a group from you only): the quick replies ("Running 5 min
+  late" → "No problem, I’ll wait. See you in a bit!", "Save me a seat", "Wait for me", "I’m at the stop", "On the 305" →
+  "Nice, I’ll look out for you on the 305."), hello, a question, else "You said: “…”. Got it, locked end to end.";
+  answers to its wait or cards; a trip card → a `message` answering `in` ("I’m in") and "See you on the IC 3512 at
+  07:41!"; your `wait` → `wait` ("I’ll wait"). It marks your lines read at once (`seen`, got = read = your newest `t`).
+  Added to a group it says hello there once ("Hi everyone! I’m the test friend…").
+- **Its controls** (its page, "Test friend controls"; one tap = one box or one short pretend run):
+  - "Pretend I’m travelling": a real departure within 45 minutes from the rail stop at the NS station nearest Home, else
+    the stop nearest Home (Transitous `/v6/stoptimes`, then `/v5/trip` for its stops from there on, up to 25 minutes of
+    it and 8 stops); without an answer, a Sprinter from that station to the next one 1.5 km or more away. It's squeezed
+    into a minute waiting at the first stop and 10 minutes riding (`TestTripSim`: the stops' real times, else their
+    distances, spread over 600 s; the position between the two stops it's between), sent as `travel` states
+    (`/f/v1/state/put`, ttl 360) at most every 20 s, with coach 3 of 6 from the front on a train; at the end it's taken
+    back (`/f/v1/state/clear`) and it says "Made it to …!". Tap again to stop.
+  - "Ask you to wait for me": a `wait` at the NS station nearest Home (`TestWaitSim`: coming from 650 m, there after
+    5 minutes, `off` after 10), updated at most every 20 s.
+  - "Pretend I’m on campus" / "…left campus": `campus` `{on, school: your school's short name, since: now − 20 min,
+    until: now + 4 h}`, or `{on:false}`.
+  - "Share scores": `scores` (`TestFriendBrain.scores`: your routes' fastest × 1.05 going, × 0.96 home, from an hour ago;
+    without trips of yours "home→school" 46.5 and "school→home" 51.2; rides = your rides with it this month).
+  - "Pretend we rode together": a ride in **your** ride history with it (the history lives on the phone; there's no box
+    for it), from the station nearest Home, and a line about it.
+  - "Wake-up buddy: pretend I haven’t left": `buddy` `{on, day: today, leave: now − 6 min, ride: a Sprinter from the
+    station nearest Home in 4 minutes}`, its pretend trip and wait stopped first. Your phone tells you once a day per
+    friend, and not when its trip or wait came in the hour before that leave (0.29's rules).
+- **Removing** ("Remove test friend" on its page or in Settings): your side removes it (0.25's `drop` + `unfriend`), its
+  chat goes, it sends `gleave` to every group it's in, takes back its state and leaves the relay (`/f/v1/leave`; tried
+  again at the next check if the network was away); then its file goes. Removed any other way, or your own account
+  deleted or moved: it leaves the same way.
+- **Never in your backup**: the vault is written through `TestFriendBrain.scrub` (the bot out of the list, every group's
+  members, the timetable's "off" list and the buddy switch). Its "TEST" tag shows beside its name wherever a friend row
+  does, and on its page.
+- **For Android**: build it the same way: a second identity in its own file, its brain only inside the app's checks,
+  the same replies, timetable, area, scores and pretend runs, kept out of the vault and out of shared logs.
+
+### Tests
+- `ios/Tests/TestFriendTests.swift`: the replies, the trip-card answer, the timetable near yours (Friday 15 January
+  2027: 28 classes in the window, Friday from 10:30, Monday 08:45/10:45/13:15; your Monday 09:30 → its 09:30), scores,
+  the buddy plan (it alerts at once), the pretend trip (times 0/300/600 s, waiting then half way with a coach, over at
+  660 s; by distance without times), the fallback Sprinter, the wait (650 m, 330 m at 150 s, there at 300 s, off at
+  600 s) and the scrubbed vault. `ios/Tests/FriendLiveTests.swift`: the `#k=` link and 0.30's form.
+- `node relay/test-live.mjs [url]`: the page reads `#k=`, bare, %-encoded, glued-on and standard-base64 keys, says "Key
+  missing" (not "Ended") without one, keeps a key that worked and drops it when the link ends.
+
+### App (0.30.1)
+- Settings › Friends: "Add a test friend" / "Remove test friend". Friends: the empty friend list's test friend card; the
+  "TEST" tag; its page's "Test friend controls". The live link card and sheet: "Send the link" (as text) and "Copy link".
+- Not yet: the test friend is iOS only; it answers only while your app checks (no push, as everything else).
