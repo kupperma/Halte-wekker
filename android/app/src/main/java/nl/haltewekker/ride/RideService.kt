@@ -446,7 +446,7 @@ class RideService : Service() {
     override fun onDestroy() {
         scope.cancel()
         try { lm.removeUpdates(listener) } catch (_: Exception) {}
-        if (RideStore.state.value == null) AlarmPlayer.shutdown(this)
+        if (RideStore.state.value == null && nl.haltewekker.school.WakeService.ringing.value == null) AlarmPlayer.shutdown(this)
         super.onDestroy()
     }
 }

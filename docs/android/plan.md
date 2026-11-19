@@ -3,7 +3,7 @@
 The Android version of Haltewekker, built from the iOS app (`ios/`, SwiftUI) as the reference. It lives in
 `android/` (one Gradle project), with this plan in `docs/android/`. The iOS app and the relay are not changed by it.
 
-Status: **A1 (0.1.0, version code 1) built.** A2 to A4 are planned below.
+Status: **A1 (0.1.0, version code 1) and A2 (0.2.0, version code 2) built.** A3 and A4 are planned below.
 
 ## Architecture
 
@@ -19,7 +19,7 @@ Status: **A1 (0.1.0, version code 1) built.** A2 to A4 are planned below.
 | Map | MapLibre Android 11.8 with OpenFreeMap vector tiles (`https://tiles.openfreemap.org/styles/liberty`) | OpenStreetMap-based, no API key, no Google Play services. Vehicles, stops and you are one GeoJSON source drawn by data-driven circle and label layers. osmdroid was the alternative (raster tiles, against OSM's tile policy for apps). |
 | Location | `android.location.LocationManager` (GPS and network providers) | No Google Play services dependency: works on any Android phone, including de-Googled ones. |
 | Storage | SharedPreferences with JSON (`profile/Profile.kt`, `ride/RideState.kt`) | A few small documents; DataStore would add a library for no gain at this size. |
-| Background | Foreground service (type `location`) for rides; AlarmManager for the backup alarm; WorkManager from A2 | See "How each iOS feature maps". |
+| Background | Foreground service (type `location`) for rides and auto-start's look; AlarmManager for the backup alarm and the school alarm (`setAlarmClock`); WorkManager 2.9 for planning the school week; platform proximity alerts for auto-start | See "How each iOS feature maps". |
 
 Packages (`android/app/src/main/java/nl/haltewekker/`):
 
@@ -34,7 +34,12 @@ Packages (`android/app/src/main/java/nl/haltewekker/`):
   `OnBoardBackoff`: the iOS matcher with its numbers.
 - `ride/` — `WakeRules` and `RideGPS` (pure), `RideState`/`RideStore`, `RideService`, `AlarmPlayer`, `AudioRoute`,
   `Notifications`, `AlarmActivity`, `AlarmReceiver`, `OnBoardLook`.
-- `profile/` — `Profile`, `Settings`, `Store`, `SchoolCatalog` (search ported from `SchoolCatalog.swift`).
+- `profile/` — `Profile`, `Settings`, `Store`, `SchoolCatalog` (search ported from `SchoolCatalog.swift`), `SetupBackup`
+  and `SetupLogic` (pure), `TestSetup`.
+- `school/` (A2) — `ManualWeek`, `SchoolHints`, `Timetable`, `SchoolSkip`, `SchoolPlan` (pure); `Calendars`
+  (CalendarContract), `SchoolAlarm` (the store and the plan), `WakeAlarm`, `WakeReceiver`, `WakeService`, `WakeActivity`.
+- `auto/` (A2) — `AutoRules`, `TripResume` (pure); `Regions` (proximity alerts), `RegionReceiver`, `AutoStart`, `ResumeStore`.
+- `work/` (A2) — `Works`, `PlanWorker`, `CalendarWorker`, `BootReceiver`.
 - `map/` — `LiveMap` (MapLibre in Compose).
 - `ui/` — theme, components, `HomeModel`, `Locator`, `MainActivity` and the screens.
 
@@ -58,7 +63,10 @@ colours (set C1): **bus `#E0632E`, intercity `#3B44B0`, sprinter `#0A93B5`**, tr
 | The backup alarm by time | `AlarmManager.setExactAndAllowWhileIdle` (RTC_WAKEUP) at the leg's (live) arrival less the time the wake distance takes (at least 2 min), so it rings when GPS never got you close. `USE_EXACT_ALARM` on Android 13+ (an alarm-clock function), `SCHEDULE_EXACT_ALARM` on 12 (asked in the permissions card), inexact `setAndAllowWhileIdle` as the fallback. |
 | "Sound only with headphones" (0.24.3) | `AudioRoute.privateOutput` (wired, USB, Bluetooth A2DP/SCO/LE, hearing aid). Headphones in: plays as media (Android's alarm stream also comes out of the speaker). None and the setting on: vibrates only, out loud on the alarm stream after 60 s. Setting off: out loud. |
 | Live Activity / Dynamic Island | The foreground service's **ongoing notification**: line and stop, what's left, the arrival (count-down chronometer), the leg's progress bar, "Stop alarm" and "End trip" actions. (Android 16's promoted "Live Updates" style is a later polish.) |
-| Background refresh (BGTask) | WorkManager, from A2 (the school alarm plans the morning's trip). A1 has no background work at all: the home's loops run only while it is in front (`repeatOnLifecycle(STARTED)`), the ride's only during a ride. |
+| Background refresh (BGTask) | WorkManager (A2), only while the school alarm is on: hourly with a network, once more 75 min before the next alarm, and on a calendar change (content-URI trigger). The home's loops still run only while it is in front, the ride's only during a ride. |
+| AlarmKit school alarm (`WakeAlarm`) | `AlarmManager.setAlarmClock` per school day (status-bar alarm icon, rings in Doze), `WakeService` (foreground, `systemExempted` on 14+, else `mediaPlayback`) plays the alarm out loud on the alarm stream, `WakeActivity` over the lock screen with Stop / Open. |
+| EventKit (`EKEventStore`) | `CalendarContract.Instances` with READ_CALENDAR, only the picked calendars. |
+| Region monitoring (`CLCircularRegion`) | `LocationManager.addProximityAlert` (platform, low-power; no Play services), needs location "all the time". |
 | Thrift (0.20.7) | Feeds fetched on demand, at most every 30 s, with ETag; the plan memo; rough GPS on long rides; the map's vehicles move on locally between fetches (no network); nothing when idle. |
 | On-board matching (`VehicleMatch`, `ChooseGPS`, `OnBoardRules`) | Ported with their numbers and tests (below). The ride looks every 15 s while it doesn't know your vehicle, then the live arrival every 60 s. |
 | Fastest trip (`GoNew`) | `PlanScreen`: from where you are (or home) to school, home or a searched place; plans again every 40 s (20 s within 12 minutes of leaving, `GoPace`). |
@@ -136,7 +144,7 @@ release is made once per name).
   intent (14+), battery optimisation (recommended).
 - Settings: wake distances, the alarm switches, real positions, rough GPS on long rides, set up again.
 
-### A2 — school alarm, calendar timetable, setup polish (0.2.x)
+### A2 — school alarm, calendar timetable, setup polish (0.2.0, code 2) — built (as planned below; "As built A2" says how)
 
 - The school alarm (iOS `School.swift`, `Morning.swift`): the first class from the calendar (`CalendarContract`, the
   calendars you pick, `SchoolHints`) or a manual week (`ManualWeek`); WorkManager plans the morning's trip the evening
@@ -171,6 +179,98 @@ byte for byte, and its test vectors as JUnit tests before any screen:
 - Log sharing (`LogShare`, `docs/logs-export.md`): the field log and a share sheet, for tuning the matcher from Android
   rides.
 
+## As built A2 (0.2.0, version code 2)
+
+**School alarm** (iOS `School.swift`, `ManualWeek.swift`, `SchoolHints.swift`, `DayTimeline.swift` `SchoolSkip`).
+
+- Where the first classes come from is the profile's `schedule` (`CALENDARS`, `MANUAL`, `NONE`) with `week`
+  (`ManualWeek`, iOS weekday numbers 1 Sunday … 7 Saturday, start, optional end and title, the same cleaning rules).
+  The school alarm's settings are `SchoolConfig` (`school.v1`: on, calendar ids, at school N min early (0–45, default
+  10), wake N min before leaving (15–150, default 60)); the planned week is `school.week.v1` (`Planned`, with the trip
+  kept so Your day can show it after a restart); skipped days `school.skip`.
+- Calendars: `Calendars.list` and `events` (`Instances`, each repeat apart); the first class of each Amsterdam day,
+  not all-day, not cancelled (status or a title with cancelled/geannuleerd/vervalt), `Timetable.firstClasses`. The
+  calendars that look like a timetable (`SchoolHints`: the timetable apps' names and the school's own short and full
+  names of 4+ letters, in the name and account, else in 60 events' notes and rooms) are marked and picked when none is.
+- `SchoolPlan.plan` is iOS's plan as a pure function: classes in, the week and alarm operations out. Per day: a rung
+  alarm is never touched; a class within 20 minutes is left; due when moved, forced, or 14 min (within 36 h) / 6 h old;
+  Transitous `/v5/plan` from Home to School arriving by "be there" (6 itineraries, 4 transfers); the trip that leaves
+  the latest and arrives within a minute of "be there", fewer changes on a tie; alarm = leave − wake minutes;
+  `SchoolSkip.decide` (skipped: clear; the same minute: keep; else set, only when more than a minute ahead). No answer
+  keeps what it had. Notifications "School alarm tomorrow 07:10" for new alarms and "moved to …" for a move of 5+ min.
+- The alarm: `setAlarmClock` (exact; 12 without the exact-alarm right: `setAndAllowWhileIdle`, said in Settings). On
+  firing `WakeReceiver` checks the day is still on and its alarm still this one (−10…+30 min), then `WakeService`
+  rings out loud (also with headphones in: it's a wake-up at home) with the full-screen `WakeActivity`: the time, "Time
+  to get up", "Leave 07:42 for your 08:30 Design", **Stop** and **Open**. Open stops the alarm *before* opening Your
+  day (the notification's Open goes to the app with `stopWake`, which stops it as it opens; opening the app at all
+  stops a ringing school alarm, as iOS 0.24.6). A volume key stops it. Not stopped after 10 min: quiet, and "Did you get
+  up? Leave by …". Settings has "Test the alarm: it rings in 1 minute" and shows the phone's next alarm clock.
+- Restart, update, clock or time-zone change: `BootReceiver` sets the week's alarms again from what was planned (no
+  network), re-registers the proximity alerts and asks WorkManager for a plan.
+- **Your day** (`DayScreen`, the alarm's Open and the home's school card): the next school day's class and room,
+  ALARM / LEAVE / AT SCHOOL, "Good morning" after the alarm, the trip's legs, "I'm on it" within 90 min of leaving,
+  "Wake me this day" (that day only; back on: set at once from the trip it has, then planned again), the week with a
+  switch per day, Plan again. The morning screen's drawn backgrounds and photos are not ported.
+
+**Auto-start** (iOS `RoleRegions` off the corridor, `RegionLook`, `TripManager.leftRegion`/`autoStartDoor`,
+`TripResume`).
+
+- Regions (`AutoRules.wanted`): School (350 m; exit for auto-start, entry for auto-home) and the home stops, merged
+  within 150 m, at most three (350 m; Home itself without stops). Registered as platform proximity alerts (mutable
+  PendingIntents, one per region) only with fine **and** background location; set again at each app start, Settings,
+  setup Done and boot. Settings › Trips by themselves explains why "all the time" is needed and asks for it.
+- Leaving one (no ride, auto-start on, not within 20 min of a ride ending in that region unless at vehicle speed):
+  `RideService` starts in a *look* mode (foreground, location, notification "Looking for your bus or train" with Stop
+  looking), GPS every 3 s, ten looks 35 s apart with A1's `OnBoardLook` (no planned leg: timetable-only fits only at
+  vehicle speed; the same one twice). Found and not blocked (a trip you ended by hand stays blocked 2 h): the trip to
+  the other place whose ride is that vehicle, planned from the region left (15 min before leaving), else from here;
+  started at that ride, the vehicle known by GPS, "Trip started by itself". Nothing found: GPS off again. If Android
+  refuses the background start (battery limits), a notification asks you to open the app.
+- Reaching School switches the home's next trip to Home, once a day.
+- **Continue your trip**: ending a trip by hand before its last leg stores the leg to go on with (`TripResume.leg`; on
+  Android "at a change" is a later leg without a vehicle yet); the home offers it for 30 min while you move like a
+  vehicle (`movingByTrack` on the home's fixes) or within 1 km of that leg's stop.
+
+**Setup** (iOS `SetupFlow`, `SetupLogic`, `SetupBackup`): Welcome, School, Home, Stops near home, **Your timetable**
+(a calendar on the phone with the picker; a roster link turned into `webcal://` and handed to the calendar app, with
+ICSx⁵ or Google Calendar's "From URL" suggested and the link copied when no app takes it, then the picker; the same
+times every week with a day editor (start, end, title); later), **Mornings** (be there N min early, wake N min before
+leaving, school alarm on/off), Allow the alarms, **All set** (a summary, each line opens its step). Set up again starts
+from what you have. **Test the setup as a new user** (Settings): `SetupBackup` keeps the stored values of the profile,
+the school alarm's settings, week and skipped days, the auto-start's memory and Continue your trip (`setup.backup.v1`,
+written with `commit`), the setup opens empty; Cancel drops it, Done makes the test live (the home and Settings say
+so), "Back to my own" cancels the test's alarms and puts every value back exactly (a key that wasn't there removed),
+then sets your own alarms again; a test that never reached Done is put back at the next launch.
+
+**Ride bar and notifications**: the ride made smaller (iOS 0.26.1 `RideBar`): the ride screen's ↓ goes to the home,
+which shows a bar over the map (line pill, "Bus 305 to Uden", the countdown in min (or the distance), the leg, how the
+wake-up stands); tap opens it full; the alarm always opens it full. Old notifications (iOS `NoticeExpiry`): every
+non-ongoing one is posted with a tag and `setTimeoutAfter` by its kind (arrived 10 min, trip started by itself 10,
+the missed school alarm 90, school alarm news 12 h), and a sweep at each app open and background plan takes off any
+left over.
+
+**Tests** (JUnit, 81 in all): `SchoolTimetableTest` (the week's rules, lessons across summer time, weekday numbers,
+words, JSON with an iOS 0.23 week, first classes, hints), `SchoolPlanTest` (the trip, the alarm, moving, a class gone,
+no answer, rung, skipped, past, due), `AutoRulesTest` (regions, merging, roles, the walk-away rule, blocked trips,
+TripResume), `SetupBackupTest` (round trip, launch step, odd stored values, roster links, notice expiry, ride bar).
+
+### Calls made in A2 (the user can correct)
+
+- The school alarm rings **out loud** (alarm stream), not by the headphones rule: it's a wake-up at home, as iOS
+  AlarmKit's. It rings 10 minutes at most.
+- Home to School is planned from Home itself (iOS uses where you are when within 6 km of Home); no `earlierWays`/`Risk`
+  safer-change pick yet (the latest trip in time wins).
+- Roster links: Android has no built-in webcal subscription; the link goes to whichever app takes `webcal:` (ICSx⁵,
+  some calendar apps), and the app reads the calendar that app makes. Fetching the iCal file in the app itself is a
+  later option.
+- Auto-start uses the platform's proximity alerts (no Play services); "all the time" location is required, and
+  "No battery limits" is recommended so Android lets it start from the background.
+- Auto-start's look runs inside `RideService` (one location foreground service) rather than a separate service.
+- Auto-start and auto-home default on, as iOS, but do nothing until background location is allowed.
+- Not in A2 (moved on): Fastest trip's earlier ways and boarding further along, the "Time to go" notification, R8,
+  Android 16 Live Updates, editing places one by one in Settings (Set up again starts from what you have), the morning
+  screen's pictures.
+
 ## Calls made (the user can correct)
 
 - Package `nl.haltewekker`, application id `nl.haltewekker.android` (debug builds `.debug`, so both can be installed).
@@ -179,7 +279,7 @@ byte for byte, and its test vectors as JUnit tests before any screen:
 - No R8 minification in A1: it can't be checked on a device from CI; it comes with A2's device pass.
 - The backup alarm by time is **on** by default on Android (off on iOS): Android phones differ more in how they treat
   background GPS, and an early alarm is better than none.
-- Rides start by hand ("I'm on it") only; auto-start waits for A2 (it needs background location).
+- A1: rides started by hand ("I'm on it") only; A2 added auto-start (it needs background location).
 - The ride's own matching is the simpler rule above; the full `choose` state machine is not ported yet.
 - Trains on the home map are NS's own positions (labelled with NS's type, SPR or IC), not joined to Transitous trips
   (Transitous's map gives no train numbers); buses and trams are Transitous trips, at their OVapi positions when fresh.

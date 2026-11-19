@@ -5,7 +5,6 @@ import android.content.Context
 import android.content.Intent
 import androidx.core.content.ContextCompat
 import nl.haltewekker.core.Iso
-import kotlin.math.abs
 
 /** A school alarm went off: ring (`WakeService`), unless the day was turned off or its alarm moved meanwhile. */
 class WakeReceiver : BroadcastReceiver() {
@@ -17,7 +16,9 @@ class WakeReceiver : BroadcastReceiver() {
             if (!SchoolAlarm.config.value.on || SchoolAlarm.isSkipped(day)) return
             val p = SchoolAlarm.week.value.firstOrNull { it.day == day } ?: return
             val at = p.alarm ?: return
-            if (abs(at - Iso.now()) > 10 * 60) return            // moved and set again: that one rings
+            val now = Iso.now()
+            // moved and set again (that one rings), or long past (the phone was off): not this one
+            if (now < at - 10 * 60 || now > at + 30 * 60) return
         }
         val i = Intent(context, WakeService::class.java).setAction(WakeService.ACTION_RING).putExtras(intent)
         try { ContextCompat.startForegroundService(context, i) } catch (_: Exception) {
