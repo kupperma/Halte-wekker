@@ -191,6 +191,14 @@ object FriendTogetherStore {
         save(); publish()
     }
 
+    /** (A5) The test friend's "Pretend we rode together": a ride in your history with it (no box: the history lives here). */
+    fun addPretend(r: RideTogether) {
+        val next = RideHistory.add(saved.rides, r, now())
+        if (next == saved.rides) return
+        saved = saved.copy(rides = next)
+        save(); publish()
+    }
+
     fun count(id: String, now: Double = now()) = RideHistory.count(rides.value, id, now)
     fun last(id: String) = RideHistory.last(rides.value, id)
 

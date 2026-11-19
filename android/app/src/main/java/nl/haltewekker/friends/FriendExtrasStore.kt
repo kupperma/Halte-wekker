@@ -363,7 +363,8 @@ object FriendExtrasStore {
         campus.value.filter { CampusRules.here(it.value, now) && FriendStore.book.value?.isFriend(it.key) == true }
             .entries.sortedBy { FriendStore.name(it.key) }.map { OnCampus(it.key, it.value.state) }
 
-    private fun schoolShort(): String? {
+    /** Your school's short name, as campus boxes say it (A5: the Friends map's campus pins and the test friend use it too). */
+    fun schoolShort(): String? {
         val p = app().store.profile.value
         return app().schools.firstOrNull { it.id == p.schoolId }?.short ?: p.school?.name?.takeIf { it.isNotBlank() }
     }

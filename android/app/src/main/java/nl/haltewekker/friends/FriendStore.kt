@@ -116,6 +116,8 @@ object FriendStore {
         FriendTimetables.init(ctx)
         FriendExtrasStore.init(ctx)
         FriendTogetherStore.init(ctx)
+        // (A5) the test friend, when there is one (its own file)
+        TestFriendBot.init(ctx)
         // (A4) an iOS 0.29+ vault's switches restored by A3 were kept as they came: now they're the extras' own
         state.vaultExtras?.let { e ->
             if (FriendExtrasStore.vaultSettings == null) FriendExtrasStore.restore(FriendJson.decode(ExtrasSettings.serializer(), e))
@@ -226,6 +228,8 @@ object FriendStore {
     }
 
     private fun forget(moved: Boolean) {
+        // (A5) the test friend goes with your account
+        TestFriendBot.userGone()
         FriendSecrets.set(ctx, "seed", null)
         FriendSecrets.set(ctx, "device", null)
         file.delete()
@@ -759,6 +763,8 @@ object FriendStore {
         val relay = FriendRelay(me, device)
         try {
             flush(relay)
+            // (A5) the test friend's brain: right after your boxes went, so its answers come back in this same check
+            TestFriendBot.check()
             if (state.kindsVersion < FriendMessage.KINDS_VERSION) state = state.copy(cursor = 0, kindsVersion = FriendMessage.KINDS_VERSION)
             var retry = state.orphans ?: emptyList()
             var orphans = emptyList<RelayBox>()
@@ -793,8 +799,9 @@ object FriendStore {
             val b = book.value
             if (state.vaultDirty && b != null) {
                 val s = FriendTimetables.settings
-                val plain = FriendJson.encode(FriendVaultContents.serializer(), FriendVaultContents(book = b, picture = myPicture.value?.let { B64u.encode(it) },
-                    groups = groups.value.groups.ifEmpty { null }, timetable = if (s == TimetableSettings()) null else s, extras = FriendExtrasStore.vaultSettings))
+                // (A5) never the test friend: it's not in your backup
+                val plain = FriendJson.encode(FriendVaultContents.serializer(), TestFriendBot.scrubbed(FriendVaultContents(book = b, picture = myPicture.value?.let { B64u.encode(it) },
+                    groups = groups.value.groups.ifEmpty { null }, timetable = if (s == TimetableSettings()) null else s, extras = FriendExtrasStore.vaultSettings)))
                 relay.vaultPut(FriendVault.seal(plain, me))
                 state = state.copy(vaultDirty = false)
                 save()
