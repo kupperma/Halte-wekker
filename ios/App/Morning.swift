@@ -1,6 +1,9 @@
 import AppIntents
 import PhotosUI
 import SwiftUI
+#if canImport(AlarmKit)
+import AlarmKit
+#endif
 
 /// One of the drawn backgrounds for the morning screen (in the app's Media folder as morning-<id>.jpg, with a small
 /// morning-<id>-t.jpg for the picker). `light`: a pale picture, so the time is written in ink instead of white.
@@ -201,8 +204,15 @@ final class Morning: ObservableObject {
 struct OpenMorningIntent: LiveActivityIntent {
     static var title: LocalizedStringResource = "Open the morning screen"
     static var openAppWhenRun: Bool = true
-    init() {}
+    /// The alarm that rang: a custom alarm button only runs this intent, so it must stop the alarm itself.
+    @Parameter(title: "Alarm") var alarmID: String
+    init() { alarmID = "" }
+    init(alarmID: String) { self.alarmID = alarmID }
     func perform() async throws -> some IntentResult {
+        #if canImport(AlarmKit)
+        if #available(iOS 26.0, *), let id = UUID(uuidString: alarmID) { try? AlarmManager.shared.stop(id: id) }
+        #endif
+        WakeAlarm.stopRinging()
         await MainActor.run { Morning.shared.showing = true }
         return .result()
     }
