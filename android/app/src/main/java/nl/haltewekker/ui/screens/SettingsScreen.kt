@@ -62,6 +62,8 @@ fun SettingsScreen(onBack: () -> Unit, onSetup: () -> Unit, onTestSetup: () -> U
             Text(if (nl.haltewekker.friends.FriendStore.hasAccount) "Your friends, chats, what they see, your backup code." else "Travel with friends: share trips, chat, compare timetables.",
                 color = DS.t.secondary)
             QuietButton("Open Friends", onClick = onFriends)
+            // (A5, iOS 0.30.1) a test friend: a bot on this phone to try Friends with
+            nl.haltewekker.ui.friends.TestFriendSettingsRow()
         }
         SchoolSettingsCard(onDay, onCalendars, onWeek)
         Card {

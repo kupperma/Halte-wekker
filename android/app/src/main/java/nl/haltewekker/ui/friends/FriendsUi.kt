@@ -22,6 +22,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -59,12 +60,17 @@ fun Avatar(name: String, jpeg: ByteArray?, size: Dp = 40.dp) {
 
 /** One row: picture, name, a line under it, and what goes on the right. */
 @Composable
-fun PersonRow(name: String, jpeg: ByteArray?, detail: String?, onClick: (() -> Unit)? = null, end: @Composable RowScope.() -> Unit = {}) {
+fun PersonRow(name: String, jpeg: ByteArray?, detail: String?, onClick: (() -> Unit)? = null, id: String? = null, end: @Composable RowScope.() -> Unit = {}) {
     Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).let { if (onClick != null) it.clickable(onClick = onClick) else it }.padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         Avatar(name, jpeg)
         Column(Modifier.weight(1f)) {
-            Text(name, color = DS.t.text, fontWeight = FontWeight.SemiBold, maxLines = 1)
+            // (A5) the test friend's "TEST" tag wherever a friend row shows
+            val bot = nl.haltewekker.friends.TestFriendBot.account.collectAsState().value
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(name, color = DS.t.text, fontWeight = FontWeight.SemiBold, maxLines = 1, modifier = Modifier.weight(1f, fill = false))
+                if (id != null && bot == id) TestFriendTag()
+            }
             if (!detail.isNullOrEmpty()) Text(detail, color = DS.t.secondary, style = MaterialTheme.typography.bodySmall, maxLines = 2)
         }
         end()

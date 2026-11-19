@@ -1,37 +1,22 @@
 package nl.haltewekker.ui.friends
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import nl.haltewekker.friends.CoachMap
+import nl.haltewekker.friends.SeatMap
+import nl.haltewekker.friends.TransitLabel
 import nl.haltewekker.friends.FriendStore
 import nl.haltewekker.friends.FriendTravelShare
 import nl.haltewekker.friends.NSCodes
-import nl.haltewekker.friends.NSTrains
-import nl.haltewekker.friends.TrainDrawing
 import nl.haltewekker.friends.TravelState
 import nl.haltewekker.friends.TravelWords
 import nl.haltewekker.ride.RideState
@@ -63,36 +48,21 @@ fun RideFriendsCard(s: RideState) {
             }
         }
         same.forEach { f ->
-            Text("${FriendStore.name(f.from)} is on this ${if (leg.isTrain) "train" else "bus"}" + (f.state.coach?.let { " · ${CoachMap.label(it)}" } ?: ""),
+            Text("${FriendStore.name(f.from)} is on this ${if (leg.isTrain) "train" else "bus"}" + (f.state.coach?.let { " · " + SeatMap.label(it).let { l -> l.take(1).lowercase() + l.drop(1) } } ?: ""),
                 color = DS.t.accentText, fontWeight = FontWeight.SemiBold)
         }
         if (same.isEmpty() && !ask) Text(if (sharing > 0) "Friends you show your trips to see this one." else "Friends on their way show here.",
             color = DS.t.secondary, style = MaterialTheme.typography.bodySmall)
-        if (leg.isTrain) {
-            val num = leg.num
+        if (leg.isTrain && FriendTravelShare.stage(s, System.currentTimeMillis() / 1000.0) == TravelState.Stage.RIDING) {
+            // (A5, iOS 0.31) the seat picker: your coach, and your window in it
             val code = NSCodes.get(context).code(leg.fromId, leg.fromStop)
-            var drawing by remember(num, code) { mutableStateOf<TrainDrawing?>(null) }
-            LaunchedEffect(num, code) { if (num.isNotEmpty() && code != null) drawing = NSTrains.drawing(num, code) }
-            val d = drawing
-            if (d != null) {
-                val spots = CoachMap.spots(d.units, d.cars)
-                Text("Your coach (friends who get on later see where to wait)", color = DS.t.text, style = MaterialTheme.typography.bodySmall)
-                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    spots.forEach { sp ->
-                        val (n, front) = CoachMap.number(sp.drawn, spots.size, d.dir)
-                        val picked = coach?.n == n && coach?.of == spots.size
-                        Box(Modifier.size(40.dp, 32.dp).clip(RoundedCornerShape(8.dp)).background(if (picked) DS.t.accent else DS.t.surface3)
-                            .clickable {
-                                FriendTravelShare.setCoach(context, if (picked) null else TravelState.Coach(n, spots.size, front, if (front) null else code), tripId)
-                            }, contentAlignment = Alignment.Center) {
-                            Text("$n", color = if (picked) Color.White else DS.t.text, fontWeight = FontWeight.SemiBold)
-                        }
-                    }
-                }
-                Text(if (d.dir != null) "Numbered from the front of the train." else "Numbered from the left of NS’s drawing at ${leg.fromStop}.",
-                    color = DS.t.secondary, style = MaterialTheme.typography.bodySmall)
-                coach?.let { Text(CoachMap.label(it), color = DS.t.accentText) }
-            }
+            val mine = if (FriendTravelShare.coachTrip.collectAsState().value == tripId) coach else null
+            Header("Your seat")
+            if (mine != null) Text(SeatMap.label(mine), color = DS.t.text, fontWeight = FontWeight.SemiBold)
+            else Text("Tap your coach, then your window: friends on this trip see it, and friends who get on later know where to wait.",
+                color = DS.t.secondary, style = MaterialTheme.typography.bodySmall)
+            TrainSeatPicker(tripId, leg.num.ifEmpty { null }, code, TransitLabel.train(s.vehicleLine ?: leg.line, leg.name), leg.toStop,
+                same.mapNotNull { f -> f.state.coach?.let { SeatMark(f.from, FriendStore.name(f.from), it) } }, editable = true)
         }
         Text("Last check ${FriendStore.lastChecked.collectAsState().value?.let { TravelWords.clock(it) } ?: "not yet"}.", color = DS.t.secondary,
             style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 2.dp))

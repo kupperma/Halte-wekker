@@ -78,7 +78,7 @@ object FriendTravelShare {
         }
     }
 
-    private fun key(s: RideState) = "${s.index}|${s.vehicleTripId ?: "-"}|${stage(s, now()).name}|${s.phase == Phase.FINISHED}|${coach.value?.n ?: 0}"
+    private fun key(s: RideState) = "${s.index}|${s.vehicleTripId ?: "-"}|${stage(s, now()).name}|${s.phase == Phase.FINISHED}|${coach.value?.n ?: 0}|${coach.value?.seat?.let { "${it.deck}${it.w}" } ?: "-"}"
 
     private fun changed(c: Context) {
         // (0.30) the live link: at once on a new leg, stage or vehicle (it has its own rules)
@@ -148,7 +148,8 @@ object FriendTravelShare {
         FriendStore.launch { FriendStore.clearTravel() }
     }
 
-    private suspend fun number(tripId: String): String? {
+    /** A train's number from its live trip (kept per trip id; the seat picker asks for NS's drawing with it). */
+    suspend fun number(tripId: String): String? {
         numbers[tripId]?.let { return it }
         val n = Transit.trip(tripId, 300.0)?.num?.takeIf { it.isNotEmpty() } ?: return null
         numbers[tripId] = n

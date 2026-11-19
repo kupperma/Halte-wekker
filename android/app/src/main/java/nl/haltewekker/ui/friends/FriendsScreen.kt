@@ -95,6 +95,11 @@ sealed class FriendsRoute {
     data object Scan : FriendsRoute()
     data object Account : FriendsRoute()
     data class Take(val card: TripCard, val chat: String) : FriendsRoute()
+    /** (A5) The Friends sheet's tiles: all chats, the groups, whom to compare with; a page of More (or "+ Add"). */
+    data object Chats : FriendsRoute()
+    data object Groups : FriendsRoute()
+    data object CompareWith : FriendsRoute()
+    data class Page(val kind: String) : FriendsRoute()
 }
 
 @Composable
@@ -130,7 +135,7 @@ fun FriendsScreen(onBack: () -> Unit, canStart: Boolean, onStart: (DoorTrip, Str
     LaunchedEffect(Unit) { lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) { while (true) { FriendStore.sync(FriendStore.Why.SCREEN); delay(30_000) } } }
     when (val r = stack.last()) {
         FriendsRoute.Hub -> FriendsHub(::push, ::pop)
-        is FriendsRoute.Friend -> FriendPage(r.id, ::push, ::pop)
+        is FriendsRoute.Friend -> FriendMapPage(r.id, ::push, ::pop)
         is FriendsRoute.Chat -> ChatScreen(r.key, ::push, ::pop)
         is FriendsRoute.Group -> GroupPage(r.id, ::push, ::pop)
         is FriendsRoute.Compare -> CompareScreen(r.key, ::pop)
@@ -139,6 +144,10 @@ fun FriendsScreen(onBack: () -> Unit, canStart: Boolean, onStart: (DoorTrip, Str
         FriendsRoute.Scan -> ScanScreen(onFound = { FriendStore.opened.value = it; pop() }, onCancel = ::pop)
         FriendsRoute.Account -> AccountScreen(::pop)
         is FriendsRoute.Take -> TakeScreen(r.card, r.chat, canStart, onStart, ::pop)
+        FriendsRoute.Chats -> ChatsPage(::push, ::pop)
+        FriendsRoute.Groups -> GroupsPage(::push, ::pop)
+        FriendsRoute.CompareWith -> CompareWithPage(::push, ::pop)
+        is FriendsRoute.Page -> MorePage(r.kind, ::push, ::pop)
     }
     opened?.let { code -> OpenedCodeDialog(code) { FriendStore.opened.value = null } }
 }
@@ -166,123 +175,19 @@ private fun OpenedCodeDialog(code: OpenedCode, onDone: () -> Unit) {
     }, dismissButton = { if (has && result == null) TextButton(onClick = onDone) { Text("Cancel") } })
 }
 
+/** Friends' first page: with an account (A5) the map and its sheet; without one, making it (or restoring it). */
 @Composable
 private fun FriendsHub(push: (FriendsRoute) -> Unit, back: () -> Unit) {
-    val context = LocalContext.current
     val book by FriendStore.book.collectAsState()
     val moved by FriendStore.movedAway.collectAsState()
-    val pictures by FriendStore.pictures.collectAsState()
-    val travelMap by FriendStore.travel.collectAsState()
-    val paused by FriendStore.travelPaused.collectAsState()
-    val answered by FriendStore.travelAnswered.collectAsState()
-    val ttAnswered by FriendTimetables.answered.collectAsState()
-    val ttOn by FriendTimetables.on.collectAsState()
-    val offline by FriendStore.offline.collectAsState()
-    val syncing by FriendStore.syncing.collectAsState()
-    val checked by FriendStore.lastChecked.collectAsState()
-    val chatBook by FriendChats.book.collectAsState()
-    val groups by FriendStore.groups.collectAsState()
-    var paste by remember { mutableStateOf("") }
-    var wrongLink by remember { mutableStateOf(false) }
-    var now by remember { mutableDoubleStateOf(System.currentTimeMillis() / 1000.0) }
-    LaunchedEffect(Unit) { while (true) { now = System.currentTimeMillis() / 1000.0; delay(15_000) } }
+    if (book != null) { FriendsMapHome(push, back); return }
     FriendsPage {
-        FriendsTop("Friends", back) { if (syncing) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp) }
+        FriendsTop("Friends", back)
         if (moved) Card {
             Note("Your friends account was restored on another phone, so this one was signed out. Restore it here again with your backup code to move it back.")
             QuietButton("OK") { FriendStore.dismissMoved() }
         }
-        val b = book
-        if (b == null) { NoAccount(); return@FriendsPage }
-        // the one-time screens, with the first friend
-        if (b.friends.isNotEmpty() && !answered) ConsentCard()
-        if (b.friends.isNotEmpty() && answered && !ttAnswered) TimetableConsentCard()
-        val travelling = FriendStore.travelling(now).filter { travelMap.containsKey(it.from) }
-        if (travelling.isNotEmpty()) Card {
-            Header("Travelling now", "${travelling.size}")
-            FriendsMap(travelling)
-            travelling.forEach { s -> TravelRow(s, b.friend(s.from)?.name ?: "Friend", pictures[s.from], now) { push(FriendsRoute.Friend(s.from)) } }
-        }
-        if (b.incoming.isNotEmpty()) Card {
-            Header("Want to be friends", "${b.incoming.size}")
-            b.incoming.forEach { r ->
-                PersonRow(r.name, pictures[r.id], "${r.name} isn’t told if you decline.")
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    QuietButton("Accept") { FriendStore.launch { FriendStore.accept(r.id) } }
-                    QuietButton("Decline") { FriendStore.launch { FriendStore.decline(r.id, false) } }
-                    QuietButton("Block") { FriendStore.launch { FriendStore.decline(r.id, true) } }
-                }
-            }
-        }
-        // (A4) the extras: waits, on campus, delays, free together, the live link, the leaderboard, at school
-        ExtrasHubCards(push)
-        // chats
-        Card {
-            val unread = FriendStore.unread.collectAsState().value
-            Header("Chats", if (unread > 0) "$unread new" else null)
-            val recent = FriendChats.recent
-            if (recent.isEmpty()) Text("Write to a friend from their page, or make a group. You can also send a trip from Fastest trip.", color = DS.t.secondary)
-            recent.take(8).forEach { c ->
-                val gid = ChatKey.groupId(c.key)
-                val title = gid?.let { FriendStore.group(it)?.name } ?: b.friend(c.key)?.name ?: "Chat"
-                val last = c.last
-                PersonRow(title, if (gid != null) FriendStore.groupPictures.value[gid] else pictures[c.key],
-                    last?.let { ChatWords.preview(it, FriendStore.myAccount ?: "", FriendStore::name, gid != null) }, { push(FriendsRoute.Chat(c.key)) }) {
-                    Badge(chatBook.unread(c.key, FriendStore.myAccount ?: ""))
-                }
-            }
-            groups.current.filter { g -> recent.none { it.key == ChatKey.group(g.id) } }.forEach { g ->
-                PersonRow(g.name, FriendStore.groupPictures.value[g.id], "${g.roster.members.size} people", { push(FriendsRoute.Chat(ChatKey.group(g.id))) })
-            }
-            if (b.friends.isNotEmpty()) QuietButton("New group") { push(FriendsRoute.NewGroup) }
-        }
-        Card {
-            Header("Your friends", if (b.friends.isEmpty()) null else "${b.friends.size}")
-            if (b.friends.isEmpty()) Text("No friends yet. Show a friend your code, or send them your link.", color = DS.t.secondary)
-            b.sortedFriends.forEach { f ->
-                val t = travelMap[f.id]?.let { TravelWords.summary(it.state) }
-                PersonRow(f.name, pictures[f.id], t ?: if (!f.showsTrips) "Doesn’t see your trips" else null, { push(FriendsRoute.Friend(f.id)) }) {
-                    Badge(chatBook.unread(f.id, FriendStore.myAccount ?: ""))
-                }
-            }
-        }
-        if (b.outgoing.isNotEmpty()) Card {
-            Header("Waiting for an answer")
-            b.outgoing.forEach { r ->
-                PersonRow(r.name, pictures[r.id], "Arrives when ${r.name} opens Haltewekker.") {
-                    TextButton(onClick = { FriendStore.launch { FriendStore.cancel(r.id) } }) { Text("Take back") }
-                }
-            }
-        }
-        Card {
-            Header("Add a friend")
-            Text("Together, show your code and let them scan it. Apart, send your link through any chat app.", color = DS.t.secondary)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                QuietButton("Show my code") { push(FriendsRoute.Code) }
-                QuietButton("Scan a code") { push(FriendsRoute.Scan) }
-                QuietButton("Send my link") { shareLink(context) }
-            }
-            OutlinedTextField(paste, { paste = it; wrongLink = false }, Modifier.fillMaxWidth(), label = { Text("Or paste a friend’s link") }, singleLine = true)
-            if (paste.isNotBlank()) QuietButton("Open the link") {
-                val c = FriendLink.parse(paste)
-                if (c == null) wrongLink = true else { FriendStore.opened.value = OpenedCode(c.first, c.second); paste = "" }
-            }
-            if (wrongLink) Text("That isn’t a Haltewekker friend link.", color = DS.t.warning, style = MaterialTheme.typography.bodySmall)
-        }
-        Card {
-            Header("Your trips")
-            SwitchRow("Show my trips", "While you’re on a bus or train (confirmed on board), friends with it on see where you are and when you arrive. Never at other times.",
-                answered && !paused) { FriendStore.setTravelPaused(!it); if (!answered) FriendStore.answerTravel(it) }
-            SwitchRow("Share my timetable", "Your classes for the next two weeks and where your trips start (stops, station, school; never your address), for Compare.",
-                ttAnswered && ttOn) { FriendTimetables.setOn(it) }
-        }
-        Card {
-            Header("You")
-            PersonRow(b.myName.ifEmpty { "You" }, FriendStore.myPicture.collectAsState().value, "Name, picture, backup code", { push(FriendsRoute.Account) })
-        }
-        val when_ = checked?.let { "Checked ${TravelWords.clock(it)}." } ?: ""
-        Text("$when_ There are no push notifications: requests, messages and friends’ trips come in when Haltewekker is open, on a trip, or at a background check about once an hour." +
-            if (offline) " No connection to the relay right now." else "", color = DS.t.secondary, style = MaterialTheme.typography.bodySmall)
+        NoAccount()
     }
 }
 
@@ -291,28 +196,6 @@ fun shareLink(c: Context) {
     val i = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_SUBJECT, "My Haltewekker friend code")
         .putExtra(Intent.EXTRA_TEXT, "Add me as a friend in Haltewekker: $link")
     c.startActivity(Intent.createChooser(i, "Send my link").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-}
-
-@Composable
-private fun ConsentCard() = Card {
-    Header("Show your trips to friends?")
-    Text("While you’re on a trip and on board, friends see that you’re travelling, on what (bus 305, IC 3512), where you are and when you arrive. " +
-        "Nothing is shared when no trip is running. You can turn it off for everyone or per friend.", color = DS.t.text)
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        QuietButton("Show my trips") { FriendStore.answerTravel(true) }
-        QuietButton("Not now") { FriendStore.answerTravel(false) }
-    }
-}
-
-@Composable
-private fun TimetableConsentCard() = Card {
-    Header("Share your timetable?")
-    Text("Friends see your classes for the next two weeks (times, titles, rooms) and where your trips start: the stops near home, the station and your school, never your address. " +
-        "Then Compare shows the days and rides you can share.", color = DS.t.text)
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        QuietButton("Share it") { FriendTimetables.answer(true) }
-        QuietButton("Not now") { FriendTimetables.answer(false) }
-    }
 }
 
 @Composable
@@ -442,72 +325,4 @@ private fun AccountScreen(back: () -> Unit) {
         text = { Text("This can’t be undone.") },
         confirmButton = { TextButton(onClick = { confirmDelete = false; FriendStore.launch { FriendStore.deleteAccount() }; back() }) { Text("Delete") } },
         dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } })
-}
-
-@Composable
-private fun FriendPage(id: String, push: (FriendsRoute) -> Unit, back: () -> Unit) {
-    val book by FriendStore.book.collectAsState()
-    val pictures by FriendStore.pictures.collectAsState()
-    val travel by FriendStore.travel.collectAsState()
-    val off by FriendTimetables.off.collectAsState()
-    val ttOn by FriendTimetables.on.collectAsState()
-    val ttAnswered by FriendTimetables.answered.collectAsState()
-    var confirm by remember { mutableStateOf(false) }
-    val f = book?.friend(id)
-    if (f == null) { LaunchedEffect(Unit) { back() }; return }
-    val now = System.currentTimeMillis() / 1000.0
-    FriendsPage {
-        FriendsTop(f.name, back)
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Avatar(f.name, pictures[id], 64.dp)
-            Text("Friends since ${nl.haltewekker.friends.TimetableDays.short(nl.haltewekker.friends.TimetableDays.key(f.since))}", color = DS.t.secondary)
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            QuietButton("Message") { push(FriendsRoute.Chat(id)) }
-            QuietButton("Compare timetables") { push(FriendsRoute.Compare(id)) }
-        }
-        travel[id]?.let { s ->
-            Card {
-                Header("Travelling now")
-                FriendsMap(listOf(s))
-                TravelRow(s, f.name, pictures[id], now, null)
-                CoachHint(s)
-                // (0.29) while they wait at a stop or change there: "Wait for me" at their stop
-                if (s.state.stage != nl.haltewekker.friends.TravelState.Stage.RIDING && s.state.from.lat != null)
-                    QuietButton("Wait for me") { FriendExtrasStore.startWait(id, nl.haltewekker.friends.DelayAlarm.spot(s.state.from), null) }
-            }
-        }
-        FriendExtrasOnPage(id, f.name)
-        Card {
-            Header("What ${f.name} sees")
-            Text("Your name and picture, and what you write to them.", color = DS.t.secondary)
-            SwitchRow("Show my trips to ${f.name}", null, f.showsTrips) { FriendStore.setShowTrips(id, it) }
-            SwitchRow("Share my timetable with ${f.name}", if (!ttAnswered || !ttOn) "Off for everyone (Friends › Your trips)" else null, id !in off) { FriendTimetables.setShares(id, it) }
-        }
-        QuietButton("Remove ${f.name}") { confirm = true }
-    }
-    if (confirm) AlertDialog(onDismissRequest = { confirm = false }, title = { Text("Remove ${f.name}?") },
-        text = { Text("Their keys go from this phone and the boxes between you from the relay. ${f.name}’s app forgets you too.") },
-        confirmButton = { TextButton(onClick = { confirm = false; FriendStore.launch { FriendStore.remove(id) }; back() }) { Text("Remove") } },
-        dismissButton = { TextButton(onClick = { confirm = false }) { Text("Cancel") } })
-}
-
-/** Where to wait for a friend's coach, when you take the same train (NS's drawing at your own boarding station). */
-@Composable
-private fun CoachHint(s: FriendTravelSeen) {
-    val context = LocalContext.current
-    val c = s.state.coach ?: return
-    val trip = s.state.trip ?: return
-    var hint by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(trip, c) {
-        val code = FriendTravelShare.boarding(context, trip)
-        val num = s.state.num
-        hint = if (code == null || num == null) null else {
-            val d = NSTrains.drawing(num, code)
-            if (d == null) CoachMap.platformHint(c, emptyList(), 0, emptyList(), null, code)
-            else CoachMap.platformHint(c, d.units, d.cars, d.letters, d.dir, code)
-        }
-    }
-    hint?.let { Note("You’re on this train too: $it", DS.t.accent) }
-    if (hint == null && FriendTravelShare.boarding(context, trip) != null) Note("You’re on this train too: ${CoachMap.label(c)}", DS.t.accent)
 }

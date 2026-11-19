@@ -77,17 +77,24 @@ private fun chatName(key: String): String =
 
 // MARK: Friends (the hub)
 
-/** The extras on Friends: waits, your wait, on campus, delays, free together, the live link, the leaderboard, at school. */
+/** (A5) What's going on now, in the Friends sheet: waits, your wait, on campus, delays, free together, the live link. */
 @Composable
-fun ExtrasHubCards(push: (FriendsRoute) -> Unit) {
+fun ExtrasNowCards() {
     WaitsForYouCard(null)
     YourWaitCard()
     OnCampusCard()
     DelaysCard(null)
     FreeTogetherCard()
-    LiveLinkCard()
-    LeaderboardCard()
-    AtSchoolCard()
+    LiveLinkCard(idleNote = false)
+}
+
+/** (A5) The live link's one line when no trip runs (at the sheet's end). */
+@Composable
+fun LiveLinkIdleNote() {
+    val link by LiveLinkStore.link.collectAsState()
+    val rs = nl.haltewekker.ride.RideStore.state.collectAsState().value
+    if (link == null && !LiveLinkStore.running(rs)) Text("While a trip runs you can share a live link with someone without the app.", color = DS.t.secondary,
+        style = MaterialTheme.typography.bodySmall)
 }
 
 /** "Waiting for you to wait": each friend's wait (in `chat` only, when given), with "I’ll wait" / "Take the next one with you". */
@@ -143,7 +150,7 @@ fun YourWaitCard(chat: String? = null) {
 }
 
 @Composable
-private fun OnCampusCard() {
+fun OnCampusCard() {
     FriendExtrasStore.campus.collectAsState().value
     val now = ticking(60_000)
     val list = FriendExtrasStore.onCampus(now)
@@ -173,7 +180,7 @@ fun DelaysCard(trips: Set<String>?) {
 }
 
 @Composable
-private fun FreeTogetherCard() {
+fun FreeTogetherCard() {
     val slots by FriendTogetherStore.freeToday.collectAsState()
     val now = ticking(60_000)
     val list = slots.filter { it.end > now }
@@ -194,7 +201,7 @@ fun shareLiveLink(c: Context, link: String) {
 
 /** "Share a live link": a web page with your trip's live times, for someone without the app. Works without friends. */
 @Composable
-fun LiveLinkCard(ride: RideState? = null) {
+fun LiveLinkCard(ride: RideState? = null, idleNote: Boolean = true) {
     val context = LocalContext.current
     val link by LiveLinkStore.link.collectAsState()
     val making by LiveLinkStore.making.collectAsState()
@@ -204,7 +211,7 @@ fun LiveLinkCard(ride: RideState? = null) {
     var name by remember { mutableStateOf(LiveLinkStore.defaultName) }
     val l = link
     if (l == null && !LiveLinkStore.running(rs)) {
-        if (ride == null) Text("While a trip runs you can share a live link with someone without the app.", color = DS.t.secondary,
+        if (ride == null && idleNote) Text("While a trip runs you can share a live link with someone without the app.", color = DS.t.secondary,
             style = MaterialTheme.typography.bodySmall)
         return
     }
