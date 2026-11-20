@@ -390,8 +390,11 @@ struct FriendsLeaderboardView: View {
 struct FriendsLeaderboardScreen: View {
     var body: some View {
         ScrollView {
-            FriendsLeaderboardView()
-                .padding(.horizontal, DS.s16).padding(.top, DS.s8).padding(.bottom, DS.s24)
+            VStack(alignment: .leading, spacing: DS.s12) {
+                TodayRankCard()                                  // (0.35)
+                FriendsLeaderboardView()
+            }
+            .padding(.horizontal, DS.s16).padding(.top, DS.s8).padding(.bottom, DS.s24)
         }
         .background(DS.page.ignoresSafeArea())
         .navigationTitle("Leaderboard")

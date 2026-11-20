@@ -82,6 +82,7 @@ final class TestFriendTests: XCTestCase {
                     ScoreTrip(route: "school→home", home: true, mins: 50, at: t(-86400))]
         let near = TestFriendBrain.scores(mine: mine, rides: 0, now: t0)
         XCTAssertEqual(near.best?.map(\.mins), [42, 48])
+        XCTAssertEqual(near.today, [DayTrip(home: false, mins: 52.4, at: t(-3600), plan: 45, line: "305", late: 7)])
     }
 
     func test_buddy() {

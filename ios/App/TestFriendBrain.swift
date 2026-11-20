@@ -130,7 +130,9 @@ enum TestFriendBrain {
             trips = [ScoreTrip(route: "home→school", home: false, mins: 46.5, at: at),
                      ScoreTrip(route: "school→home", home: true, mins: 51.2, at: at)]
         }
-        return ScoresRules.build(trips: trips, rides: rides, now: now)
+        // (0.35) and a trip to school an hour ago, for today's best and worst: 52.4 min, the 305 7 min late
+        let today: [DayTrip] = [DayTrip(home: false, mins: 52.4, at: at, plan: 45, line: "305", late: 7)]
+        return ScoresRules.build(trips: trips, rides: rides, now: now, today: today)
     }
 
     // MARK: the wake-up buddy

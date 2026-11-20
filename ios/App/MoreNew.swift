@@ -84,6 +84,8 @@ struct LeaderboardScreenNew: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: DS.s12) {
+                // (0.35) today's fastest and slowest trip, yours and your friends'
+                TodayRankCard()
                 if friends.hasFriends {
                     Picker("Whose", selection: $withFriends) { Text("You").tag(false); Text("With friends").tag(true) }.pickerStyle(.segmented)
                 }

@@ -120,6 +120,33 @@ final class FriendExtrasBTests: XCTestCase {
         XCTAssertEqual(ScoresShare.valid(ScoresShare(on: false, month: "2027-01", rides: 2)), ScoresShare(on: false))
     }
 
+    // MARK: (0.35) today's trips in the scores box
+
+    /// The body with today's trips, byte for byte (docs: "As built (0.35)"), and an older body still reads.
+    func test_scoresToday() throws {
+        let today = [DayTrip(home: false, mins: 72, at: at(1_799_998_200), plan: 52, line: "305", late: 18)]
+        let body = ScoresShare(on: true, month: "2027-01", today: today)
+        let bytes = String(decoding: try FriendJSON.encoder.encode(body), as: UTF8.self)
+        XCTAssertEqual(bytes, #"{"month":"2027-01","on":true,"today":[{"at":1799998200,"home":false,"late":18,"line":"305","mins":72,"plan":52}]}"#)
+        let back = try FriendJSON.decoder.decode(ScoresShare.self, from: Data(bytes.utf8))
+        XCTAssertEqual(ScoresShare.valid(back).today, today)
+        // 0.30's body (no today) reads, and a phone with no trip today sends none, so 0.30's bytes stay as they were
+        let old = try FriendJSON.decoder.decode(ScoresShare.self, from: Data(#"{"on":true,"month":"2027-01","rides":3}"#.utf8))
+        XCTAssertNil(old.today)
+        XCTAssertNil(ScoresRules.build(trips: myTrips, rides: 14, now: t0).today)
+        XCTAssertEqual(ScoresRules.build(trips: myTrips, rides: 14, now: t0, today: today).today, today)
+        // taken back: nothing of it
+        XCTAssertNil(ScoresShare.valid(ScoresShare(on: false, today: today)).today)
+    }
+
+    /// A new trip today goes out after 5 minutes, not 12 hours.
+    func test_scoresDueSoon() {
+        let sent = TimetableShareRules.Sent(hash: "h1", at: t0, to: ["a"])
+        XCTAssertEqual(ScoresRules.due(last: sent, hash: "h2", friends: ["a"], now: t(240), soon: true), [])
+        XCTAssertEqual(ScoresRules.due(last: sent, hash: "h2", friends: ["a"], now: t(300), soon: true), ["a"])
+        XCTAssertEqual(ScoresRules.due(last: sent, hash: "h2", friends: ["a"], now: t(300)), [])
+    }
+
     func test_scoresDue() {
         let friends = ["b", "a"]
         XCTAssertEqual(ScoresRules.due(last: nil, hash: "h1", friends: friends, now: t0), ["a", "b"])

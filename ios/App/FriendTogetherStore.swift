@@ -23,6 +23,8 @@ final class FriendTogetherStore: ObservableObject {
         var scores: [String: ScoresSeen] = [:]
         var scoresSent: TimetableShareRules.Sent?
         var freeNoteDay: String?
+        /// (0.35) The fingerprint of the `today` list that went out last (a new trip today goes out within minutes).
+        var scoresToday: String?
     }
 
     private var saved = Saved()
@@ -90,7 +92,17 @@ final class FriendTogetherStore: ObservableObject {
 
     /// Yours as friends see it now.
     func myScores(now: Date = Date()) -> ScoresShare {
-        ScoresRules.build(trips: Self.myTrips(), rides: RideHistory.count(saved.rides, now: now), now: now)
+        ScoresRules.build(trips: Self.myTrips(), rides: RideHistory.count(saved.rides, now: now), now: now,
+                          today: DailyRank.today(ScoreBook.shared.trips, now: now, calendar: .current))
+    }
+
+    /// (0.35) Today's trips of you ("me") and of the friends who share their scores, for today's best and worst.
+    func todayPeople(now: Date = Date()) -> [(id: String, trips: [DayTrip])] {
+        var out: [(id: String, trips: [DayTrip])] = [(id: "me", trips: DailyRank.today(ScoreBook.shared.trips, now: now, calendar: .current))]
+        for (id, s) in scores.sorted(by: { $0.key < $1.key }) where store.book?.isFriend(id) == true && s.share.on {
+            if let t = s.share.today, !t.isEmpty { out.append((id: id, trips: t)) }
+        }
+        return out
     }
 
     /// "Share my scores" on: to every friend when it changed (at most every 12 hours) and once a week anyway, to a new
@@ -99,10 +111,14 @@ final class FriendTogetherStore: ObservableObject {
         if settings.scores == true {
             let body: ScoresShare = myScores(now: now)
             let hash: String = ScoresRules.fingerprint(body)
-            let to: [String] = ScoresRules.due(last: saved.scoresSent, hash: hash, friends: friends, now: now)
+            // (0.35) a new trip today goes out within minutes, not after the 12 hours a change waits
+            let todayHash: String? = body.today.map { ScoresRules.fingerprint(ScoresShare(on: true, today: $0)) }
+            let soon: Bool = todayHash != nil && todayHash != saved.scoresToday
+            let to: [String] = ScoresRules.due(last: saved.scoresSent, hash: hash, friends: friends, now: now, soon: soon)
             guard !to.isEmpty else { return }
             store.queueBox(.scores(body), to: to, slot: ScoresRules.slot, ttl: ScoresRules.ttl)
             saved.scoresSent = TimetableShareRules.after(saved.scoresSent, hash: hash, sent: to, everyone: friends, at: now)
+            if to.count == friends.count { saved.scoresToday = todayHash }
         } else if let sent = saved.scoresSent {
             let still: [String] = sent.to.filter { friends.contains($0) }
             if !still.isEmpty {

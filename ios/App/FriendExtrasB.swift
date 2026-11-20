@@ -104,6 +104,9 @@ struct ScoresShare: Codable, Equatable {
     var mbest: [Best]? = nil
     /// Rides together with friends this month (0–1000).
     var rides: Int? = nil
+    /// (0.35) Your trips today (the sender's own day, newest first, 0–12), for today's best and worst (`DailyRank`).
+    /// Absent when there are none; an older app ignores it.
+    var today: [DayTrip]? = nil
 
     static let maxRoutes = 8
     static let routeLength = 40
@@ -123,6 +126,7 @@ struct ScoresShare: Codable, Equatable {
         var v = ScoresShare(on: s.on)
         guard s.on else { return v }
         v.best = clean(s.best)
+        v.today = DayTrip.valid(s.today)
         if let m = s.month, ScoresRules.isMonth(m) {
             v.month = m
             v.mbest = clean(s.mbest)
@@ -167,10 +171,12 @@ enum ScoresRules {
 
     /// Yours: the fastest trip per route ever and this month (to school first, then the fastest), and your rides
     /// together this month.
-    static func build(trips: [ScoreTrip], rides: Int, now: Date) -> ScoresShare {
+    /// (0.35) `today`: your trips today (`DailyRank.today`), sent only when there are some.
+    static func build(trips: [ScoreTrip], rides: Int, now: Date, today: [DayTrip] = []) -> ScoresShare {
         let m: String = month(now)
         let thisMonth: [ScoreTrip] = trips.filter { month($0.at) == m }
-        return ScoresShare(on: true, month: m, best: bests(trips), mbest: bests(thisMonth), rides: max(0, min(1000, rides)))
+        return ScoresShare(on: true, month: m, best: bests(trips), mbest: bests(thisMonth), rides: max(0, min(1000, rides)),
+                           today: today.isEmpty ? nil : DayTrip.valid(today))
     }
 
     static func bests(_ trips: [ScoreTrip]) -> [ScoresShare.Best] {
@@ -196,13 +202,17 @@ enum ScoresRules {
         return TimetableShareRules.fingerprint(d)
     }
 
-    /// Who gets yours now: every friend when it changed and the last went `changedGap` ago, or `refresh` ago whatever;
-    /// else only friends who haven't had it. (0.28's `Sent`.)
-    static func due(last: TimetableShareRules.Sent?, hash: String, friends: [String], now: Date) -> [String] {
+    /// (0.35) A new trip today goes out this soon (else a change waits `changedGap`).
+    static let todayGap: TimeInterval = 5 * 60
+
+    /// Who gets yours now: every friend when it changed and the last went `changedGap` ago (`todayGap` when the change
+    /// is a new trip today: `soon`), or `refresh` ago whatever; else only friends who haven't had it. (0.28's `Sent`.)
+    static func due(last: TimetableShareRules.Sent?, hash: String, friends: [String], now: Date, soon: Bool = false) -> [String] {
         guard !friends.isEmpty else { return [] }
         guard let last else { return friends.sorted() }
         let age: TimeInterval = now.timeIntervalSince(last.at)
-        if age < 0 || age >= refresh || (hash != last.hash && age >= changedGap) { return friends.sorted() }
+        let gap: TimeInterval = soon ? todayGap : changedGap
+        if age < 0 || age >= refresh || (hash != last.hash && age >= gap) { return friends.sorted() }
         let had = Set(last.to)
         return friends.filter { !had.contains($0) }.sorted()
     }

@@ -272,6 +272,8 @@ struct FriendsScreen: View {
             FreeTodayCard()
             LiveLinkCard()
             moreCard(b, friends: friends)
+            // (0.35) today's fastest and slowest trip, when there's one
+            if !friends.isEmpty { TodayRankCard(compact: true) }
             if !friends.isEmpty { FriendsTogetherCard() }
             LiveLinkCard(idleNote: true)
             statusLine
