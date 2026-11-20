@@ -206,10 +206,38 @@ final class ThriftTests: XCTestCase {
 
     private func far(_ m: Double, wasFar: Bool = false, train: Bool = false, speed: Double? = 20, eta: TimeInterval? = 40 * 60,
                      confirmed: Bool = true, asleep: Bool = true, enabled: Bool = true, backstop: Bool = false,
-                     accuracy: Double? = 8, age: TimeInterval? = 3, wake: Double? = nil) -> Bool {
+                     accuracy: Double? = 8, age: TimeInterval? = 3, wake: Double? = nil, steady: Bool = false) -> Bool {
         RideGPS.far(RideGPS.Input(enabled: enabled, asleep: asleep, confirmed: confirmed, metresToStop: m, accuracy: accuracy, fixAge: age,
                                   wakeMetres: wake ?? (train ? 5000 : 2000), isTrain: train, speed: speed, secondsToStop: eta,
-                                  backstop: backstop, wasFar: wasFar))
+                                  backstop: backstop, wasFar: wasFar, steady: steady))
+    }
+
+    /// 0.33: Motion & Fitness says automotive, steadily: the far tier comes on sooner (no kilometre more to switch on,
+    /// 6 minutes at full speed instead of 8), and only then; everything else holds as it was.
+    func test_rideFarSoonerWhenSteadilyInAVehicle() {
+        // a bus: 2 km + 12 km (+1 km to switch on); steady: 2 km + 9 km
+        XCTAssertFalse(far(14_500))
+        XCTAssertTrue(far(14_500, steady: true))
+        XCTAssertTrue(far(11_100, steady: true))
+        XCTAssertFalse(far(10_900, steady: true))
+        XCTAssertEqual(RideGPS.farFrom(wakeMetres: 2000, isTrain: false, speed: 10, steady: true), 11_000, accuracy: 0.1)
+        // still only confirmed, asleep, with the setting, no backstop, not due within 10 minutes, a good fresh fix
+        XCTAssertFalse(far(30_000, confirmed: false, steady: true))
+        XCTAssertFalse(far(30_000, asleep: false, steady: true))
+        XCTAssertFalse(far(30_000, enabled: false, steady: true))
+        XCTAssertFalse(far(30_000, backstop: true, steady: true))
+        XCTAssertFalse(far(30_000, eta: 600, steady: true))
+        XCTAssertFalse(far(30_000, accuracy: 120, steady: true))
+        // and never within 6 minutes at full speed of the wake point
+        for train in [false, true] {
+            var m = 60_000.0, on = true
+            while m > 0 {
+                on = far(m, wasFar: on, train: train, speed: nil, eta: nil, steady: true)
+                if on { XCTAssertGreaterThanOrEqual(m - (train ? 5000 : 2000), (train ? 39 : 25) * 360 - 0.001) }
+                m -= 75
+            }
+            XCTAssertFalse(on)
+        }
     }
 
     func test_rideFarLine() {

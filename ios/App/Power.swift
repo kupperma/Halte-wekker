@@ -30,14 +30,19 @@ enum GPSPolicy {
     ///   - regionLook: you just left one of your stations, and it looks for what you're on
     ///   - rideFar: on a leg, far from its stop with the vehicle confirmed (`RideGPS.far`, 0.20.7): 10 m, every 75 m
     ///   - goCoarse: Fastest trip, standing with long to go (`GoGPS.coarse`, 0.20.7): 100 m, every 50 m
-    /// At a change it stays the best, standing still too: a coarse fix could see the next one you get on (an earlier
-    /// one than listed, a late one without live times) more than one look later.
+    ///   - waitLow: waiting for the one you get on (a leg's first stop, or a change) while Motion & Fitness says you
+    ///     stand or walk about and the fixes agree (`MotionRules.waitLow`, 0.33): 100 m, every 50 m
+    /// At a change it stays the best while standing still without Motion & Fitness: a coarse fix could see the next one
+    /// you get on (an earlier one than listed, a late one without live times) more than one look later. With it, the
+    /// word "automotive" (or a fix that moves) brings the best back at once.
     static func plan(phase: Phase, demo: Bool, going: Bool, lineWatch: Bool, regionLook: Bool,
-                     rideFar: Bool = false, goCoarse: Bool = false) -> Plan {
+                     rideFar: Bool = false, goCoarse: Bool = false, waitLow: Bool = false) -> Plan {
         if demo { return .off }
         switch phase {
-        case .riding: return rideFar ? .ten(75) : .best(25)         // the best near the stop, and whenever in doubt
-        case .transfer: return .best(25)
+        case .riding:
+            if waitLow { return .coarse(50) }
+            return rideFar ? .ten(75) : .best(25)                   // the best near the stop, and whenever in doubt
+        case .transfer: return waitLow ? .coarse(50) : .best(25)
         case .finished: return .off
         case .idle:
             if going { return goCoarse ? .coarse(50) : .best(10) }

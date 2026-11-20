@@ -63,6 +63,18 @@ final class PowerTests: XCTestCase {
         XCTAssertEqual(plan(.idle, going: true, lineWatch: true, regionLook: true), .best(10))
     }
 
+    /// 0.33: waiting for the one you get on (a leg's first stop, or a change) while Motion & Fitness says you stand or
+    /// walk about: the rough GPS, as Fastest trip's while you stand; on a ride it's never that.
+    func test_waitingLowTier() {
+        XCTAssertEqual(GPSPolicy.plan(phase: .riding, demo: false, going: false, lineWatch: false, regionLook: false, waitLow: true), .coarse(50))
+        XCTAssertEqual(GPSPolicy.plan(phase: .transfer, demo: false, going: false, lineWatch: false, regionLook: false, waitLow: true), .coarse(50))
+        XCTAssertTrue(GPSPolicy.plan(phase: .transfer, demo: false, going: false, lineWatch: false, regionLook: false, waitLow: true).background)
+        XCTAssertEqual(GPSPolicy.plan(phase: .riding, demo: false, going: false, lineWatch: false, regionLook: false, waitLow: false), .best(25))
+        XCTAssertEqual(GPSPolicy.plan(phase: .idle, demo: false, going: false, lineWatch: false, regionLook: false, waitLow: true), .off)
+        XCTAssertEqual(GPSPolicy.plan(phase: .finished, demo: false, going: false, lineWatch: false, regionLook: false, waitLow: true), .off)
+        XCTAssertEqual(GPSPolicy.plan(phase: .riding, demo: true, going: false, lineWatch: false, regionLook: false, waitLow: true), .off)
+    }
+
     private func fix(_ dt: TimeInterval, east: Double, speed: Double = 0, accuracy: Double = 10) -> Fix {
         Fix(t: t0 + dt, p: Fx.east(east), accuracy: accuracy, speed: speed, course: 90)
     }

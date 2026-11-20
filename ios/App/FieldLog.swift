@@ -307,7 +307,8 @@ enum FieldFormat {
         "wake · silently (started \(metres(startedMetres)) from its stop\(after.map { ", first fix \(Int(max(0, $0).rounded())) s in" } ?? ""))"
     }
 
-    /// "ring · approach · 1600 m · leg 25 s old · started 1940 m"
+    /// "ring · by distance · 1600 m · leg 25 s old · started 1940 m" (0.33: "by time 3 min (live)", "by time 2 min (speed)",
+    /// "by distance"; "backup"; before 0.33 "approach")
     static func rideRing(_ why: String, metres m: Double?, legAge: TimeInterval, started: Double?) -> String {
         "ring · \(why) · \(metres(m)) · leg \(Int(max(0, legAge).rounded())) s old · started \(metres(started))"
     }

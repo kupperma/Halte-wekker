@@ -43,7 +43,9 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     @Published private(set) var accuracy: Double?
     @Published private(set) var arrival: Date?
     @Published private(set) var next: Ride?
-    @Published private(set) var vehicle: Vehicle?
+    @Published private(set) var vehicle: Vehicle? {
+        didSet { if oldValue?.tripId != vehicle?.tripId { wakeLive = nil; wakeRoute = [] } }   // (another one's times aren't this one's)
+    }
     @Published private(set) var legArrival: Date?
     @Published private(set) var legFrom: Date?          // when this bus or train left (or should have)
     @Published private(set) var legTo: Date?            // when it reaches your stop: live, or from the timetable
@@ -53,6 +55,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
 
     @Published var busKm: Double = UserDefaults.standard.object(forKey: "busKm") as? Double ?? 2 { didSet { UserDefaults.standard.set(busKm, forKey: "busKm") } }
     @Published var trainKm: Double = UserDefaults.standard.object(forKey: "trainKm") as? Double ?? 5 { didSet { UserDefaults.standard.set(trainKm, forKey: "trainKm") } }
+    /// 0.33: Settings › Trips & alarm › "Wake me … before my stop": by time (the default) or by distance.
+    @Published var wake: WakeSettings = WakeSettings.load() { didSet { wake.save() } }
     @Published var ringAtStop: Bool = UserDefaults.standard.object(forKey: "ringAtStop") as? Bool ?? true { didSet { UserDefaults.standard.set(ringAtStop, forKey: "ringAtStop") } }
     @Published var announce: Bool = UserDefaults.standard.object(forKey: "announce") as? Bool ?? true { didSet { UserDefaults.standard.set(announce, forKey: "announce") } }
     @Published var movingStation: Bool = UserDefaults.standard.object(forKey: "movingStation") as? Bool ?? true { didSet { UserDefaults.standard.set(movingStation, forKey: "movingStation") } }
@@ -159,6 +163,15 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     private var gpsWhy: GPSReason?                         // why GPS is on, as the battery log has it
     private var sameOK: (tripId: String, looks: Int)?      // "still the same bus?" looks in a row that passed, for this one
     private nonisolated static let backstopId = "backstop"
+    // 0.33: waking by time (`WakeRule`), and Motion & Fitness (`MotionRules`)
+    private var smoother = SpeedSmoother()                 // your speed, smoothed, for the time to your stop
+    private var lastSpeedFix: Fix?
+    private var wakeLive: (arrival: Date, at: Date)?       // your stop's live arrival by the vehicle's own answer, asked when
+    private var wakeRoute: [GeoPoint] = []                 // the vehicle's road from where you got on to your stop
+    private var motionVehicle = false                      // Motion & Fitness said "automotive" at the last change
+    private var waitLowOn = false                          // the rough GPS while you wait for the one you get on
+    private var detectWake: (id: Int, c: CheckedContinuation<Void, Never>)?
+    private var detectWakeN = 0
     private var idleBest: String?
     private var notSureLogged: [String: Date] = [:]          // the matcher's last "not sure" line in the field log, per place
     private let arriveM = 450.0
@@ -220,6 +233,12 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         return direction == .home ? "Home" : RoleWords.current.toSchoolWord
     }
     func km(for l: Leg) -> Double { kmMem["\(l.mode.rawValue):\(l.to.key)"] ?? (l.mode == .bus ? busKm : trainKm) }
+    /// This leg is by train (the one you're on, else the plan).
+    private var legIsTrain: Bool { vehicle?.isTrain ?? (leg?.mode == .train) }
+    /// The wake distance the far GPS tier and its backstop keep clear of: by time, the time rule's reach (0.33).
+    private var gpsWakeMetres: Double { WakeRule.gpsWakeMetres(wakeMetres: wakeKm * 1000, wake, isTrain: legIsTrain) }
+    /// What the notifications say it rings: "3 min before your stop (or 5 km)", "2 km before your stop".
+    var wakeWords: String { WakeRule.says(wake, isTrain: legIsTrain, wakeMetres: wakeKm * 1000) }
     var here: CLLocationCoordinate2D? { location.location?.coordinate }
     /// Your last GPS fix.
     var lastFix: CLLocation? { samples.last ?? location.location }
@@ -242,6 +261,11 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         let mid = g[g.count / 2]
         func v(_ p: CLLocation, _ q: CLLocation) -> Double { q.distance(from: p) / max(1, q.timestamp.timeIntervalSince(p.timestamp)) }
         return v(a, mid) >= 4 && v(mid, b) >= 4 && v(a, b) >= 5
+    }
+    /// `movedRecently`, with Motion & Fitness's word (0.33): "automotive" is moving like a bus or train at once;
+    /// walking quickly, running or cycling (at your own speeds) isn't. Without it: `movedRecently`.
+    var movingLikeVehicle: Bool {
+        MotionRules.movingLikeVehicle(byFixes: movedRecently, motion: Motion.shared.now(), speed: currentSpeed)
     }
     /// The Fastest trip screen is open: it needs GPS (also locked) to plan from where you are and notice when you get on.
     private(set) var going = false
@@ -303,6 +327,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         DispatchQueue.main.async { [weak self] in self?.updateKeepAlive() }
         music.onChange = { [weak self] in self?.pushActivity(force: true) }
         LineWatchStore.shared.onChange = { [weak self] in self?.updateKeepAlive() }
+        Motion.shared.listen("trip") { [weak self] in self?.motionChanged() }
         GoStore.shared.trip = self
         SchoolAlarm.shared.trip = self
         NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
@@ -415,6 +440,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         legClosest = nil; awayLooked = false
         transferAnchor = nil; changeSince = nil; finishedAt = nil; finishTask?.cancel(); finishTask = nil
         backstopHit = false; sameOK = nil
+        smoother = SpeedSmoother(); lastSpeedFix = nil; wakeLive = nil; wakeRoute = []
+        Motion.shared.live(!demo, for: "trip")
         applyGPS(restart: true)                           // the best GPS, also locked (far from the stop: `RideGPS`)
         // A leg that starts inside its wake distance (a short one, or one started near its stop): awake from the start,
         // without the alarm, whenever its first fix comes; the announcement comes at the stop. (Without a fix that says
@@ -632,6 +659,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         cands = []; choosing = []; candSince = nil; candLead = nil; candSwitch = SwitchState(); candMisses = [:]; candTimedOut = nil; candGPS = GPSChoice()
         legFrom = nil; legTo = nil; maxDistance = nil
         handLock = nil; stillOnAsk = nil; pickAgain = false; headsignOf = [:]
+        smoother = SpeedSmoother(); lastSpeedFix = nil; wakeLive = nil; wakeRoute = []; waitLowOn = false
+        Motion.shared.live(false, for: "trip")
         let a = activity, e = endedActivity; activity = nil; endedActivity = nil
         Task {
             await a?.end(nil, dismissalPolicy: .immediate)
@@ -663,8 +692,14 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     /// `restart`: start it again even when nothing changed (a fresh fix as a leg begins).
     private func applyGPS(restart: Bool = false) {
         let far = rideFarNow()
+        let low = waitLowNow()
         let p = GPSPolicy.plan(phase: gpsPhase, demo: demo, going: going, lineWatch: !LineWatchStore.shared.watches.isEmpty,
-                               regionLook: watchLeft != nil, rideFar: far, goCoarse: goCoarseNow())
+                               regionLook: watchLeft != nil, rideFar: far, goCoarse: goCoarseNow(), waitLow: low)
+        if low != waitLowOn {
+            waitLowOn = low
+            rideLog(low ? "gps · waiting, standing or walking about (motion): 100 m, every 50 m"
+                        : "gps · the best again (\(motionWords))", once: "waitLow|\(low)", every: 60)
+        }
         if far != rideFarOn {
             rideFarOn = far
             rideLog(far ? "gps · far from the stop, the vehicle confirmed: 10 m, every 75 m"
@@ -737,11 +772,68 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         let f = lastFix
         let input = RideGPS.Input(enabled: RideGPS.enabled(), asleep: phase == .sleeping, confirmed: rideConfirmed,
                                   metresToStop: metresToLegStop, accuracy: f?.horizontalAccuracy,
-                                  fixAge: f.map { -$0.timestamp.timeIntervalSinceNow }, wakeMetres: wakeKm * 1000,
+                                  fixAge: f.map { -$0.timestamp.timeIntervalSinceNow }, wakeMetres: gpsWakeMetres,
                                   isTrain: vehicle?.isTrain ?? (l.mode == .train), speed: currentSpeed,
                                   secondsToStop: (legArrival ?? legTo).map { $0.timeIntervalSinceNow },
-                                  backstop: backstopHit, wasFar: rideFarOn)
+                                  backstop: backstopHit, wasFar: rideFarOn,
+                                  steady: MotionRules.steadyVehicle(Motion.shared.now(), now: Date()))
         return RideGPS.far(input)
+    }
+
+    /// The rough GPS while you wait for the one you get on (`MotionRules.waitLow`, 0.33): at a leg's first stop with
+    /// nothing found yet, or at a change; Motion & Fitness says you stand or walk about, and your fixes don't move.
+    private func waitLowNow() -> Bool {
+        guard !demo, Motion.shared.usable else { return false }
+        let fixesMove = movedRecently || RideGuards.movingNow(recentFixes, now: Date())
+        if phase == .transfer, let n = legs[safe: index + 1], let f = lastFix {
+            let d = f.distance(from: CLLocation(latitude: n.to.coordinate.latitude, longitude: n.to.coordinate.longitude))
+            return MotionRules.waitLow(waiting: true, motion: Motion.shared.now(), movingByFixes: fixesMove, metresToStop: d,
+                                       wakeMetres: WakeRule.gpsWakeMetres(wakeMetres: km(for: n) * 1000, wake, isTrain: n.mode == .train))
+        }
+        return MotionRules.waitLow(waiting: waitingToBoard && detectTask != nil, motion: Motion.shared.now(), movingByFixes: fixesMove,
+                                   metresToStop: metresToLegStop, wakeMetres: gpsWakeMetres)
+    }
+
+    /// "motion: walking (high)", for the ride log.
+    private var motionWords: String {
+        guard let m = Motion.shared.now() else { return Motion.shared.on ? "motion: nothing yet" : "motion off" }
+        return "motion: \(m.kind.rawValue) (\(m.confidence))"
+    }
+
+    /// Motion & Fitness said something new (0.33): during a trip, a line in the ride log; "automotive" while you wait
+    /// for the one you get on (at its stop, or at a change) looks for it at once; and the GPS as it should be now.
+    private func motionChanged() {
+        guard phase != .idle, !demo else { return }
+        let m = Motion.shared.now()
+        let v = MotionRules.inVehicle(m)
+        defer { motionVehicle = v }
+        if let m { rideLog("motion · \(m.kind.rawValue) (\(m.confidence))", once: "motion|\(m.kind.rawValue)", every: 120) }
+        if v, !motionVehicle, detectTask != nil, waitingToBoard || phase == .transfer {
+            rideLog("motion · automotive: looking for the one you're on now", once: "motionKick", every: 30)
+            wakeDetect()
+        }
+        applyGPS()
+    }
+
+    /// The detect loop's wait between looks: `seconds`, or less once `wakeDetect` says to look now.
+    private func detectPause(_ seconds: TimeInterval) async {
+        detectWakeN += 1
+        let id = detectWakeN
+        await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+            if let old = detectWake { old.c.resume() }
+            detectWake = (id, c)
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: UInt64(max(0, seconds) * 1_000_000_000))
+                self?.wakeDetect(id)
+            }
+        }
+    }
+
+    /// The detect loop looks now (nil), or the pause `id` is over.
+    private func wakeDetect(_ id: Int? = nil) {
+        guard let w = detectWake, id == nil || w.id == id else { return }
+        detectWake = nil
+        w.c.resume()
     }
 
     /// Fastest trip's rough GPS now: you leave more than 12 minutes from now, standing (`GoGPS`).
@@ -757,13 +849,13 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     /// The backstop for the far tier: a region around this leg's stop (its wake distance and 4 km more) while the far tier
     /// is on, so it's the best GPS again well before the wake point even if the fixes say otherwise. Needs "Always".
     private func updateBackstop(_ far: Bool) {
-        let key: String? = far ? leg.map { "\(index)|\($0.to.key)|\(Int(wakeKm * 1000))" } : nil
+        let key: String? = far ? leg.map { "\(index)|\($0.to.key)|\(Int(gpsWakeMetres))" } : nil
         guard key != backstopKey else { return }
         for r in location.monitoredRegions where r.identifier == Self.backstopId { location.stopMonitoring(for: r) }
         backstopKey = nil
         guard let key, let l = leg, location.authorizationStatus == .authorizedAlways,
               CLLocationManager.isMonitoringAvailable(for: CLCircularRegion.self) else { return }
-        let radius = min(RideGPS.backstopRadius(wakeMetres: wakeKm * 1000), location.maximumRegionMonitoringDistance)
+        let radius = min(RideGPS.backstopRadius(wakeMetres: gpsWakeMetres), location.maximumRegionMonitoringDistance)
         let r = CLCircularRegion(center: l.to.coordinate, radius: radius, identifier: Self.backstopId)
         r.notifyOnEntry = true
         r.notifyOnExit = false
@@ -941,11 +1033,14 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         accuracy = loc.horizontalAccuracy
         let good = loc.horizontalAccuracy >= 0 && loc.horizontalAccuracy < 250
         if good, legStartMetres == nil { legStartMetres = d }
-        if phase == .sleeping && good && d <= wakeKm * 1000 {
+        noteSpeed(loc)
+        // The distance rule as it always was; by time (0.33) also the time rule, whichever comes first (`WakeRule`).
+        // Within 20 s of the leg's start either one wakes it silently, as a leg that starts inside its wake distance.
+        if phase == .sleeping && good, let fire = wakeFire(loc, metres: d) {
             if Date().timeIntervalSince(legStart) < 20 {
                 phase = .awake; forceArrival = true
                 rideLog(FieldFormat.rideWake(startedMetres: d, after: Date().timeIntervalSince(legStart)))
-            } else { ring(approach: true) }
+            } else { ring(approach: true, why: WakeRule.log(fire), fire: fire) }
         } else if phase == .awake && d <= arriveM && loc.horizontalAccuracy <= 600 {
             if ringAtStop || forceArrival { arrive() } else { legDone(why: "by GPS, quietly") }
         }
@@ -953,6 +1048,43 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         if tick { refreshEta(force: false) }
         pushActivity(force: false)
         if tick, now.timeIntervalSince(lastWatchCheck) >= 59 { lastWatchCheck = now; Task { await WatchStore.shared.check() } }
+    }
+
+    /// Your speed for the time rule, from a good fix (`SpeedSmoother`).
+    private func noteSpeed(_ loc: CLLocation) {
+        guard loc.horizontalAccuracy >= 0, loc.horizontalAccuracy < 100 else { return }
+        let f = Fix(loc)
+        if let v = SpeedSmoother.reading(f, previous: lastSpeedFix) { smoother.add(v, at: f.t) }
+        lastSpeedFix = f
+    }
+
+    /// What rings this leg now, from a good fix `metres` from its stop (`WakeRule.decide`; nil: nothing yet).
+    private func wakeFire(_ loc: CLLocation, metres d: Double) -> WakeRule.Fire? {
+        let train = legIsTrain
+        let w = wakeKm * 1000
+        // (further than the time rule ever rings from: only the distance rule could, and it doesn't)
+        if d > w, wake.by == .distance || d > WakeRule.reach(isTrain: train, minutes: wake.minutes(isTrain: train)) { return nil }
+        let now = Date()
+        let input = WakeRule.Input(by: wake.by, minutes: wake.minutes(isTrain: train), isTrain: train, metres: d,
+                                   routeMetres: RouteLeft.metres(from: GeoPoint(loc.coordinate), along: wakeRoute), wakeMetres: w,
+                                   liveArrival: wakeLive?.arrival, liveAge: wakeLive.map { now.timeIntervalSince($0.at) },
+                                   speed: smoother.speed(now: loc.timestamp), fromStartMetres: startDistance, now: now)
+        return WakeRule.decide(input)
+    }
+
+    /// The vehicle's own answer (asked `at`): your stop's live arrival for the time rule, and its road from where you got
+    /// on to your stop for the distance left along it. Not live (timetable only): no arrival, the road still counts.
+    private func noteWakeTrip(_ t: LiveTrip, at: Date) {
+        guard let l = leg, t.stops.count >= 2 else { return }
+        func d(_ i: Int, _ c: CLLocationCoordinate2D) -> Double { Geo.metres(GeoPoint(t.stops[i].coordinate), GeoPoint(c)) }
+        guard let mine = t.stops.indices.min(by: { d($0, l.to.coordinate) < d($1, l.to.coordinate) }), d(mine, l.to.coordinate) < 1500 else {
+            wakeLive = nil; wakeRoute = []
+            return
+        }
+        let before = t.stops.indices.filter { $0 < mine }
+        let board = before.min(by: { d($0, l.from.coordinate) < d($1, l.from.coordinate) }).flatMap { d($0, l.from.coordinate) < 1500 ? $0 : nil } ?? 0
+        wakeRoute = t.road(from: t.metres(ofStop: board), to: t.metres(ofStop: mine)).map { GeoPoint($0) }
+        wakeLive = t.live ? t.arrival(mine).map { (arrival: $0, at: at) } : nil
     }
 
     // MARK: alarm + announcement
@@ -981,14 +1113,16 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
                         : "Arriving at \(place). This is your stop. Please leave the \(veh) here."
     }
 
-    private func ring(approach: Bool, why: String = "approach") {
+    private func ring(approach: Bool, why: String = "approach", fire: WakeRule.Fire? = nil) {
         let inUse = quietWhenInUse && phoneInUse() && !demo
         rideLog(FieldFormat.rideRing(why + (inUse ? ", phone in use: a notification" : ""), metres: distance,
                                      legAge: Date().timeIntervalSince(legStart), started: legStartMetres))
         setBackup(0)
         let c = UNMutableNotificationContent()
         c.title = approach ? "Wake up" : "Get off now"
-        c.body = approach ? "\(leg?.to.short ?? "Your stop") in about \(Fmt.distance(distance ?? 0))." : "You’re at \(leg?.to.short ?? "your stop")."
+        let soon: String
+        if case .time(_, _, let secs)? = fire { soon = "\(max(1, Int((secs / 60).rounded(.up)))) min" } else { soon = Fmt.distance(distance ?? 0) }
+        c.body = approach ? "\(leg?.to.short ?? "Your stop") in about \(soon)." : "You’re at \(leg?.to.short ?? "your stop")."
         c.sound = sound.quietNow ? nil : .default         // no headphones: it buzzes instead
         c.interruptionLevel = .timeSensitive
         // Using your phone right now? Then you're awake: one notification is enough.
@@ -1128,14 +1262,17 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         detectTask = Task { [weak self] in
             var lastBest: String?
             var rejected = Set<String>()
-            var wait: UInt64 = 3
+            var wait: TimeInterval = 3
             var leftSince: Date?                                    // since when you've clearly left on the planned one
             var pickLooks: [(at: Date, metres: Double?)] = []       // the one you picked: how far you were from its road, look by look
             var retryAt: [String: Date] = [:]                       // a plan again refused: not again before then
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: wait * 1_000_000_000)
-                wait = 7                                                // first look soon, then every 7 seconds
+                // (Motion & Fitness saying "automotive" ends the wait at once: `motionChanged`)
+                await self?.detectPause(wait)
                 guard let self, !Task.isCancelled else { return }
+                // first look soon, then every 7 seconds; standing or walking about at the stop by Motion & Fitness, and
+                // your fixes not moving, every 15 (0.33)
+                wait = MotionRules.lookWait(base: 7, motion: Motion.shared.now(), movingByFixes: self.movedRecently)
                 if forNextLeg {
                     guard self.phase == .transfer else { return }
                     if self.endIfNoRide() { return }
@@ -1275,7 +1412,9 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     private func goingFromChange() -> Bool {
         let now = Date(), fixes = recentFixes
         let from = metresToLegStop                  // (at a change this leg is the one you finished: its stop is where you got off)
-        if RideGuards.mayTakeAtChange(moving: RideGuards.movingNow(fixes, now: now), fromChangeStop: from) { return true }
+        // (0.33: walking quickly or cycling away from the change, by Motion & Fitness, isn't going on a bus or train)
+        let moving = MotionRules.movingLikeVehicle(byFixes: RideGuards.movingNow(fixes, now: now), motion: Motion.shared.now(), speed: currentSpeed)
+        if RideGuards.mayTakeAtChange(moving: moving, fromChangeStop: from) { return true }
         rideLog(FieldFormat.rideWait(moved: RideGuards.movedMetres(fixes, now: now), fromStop: from), once: "wait", every: 60)
         return false
     }
@@ -2322,6 +2461,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         let stops = await Transit.tripStops(v.tripId, maxAge: RideTick.tripCache)
         guard vehicle == v, !stops.isEmpty else { return }
         applyStops(stops)
+        // (the same answer, as it was asked: no request of its own)
+        if let c = await Transit.cachedLiveTrip(v.tripId), vehicle == v { noteWakeTrip(c.trip, at: c.at) }
         pushActivity(force: false)
     }
 
@@ -2605,8 +2746,14 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         detectTask?.cancel()
         detectTask = Task { [weak self] in
             var lastBest: String?
+            // (0.33: Motion & Fitness, asked once on this wake-up: already "automotive", the first look in 12 s, not 35)
+            await Motion.shared.refresh()
+            var first = true
             for _ in 0..<10 {
-                try? await Task.sleep(nanoseconds: 35_000_000_000)
+                let wait = first ? MotionRules.firstRegionLook(Motion.shared.now()) : MotionRules.regionLookUsual
+                if first, wait < MotionRules.regionLookUsual { self?.rideLog("motion · automotive on leaving a station: looking in \(Int(wait)) s") }
+                first = false
+                try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
                 guard let self, !Task.isCancelled, self.phase == .idle else { return }
                 guard let v = await self.matchVehicle(mode: nil)?.vehicle else { lastBest = nil; continue }
                 if v.tripId == lastBest, await self.autoStartTrip(from: place, on: v) { return }
@@ -2649,7 +2796,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         c.title = "Trip started by itself"
         // (a leg that started inside its wake distance has no alarm: it tells you at the stop)
         c.body = "\(v.title) to \(legs[safe: i]?.to.short ?? "your stop"). "
-            + (phase == .awake ? "It tells you when you’re there." : "It rings \(Fmt.distance(wakeKm * 1000)) before your stop.")
+            + (phase == .awake ? "It tells you when you’re there." : "It rings \(wakeWords).")
         c.sound = .default
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "autostart", content: c, trigger: nil)) { _ in }
         return true
@@ -2672,7 +2819,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         c.title = "Trip started by itself"
         // (a leg that started inside its wake distance has no alarm: it tells you at the stop)
         c.body = "\(v.title) to \(legs.first?.to.short ?? "your stop"), on your way to \(home ? RoleWords.current.school : "home"). "
-            + (phase == .awake ? "It tells you when you’re there." : "It rings \(Fmt.distance(wakeKm * 1000)) before your stop.")
+            + (phase == .awake ? "It tells you when you’re there." : "It rings \(wakeWords).")
         c.sound = .default
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "autostart", content: c, trigger: nil)) { _ in }
         return true

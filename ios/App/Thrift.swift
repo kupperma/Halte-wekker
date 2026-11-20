@@ -192,7 +192,8 @@ enum PlanMemo {
 /// - the bus or train is confirmed (none to choose between, on its road, near its times, not picked by hand in the
 ///   ride, not taken by its timetable alone);
 /// - a fresh, good fix puts you further from the stop than the wake distance plus 8 minutes at full speed (90 km/h a
-///   bus, 140 km/h a train; faster when you are), and a kilometre more to switch it on;
+///   bus, 140 km/h a train; faster when you are), and a kilometre more to switch it on (0.33: Motion & Fitness saying
+///   automotive steadily, `MotionRules.steadyVehicle`: 6 minutes, and no kilometre more);
 /// - the stop isn't due within 10 minutes (when its time is known);
 /// - the backstop around the stop hasn't been entered.
 /// Anything else: the best, at once.
@@ -200,6 +201,8 @@ enum RideGPS {
     static let busCruise = 25.0                   // m/s, 90 km/h
     static let trainCruise = 39.0                 // m/s, 140 km/h
     static let travel: TimeInterval = 8 * 60
+    /// Steadily in a vehicle by Motion & Fitness (0.33): the far tier from 6 minutes at full speed.
+    static let steadyTravel: TimeInterval = 6 * 60
     static let hysteresis = 1000.0                // m more to switch the far tier on than to stay in it
     static let dueSoon: TimeInterval = 10 * 60
     static let freshFix: TimeInterval = 300
@@ -224,14 +227,15 @@ enum RideGPS {
         var secondsToStop: TimeInterval?  // when it reaches your stop (nil: not known)
         var backstop = false              // the region around the stop was entered
         var wasFar = false                // the far tier is on now
+        var steady = false                // Motion & Fitness: automotive for 3 minutes or more (0.33)
     }
 
     /// Beyond this from the stop the far tier may be on: the wake distance plus 8 minutes at the faster of full speed
     /// and yours.
-    static func farFrom(wakeMetres: Double, isTrain: Bool, speed: Double?) -> Double {
+    static func farFrom(wakeMetres: Double, isTrain: Bool, speed: Double?, steady: Bool = false) -> Double {
         let cruise = isTrain ? trainCruise : busCruise
         let v = max(cruise, speed.flatMap { $0.isFinite ? $0 : nil } ?? 0)
-        return max(0, wakeMetres) + v * travel
+        return max(0, wakeMetres) + v * (steady ? steadyTravel : travel)
     }
 
     static func backstopRadius(wakeMetres: Double) -> Double { max(0, wakeMetres) + backstopMargin }
@@ -243,8 +247,8 @@ enum RideGPS {
         guard let age = i.fixAge, age.isFinite, age >= 0, age <= freshFix else { return false }
         guard i.wakeMetres.isFinite, i.wakeMetres >= 0 else { return false }
         if let s = i.secondsToStop, !(s.isFinite && s > dueSoon) { return false }
-        let line = farFrom(wakeMetres: i.wakeMetres, isTrain: i.isTrain, speed: i.speed)
-        return d > line + (i.wasFar ? 0 : hysteresis)
+        let line = farFrom(wakeMetres: i.wakeMetres, isTrain: i.isTrain, speed: i.speed, steady: i.steady)
+        return d > line + (i.wasFar || i.steady ? 0 : hysteresis)
     }
 }
 

@@ -87,3 +87,45 @@ final class ReplayTests: XCTestCase {
         XCTAssertEqual(p[2].lat, 43.252, accuracy: 1e-9)
     }
 }
+
+/// 0.33: when the wake rules would have rung on a leg, from its GPS points.
+final class WakeReplayTests: XCTestCase {
+    private let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+
+    /// A straight ride east at `speed` m/s for `minutes`, a point every 5 s.
+    private func leg(train: Bool, speed: Double, minutes: Double, lines: [LogLine] = []) -> ReplayLeg {
+        let n = Int(minutes * 60 / 5)
+        let fixes = (0...n).map { i -> ExportFix in
+            let east = Double(i) * 5 * speed
+            return ExportFix(t: t0.timeIntervalSince1970 + Double(i) * 5, lat: 51.5, lon: 5.0 + east / (cos(51.5 * .pi / 180) * 111_320),
+                             acc: 8, spd: speed, crs: 90, leg: "1/1", veh: train ? "train IC·a1b2" : "bus 305·7821", ride: "r1")
+        }
+        return ReplayLeg(install: "i", ride: "r1", leg: "1/1", fixes: fixes, lines: lines, truth: nil, truthFrom: "none")
+    }
+
+    func test_aFastTrainRingsByTimeFirst() {
+        // 30 m/s: the 5 km wake point is 167 s from the end, 3 minutes is 180 s
+        let w = WakeReplay.of(leg(train: true, speed: 30, minutes: 12))
+        XCTAssertTrue(w.isTrain)
+        XCTAssertEqual(w.byDistance ?? 0, 165, accuracy: 5)
+        XCTAssertEqual(w.byTime ?? 0, 180, accuracy: 5)
+        XCTAssertEqual(w.first ?? 0, 180, accuracy: 5)
+    }
+
+    func test_aSlowBusRingsByDistanceFirst() {
+        // 10 m/s: the 2 km wake point is 200 s from the end, 2 minutes is 120 s
+        let w = WakeReplay.of(leg(train: false, speed: 10, minutes: 10))
+        XCTAssertFalse(w.isTrain)
+        XCTAssertEqual(w.byDistance ?? 0, 200, accuracy: 5)
+        XCTAssertEqual(w.byTime ?? 0, 120, accuracy: 5)
+        XCTAssertEqual(w.first ?? 0, 200, accuracy: 5)
+    }
+
+    func test_theAppsRingLine() {
+        let ring = LogLine(at: t0.addingTimeInterval(9 * 60), kind: "ride", text: "ring · by time 3 min (live) · 5400 m · leg 540 s old · started 21600 m")
+        let w = WakeReplay.of(leg(train: true, speed: 30, minutes: 12, lines: [ring]))
+        XCTAssertEqual(w.logged ?? 0, 180, accuracy: 0.5)
+        XCTAssertEqual(w.loggedWhy, "by time 3 min (live)")
+        XCTAssertTrue(WakeReplay.words(w).contains("the app rang 3.0 min before (by time 3 min (live))"))
+    }
+}
