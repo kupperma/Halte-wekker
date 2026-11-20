@@ -35,6 +35,7 @@ struct MapStopSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: DS.s16) {
                     header
+                    if stop.rail { OVFietsLine(code: NSStore.code(stopId: stop.id, name: stop.name)) }      // (0.37)
                     departures
                     actions
                 }

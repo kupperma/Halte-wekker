@@ -262,6 +262,10 @@ struct RideViewNew: View {
         }
         .id(trip.index)
         stats(eta: eta)
+        // (0.37) on the last train of the trip: how many OV-fiets are left where it gets in
+        if let l = trip.leg, l.mode == .train, !trip.legs.dropFirst(trip.index + 1).contains(where: { $0.mode == .train }) {
+            OVFietsLine(code: NSStore.code(l.to), station: l.to.short)
+        }
         if trip.phase == .awake {
             DSNote(icon: "bell.and.waves.left.and.right.fill", tint: DS.warning,
                    text: trip.ringAtStop ? "You’re awake. A chime when you’re there." : "You’re awake. Get your things ready.")

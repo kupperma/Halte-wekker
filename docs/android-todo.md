@@ -3,6 +3,33 @@
 The rules and numbers for each are in [logs-export.md](logs-export.md) › For Android (parity), with the iOS files and
 their tests.
 
+## iOS 0.37
+
+- [ ] OV-fiets at the station (`OVFiets`, Settings › Map & home, on by default): the relay's `/ns/ovfiets?station=BD`
+      (NS Places API, slimmed to `{"station","locations":[{"name","code","bikes","lat","lon","open"}]}`), kept 5 min per
+      station; "Breda · OV-fiets: 12 left" (warm at ≤ 5, "· closed now" when every staffed point says `open: "No"`) on
+      the Go card for the station where the trip's last train gets in (when a bus or a walk of ≥ 5 min follows it), on
+      the ride screen's last train leg and in a station's sheet. Vectors in `ios/Tests/OVFietsTests.swift`.
+- [ ] Rain advice for the walk (`RainAdvice`, Settings › Map & home, on by default): from 3 h before a trip until 5 min
+      after it starts, Open-Meteo's hourly `precipitation` (the hour *before* its time) ≥ 0.5 mm during the walk to the
+      first stop (from the trip's start, `walkBefore` min) or from the last one (last arrival → end) at the start or end
+      point: "Rain at 08:00 — take bus 305 at 07:41 to the station instead of walking" when the first ride is a train
+      with a walk of ≥ 6 min and a bus exists (another way starting with a bus, walk ≤ max(2, min(walk/2, walk − 4)),
+      leaving after now + its walk, there by the trip's end + 10 min; else a Transitous bus-only plan to the station
+      arriving by the train − 2 min), else "Rain at 08:00 — bring an umbrella"; on the home's next-trip card and the
+      Go card. Vectors in `ios/Tests/RainAdviceTests.swift`.
+- [ ] Home-screen widget (Android: an app widget with its own stop setting, no shared storage needed): small / medium
+      (+ lock-screen rectangular / inline on iOS) "next departures from a stop", Transitous `/v6/stoptimes` asked by the
+      widget itself; entries just after each departure leaves, refresh every 12 min (sooner when the list runs short,
+      at least 5 min apart; 30 min with nothing leaving); "07:41 (+2)", "07:41 cancelled"; tap opens the app on that
+      stop (`haltewekker://stop?id=…&name=…&lat=…&lon=…&rail=1`); "Pick a stop" when none is set. Rules in
+      `ios/Shared/StopBoardCore.swift`, vectors in `ios/Tests/StopBoardCoreTests.swift`.
+- [ ] Voice / shortcuts (Android: App Actions or shortcuts): "When's my bus?" (home stop within 600 m of home or with no
+      fix, else the nearest stop; spoken "Bus 305 to Uden leaves Veghel at 07:41, 2 minutes late — in 6 minutes. Then
+      the 306 at 07:52."), "Wake me at a stop" (opens Wake me at a stop with it, to confirm), "Plan to school / home"
+      (Fastest trip), "Start my trip" (I'm on it when the planned ride leaves within 3 min or left in the last 15, else
+      Fastest trip for it). Nothing over a running trip. Rules in `ios/App/IntentActions.swift`.
+
 ## iOS 0.36
 
 - [ ] Check-out reminder (`CheckOut`, Settings › Trips & alarm, on by default): "Did you check out?" a minute after you

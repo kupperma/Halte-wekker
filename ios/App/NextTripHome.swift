@@ -223,6 +223,7 @@ struct NextTripCard: View {
                 Text(Snapshots.asOf(a)).font(DS.footnote).monospacedDigit().foregroundStyle(DS.secondary)
             }
             DSLegBar(legs: NextTrip.legs(of: s.trip))
+            RainAdviceLine(trip: s.trip)                  // (0.37) rain on the walk, before the trip
             DSPrimaryButton(title: s.startTitle ?? "Start · wake me before \(Fmt.place(s.trip.last.toStop))", icon: "play.fill", lines: 2, action: start)
                 .accessibilityHint("Opens the hands-free trip")
         }
