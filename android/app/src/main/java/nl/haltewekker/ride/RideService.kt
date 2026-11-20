@@ -72,8 +72,12 @@ class RideService : Service() {
         }
 
         /** Starts a ride on `trip` ("I'm on it"), at leg `index`: asleep, each leg's wake distance from the settings. */
-        fun start(context: Context, trip: DoorTrip, destination: String, index: Int = 0) {
-            RideStore.set(context, newState(context, trip, destination, index))
+        fun start(context: Context, trip: DoorTrip, destination: String, index: Int = 0, resumed: ResumeOffer? = null) {
+            var st = newState(context, trip, destination, index)
+            // (A6, iOS 0.35) going on with a trip ended by hand is still that trip: its start stays
+            if (resumed?.startedAt != null) st = st.copy(startedAt = resumed.startedAt, firstLeg = resumed.firstLeg ?: st.firstLeg,
+                startLat = resumed.startLat, startLon = resumed.startLon, startFixAt = resumed.startFixAt)
+            RideStore.set(context, st)
             nl.haltewekker.auto.ResumeStore.set(context, null)
             ContextCompat.startForegroundService(context, Intent(context, RideService::class.java).setAction(ACTION_START))
         }
@@ -176,8 +180,15 @@ class RideService : Service() {
     private fun logStart(how: String) {
         val s = RideStore.state.value ?: return
         val leg = s.leg ?: return
-        val here = fixes.lastOrNull()?.p ?: nl.haltewekker.ui.Locator.last(this)
+        val fix = fixes.lastOrNull()
+        val loc = if (fix == null) nl.haltewekker.ui.Locator.lastFix(this) else null
+        val here = fix?.p ?: loc?.let { GeoPoint(it.latitude, it.longitude) }
         val m = if (here != null && leg.from != null) Geo.metres(here, leg.from!!) else null
+        // (A6) where you were when it started, for the leaderboard (a stale fix falls back to the first stop)
+        if (here != null && s.startLat == null) {
+            val at = fix?.t ?: (loc!!.time / 1000.0)
+            RideStore.update(this) { it.copy(startLat = here.lat, startLon = here.lon, startFixAt = at) }
+        }
         FieldLog.ride(FieldFormat.rideStart(how, vehicleText(s), m, s.index + 1, s.trip.rides.size))
     }
 
@@ -357,8 +368,19 @@ class RideService : Service() {
     }
 
     private fun legDone() {
-        val s = RideStore.state.value ?: return
+        val s0 = RideStore.state.value ?: return
         val now = Iso.now()
+        // (A6, iOS 0.35) how late this ride got you to its stop, for the leaderboard's "the 305 was 18 min late"
+        s0.leg?.let { l ->
+            val lateMin = (minOf(now, s0.legArrival ?: now) - l.scheduledArrival) / 60
+            if (lateMin >= 1 && lateMin <= 600) {
+                val line = if (l.isTrain) nl.haltewekker.friends.TransitLabel.train(s0.vehicleLine ?: l.line, l.name) else (s0.vehicleLine ?: l.line)
+                val had = s0.lateLine?.let { ln -> s0.lateMins?.let { ln to it } }
+                val w = nl.haltewekker.friends.ScoreRules.worse(had, line to Math.round(lateMin * 10) / 10.0)
+                RideStore.update(this) { it.copy(lateLine = w.first, lateMins = w.second) }
+            }
+        }
+        val s = RideStore.state.value ?: return
         look.reset()
         etaAt = 0.0
         resetLegWake()
@@ -409,7 +431,7 @@ class RideService : Service() {
                 AutoStart.block(this, listOfNotNull(s.vehicleTripId, s.leg?.tripId))
                 val atChange = s.index > 0 && s.vehicleSource == VehicleSource.NONE && s.phase == Phase.SLEEPING
                 TripResume.leg(atChange, false, if (atChange) s.index - 1 else s.index, s.trip.rides.size)?.let {
-                    ResumeStore.set(this, ResumeOffer(s.trip, s.destination, it, Iso.now()))
+                    ResumeStore.set(this, ResumeOffer(s.trip, s.destination, it, Iso.now(), s.startedAt, s.firstLeg, s.startLat, s.startLon, s.startFixAt))
                 }
             }
         }

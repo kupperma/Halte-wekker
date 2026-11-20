@@ -72,6 +72,8 @@ data class ScoresShare(
     val best: List<Best>? = null,
     val mbest: List<Best>? = null,
     val rides: Int? = null,
+    /** (A6, iOS 0.35) your trips today (the sender's own day, newest first, 0–12), for today's best and worst. */
+    val today: List<DayTrip>? = null,
 ) {
     @Serializable
     data class Best(val route: String, val home: Boolean, val mins: Double, val at: Double)
@@ -88,15 +90,19 @@ data class ScoresShare(
             if (!s.on) return ScoresShare(on = false)
             val m = s.month?.takeIf { ScoresRules.isMonth(it) }
             return ScoresShare(on = true, month = m, best = clean(s.best), mbest = if (m != null) clean(s.mbest) else null,
-                rides = if (m != null) s.rides?.takeIf { it in 0..1000 } else null)
+                rides = if (m != null) s.rides?.takeIf { it in 0..1000 } else null, today = DayTrip.valid(s.today))
         }
     }
 }
 
 @Serializable data class ScoresSeen(val share: ScoresShare, val t: Long, val got: Double)
 
-/** A finished trip on your own board, as the friends board counts it. */
-@Serializable data class ScoreTrip(val route: String, val home: Boolean, val mins: Double, val at: Double)
+/**
+ * A finished trip on your own board, as the friends board counts it. (A6, iOS 0.35) `plan`: planned minutes (from
+ * starting the alarm to the scheduled arrival), `lateLine`/`late`: the ride that was latest at your stop.
+ */
+@Serializable data class ScoreTrip(val route: String, val home: Boolean, val mins: Double, val at: Double,
+                                   val plan: Double? = null, val lateLine: String? = null, val late: Double? = null)
 
 object ScoresRules {
     const val SLOT = "scores"
@@ -104,6 +110,8 @@ object ScoresRules {
     const val CHANGED_GAP = 12 * 3600.0
     const val REFRESH = 7 * 86400.0
     const val OFF_TTL = 14 * 86400
+    /** (A6, iOS 0.35) a new trip today goes out this soon (else a change waits `CHANGED_GAP`). */
+    const val TODAY_GAP = 5 * 60.0
 
     fun month(t: Double): String = TimetableDays.key(t).take(7)
 
@@ -114,9 +122,10 @@ object ScoresRules {
         return p[1].toInt() in 1..12
     }
 
-    fun build(trips: List<ScoreTrip>, rides: Int, now: Double): ScoresShare {
+    fun build(trips: List<ScoreTrip>, rides: Int, now: Double, today: List<DayTrip> = emptyList()): ScoresShare {
         val m = month(now)
-        return ScoresShare(on = true, month = m, best = bests(trips), mbest = bests(trips.filter { month(it.at) == m }), rides = rides.clampTo(0, 1000))
+        return ScoresShare(on = true, month = m, best = bests(trips), mbest = bests(trips.filter { month(it.at) == m }), rides = rides.clampTo(0, 1000),
+            today = if (today.isEmpty()) null else DayTrip.valid(today))
     }
 
     fun bests(trips: List<ScoreTrip>): List<ScoresShare.Best> {
@@ -135,11 +144,12 @@ object ScoresRules {
 
     fun fingerprint(s: ScoresShare): String = TimetableShareRules.fingerprint(FriendJson.encode(ScoresShare.serializer(), s))
 
-    fun due(last: TimetableShareRules.Sent?, hash: String, friends: List<String>, now: Double): List<String> {
+    fun due(last: TimetableShareRules.Sent?, hash: String, friends: List<String>, now: Double, soon: Boolean = false): List<String> {
         if (friends.isEmpty()) return emptyList()
         if (last == null) return friends.sorted()
         val age = now - last.at
-        if (age < 0 || age >= REFRESH || (hash != last.hash && age >= CHANGED_GAP)) return friends.sorted()
+        val gap = if (soon) TODAY_GAP else CHANGED_GAP
+        if (age < 0 || age >= REFRESH || (hash != last.hash && age >= gap)) return friends.sorted()
         val had = last.to.toSet()
         return friends.filter { it !in had }.sorted()
     }

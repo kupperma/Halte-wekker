@@ -12,7 +12,10 @@ import nl.haltewekker.data.DoorTrip
 
 /** A trip you ended by hand before its last leg, while it's offered to go on with (iOS 0.26.2). */
 @Serializable
-data class ResumeOffer(val trip: DoorTrip, val destination: String, val leg: Int, val endedAt: Double)
+data class ResumeOffer(val trip: DoorTrip, val destination: String, val leg: Int, val endedAt: Double,
+                       /** (A6, iOS 0.35) going on with it keeps its start, for the leaderboard. */
+                       val startedAt: Double? = null, val firstLeg: Int? = null,
+                       val startLat: Double? = null, val startLon: Double? = null, val startFixAt: Double? = null)
 
 object ResumeStore {
     const val KEY = "resume.v1"

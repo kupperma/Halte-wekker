@@ -113,9 +113,9 @@ private fun Root() {
         MainActivity.asked.value = null
     }
 
-    fun start(t: nl.haltewekker.data.DoorTrip, to: String, index: Int = 0) {
+    fun start(t: nl.haltewekker.data.DoorTrip, to: String, index: Int = 0, resumed: nl.haltewekker.auto.ResumeOffer? = null) {
         if (!Perms.location(context)) { screen = Screen.SETTINGS; return }
-        RideService.start(context, t, to, index)
+        RideService.start(context, t, to, index, resumed)
         screen = Screen.RIDE
     }
 
@@ -131,7 +131,7 @@ private fun Root() {
     when (screen) {
         Screen.HOME, Screen.SETUP, Screen.TEST_SETUP -> HomeScreen(r, onPlan = { planDir = it; screen = Screen.PLAN }, onRide = { screen = Screen.RIDE },
             onStart = { t, to -> start(t, to) }, onSettings = { screen = Screen.SETTINGS }, onDay = { screen = Screen.DAY },
-            onResume = { o -> ResumeStore.set(context, null); start(o.trip, o.destination, o.leg) }, onFriends = { screen = Screen.FRIENDS })
+            onResume = { o -> ResumeStore.set(context, null); start(o.trip, o.destination, o.leg, o) }, onFriends = { screen = Screen.FRIENDS })
         Screen.PLAN -> PlanScreen(planDir, canStart = r == null, onBack = { screen = Screen.HOME }, onStart = { t, to -> start(t, to) })
         Screen.RIDE -> if (r != null) RideScreen(r, onBack = { screen = Screen.HOME }) else screen = Screen.HOME
         Screen.SETTINGS -> SettingsScreen(onBack = { screen = Screen.HOME }, onSetup = { screen = Screen.SETUP },

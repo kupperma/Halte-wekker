@@ -45,6 +45,13 @@ data class RideState(
     val ringMinutes: Int? = null,
     /** (A6, iOS 0.34) No good GPS for a while: the place goes on along the vehicle's route. */
     val reckoning: Boolean = false,
+    /** (A6, iOS 0.35) where you were when it started (if known) and when that fix was, for the leaderboard's start. */
+    val startLat: Double? = null,
+    val startLon: Double? = null,
+    val startFixAt: Double? = null,
+    /** (A6, iOS 0.35) the ride that was latest at your stop so far, and by how many minutes. */
+    val lateLine: String? = null,
+    val lateMins: Double? = null,
 ) {
     val leg: Ride? get() = trip.rides.getOrNull(index)
     val wakeMetres: Double get() = (wakeKm.getOrNull(index) ?: WakeRules.BUS_KM) * 1000

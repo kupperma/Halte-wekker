@@ -125,7 +125,8 @@ object TestFriendBrain {
             ScoreTrip(b.route, b.home, max(5.0, min(600.0, b.mins * factor)), at)
         }
         if (trips.isEmpty()) trips = listOf(ScoreTrip("home→school", false, 46.5, at), ScoreTrip("school→home", true, 51.2, at))
-        return ScoresRules.build(trips, rides, now)
+        // (A6, iOS 0.35) and a trip to school an hour ago, for today's best and worst: 52.4 min, the 305 7 min late
+        return ScoresRules.build(trips, rides, now, listOf(DayTrip(false, 52.4, at, 45.0, "305", 7.0)))
     }
 
     // MARK: the wake-up buddy

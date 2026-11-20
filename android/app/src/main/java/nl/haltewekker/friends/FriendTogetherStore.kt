@@ -23,21 +23,24 @@ object ScoreLog {
     fun load(c: Context) {
         if (loaded) return
         loaded = true
-        trips.value = (c.applicationContext as App).store.getString(KEY)?.let { FriendJson.decode(ser, it) } ?: emptyList()
+        // (A6, iOS 0.35) read entry by entry: one bad entry no longer empties the board
+        trips.value = ScoreRules.decode((c.applicationContext as App).store.getString(KEY))
     }
 
     /** A ride reached its last stop: scored when it went from near Home to near School (or back) from its first leg. */
     fun finished(c: Context, s: RideState, now: Double) {
         load(c)
-        if (s.firstLeg != 0) return
         val p = (c.applicationContext as App).store.profile.value
         val home = p.home?.point ?: return
         val school = p.school?.point ?: return
-        val start = s.trip.first.from ?: return
-        val end = s.trip.last.to ?: return
-        val (route, isHome) = DoorScore.key(start, end, home, school) ?: return
+        // (A6, iOS 0.35 `ScoreRules.board`) where you were when it started if that fix was fresh, else its first stop
+        val fix = if (s.startLat != null && s.startLon != null) nl.haltewekker.core.GeoPoint(s.startLat, s.startLon) else null
+        val starts = ScoreRules.starts(fix, s.startFixAt, s.startedAt, s.trip.first.from)
+        val (route, isHome) = ScoreRules.board(ScoreRules.Finished(startedAtLeg = s.firstLeg ?: 0, starts = starts, end = s.trip.last.to,
+            home = home, school = school)) ?: return
         val mins = DoorScore.minutes(s.startedAt, now) ?: return
-        val list = (listOf(ScoreTrip(route, isHome, mins, now)) + trips.value).take(300)
+        val plan = ((s.trip.last.scheduledArrival - s.startedAt) / 60).takeIf { it in 5.0..600.0 }?.let { Math.round(it * 10) / 10.0 }
+        val list = (listOf(ScoreTrip(route, isHome, mins, now, plan, s.lateLine, s.lateMins)) + trips.value).take(300)
         trips.value = list
         (c.applicationContext as App).store.putString(KEY, FriendJson.encodeString(ser, list))
     }
@@ -60,6 +63,8 @@ object FriendTogetherStore {
         val scores: Map<String, ScoresSeen> = emptyMap(),
         val scoresSent: TimetableShareRules.Sent? = null,
         val freeNoteDay: String? = null,
+        /** (A6, iOS 0.35) the fingerprint of the `today` that last went to every friend. */
+        val scoresToday: String? = null,
     )
 
     private lateinit var ctx: Context
@@ -123,16 +128,28 @@ object FriendTogetherStore {
 
     // MARK: the leaderboard with friends
 
-    fun myScores(now: Double = now()): ScoresShare = ScoresRules.build(ScoreLog.trips.value, RideHistory.count(saved.rides, now), now)
+    fun myScores(now: Double = now()): ScoresShare = ScoresRules.build(ScoreLog.trips.value, RideHistory.count(saved.rides, now), now,
+        DailyRank.today(ScoreLog.trips.value, now, java.time.ZoneId.systemDefault()))
+
+    /** (A6, iOS 0.35) you and the friends who share their scores, with their trips today (for `DailyRank.rows`). */
+    fun todayPeople(now: Double = now()): List<Pair<String, List<DayTrip>>> =
+        listOf("me" to DailyRank.today(ScoreLog.trips.value, now, java.time.ZoneId.systemDefault())) +
+            scores.value.filter { FriendStore.book.value?.isFriend(it.key) == true && it.value.share.on }.map { it.key to (it.value.share.today ?: emptyList()) }
+
+    fun todayRows(now: Double = now()) = DailyRank.rows(todayPeople(now), ScoreLog.trips.value, now, java.time.ZoneId.systemDefault())
 
     private fun scoresDue(friends: List<String>, now: Double) {
         if (settings.scores == true) {
             val body = myScores(now)
             val hash = ScoresRules.fingerprint(body)
-            val to = ScoresRules.due(saved.scoresSent, hash, friends, now)
+            // (A6, iOS 0.35) a new trip today goes out within 5 minutes
+            val todayHash = ScoresRules.fingerprint(ScoresShare(on = true, today = body.today))
+            val soon = body.today != null && todayHash != saved.scoresToday
+            val to = ScoresRules.due(saved.scoresSent, hash, friends, now, soon)
             if (to.isEmpty()) return
             FriendStore.queueBox(FriendMessage.Scores(body), to, ScoresRules.SLOT, ScoresRules.TTL)
-            saved = saved.copy(scoresSent = TimetableShareRules.after(saved.scoresSent, hash, to, friends, now))
+            saved = saved.copy(scoresSent = TimetableShareRules.after(saved.scoresSent, hash, to, friends, now),
+                scoresToday = if (to.toSet().containsAll(friends)) todayHash else saved.scoresToday)
         } else {
             val sent = saved.scoresSent ?: return
             val still = sent.to.filter { it in friends }
