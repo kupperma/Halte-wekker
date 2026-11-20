@@ -134,6 +134,8 @@ final class RailWorksTests: XCTestCase {
         "TB": GeoPoint(lat: 51.56055, lon: 5.08361), "TBR": GeoPoint(lat: 51.57361, lon: 4.99444), "GZ": GeoPoint(lat: 51.58361, lon: 4.92611),
         "BD": GeoPoint(lat: 51.59555, lon: 4.78), "ETN": GeoPoint(lat: 51.575, lon: 4.63583), "RSD": GeoPoint(lat: 51.54028, lon: 4.45833),
         "HT": GeoPoint(lat: 51.69048, lon: 5.29362), "BTL": GeoPoint(lat: 51.58433, lon: 5.31912),
+        "EHV": GeoPoint(lat: 51.44333, lon: 5.48139), "EHS": GeoPoint(lat: 51.45111, lon: 5.45583),
+        "TBU": GeoPoint(lat: 51.56499, lon: 5.05178),
     ]
     private func point(_ c: String) -> GeoPoint? { points[c] }
 
@@ -185,6 +187,10 @@ final class RailWorksTests: XCTestCase {
         XCTAssertEqual(RailWorks.hit(item, RailWorks.Ride(from: "BD", to: "TB"), point: point), ["GZ", "BD"])
         XCTAssertNil(RailWorks.hit(item, RailWorks.Ride(from: "HT", to: "BTL"), point: point))
         XCTAssertNil(RailWorks.hit(item, RailWorks.Ride(from: "BD", to: "RSD"), point: point))
+        // a station just out of the same town on another line isn't on the way (Strijp-S, from Eindhoven to Den Bosch)
+        XCTAssertEqual(RailWorks.passed(RailWorks.Ride(from: "EHV", to: "HT"), stretch: ["EHS", "EHV"], point: point), ["EHV"])
+        // one close to an end on the line is (Tilburg Universiteit, from Tilburg to Breda)
+        XCTAssertEqual(RailWorks.passed(tbBd, stretch: ["TB", "TBU"], point: point), ["TB", "TBU"])
         // a station it can't place: only its own two ends count
         XCTAssertEqual(RailWorks.passed(RailWorks.Ride(from: "TB", to: "XX"), stretch: ["TB", "GZ"], point: point), ["TB"])
     }

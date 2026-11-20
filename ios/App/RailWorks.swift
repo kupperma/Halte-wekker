@@ -109,7 +109,9 @@ enum RailWorks {
 
     // MARK: is it on your ride?
 
-    /// Within this of the straight line between a ride's two stations, and between them, a station is on its way.
+    /// Within this of the straight line between a ride's two stations, and between them, a station is on its way; near
+    /// either end the room shrinks (to 0.6 × the way from that end), so a station of another line that leaves the same
+    /// town (Eindhoven Strijp-S on a ride from Eindhoven to Den Bosch) isn't.
     static let corridorMetres = 2500.0
 
     /// The stations of `stretch` your ride passes: its own two, and those it goes past (near the straight line between
@@ -130,7 +132,7 @@ enum RailWorks {
             let t = (px * bx + py * by) / (len * len)
             guard t > 0, t < 1 else { return false }
             let dx = px - t * bx, dy = py - t * by
-            return (dx * dx + dy * dy).squareRoot() <= corridorMetres
+            return (dx * dx + dy * dy).squareRoot() <= min(corridorMetres, 0.6 * min(t, 1 - t) * len)
         }
     }
 
