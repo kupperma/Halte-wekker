@@ -229,6 +229,7 @@ struct NewHome: View {
     @ObservedObject private var nearDeps = NearDeparturesModel.shared
     @ObservedObject private var school = SchoolAlarm.shared
     @ObservedObject private var friends = FriendStore.shared
+    @ObservedObject private var travelLog = TravelLogStore.shared      // (0.35) the December card
     @EnvironmentObject var stopsStore: StopsStore
     @State private var focusedCard: String?
     @State private var tapped: DepartureTap?
@@ -258,7 +259,7 @@ struct NewHome: View {
     private struct PlanReturn { let following: Bool; let camera: MapCamera? }
 
     enum HomeSheet: String, Identifiable {
-        case settings, weather, addPlace, demo
+        case settings, weather, addPlace, demo, year
         var id: String { rawValue }
     }
 
@@ -308,6 +309,7 @@ struct NewHome: View {
                     VStack(spacing: 10) {
                         searchRow
                         chipsRow
+                        yearBanner
                         HStack { Spacer(); rightColumn }
                     }
                     .padding(.horizontal, DS.edge)
@@ -391,7 +393,11 @@ struct NewHome: View {
             warmedUp = true
         }
         .onDisappear { shown = false; mapStops.pause() }
-        .onChange(of: scene) { _, s in if s != .active { mapStops.pause() } else if let r = region { mapStops.cameraStopped(r, visible: visible) } }
+        .onChange(of: scene) { _, s in
+            if s != .active { mapStops.pause() } else if let r = region { mapStops.cameraStopped(r, visible: visible) }
+            if s == .active { travelLog.refreshSeasonal() }
+        }
+        .onAppear { travelLog.refreshSeasonal() }
         .sheet(item: $sheet) { s in
             switch s {
             case .settings:
@@ -400,11 +406,20 @@ struct NewHome: View {
                     Task { @MainActor in try? await Task.sleep(nanoseconds: 500_000_000); sheet = .demo }
                 }).presentationDetents([.large])
             case .demo: DemoSheetNew().presentationDetents([.large])
+            case .year: NavigationStack { TravelYearScreen(done: { sheet = nil }) }.presentationDetents([.large])
             case .weather: OutfitSheetNew().presentationDetents([.medium, .large])
             case .addPlace: PlaceSearchSheet(title: "Add a place") { hit in places.add(name: Fmt.place(hit.name), lat: hit.lat, lon: hit.lon, stopIds: [hit.id]) }
             }
         }
         .animation(DS.quick, value: trip.toast)
+    }
+
+    /// (0.35) In December (or after a year of rides): Your year in travel, while no trip runs.
+    @ViewBuilder private var yearBanner: some View {
+        if trip.phase == .idle, let y = travelLog.seasonalYear {
+            TravelYearBanner(year: y) { sheet = .year }
+                .transition(.opacity)
+        }
     }
 
     // MARK: map
@@ -925,6 +940,7 @@ struct NewHome: View {
                 } else {
                     VStack(spacing: 10) {
                         nextSearchRow
+                        yearBanner
                         Spacer(minLength: 0)
                         HStack { Spacer(); followButton }
                         if trip.phase == .idle {

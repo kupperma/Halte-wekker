@@ -1,17 +1,6 @@
 import Foundation
 
-/// One finished trip on the leaderboard.
-struct TripScore: Codable, Identifiable, Equatable {
-    let id: String
-    let at: Date
-    let home: Bool
-    let route: String           // "Via Den Bosch"
-    let mins: Double
-    let score: Int              // out of 500
-    let grade: String           // S A B C D F
-    let ref: Int                // the fastest possible, in minutes
-    let est: Bool               // no fastest time known yet: compared with your own trips
-}
+// `TripScore` and the rules are in ScoreRules.swift (0.35, tested).
 
 struct ScoreResult: Equatable {
     let entry: TripScore
@@ -35,11 +24,11 @@ final class ScoreBook: ObservableObject {
     private static let changeMinutes = 5.0
 
     private init() {
-        trips = UserDefaults.standard.data(forKey: "trips").flatMap { try? JSONDecoder().decode([TripScore].self, from: $0) } ?? []
+        trips = ScoreRules.decode(UserDefaults.standard.data(forKey: "trips"))
     }
     private func persist() { UserDefaults.standard.set(try? JSONEncoder().encode(trips), forKey: "trips") }
 
-    static func letter(_ n: Int) -> String { n >= 475 ? "S" : n >= 425 ? "A" : n >= 375 ? "B" : n >= 325 ? "C" : n >= 275 ? "D" : "F" }
+    static func letter(_ n: Int) -> String { ScoreRules.letter(n) }
 
     static var weekStart: Date {
         var c = Calendar(identifier: .iso8601)
@@ -60,27 +49,28 @@ final class ScoreBook: ObservableObject {
         log(name: r.name, ideal: ideal(r, home: home), home: home, start: start, end: end)
     }
 
-    /// A door-to-door trip between Home and School (off the corridor, 0.24: `DoorScore`), against your own fastest.
-    func log(door key: String, home: Bool, start: Date, end: Date = Date()) -> ScoreResult? {
-        log(name: key, ideal: nil, home: home, start: start, end: end)
+    /// A door-to-door trip between Home and School (0.24 off the corridor; 0.35 on it too: `ScoreRules.board`), against
+    /// your own fastest. `plan`, `lateLine`, `late`: for today's ranking (0.35).
+    func log(door key: String, home: Bool, start: Date, end: Date = Date(), plan: Double? = nil, lateLine: String? = nil, late: Double? = nil) -> ScoreResult? {
+        log(name: key, ideal: nil, home: home, start: start, end: end, plan: plan, lateLine: lateLine, late: late)
     }
 
-    private func log(name: String, ideal: Double?, home: Bool, start: Date, end: Date) -> ScoreResult? {
-        let mins = (end.timeIntervalSince(start) / 6).rounded() / 10
-        guard mins >= 5 else { return nil }
-        let same = trips.filter { $0.home == home && $0.route == name }
-        let ref = ideal ?? same.map(\.mins).min() ?? mins
-        let score = Int((500 * min(1, ref / mins)).rounded())
-        let e = TripScore(id: "t" + String(Int(end.timeIntervalSince1970), radix: 36), at: end, home: home, route: name, mins: mins,
-                          score: score, grade: Self.letter(score), ref: Int(ref.rounded()), est: ideal == nil)
-        let mine = trips.filter { $0.home == home }
-        let week = mine.filter { $0.at >= Self.weekStart }
-        let res = ScoreResult(entry: e, fastestWeek: !week.isEmpty && week.allSatisfy { $0.mins > mins },
-                              fastestEver: !mine.isEmpty && mine.allSatisfy { $0.mins > mins }, firstWeek: week.isEmpty)
-        trips.insert(e, at: 0)
+    private func log(name: String, ideal: Double?, home: Bool, start: Date, end: Date, plan: Double? = nil, lateLine: String? = nil, late: Double? = nil) -> ScoreResult? {
+        guard let s = ScoreRules.score(name: name, ideal: ideal, home: home, start: start, end: end, trips: trips, weekStart: Self.weekStart,
+                                       plan: plan, lateLine: lateLine, late: late) else { return nil }
+        trips.insert(s.entry, at: 0)
         if trips.count > 300 { trips = Array(trips.prefix(300)) }
         persist()
-        return res
+        return ScoreResult(entry: s.entry, fastestWeek: s.fastestWeek, fastestEver: s.fastestEver, firstWeek: s.firstWeek)
+    }
+
+    /// A ride of a scored trip turned out late (its delay at your stop comes in after the trip was scored): the trip keeps
+    /// its latest ride, for today's ranking.
+    func noteLate(_ id: String, line: String, mins: Double) {
+        guard let i = trips.firstIndex(where: { $0.id == id }), mins > (trips[i].late ?? -.infinity) else { return }
+        trips[i].lateLine = line
+        trips[i].late = (mins * 10).rounded() / 10
+        persist()
     }
 
     func remove(_ id: String) { trips.removeAll { $0.id == id }; persist() }

@@ -84,6 +84,8 @@ struct LeaderboardScreenNew: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: DS.s12) {
+                // (0.35) today's fastest and slowest trip, yours and your friends'
+                TodayRankCard()
                 if friends.hasFriends {
                     Picker("Whose", selection: $withFriends) { Text("You").tag(false); Text("With friends").tag(true) }.pickerStyle(.segmented)
                 }
@@ -117,7 +119,7 @@ struct LeaderboardScreenNew: View {
         }
         .dsPanel()
         Text(RoleWords.current.onCorridor
-             ? "Time from starting the alarm until you reach your last stop, so waiting at the change counts. 500 means as fast as that route gets."
+             ? "Time from starting the alarm until you reach your last stop, so waiting at the change counts. 500 means as fast as that route gets; for a trip planned from home to \(RoleWords.current.school), as fast as your fastest one so far."
              : "Trips between home and \(RoleWords.current.school), from starting the alarm until your last stop, so waiting at a change counts. 500 means as fast as your fastest one so far.")
             .font(DS.footnote).foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, DS.s4)
