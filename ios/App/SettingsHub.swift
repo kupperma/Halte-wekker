@@ -427,12 +427,12 @@ private struct TripsSettingsRows: View {
             }
             Button("Reset what it learned", role: .destructive) { confirmReset = true }
                 .disabled(habits.book.isEmpty && habits.changes.days.isEmpty)
-                .confirmationDialog("Forget your walking speed, change time, stops and how your changes went?", isPresented: $confirmReset,
+                .confirmationDialog("Forget your walking speed, change time, stops, usual lines and how your changes went?", isPresented: $confirmReset,
                                     titleVisibility: .visible) {
                     Button("Reset", role: .destructive) { habits.reset() }
                 }
         } header: { Text("Learned from your rides") } footer: {
-            Text("From your own rides and walks, kept on this phone only. Plans use your walking speed for the walks, your change time as the least room a change needs, and give a plan from a stop you prefer a little head start. A change you’ve made 3 times or more says how often it worked.")
+            Text("From your own rides and walks, kept on this phone only. Plans use your walking speed for the walks, your change time as the least room a change needs, and give a plan from a stop you prefer a little head start. A change you’ve made 3 times or more says how often it worked. Your usual line at a time of day breaks a tie when two buses or trains fit about as well (never against their own GPS).")
         }
     }
 

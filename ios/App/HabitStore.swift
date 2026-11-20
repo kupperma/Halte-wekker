@@ -1,8 +1,8 @@
 import Foundation
 
-/// What the app learns from your own rides and walks (0.34, `Habits`), and how your changes went (`ChangeOdds`): kept on
-/// the phone only (UserDefaults), never sent anywhere. Settings › Trips & alarm › Learned from your rides shows it and
-/// resets it.
+/// What the app learns from your own rides and walks (0.34, `Habits`; 0.38 also your usual lines, `UsualLine`), and how
+/// your changes went (`ChangeOdds`): kept on the phone only (UserDefaults), never sent anywhere. Settings › Trips &
+/// alarm › Learned from your rides shows it and resets it.
 @MainActor
 final class HabitStore: ObservableObject {
     static let shared = HabitStore()
@@ -37,6 +37,18 @@ final class HabitStore: ObservableObject {
     func addChange(_ minutes: Double) { book.addChange(minutes); save() }
     func boarded(at stop: String) { book.boarded(at: stop); save() }
     func plannedFrom(_ stop: String) { book.plannedFrom(stop); save() }
+
+    /// 0.38: a ride on `line` whose planned departure is `at` (`UsualLine`: confirmed, said, or not this one).
+    func rode(line: String, train: Bool, at: Date, weight: Int) {
+        book.rode(line, train: train, minute: UsualLine.minute(at, calendar: calendar), weekend: UsualLine.weekend(at, calendar: calendar),
+                  weight: weight)
+        save()
+    }
+
+    /// 0.38: of `cands`, the one of your usual line at `at` (`UsualLine.usual`). Nil: none.
+    func usual(_ cands: [(id: String, line: String, train: Bool)], at: Date) -> String? {
+        UsualLine.usual(cands, minute: UsualLine.minute(at, calendar: calendar), weekend: UsualLine.weekend(at, calendar: calendar), book.lines)
+    }
 
     /// How a change went today (one outcome a day per change and time of day).
     func recordChange(from a: String, to b: String, at station: String, time: Date, made: Bool) {
