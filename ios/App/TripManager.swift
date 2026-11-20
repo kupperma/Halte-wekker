@@ -547,7 +547,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     func legDone(why: String = "by hand") {
         rideLog(FieldFormat.rideArrive(why: why, metres: distance, accuracy: accuracy, legAge: Date().timeIntervalSince(legStart), started: legStartMetres))
         let gotOff = vehicle?.tripId
-        if let v = vehicle, let l = leg, !demo { noteDelay(v, at: l.to) }
+        let rideId: String? = demo ? nil : leg.flatMap { l in tripStart.flatMap { keepRide(l, tripStart: $0) } }
+        if let v = vehicle, let l = leg, !demo { noteDelay(v, at: l.to, rideId: rideId) }
         handLock = nil; stillOnAsk = nil                   // (a pick by hand holds for its leg only)
         UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [Self.stillOnId])
         sound.stop()
@@ -1775,7 +1776,27 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
 
     /// It got you there: how late it was against its timetable (by its own live times when it has them), so next time
     /// a change after it gets the room it needs.
-    private func noteDelay(_ v: Vehicle, at stop: Place) {
+    /// (0.35) The ride just ended, kept for Your year in travel (`TravelLogStore`, this phone only): from the planned
+    /// departure once that had passed (else from when the leg began), its line, stops, kilometres and your coach.
+    /// Nil: under a minute, nothing to keep.
+    private func keepRide(_ l: Leg, tripStart ts: Date) -> String? {
+        let now = Date()
+        let planned: PlannedRide? = route?.planned?[safe: index]
+        var dep: Date = legStart
+        if let p = planned?.departure, p > legStart, p < now { dep = p }
+        guard now.timeIntervalSince(dep) >= 60 else { return nil }
+        let train: Bool = vehicle?.isTrain ?? planned?.isTrain ?? (l.mode == .train)
+        let label: String = vehicle?.title ?? planned.map { Vehicle(tripId: $0.tripId, line: $0.line, isTrain: $0.isTrain).title } ?? l.mode.title
+        let share = FriendTravelShare.shared
+        let coach: Int? = train && vehicle != nil && share.coachTrip == vehicle?.tripId ? share.coach?.n : nil
+        let metres: Double = Geo.metres(GeoPoint(l.from.coordinate), GeoPoint(l.to.coordinate))
+        let id = "r" + String(Int(dep.timeIntervalSince1970), radix: 36) + "-\(index)"
+        TravelLogStore.shared.add(RideRecord(id: id, trip: ts, dep: dep, arr: now, train: train, label: label, from: l.from.short,
+                                             to: l.to.short, km: TravelYear.km(metres: metres, train: train), coach: coach))
+        return id
+    }
+
+    private func noteDelay(_ v: Vehicle, at stop: Place, rideId: String? = nil) {
         let now = Date(), start = tripStart
         Task {
             guard let t = await Transit.liveTrip(v.tripId) else { return }
@@ -1787,6 +1808,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             let late = real.timeIntervalSince(sch) / 60
             DelayBook.shared.record(line: v.line, stop: t.stops[i].name, scheduled: sch, delay: late)
             self.noteLate(v, mins: late, tripStart: start)
+            if let rideId { TravelLogStore.shared.noteLate(rideId, mins: late) }
         }
     }
 
@@ -3315,7 +3337,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         busKm = 2; trainKm = 5; ringAtStop = true; announce = true; movingStation = true; autoStart = true
         soundKind = .steam; pauseMusic = false; autoHome = true; quietWhenInUse = true; headphonesOnly = true; kmMem = [:]; lastScore = nil
         direction = Self.savedDirection()
-        Ratings.shared.reset(); ScoreBook.shared.reset(); WatchStore.shared.reset(); StopsStore.shared.reset(); LineWatchStore.shared.reset()
+        Ratings.shared.reset(); ScoreBook.shared.reset(); TravelLogStore.shared.reset(); WatchStore.shared.reset(); StopsStore.shared.reset(); LineWatchStore.shared.reset()
         music.disconnectSpotify(); music.source = .off
     }
 

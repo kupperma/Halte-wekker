@@ -815,6 +815,13 @@ private struct AdvancedSettingsRows: View {
                 .settingsAnchor("adv.demo")
             } footer: { Text("Fastest trip with the map and notifications, being recognised on the bus, the ride ring, the alarm and arriving, all pretend.") }
         }
+        // (0.35) Your year in travel
+        Section {
+            NavigationLink { TravelYearScreen() } label: {
+                Label("Your year in travel", systemImage: "sparkles")
+            }
+            .settingsAnchor("adv.year")
+        } footer: { Text("Hours on buses and trains, kilometres, CO₂ saved against driving, favourites and more, worked out on this phone from your rides.") }
         FieldLogSection()
         if froze {
             FreezeSection()

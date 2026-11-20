@@ -126,6 +126,7 @@ enum SettingsIndex {
         SettingsEntry(id: "share.delete", title: "Delete what I sent", topic: .share, keywords: ["remove", "privacy", "server"]),
         // Advanced
         SettingsEntry(id: "adv.demo", title: "Try it at home: a pretend trip", topic: .advanced, keywords: ["demo", "pretend", "practice", "test trip"]),
+        SettingsEntry(id: "adv.year", title: "Your year in travel", topic: .advanced, keywords: ["wrapped", "year", "stats", "statistics", "hours", "km", "kilometres", "co2", "carbon", "favourite line", "travel so far", "share"]),
         SettingsEntry(id: "adv.log", title: "Connection and matching log", topic: .advanced, keywords: ["logs", "ride log", "requests", "copy the log", "debug"]),
         SettingsEntry(id: "adv.classic", title: "Classic vehicle matching", topic: .advanced, keywords: ["wrong bus", "wrong train", "old way", "matching"]),
         SettingsEntry(id: "adv.freeze", title: "When the app froze", topic: .advanced, keywords: ["freeze", "stuck", "diagnostics", "hang", "not responding"]),
