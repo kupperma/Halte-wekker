@@ -167,6 +167,30 @@ struct RidePickButton: View {
 }
 
 /// "Still on bus 306?" (0.20.5): the one you picked has been off its road for 3 minutes. Yes, or pick again.
+/// 0.34: two trains on the same track still tied after 2 minutes, going different ways: which one are you on?
+struct WhichTrainCard: View {
+    @EnvironmentObject var trip: TripManager
+    let trains: [Vehicle]
+    let to: [String: String]
+    var body: some View {
+        let a = trains[0], b = trains[1]
+        VStack(alignment: .leading, spacing: DS.s12) {
+            Label(TrainRules.askTitle((a.line, to[a.tripId] ?? ""), (b.line, to[b.tripId] ?? "")), systemImage: "questionmark.circle.fill")
+                .font(DS.headline).foregroundStyle(DS.text)
+            Text("Two trains run on the same track here. Which one are you on? Then it wakes you at the right stop.")
+                .font(DS.sub).foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: DS.s8) {
+                ForEach(trains, id: \.tripId) { v in
+                    DSQuietButton(title: TrainRules.answer(line: v.line, to: to[v.tripId] ?? ""), full: true) {
+                        Task { await trip.answerWhichTrain(v.tripId) }
+                    }
+                }
+            }
+        }
+        .dsPanel()
+    }
+}
+
 struct StillOnCard: View {
     @EnvironmentObject var trip: TripManager
     let v: Vehicle

@@ -88,6 +88,7 @@ enum SettingsIndex {
         SettingsEntry(id: "more.tips", title: "Before you nap", topic: .trips, keywords: ["tips", "sleep", "wake up", "sure"]),
         SettingsEntry(id: "more.leaderboard", title: "Leaderboard", topic: .trips, keywords: ["score", "scores", "fastest", "this week", "all time"]),
         SettingsEntry(id: "more.steady", title: "How steady are they now?", topic: .trips, keywords: ["reliability", "delays", "late", "punctual", "on time"]),
+        SettingsEntry(id: "trips.learned", title: "Learned from your rides", topic: .trips, keywords: ["habits", "walking speed", "walk", "change time", "transfer", "preferred stop", "bolkenplein", "reset", "learn", "worked on"]),
         // Your places
         SettingsEntry(id: "places.now", title: "Your school and home", topic: .places, keywords: ["profile", "timetable", "campus", "town"]),
         SettingsEntry(id: "places.list", title: "Your places", topic: .places, keywords: ["home", "school", "rename", "move", "order", "chips"]),

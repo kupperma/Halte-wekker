@@ -1777,6 +1777,22 @@ struct RideView: View {
             }
         }
         sheetInfo
+        if trip.whichTrain.count == 2 {
+            // (0.34) two trains on the same track: which one?
+            let w = trip.whichTrain, to = trip.whichTrainTo
+            VStack(alignment: .leading, spacing: 6) {
+                Text(TrainRules.askTitle((w[0].line, to[w[0].tripId] ?? ""), (w[1].line, to[w[1].tripId] ?? "")))
+                    .font(HWFont.display(17)).foregroundStyle(Paper.ink)
+                HStack(spacing: 10) {
+                    ForEach(w, id: \.tripId) { v in
+                        Button(TrainRules.answer(line: v.line, to: to[v.tripId] ?? "")) { Task { await trip.answerWhichTrain(v.tripId) } }
+                            .frame(minHeight: 44)
+                    }
+                }
+                .font(HWFont.body(13, bold: true)).foregroundStyle(Paper.navy).buttonStyle(.plain)
+            }
+            .padding(.horizontal, 16).padding(.top, 4)
+        }
         if let s = trip.stillOnAsk {
             // (0.20.5) the one you picked, off its road for 3 minutes
             VStack(alignment: .leading, spacing: 6) {

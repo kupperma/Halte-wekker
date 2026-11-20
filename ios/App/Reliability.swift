@@ -256,7 +256,9 @@ enum Risk {
     static func miss(_ t: DoorTrip, at i: Int, now: Date = Date()) -> Double {
         guard i > 0, i < t.rides.count else { return 0 }
         let r = t.rides[i - 1], n = t.rides[i]
-        let slack = n.departure.timeIntervalSince(r.arrival) / 60 - Double(n.walkBefore)
+        // (0.34) the planner's walk is at your own walking speed once it's learned (`Transit.plan`); the room a change
+        // needs, your own change time when that's more (`HabitStore.changeNeed`)
+        let slack = n.departure.timeIntervalSince(r.arrival) / 60 - HabitStore.shared.changeNeed(walk: n.walkBefore)
         if slack < 0 { return 0.95 }
         // its live times already have the delay it has now; what's left is how much later it could still get
         let already = r.live ? r.arrival.timeIntervalSince(r.scheduledArrival) / 60 : 0
@@ -267,8 +269,11 @@ enum Risk {
         // your own rides to that stop, once there are a few
         let learned = DelayBook.shared.delays(line: r.line, stop: r.toStop, at: r.scheduledArrival)
         // a slow bus before it (its speed rank B or C) needs more room: that much less of the slack counts
-        return ChangeRoom.missChance(slack: slack, typical: typical, already: already, soon: soon, learned: learned,
-                                     extra: ChangeRoom.feederExtra(isTrain: r.isTrain, grade: feederGrade(r)))
+        let model = ChangeRoom.missChance(slack: slack, typical: typical, already: already, soon: soon, learned: learned,
+                                          extra: ChangeRoom.feederExtra(isTrain: r.isTrain, grade: feederGrade(r)))
+        // (0.34) how this change went for you on other days, at this time of day (`ChangeOdds`)
+        let mine = HabitStore.shared.tally(from: r.line, to: n.line, at: n.fromStop, time: n.departure)
+        return ChangeOdds.missChance(model: model, made: mine.made, days: mine.days)
     }
 
     /// The speed rank of a bus you'd change from (only read): a slow one needs more room. Trains: none (a Sprinter is
@@ -293,12 +298,28 @@ enum Risk {
     /// The wait for the next one if you miss change `i`: a train often 20 to 30 min, a bus into town (the last ride) a few.
     static func after(_ t: DoorTrip, _ i: Int) -> Double { t.rides[i].isTrain ? 20 : i == t.rides.count - 1 ? 6 : 12 }
 
+    /// (0.34) Your own history of one of the trip's changes, once there are 3 days of it: "At Tilburg: this change worked
+    /// on 9 of 10 days" (the change with the most days; nil: none yet).
+    static func history(_ t: DoorTrip) -> String? {
+        var best: (days: Int, text: String)?
+        for i in t.rides.indices.dropFirst() {
+            let a = t.rides[i - 1], n = t.rides[i]
+            let mine = HabitStore.shared.tally(from: a.line, to: n.line, at: n.fromStop, time: n.departure)
+            guard let w = ChangeOdds.words(made: mine.made, days: mine.days), mine.days > (best?.days ?? 0) else { continue }
+            let cap: String = w.prefix(1).uppercased() + String(w.dropFirst())
+            let text: String = t.rides.count > 2 ? "At \(Fmt.place(n.fromStop)): \(w)" : cap
+            best = (mine.days, text)
+        }
+        return best?.text
+    }
+
     /// Below this many minutes of likely cost, a trip's changes are safe enough.
     static let safe = 3.5
 
     /// When you'd likely be there, in minutes: the arrival, plus what a missed change would likely cost.
+    /// (0.34) A plan from a stop you get on at more often than the planner has you: a little sooner (`Habits.bonus`).
     static func score(_ t: DoorTrip, now: Date = Date()) -> Double {
-        t.end.timeIntervalSince1970 / 60 + penalty(t, now: now)
+        t.end.timeIntervalSince1970 / 60 + penalty(t, now: now) - HabitStore.shared.bonus(t)
     }
 
     /// The change most likely to cost you, if it's a real worry (missing it would likely cost 2.5 minutes or more: a train

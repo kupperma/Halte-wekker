@@ -268,6 +268,8 @@ struct BoardingPass: View {
             let note = Risk.changeNote(after: ride, minutes: ch, walk: n.walkBefore)
             let why = note.why.map { " · \($0)" } ?? ""
             out.append(PassLine(text: "\(ch) min to change\(n.walkBefore > 0 ? ", \(n.walkBefore) min walk" : "")\(why)", warn: note.red))
+            // (0.34) how this change went for you on other days
+            if let w = HabitStore.shared.words(after: ride, onto: n) { out.append(PassLine(text: w)) }
         }
         return out
     }
