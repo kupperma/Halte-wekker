@@ -881,7 +881,8 @@ enum Transit {
             return LiveTrip.Stop(name: (o["name"] as? String) ?? "", coordinate: .init(latitude: la, longitude: lo),
                                  arrival: date(o["arrival"]), departure: date(o["departure"]),
                                  scheduled: date(o["scheduledArrival"]) ?? date(o["scheduledDeparture"]),
-                                 scheduledArrival: date(o["scheduledArrival"]), scheduledDeparture: date(o["scheduledDeparture"]))
+                                 scheduledArrival: date(o["scheduledArrival"]), scheduledDeparture: date(o["scheduledDeparture"]),
+                                 track: (o["track"] as? String) ?? (o["scheduledTrack"] as? String))
         }
         for l in legs {
             line = (l["routeShortName"] as? String) ?? line

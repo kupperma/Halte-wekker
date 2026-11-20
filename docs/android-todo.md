@@ -3,6 +3,39 @@
 The rules and numbers for each are in [logs-export.md](logs-export.md) › For Android (parity), with the iOS files and
 their tests.
 
+## iOS 0.39.0
+
+- [ ] Change guidance (`ChangeGuide`): at a change (bus → train, train → train), on the ride screen, at the change and on
+      the lock screen (Android: the ongoing trip notification): "Platform 5 → 7" (same platform "Same platform (5)", onto
+      a bus "Platform 5 → bus 306", from a bus "To platform 7"), "3 min walk", "4 min to change" (from your live arrival;
+      at the change from now). Missed when the room is under what the change needs: the planner's walk, or your own
+      learned change time (`Habits.changeMinutes`, at most 2 min over the walk), never under 1 min. Then at once "You’ll
+      miss the 08:12 — take the 08:27 from platform 4" (a bus: "… take bus 306 at 08:27"; none found: "You’ll likely miss
+      the 08:12"): the first later ride of the next leg with that room for its own walk. One tap "Switch to the 08:27"
+      on a planned trip: the rest planned again from the change (the planner from the change's stop to the trip's end,
+      the itinerary whose first ride is that one, else one leaving within 60 s of it) and spliced after the current leg.
+      Platforms from NS's live track, else Transitous `track`/`scheduledTrack`; the arrival platform from the ride's own
+      trip answer at your stop. Vectors in `ios/Tests/ChangeGuideTests.swift`.
+- [ ] Adaptive wake-up (`AdaptiveWake`, Settings › Trips & alarm › "Learn when I get up", on by default, with a reset):
+      per ring before the stop: seconds ring → Stop alarm (none: still ringing when you got within 450 m of the stop),
+      seconds ring → at the stop; spare = lead − reaction. Valid: lead 30 s … 20 min, reaction ≤ lead + 5 min. Per mode
+      the newest 10 kept; from 3 rides, the median spare of the newest 5: under 75 s → 1 min earlier, over 225 s → 1 min
+      back; bounds 0…3 (train), 0…2 (bus), never later than the setting (it only adds minutes to the time rule; the
+      distance rule unchanged). Shows "Learned: wakes you 1 min earlier" (or "… on trains", "Learning: 2 more rides",
+      "Learned: as you set it"). Vectors in `ios/Tests/AdaptiveWakeTests.swift`.
+- [ ] Richer lock screen: the trip notification shows the next stop (not yours), the delay at your stop ("3 min
+      late", "on time", "2 min early") and the platform you get in at ("Next: Vught · 3 min late · platform 5"), and the
+      change line (the miss first). Plus a quiet "Get ready" (`GetReady`, id `ready-<trip start>-<leg>`, no sound, gone
+      after 10 min) once the vehicle is at the stop before yours (30 s early counts), only before the alarm rang, when
+      your stop is more than the wake minutes + 1 min away and within 15 min. Vectors in `ios/Tests/GetReadyTests.swift`,
+      `ios/Tests/LockWordsTests.swift`, `ios/Tests/NoticeExpiryTests.swift`.
+- [ ] Without signal (`RideCache`): when a trip starts, each planned ride's trip answer (stops with times, scheduled
+      times, platforms, the road shape, the line) saved on the phone; again when the vehicle is found and at most every
+      2 min after; at most 4 rides, 120 stops and 400 road points each (thinned evenly, ends kept), 160 kB, for that trip
+      only, cleared when it ends (and on app start). No answer: the ride's stops, your stop's time, the road for the
+      wake time and dead reckoning come from the copy ("No network: going by the stops and times saved on your phone");
+      the network back: ask again at once. Vectors in `ios/Tests/RideCacheTests.swift`.
+
 ## iOS 0.37.1
 
 - [ ] Notifications that work on a watch (`WristNotice`; iOS mirrors them to a paired Apple Watch while the phone is

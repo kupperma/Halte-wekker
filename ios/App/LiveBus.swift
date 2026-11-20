@@ -13,6 +13,7 @@ struct LiveTrip {
         let scheduled: Date?
         var scheduledArrival: Date? = nil       // the timetable's own two times (`scheduled`: either)
         var scheduledDeparture: Date? = nil
+        var track: String? = nil                // (0.39) its platform there (live, else the timetable's)
     }
     let line: String
     let headsign: String

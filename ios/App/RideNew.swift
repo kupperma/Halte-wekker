@@ -238,6 +238,11 @@ struct RideViewNew: View {
             Text("No GPS here: following its route at its pace until GPS is back.").font(DS.sub).foregroundStyle(DS.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
+        if trip.offline && trip.usingSaved {
+            // (0.39) no network: the stops, times and road saved when the trip started
+            Label("No network: going by the stops and times saved on your phone. It updates once the network is back.", systemImage: "icloud.slash")
+                .font(DS.sub).foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
+        }
         if v == nil, trip.handLock != nil {
             Text("Going by your location: it wakes you by GPS for \(to).").font(DS.sub).foregroundStyle(DS.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -408,7 +413,10 @@ struct RideViewNew: View {
                     Spacer(minLength: 0)
                 }
                 .accessibilityElement(children: .combine)
-                if let ch {
+                if let g = trip.changeGuide {
+                    // (0.39) the platforms, the walk, the minutes; missed: the one you make instead, one tap to switch
+                    ChangeGuideRows(guide: g, at: at)
+                } else if let ch {
                     Label(ch.text, systemImage: ch.tight ? "exclamationmark.triangle.fill" : "arrow.triangle.swap")
                         .font(DS.subStrong).monospacedDigit().foregroundStyle(ch.tight ? DS.warning : DS.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -663,6 +671,10 @@ struct ArrivalViewNew: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityAddTraits(.isHeader)
         }
+        if let g = trip.changeGuide {
+            // (0.39) the platforms, the walk, the minutes; missed: the one you make instead, one tap to switch
+            ChangeGuideRows(guide: g, at: trip.leg?.to.short ?? n.from.short).dsPanel()
+        }
         if let r = trip.next {
             // (0.20.4) where to go for the next one, which one, the walk there
             let stop = GoToCard.leavesFrom(r, or: n.from)
@@ -905,5 +917,48 @@ struct RideBarNew: View {
         guard let to = trip.leg?.to.coordinate else { return false }
         let here = CLLocation(latitude: n.coordinate.latitude, longitude: n.coordinate.longitude)
         return here.distance(from: CLLocation(latitude: to.latitude, longitude: to.longitude)) < 300
+    }
+}
+
+// MARK: the change guide (0.39)
+
+/// The change ahead, guided (`ChangeGuide`): "Platform 5 → 7 · 3 min walk", "4 min to change"; when your ride's live
+/// times have you there too late for the planned one: "You’ll miss the 08:12 — take the 08:27 from platform 4", and one
+/// tap to switch the rest of the trip to it.
+struct ChangeGuideRows: View {
+    @EnvironmentObject var trip: TripManager
+    let guide: ChangeGuide.Guide
+    let at: String
+
+    var body: some View {
+        let g = guide
+        let line: String = [g.platforms, g.walk].compactMap { $0 }.joined(separator: " · ")
+        VStack(alignment: .leading, spacing: DS.s8) {
+            if let m = g.missText {
+                Label(m, systemImage: "exclamationmark.triangle.fill")
+                    .font(DS.bodyStrong).monospacedDigit().foregroundStyle(DS.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            HStack(alignment: .firstTextBaseline, spacing: DS.s8) {
+                Image(systemName: "arrow.triangle.swap").foregroundStyle(g.tight ? DS.warning : DS.accentText)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(g.countdown) at \(at)").font(DS.subStrong).monospacedDigit()
+                        .foregroundStyle(g.tight ? DS.warning : DS.text).fixedSize(horizontal: false, vertical: true)
+                    if !line.isEmpty {
+                        Text(line).font(DS.sub).monospacedDigit().foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            .accessibilityElement(children: .combine)
+            if trip.canSwitchChange {
+                DSQuietButton(title: trip.switchingChange ? "Planning the rest…" : "Switch to the \(Fmt.hhmm(g.target.departure))",
+                              icon: "arrow.triangle.branch", full: true) {
+                    Task { await trip.switchChange() }
+                }
+                .disabled(trip.switchingChange)
+                .accessibilityHint("Plans the rest of your trip from \(at) with this one")
+            }
+        }
     }
 }
