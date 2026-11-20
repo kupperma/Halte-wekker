@@ -667,6 +667,7 @@ private struct MapSettingsRows: View {
             SettingsSwitch(title: "Moving station", detail: "The station and train behind the home and ride screens. It pauses when the screen is off. Off shows a still picture.", isOn: $trip.movingStation)
                 .settingsAnchor("map.movingStation")
         }
+        TripExtrasSettingsRows()                  // (0.37) rain advice, OV-fiets, the widget and Siri
         NewLookSwitch()
     }
 }

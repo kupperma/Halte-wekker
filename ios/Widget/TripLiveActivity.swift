@@ -5,7 +5,10 @@ import WidgetKit
 
 @main
 struct HaltewekkerWidgets: WidgetBundle {
-    var body: some Widget { TripLiveActivity() }
+    var body: some Widget {
+        TripLiveActivity()
+        StopBoardWidget()               // (0.37) the next departures from a stop you pick
+    }
 }
 
 private let hhmm: DateFormatter = {

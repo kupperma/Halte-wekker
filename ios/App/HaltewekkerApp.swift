@@ -31,6 +31,7 @@ struct HaltewekkerApp: App {
     var body: some Scene {
         WindowGroup {
             RootView()
+                .modifier(AppActionsHandler())          // (0.37) Siri and Shortcuts: Fastest trip, Start my trip
                 .environmentObject(trip).environmentObject(live).environmentObject(trip.music)
                 .environmentObject(planner).environmentObject(near)
                 .environmentObject(NSStore.shared).environmentObject(WatchStore.shared)
@@ -39,6 +40,8 @@ struct HaltewekkerApp: App {
                 .onOpenURL { url in
                     // a friend's code (haltewekker://friend?…, 0.25), else back from the Spotify sign-in page
                     if FriendStore.shared.handle(url) { return }
+                    // (0.37) the widget's tap: haltewekker://stop?… opens that stop's sheet
+                    if let a = IntentActions.action(url) { AppActions.shared.post(a); return }
                     Task { await trip.music.finish(url) }
                 }
                 // Friends (0.25): requests are fetched when the app comes to the front (only with an account; no push)

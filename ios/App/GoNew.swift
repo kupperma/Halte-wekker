@@ -256,6 +256,9 @@ struct GoViewNew: View {
                        + (alt.map { ", or take \(GoStore.what($0.first)) at \(Fmt.hhmm($0.first.departure)) (\(destWord) \(Fmt.hhmm($0.end)))." } ?? "."))
             }
             changeNote(t)
+            // (0.37) rain on the walk, and the OV-fiets left where your last train gets in
+            RainAdviceLine(trip: t, others: go.others, origin: go.here?.coordinate)
+            if let st = OVFietsStore.station(for: t) { OVFietsLine(code: st.code, station: st.name) }
             // (0.34) how this change went for you on other days
             if let h = Risk.history(t) { DSNote(icon: "clock.arrow.circlepath", tint: DS.accentText, text: h) }
             Rectangle().fill(DS.divider).frame(height: 1)

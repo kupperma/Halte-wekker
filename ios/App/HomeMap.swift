@@ -231,6 +231,7 @@ struct NewHome: View {
     @ObservedObject private var school = SchoolAlarm.shared
     @ObservedObject private var friends = FriendStore.shared
     @ObservedObject private var travelLog = TravelLogStore.shared      // (0.35) the December card
+    @ObservedObject private var actions = AppActions.shared             // (0.37) the widget's tap, Siri's Wake me at a stop
     @EnvironmentObject var stopsStore: StopsStore
     @State private var focusedCard: String?
     @State private var tapped: DepartureTap?
@@ -399,6 +400,8 @@ struct NewHome: View {
             if s == .active { travelLog.refreshSeasonal() }
         }
         .onAppear { travelLog.refreshSeasonal(); Task { await TravelNotes.shared.tick() } }
+        .onAppear { takeAction() }
+        .onChange(of: actions.pending) { _, _ in takeAction() }
         .sheet(item: $sheet) { s in
             switch s {
             case .settings:
@@ -413,6 +416,28 @@ struct NewHome: View {
             }
         }
         .animation(DS.quick, value: trip.toast)
+    }
+
+    /// (0.37) The widget's tap (a stop's sheet) and Siri's Wake me at a stop (its screen, to confirm): over the home,
+    /// once what's open on it is closed.
+    private func takeAction() {
+        guard let a = actions.current else { return }
+        let stop: StopBoardCore.Stop
+        let wake: Bool
+        switch a {
+        case .showStop(let s): stop = s; wake = false
+        case .wake(let s): stop = s; wake = true
+        default: return
+        }
+        actions.done()
+        if wake && trip.phase != .idle { return }
+        let busy = sheet != nil || tapped != nil || stopTap != nil || vehicleTap != nil || wakeAt != nil || dayOpen
+        sheet = nil; tapped = nil; stopTap = nil; vehicleTap = nil; wakeAt = nil; dayOpen = false
+        let tappedStop = Transit.NearStop(id: stop.id, name: stop.name, lat: stop.lat, lon: stop.lon, rail: stop.rail, meters: 0)
+        Task { @MainActor in
+            if busy { try? await Task.sleep(nanoseconds: 600_000_000) }
+            if wake { wakeAt = WakeTarget(place: MapStopSheet.place(tappedStop), rail: stop.rail) } else { stopTap = tappedStop }
+        }
     }
 
     /// (0.35) In December (or after a year of rides): Your year in travel, while no trip runs. (0.36) Above it, works

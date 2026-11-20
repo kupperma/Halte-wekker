@@ -114,6 +114,9 @@ enum SettingsIndex {
         SettingsEntry(id: "map.real", title: "Real bus and train positions", topic: .map, keywords: ["gps", "ovapi", "ns", "where they are", "data"]),
         SettingsEntry(id: "map.movingStation", title: "Moving station", topic: .map, keywords: ["animation", "train behind", "still picture", "backdrop"]),
         SettingsEntry(id: "map.newLook", title: "New look", topic: .map, keywords: ["old look", "station look", "0.18"], corridorOnly: true),
+        SettingsEntry(id: "map.rainAdvice", title: "Rain advice for the walk", topic: .map, keywords: ["umbrella", "weather", "wet", "bus instead", "walking", "forecast", "open-meteo"]),
+        SettingsEntry(id: "map.ovfiets", title: "OV-fiets at the station", topic: .map, keywords: ["rental bike", "bikes left", "fiets", "bike", "ns", "station"]),
+        SettingsEntry(id: "map.widget", title: "Widget and Siri", topic: .map, keywords: ["home screen widget", "lock screen", "shortcuts", "hey siri", "when’s my bus", "departures", "voice"]),
         // Notifications
         SettingsEntry(id: "notices.watched", title: "Notifications and what’s watched", topic: .notifications, keywords: ["watch", "stop all notifications", "history", "bell", "lines", "trains"]),
         SettingsEntry(id: "notices.works", title: "Works and disruptions on my routes", topic: .notifications, keywords: ["engineering works", "werkzaamheden", "storing", "disruption", "no trains", "buses replace trains", "evening before", "ns"]),
