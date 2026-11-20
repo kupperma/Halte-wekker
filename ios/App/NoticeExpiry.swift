@@ -27,6 +27,10 @@ enum NoticeExpiry {
         ("delay-", 20),            // "… min late": the train has left by then
         ("wake-", 60),             // the school wake-up notifications (when AlarmKit isn't used)
         ("go-", 15),               // Fastest trip's "leave now" and changes (only the newest is kept anyway)
+        ("checkout-", 30),         // (0.36) "Did you check out?": you have checked out by then, or it's too late
+        ("nsclaim-", 2880),        // (0.36) "Your train was 34 min late — claim money back": two days to get to it
+        ("works-", 900),           // (0.36) the evening before works or a disruption on your route: gone the next afternoon
+        ("lasthome-", 45),         // (0.36) "Last way home in 30 min": it has left 15 min after
     ].sorted { $0.0.count > $1.0.count }
 
     /// The delivered notifications to take off now: `delivered` is (identifier, when it arrived).

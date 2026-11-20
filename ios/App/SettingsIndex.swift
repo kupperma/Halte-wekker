@@ -88,6 +88,9 @@ enum SettingsIndex {
         SettingsEntry(id: "more.tips", title: "Before you nap", topic: .trips, keywords: ["tips", "sleep", "wake up", "sure"]),
         SettingsEntry(id: "more.leaderboard", title: "Leaderboard", topic: .trips, keywords: ["score", "scores", "fastest", "this week", "all time"]),
         SettingsEntry(id: "more.steady", title: "How steady are they now?", topic: .trips, keywords: ["reliability", "delays", "late", "punctual", "on time"]),
+        SettingsEntry(id: "trips.studentOV", title: "Student travel product", topic: .trips, keywords: ["student ov", "studentenreisproduct", "ov-chipkaart", "free", "weekday", "weekend", "discount", "price", "costs", "duo", "fare"]),
+        SettingsEntry(id: "trips.checkOut", title: "Check-out reminder", topic: .trips, keywords: ["check out", "uitchecken", "ov-chipkaart", "card", "pole", "forgot", "reminder"]),
+        SettingsEntry(id: "trips.delayClaim", title: "Money back for a late train", topic: .trips, keywords: ["delay compensation", "geld terug bij vertraging", "refund", "claim", "late", "ns", "30 min"]),
         SettingsEntry(id: "trips.learned", title: "Learned from your rides", topic: .trips, keywords: ["habits", "walking speed", "walk", "change time", "transfer", "preferred stop", "bolkenplein", "reset", "learn", "worked on"]),
         // Your places
         SettingsEntry(id: "places.now", title: "Your school and home", topic: .places, keywords: ["profile", "timetable", "campus", "town"]),
@@ -113,6 +116,8 @@ enum SettingsIndex {
         SettingsEntry(id: "map.newLook", title: "New look", topic: .map, keywords: ["old look", "station look", "0.18"], corridorOnly: true),
         // Notifications
         SettingsEntry(id: "notices.watched", title: "Notifications and what’s watched", topic: .notifications, keywords: ["watch", "stop all notifications", "history", "bell", "lines", "trains"]),
+        SettingsEntry(id: "notices.works", title: "Works and disruptions on my routes", topic: .notifications, keywords: ["engineering works", "werkzaamheden", "storing", "disruption", "no trains", "buses replace trains", "evening before", "ns"]),
+        SettingsEntry(id: "notices.lastHome", title: "Last way home", topic: .notifications, keywords: ["last train", "last bus", "night", "evening", "get home", "missed", "late"]),
         SettingsEntry(id: "lock.music", title: "Show music from", topic: .notifications, keywords: ["lock screen", "spotify", "apple music", "song", "now playing"]),
         SettingsEntry(id: "lock.spotify", title: "Connect Spotify", topic: .notifications, keywords: ["client id", "disconnect spotify", "music"]),
         SettingsEntry(id: "lock.preview", title: "Preview on the lock screen", topic: .notifications, keywords: ["live activity", "lock screen", "dynamic island"]),
