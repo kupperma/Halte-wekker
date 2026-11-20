@@ -1320,7 +1320,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             if id.hasPrefix("wake-") { WakeAlarm.cancelRepeats(of: id) }
             // (0.36) "claim money back from NS": NS's claim page
             if id.hasPrefix("nsclaim-"), action == UNNotificationDefaultActionIdentifier, let u = URL(string: DelayClaim.claimURL) {
-                UIApplication.shared.open(u)
+                _ = await UIApplication.shared.open(u)
             }
             if id == Self.stillOnId, action == "STILL_YES" || action == "STILL_PICK" {
                 self.answerStillOn(yes: action == "STILL_YES", fromNotification: true)
