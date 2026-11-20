@@ -649,13 +649,16 @@ struct SchoolAlarmSection: View {
                         .font(ink.note(12)).foregroundStyle(ink.muted)
                 }
             }
+            .settingsAnchor("school.alarm")
             if school.on {
                 if profile.profile.schedule == .calendars && !school.allowed {
                     Button("Allow calendar access") { Task { await school.start() } }.foregroundStyle(ink.link)
                 } else {
                     timetableRow
                     Stepper("At \(RoleWords.current.school) \(school.earlyMinutes) min before class", value: $school.earlyMinutes, in: 0...45, step: 5)
+                        .settingsAnchor("school.early")
                     Stepper("Wake me \(school.wakeMinutes) min before I leave", value: $school.wakeMinutes, in: 15...150, step: 5)
+                        .settingsAnchor("school.wake")
                     if let n = school.next {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("\(SchoolAlarm.dayWord(n.classStart).capitalizedFirst): \(n.title) at \(Fmt.hhmm(n.classStart))").font(ink.strong(13))
@@ -690,6 +693,7 @@ struct SchoolAlarmSection: View {
                     Text(school.calendarIds.isEmpty ? "Pick one" : "\(school.calendarIds.count) picked").foregroundStyle(ink.muted)
                 }
             }
+            .settingsAnchor("school.timetable")
         case .manual(let w):
             NavigationLink { ManualWeekScreen() } label: {
                 HStack {
@@ -698,12 +702,14 @@ struct SchoolAlarmSection: View {
                     Text(SetupLogic.weekWords(w)).foregroundStyle(ink.muted).multilineTextAlignment(.trailing)
                 }
             }
+            .settingsAnchor("school.timetable")
         case .none:
             Button("Read it from a calendar on this iPhone") {
                 profile.setSchedule(.calendars)
                 Task { await school.start() }
             }
             .foregroundStyle(ink.link)
+            .settingsAnchor("school.timetable")
             Button("Same times every week") { profile.setSchedule(.manual(.workdays)) }.foregroundStyle(ink.link)
         }
     }

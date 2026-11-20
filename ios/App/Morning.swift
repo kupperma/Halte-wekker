@@ -366,6 +366,7 @@ struct MorningSection: View {
                         .font(ink.note(12)).foregroundStyle(ink.muted)
                 }
             }
+            .settingsAnchor("morning.screen")
             if morning.on {
                 LazyVGrid(columns: cols, spacing: 10) {
                     ForEach(morning.all, id: \.self) { l in tile(l) }
@@ -392,6 +393,7 @@ struct MorningSection: View {
                 .padding(.vertical, 6)
                 Text(caption).font(ink.note(11.5)).foregroundStyle(ink.muted)
                 Button("Show the morning screen now") { preview(nil) }.foregroundStyle(ink.link)
+                    .settingsAnchor("morning.show")
             }
         } header: { Text("Morning") }
         .onChange(of: picking) { _, items in

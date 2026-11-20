@@ -102,7 +102,7 @@ private struct CompareHeader: View {
 
     private func status(_ p: ComparePerson) -> String {
         if p.isMe {
-            if p.timetable == nil { return "Your timetable isn’t set up (Settings › School alarm)" }
+            if p.timetable == nil { return "Your timetable isn’t set up (Settings › School & mornings)" }
             return p.timetable?.src == "week" ? "Your week (same times every week)" : "From your school calendar"
         }
         guard let t = p.timetable else { return "Hasn’t shared a timetable with you yet" }
@@ -511,7 +511,7 @@ struct MyTimetableCard: View {
             let n = tt.sentCount
             return "Shared with \(n == 1 ? "1 person" : "\(n) people") · last sent \(FriendDates.day(at)) \(Fmt.hhmm(at)). It follows your timetable, at most every few hours."
         }
-        return "Shared with friends once your timetable is read (Settings › School alarm)."
+        return "Shared with friends once your timetable is read (Settings › School & mornings)."
     }
 
     var body: some View {

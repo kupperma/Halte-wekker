@@ -2260,10 +2260,9 @@ struct SettingsView: View {
     @EnvironmentObject var music: NowPlaying
     @State private var liveStops = false
     @State private var confirmReset = false
-    @Environment(\.webAuthenticationSession) private var webAuth
     @Environment(\.dismiss) private var dismissSettings
     var tryDemo: (() -> Void)? = nil
-    /// Opened from the new look's home (0.19): its own sections first, in the system look.
+    /// In the system look with the new tokens (the new look's home opens `SettingsHub` instead since 0.32.1).
     var newLook = false
     var pal: HWPalette { .of(home: trip.direction == .home) }
     private var ink: SettingsInk { SettingsInk(newLook: newLook) }
@@ -2272,9 +2271,7 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
-                if newLook {
-                    NewLookSettings(tryDemo: tryDemo, dismissSettings: { dismissSettings() })
-                } else if let tryDemo, trip.phase == .idle {
+                if let tryDemo, trip.phase == .idle {
                     Section {
                         Button { dismissSettings(); tryDemo() } label: {
                             Label("Try it at home: a pretend trip", systemImage: "play.circle.fill").foregroundStyle(link)
@@ -2328,22 +2325,7 @@ struct SettingsView: View {
                 } header: { Text("Backup alarm") } footer: {
                     Text("On every leg it also rings after this time, even if GPS drops out. Pick a bit longer than your longest ride.")
                 }
-                Section {
-                    Picker("Show music from", selection: $music.source) {
-                        ForEach(MusicSource.allCases) { m in Text(m.title).tag(m) }
-                    }
-                    if music.source == .spotify { spotifyRows }
-                    if music.source == .appleMusic && !music.appleMusicAllowed {
-                        Text("Let Haltewekker see Apple Music: iPhone Settings → Apps → Haltewekker → Media & Apple Music.").font(ink.note(12)).foregroundStyle(ink.late)
-                    }
-                    if let s = music.song {
-                        Label("\(s.title)\(s.artist.isEmpty ? "" : " · \(s.artist)")", systemImage: s.playing ? "music.note" : "pause.fill").font(ink.note(13))
-                    }
-                    Button("Preview on the lock screen") { music.checkOnce(); DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { trip.previewActivity() } }
-                        .foregroundStyle(link).disabled(trip.isRiding)
-                } header: { Text("Lock screen") } footer: {
-                    Text("During a trip your lock screen shows a little train screen: how far to go, a metro that drives along as you get closer, your arrival time and the song you’re playing. The preview runs for about a minute: lock your phone to see it.")
-                }
+                LockScreenSection()
                 Section {
                     Stepper("Bus: \(String(format: "%.1f", trip.busKm)) km", value: $trip.busKm, in: 0.5...10, step: 0.5)
                     Stepper("Train: \(String(format: "%.1f", trip.trainKm)) km", value: $trip.trainKm, in: 0.5...15, step: 0.5)
@@ -2372,45 +2354,6 @@ struct SettingsView: View {
         }
         .environment(\.settingsNewLook, newLook)
     }
-    @ViewBuilder private var spotifyRows: some View {
-        if music.spotifyConnected {
-            Label("Spotify is connected", systemImage: "checkmark.circle.fill").foregroundStyle(ink.ok)
-            Button("Check what’s playing") { music.checkOnce() }.foregroundStyle(link)
-            Button("Disconnect Spotify", role: .destructive) { music.disconnectSpotify() }
-        } else {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Spotify only tells apps what’s playing if you make a (free) Spotify app for it. Once, on developer.spotify.com with your Premium account:")
-                Text("1. Dashboard → Create app. Tick “Web API”.\n2. Redirect URI: the link below.\n3. Settings → User Management: add your own name and Spotify email.\n4. Copy the Client ID and paste it here.")
-            }
-            .font(ink.note(12)).foregroundStyle(ink.muted)
-            Button { UIPasteboard.general.string = NowPlaying.redirect } label: { Label("Copy the redirect link", systemImage: "doc.on.doc") }
-                .foregroundStyle(link)
-            Text(NowPlaying.redirect).font(ink.note(11)).foregroundStyle(ink.muted).textSelection(.enabled)
-            HStack {
-                TextField("Client ID", text: $music.clientId)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled().font(ink.note(13))
-                PasteButton(payloadType: String.self) { strings in
-                    Task { @MainActor in music.clientId = (strings.first ?? "").trimmingCharacters(in: .whitespacesAndNewlines) }
-                }
-                .labelStyle(.iconOnly).buttonBorderShape(.capsule)
-            }
-            Button(music.busy ? "Connecting…" : "Connect Spotify") { Task { await connectSpotify() } }
-                .foregroundStyle(link)
-                .disabled(music.clientId.trimmingCharacters(in: .whitespacesAndNewlines).count < 20 || music.busy)
-        }
-        if let e = music.spotifyError { Text(e).font(ink.note(12)).foregroundStyle(ink.late) }
-    }
-
-    private func connectSpotify() async {
-        guard let url = music.spotifySignInURL() else { return }
-        do {
-            let back = try await webAuth.authenticate(using: url, callbackURLScheme: "haltewekker", preferredBrowserSession: .shared)
-            await music.finish(back)
-        } catch {
-            if (error as? ASWebAuthenticationSessionError)?.code != .canceledLogin { music.report("Couldn’t sign in: \(error.localizedDescription)") }
-        }
-    }
-
     private func label(_ t: String, _ d: String) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(t).font(newLook ? DS.body : HWFont.display(16))

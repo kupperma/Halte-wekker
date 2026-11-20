@@ -425,7 +425,7 @@ private struct SetupHomeStep: View {
                 HStack(spacing: DS.s8) { ProgressView(); Text("Finding the stops near home…").font(DS.sub).foregroundStyle(DS.secondary) }
                     .padding(.vertical, DS.s8)
             } else if rows.isEmpty {
-                Text(choices == nil ? "Couldn’t look up the stops just now: trips start from home itself. Pick them later in Settings › Home bus stops and lines."
+                Text(choices == nil ? "Couldn’t look up the stops just now: trips start from home itself. Pick them later in Settings › Your places › Home bus stops and lines."
                                     : "No stops found near here: trips start from home itself.")
                     .font(DS.sub).foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true).padding(.vertical, DS.s8)
             }
@@ -603,7 +603,7 @@ private struct SetupTimetableStep: View {
                 }
                 .dsPanel(padding: DS.s12)
             case .later?:
-                Text("You can set it up later in Settings › School alarm. Trips and the stop alarm work without it.")
+                Text("You can set it up later in Settings › School & mornings. Trips and the stop alarm work without it.")
                     .font(DS.sub).foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
             case nil: EmptyView()
             }
@@ -717,7 +717,7 @@ private struct SetupTimetableStep: View {
             if notFound {
                 DSNote(icon: "info.circle.fill", text: access
                        ? "No new calendar yet. Add it in Settings › Calendar › Accounts (Add Account › Other › Add Subscribed Calendar), then pick it here."
-                       : "Allow calendar access to find the new calendar, or add it in Settings › Calendar › Accounts and pick it later in Settings › School alarm.")
+                       : "Allow calendar access to find the new calendar, or add it in Settings › Calendar › Accounts and pick it later in Settings › School & mornings.")
             }
             if access && (notFound || found != nil) { calendarList }
             Text("iPhone asks before it subscribes, and then refreshes subscribed calendars on its own schedule, so a change to your roster can take a while to show here.")
@@ -861,7 +861,7 @@ private struct SetupMorningStep: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: DS.s16) {
-            Text("How the school alarm plans your mornings. You can change these any time in Settings › School alarm.")
+            Text("How the school alarm plans your mornings. You can change these any time in Settings › School & mornings.")
                 .font(DS.body).foregroundStyle(DS.text).fixedSize(horizontal: false, vertical: true)
             VStack(alignment: .leading, spacing: DS.s12) {
                 Stepper(value: $draft.earlyMinutes, in: SetupLogic.earlyRange, step: 5) {
@@ -896,7 +896,7 @@ private struct SetupMorningStep: View {
             .dsPanel()
             if draft.wakeOn && SetupLogic.schedule(draft) == ScheduleSource.none {
                 DSNote(icon: "calendar.badge.exclamationmark",
-                       text: "It needs your timetable to know your first class: go back a step, or set it later in Settings › School alarm.")
+                       text: "It needs your timetable to know your first class: go back a step, or set it later in Settings › School & mornings.")
             }
         }
         .onChange(of: draft.wakeOn) { _, on in if on { Task { await askAlarm() } } }
@@ -962,7 +962,7 @@ private struct SetupDoneStep: View {
     var body: some View {
         VStack(alignment: .leading, spacing: DS.s16) {
             Text(test ? "This is what a new student has now. Try it for real: trips, the board and the school alarm use this test setup until you go back to your own."
-                      : "That’s all it needs. Change any of it later in Settings › Your school and home.")
+                      : "That’s all it needs. Change any of it later in Settings › Advanced › Set up again.")
                 .font(DS.body).foregroundStyle(DS.text).fixedSize(horizontal: false, vertical: true)
             VStack(alignment: .leading, spacing: 0) {
                 row("graduationcap.fill", "School", [draft.school?.name, draft.campus].compactMap { $0 }.joined(separator: " · "), .school)
@@ -985,7 +985,7 @@ private struct SetupDoneStep: View {
             .dsPanel(padding: DS.s12)
             if test {
                 DSNote(icon: "arrow.uturn.backward.circle.fill", tint: DS.accentText,
-                       text: "“Back to my own” at the top of the home (and in Settings › Your school and home) puts your own setup back exactly as it was.")
+                       text: "“Back to my own” at the top of the home (and in Settings › Advanced) puts your own setup back exactly as it was.")
             }
         }
     }
@@ -1192,7 +1192,7 @@ struct SetupSettingsView: View {
     }
 }
 
-/// Settings › School alarm › Your week (a profile with the same times every week).
+/// Settings › School & mornings › Your week (a profile with the same times every week).
 struct ManualWeekScreen: View {
     @ObservedObject private var profile = ProfileStore.shared
     @State private var week = ManualWeek.workdays
