@@ -79,7 +79,7 @@ final class OutfitWordsTests: XCTestCase {
         let c = OutfitWords.chips(pieces: ["Shirt", "Sweater", "Coat"], raincoat: true)
         XCTAssertEqual(c.map(\.label), ["Shirt", "Sweater", "Coat", "Raincoat"])
         XCTAssertEqual(c[0].symbols, ["tshirt.fill"])
-        XCTAssertEqual(c[1].symbols, [], "no sweater symbol: a text chip")
+        XCTAssertEqual(c[1].symbols, [OutfitWords.sweaterGlyph], "no SF Symbol for a sweater: the app's own drawn glyph")
         XCTAssertEqual(c[2].symbols.first, "coat.fill")
         XCTAssertTrue(c[3].rain)
         XCTAssertEqual(c[3].symbols, ["umbrella.fill"])
