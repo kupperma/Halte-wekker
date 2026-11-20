@@ -55,6 +55,7 @@ enum NewLook {
         for k in [key, vehiclesKey, HomeMapStyle.key, HomeStyle.key, PlanTripModel.recentsKey, PlacesLogic.storageKey] { d.removeObject(forKey: k) }
         PlacesStore.shared.reset()
         SchoolAlarm.shared.clearSkipped()
+        TravelNotes.shared.reset()                    // (0.36) the travel help's settings and what it learned
     }
 }
 
@@ -397,7 +398,7 @@ struct NewHome: View {
             if s != .active { mapStops.pause() } else if let r = region { mapStops.cameraStopped(r, visible: visible) }
             if s == .active { travelLog.refreshSeasonal() }
         }
-        .onAppear { travelLog.refreshSeasonal() }
+        .onAppear { travelLog.refreshSeasonal(); Task { await TravelNotes.shared.tick() } }
         .sheet(item: $sheet) { s in
             switch s {
             case .settings:
@@ -414,8 +415,13 @@ struct NewHome: View {
         .animation(DS.quick, value: trip.toast)
     }
 
-    /// (0.35) In December (or after a year of rides): Your year in travel, while no trip runs.
+    /// (0.35) In December (or after a year of rides): Your year in travel, while no trip runs. (0.36) Above it, works
+    /// on your route today or tomorrow, and in the evening away from home the last way home.
     @ViewBuilder private var yearBanner: some View {
+        if trip.phase == .idle {
+            TravelNotesBanner()
+                .transition(.opacity)
+        }
         if trip.phase == .idle, let y = travelLog.seasonalYear {
             TravelYearBanner(year: y) { sheet = .year }
                 .transition(.opacity)

@@ -12,10 +12,13 @@
 //    developer, which needs the secret LOGS_ADMIN_KEY (see docs/logs-export.md and logs.js).
 // 8. Live links (0.30): /live/<token>#<key>, a page with a trip's live times for someone without the app, locked on
 //    the phone with a key the relay never sees (/live/v1/put, /live/v1/end, /live/v1/get; see live.js).
+// 9. (0.36) NS disruptions and planned works: /ns/disruptions[?station=BD]; what a journey costs: /ns/price?from=TB&to=BD
+//    (see ns-extra.js).
 import { DurableObject } from "cloudflare:workers";
 import { friends, FriendsCore } from "./friends.js";
 import { logs, LogsCore } from "./logs.js";
 import { live, LiveCore } from "./live.js";
+import { nsExtra } from "./ns-extra.js";
 
 export class Friends extends DurableObject {
   constructor(ctx, env) {
@@ -61,6 +64,11 @@ export default {
     }
     // The key may be saved as NS_KEY or NS-KEY.
     const NS_KEY = env.NS_KEY || env["NS-KEY"];
+
+    if (url.pathname === "/ns/disruptions" || url.pathname === "/ns/price") {
+      const r = await nsExtra(url, env, cors);
+      if (r) return r;
+    }
 
     if (url.pathname === "/ns/departures") {
       const station = (url.searchParams.get("station") || "").toUpperCase();

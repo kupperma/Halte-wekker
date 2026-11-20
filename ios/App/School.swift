@@ -465,7 +465,8 @@ final class SchoolAlarm: ObservableObject {
 
     /// Ask iOS to wake the app now and then (about every hour) to plan the alarms again.
     static func scheduleBackground() {
-        guard UserDefaults.standard.bool(forKey: "school.on") else { return }
+        // (0.36) also for the works on your routes and the last way home, which look at the same wake-up
+        guard UserDefaults.standard.bool(forKey: "school.on") || TravelNotes.wantsBackground else { return }
         let r = BGAppRefreshTaskRequest(identifier: backgroundId)
         r.earliestBeginDate = Date().addingTimeInterval(50 * 60)
         try? BGTaskScheduler.shared.submit(r)
@@ -477,6 +478,8 @@ final class SchoolAlarm: ObservableObject {
         NoticeSweep.soon()
         scheduleBackground()
         await shared.refresh(force: false)
+        // (0.36) works on your routes and the last way home, at most every 4 h / hourly
+        await TravelNotes.shared.tick()
         // Friends (0.25): requests come in at this same wake-up too (nothing without an account)
         await FriendStore.shared.sync(.auto)
     }

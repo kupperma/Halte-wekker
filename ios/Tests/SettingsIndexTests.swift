@@ -89,4 +89,13 @@ final class SettingsIndexTests: XCTestCase {
         XCTAssertEqual(SettingsTopic.inGroup(1), [.trips, .places, .school, .friends, .map, .notifications])
         XCTAssertEqual(SettingsTopic.inGroup(2), [.battery, .share, .advanced])
     }
+
+    func test_travelHelpRowsAreFound() {                                   // (0.36)
+        XCTAssertEqual(SettingsIndex.search("student ov").first?.id, "trips.studentOV")
+        XCTAssertEqual(SettingsIndex.search("check out").first?.id, "trips.checkOut")
+        XCTAssertEqual(SettingsIndex.search("geld terug").first?.id, "trips.delayClaim")
+        XCTAssertEqual(SettingsIndex.search("works").first?.id, "notices.works")
+        XCTAssertEqual(SettingsIndex.search("last way home").first?.id, "notices.lastHome")
+        XCTAssertEqual(SettingsIndex.search("last train").first?.topic, .notifications)
+    }
 }

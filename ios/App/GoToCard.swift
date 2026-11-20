@@ -78,6 +78,7 @@ struct GoToCard: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("Its whole route, live")
             }
+            StudentFareLine(rides: [ride])               // (0.36) with a student travel product
             if let footer {
                 Text(footer).font(DS.footnote).foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
             }

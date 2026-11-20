@@ -44,7 +44,11 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     @Published private(set) var arrival: Date?
     @Published private(set) var next: Ride?
     @Published private(set) var vehicle: Vehicle? {
-        didSet { if oldValue?.tripId != vehicle?.tripId { wakeLive = nil; wakeRoute = [] } }   // (another one's times aren't this one's)
+        didSet {
+            if oldValue?.tripId != vehicle?.tripId { wakeLive = nil; wakeRoute = [] }   // (another one's times aren't this one's)
+            // (0.36) at a change, the next leg found the one you got off: still on board, no "Did you check out?"
+            if let p = checkOutPending, let v = vehicle, v.tripId == p.gotOff, oldValue?.tripId != v.tripId { checkOutLook(speed: nil, sameVehicle: true) }
+        }
     }
     @Published private(set) var legArrival: Date?
     @Published private(set) var legFrom: Date?          // when this bus or train left (or should have)
@@ -161,6 +165,11 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     private var tripStartSpot: CLLocationCoordinate2D?    // where you were when the trip started (its score), if that fix was fresh
     private var tripPlannedEnd: Date?                     // (0.35) the trip's scheduled arrival as it started (a replan keeps it)
     private var tripLate: (line: String, mins: Double)?   // (0.35) its latest ride at your stop so far
+    /// (0.36) "Did you check out?" waiting to come (a minute after you got off), taken back if you're still on board.
+    private struct CheckOutPending { let id: String; let at: Date; var speeds: [Double]; let gotOff: String?; let end: Bool }
+    private var checkOutPending: CheckOutPending?
+    private var trainLate: [Double] = []                  // (0.36) this trip's trains' delays at your stops (money back from NS)
+    private var claimTold: Date?                          // …the trip (by its start) it told you about
     private var activityLater: Task<Void, Never>?          // a Live Activity change held back for the 30 s
     private var gpsWhy: GPSReason?                         // why GPS is on, as the battery log has it
     private var sameOK: (tripId: String, looks: Int)?      // "still the same bus?" looks in a row that passed, for this one
@@ -433,7 +442,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         }
         tripStart = Date(); startedAtLeg = index; lastScore = nil
         tripStartSpot = lastFix.flatMap { Date().timeIntervalSince($0.timestamp) < ScoreRules.freshStart ? $0.coordinate : nil }
-        tripPlannedEnd = r.plannedEnd; tripLate = nil
+        tripPlannedEnd = r.plannedEnd; tripLate = nil; trainLate = []
+        if !demo { TravelNotes.shared.tripStarted(); TravelNotes.shared.noteLegs(legs) }   // (0.36) your usual trains
         boardedNoted = demo || index > 0 || r.custom == nil; changeArrived = nil
         if !demo, index == 0, let first = r.custom?.first { HabitStore.shared.plannedFrom(first.from.name) }
         setBackup(backup ?? backupMinutes)
@@ -547,6 +557,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     func legDone(why: String = "by hand") {
         rideLog(FieldFormat.rideArrive(why: why, metres: distance, accuracy: accuracy, legAge: Date().timeIntervalSince(legStart), started: legStartMetres))
         let gotOff = vehicle?.tripId
+        if !demo, TravelNotes.shared.checkOut { remindCheckOut(gotOff: gotOff) }     // (0.36)
         let rideId: String? = demo ? nil : leg.flatMap { l in tripStart.flatMap { keepRide(l, tripStart: $0) } }
         if let v = vehicle, let l = leg, !demo { noteDelay(v, at: l.to, rideId: rideId) }
         handLock = nil; stillOnAsk = nil                   // (a pick by hand holds for its leg only)
@@ -573,11 +584,59 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             phase = .finished
             finishedAt = Date()
             scoreTrip()
+            considerClaim()                                   // (0.36) a train 30 min late: money back from NS
         }
         applyGPS()                  // a change: as on the ride, until you stand still a while; the end: off
         pushActivity(force: true)
         if phase == .finished { afterArrival() }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { WatchStore.shared.showNext() }
+    }
+
+    /// (0.36) "Did you check out?" a minute after you got off, where the OV-chipkaart wants you to (`CheckOut`): the
+    /// trip's end, off a bus, between bus and train, between train companies. Taken back when you turn out to be still
+    /// on board in that minute (the next leg found the one you got off; at the end, two fixes at a vehicle's speed).
+    private func remindCheckOut(gotOff: String?) {
+        guard let l = leg else { return }
+        let planned = route?.planned
+        var rides: [CheckOut.Ride] = legs.indices.map { k in CheckOut.Ride(train: legs[k].mode == .train, company: planned?[safe: k]?.agency) }
+        if let v = vehicle, rides.indices.contains(index) { rides[index] = CheckOut.Ride(train: v.isTrain, company: rides[index].company) }
+        guard CheckOut.due(after: index, of: rides) else { return }
+        let next: CheckOut.Ride? = index + 1 < rides.count ? rides[index + 1] : nil
+        let t = CheckOut.text(at: l.to.short, change: next.map { (fromTrain: rides[index].train, toTrain: $0.train) })
+        if let p = checkOutPending { TravelNotes.cancel(id: p.id) }
+        let id = "checkout-\(Int(Date().timeIntervalSince1970))-\(index)"
+        checkOutPending = CheckOutPending(id: id, at: Date(), speeds: [], gotOff: gotOff, end: next == nil)
+        TravelNotes.post(id: id, title: t.title, body: t.body, kind: "info", after: CheckOut.after)
+        rideLog("check-out reminder in \(Int(CheckOut.after)) s (\(next == nil ? "the end" : "a change"))")
+    }
+
+    /// In the minute after you got off: still on board takes the reminder back.
+    private func checkOutLook(speed: Double?, sameVehicle: Bool) {
+        guard var p = checkOutPending else { return }
+        guard Date().timeIntervalSince(p.at) < CheckOut.after else { checkOutPending = nil; return }
+        if let s = speed { p.speeds.append(s) }
+        if CheckOut.stillAboard(speeds: p.speeds, sameVehicle: sameVehicle) {
+            TravelNotes.cancel(id: p.id)
+            checkOutPending = nil
+            rideLog("check-out reminder taken back: still on board")
+        } else {
+            checkOutPending = p
+        }
+    }
+
+    /// (0.36) NS's money back for a late train (`DelayClaim`): after the trip, once, when its trains got you there 30
+    /// minutes late or more, with a link to NS's claim page.
+    private func considerClaim() {
+        guard !demo, TravelNotes.shared.delayClaim, let s = tripStart, claimTold != s else { return }
+        guard phase == .finished || phase == .idle else { return }
+        let lastIsTrain = phase == .finished && legs.last?.mode == .train
+        let end: Date? = phase == .finished ? finishedAt : nil
+        let m = DelayClaim.minutesLate(plannedEnd: lastIsTrain ? tripPlannedEnd : nil, actualEnd: lastIsTrain ? end : nil, trainDelays: trainLate)
+        guard DelayClaim.due(minutesLate: m, told: false), let mins = m else { return }
+        claimTold = s
+        let t = DelayClaim.text(minutesLate: mins)
+        TravelNotes.post(id: "nsclaim-\(Int(s.timeIntervalSince1970))", title: t.title, body: t.body, kind: "late", after: 60, url: DelayClaim.claimURL)
+        rideLog("money back from NS: \(Int(mins.rounded())) min late")
     }
 
     /// The trip at its last stop goes on the leaderboard (`ScoreRules.board`): a corridor route by its name, a planned
@@ -725,6 +784,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             await e?.end(nil, dismissalPolicy: .immediate)
         }
         resumable = resume
+        considerClaim()                                   // (0.36) ended by hand after a late train: still told once
         updateKeepAlive()                                 // GPS off, unless Fastest trip or a line watch wants it
         FieldLog.shared.flush(); DelayBook.shared.save()
     }
@@ -1040,6 +1100,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         if LogShareStore.shared.fixesOn { LogShareStore.shared.heard(loc, trip: self) }
         samples.append(loc)
         samples.removeAll { $0.timestamp < Date().addingTimeInterval(-240) }
+        if phase == .finished, checkOutPending?.end == true, loc.speed >= 0 { checkOutLook(speed: loc.speed, sameVehicle: false) }   // (0.36)
         if loc.speed >= 0 {
             currentSpeed = loc.speed
             // (each new value redraws every screen that shows the trip: the home screen too, on every fix while idle)
@@ -1257,6 +1318,10 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         Task { @MainActor in
             if action == "STOP" || (id == "alarm" && (action == UNNotificationDefaultActionIdentifier || action == UNNotificationDismissActionIdentifier)) { self.stopAlarm() }
             if id.hasPrefix("wake-") { WakeAlarm.cancelRepeats(of: id) }
+            // (0.36) "claim money back from NS": NS's claim page
+            if id.hasPrefix("nsclaim-"), action == UNNotificationDefaultActionIdentifier, let u = URL(string: DelayClaim.claimURL) {
+                _ = await UIApplication.shared.open(u)
+            }
             if id == Self.stillOnId, action == "STILL_YES" || action == "STILL_PICK" {
                 self.answerStillOn(yes: action == "STILL_YES", fromNotification: true)
             }
@@ -1808,6 +1873,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             let late = real.timeIntervalSince(sch) / 60
             DelayBook.shared.record(line: v.line, stop: t.stops[i].name, scheduled: sch, delay: late)
             self.noteLate(v, mins: late, tripStart: start)
+            if v.isTrain, start != nil, start == self.tripStart { self.trainLate.append(late); self.considerClaim() }   // (0.36)
             if let rideId { TravelLogStore.shared.noteLate(rideId, mins: late) }
         }
     }

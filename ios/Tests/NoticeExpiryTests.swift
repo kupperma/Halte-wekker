@@ -23,6 +23,11 @@ final class NoticeExpiryTests: XCTestCase {
         XCTAssertEqual(NoticeExpiry.minutes(forId: "arrive-leave"), 15)
         XCTAssertEqual(NoticeExpiry.minutes(forId: "wake-2026-11-18-0"), 60)
         XCTAssertEqual(NoticeExpiry.minutes(forId: "linewatch-abc-1800000000"), 15)
+        // 0.36
+        XCTAssertEqual(NoticeExpiry.minutes(forId: "checkout-1800000000-1"), 30)
+        XCTAssertEqual(NoticeExpiry.minutes(forId: "nsclaim-1800000000"), 2880)
+        XCTAssertEqual(NoticeExpiry.minutes(forId: "works-2026-11-26-7001"), 900)
+        XCTAssertEqual(NoticeExpiry.minutes(forId: "lasthome-1800000000"), 45)
     }
 
     func test_onlyOldOnesAreDue() {
