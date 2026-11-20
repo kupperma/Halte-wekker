@@ -3,7 +3,7 @@
 The Android version of Haltewekker, built from the iOS app (`ios/`, SwiftUI) as the reference. It lives in
 `android/` (one Gradle project), with this plan in `docs/android/`. The iOS app and the relay are not changed by it.
 
-Status: **A1 (0.1.0, version code 1), A2 (0.2.0, version code 2), A3 (0.3.0, version code 3: Friends), A4 (0.4.0, version code 4: Friends extras and shared ride logs) A5 (0.5.0, version code 5: Friends map first, the seat picker, the test friend) and A5.1 (0.5.1, version code 6: 1st class in the seat picker) built.**
+Status: **A1 (0.1.0, version code 1), A2 (0.2.0, version code 2), A3 (0.3.0, version code 3: Friends), A4 (0.4.0, version code 4: Friends extras and shared ride logs) A5 (0.5.0, version code 5: Friends map first, the seat picker, the test friend) and A5.1 (0.5.1, version code 6: 1st class in the seat picker) and A6 (0.6.0, version code 7: iOS 0.32–0.37) built.**
 
 ## Architecture
 
@@ -125,6 +125,10 @@ JUnit, run by CI before every build (`./gradlew testReleaseUnitTest`):
   Ride along), `TestFriendTest` (the bot's rules), `TestFriendLiveTest` (live, opt-in): see "As built A5".
 - (A5.1) `SeatClassTest` (1st class from 11 real NS compositions, the table, the words, the seat box unchanged): see
   "As built A5.1".
+- (A6) `WakeRuleTest`, `DeadReckonTest`, `GPSShareTest`, `SettingsIndexTest`, `TrainRulesTest`, `AdvanceTest`,
+  `HabitsTest` (with ChangeOdds), `DailyRankTest` (with the board's rule and the 0.35 scores vector), `StudentOVTest`,
+  `TravelHelpTest`, `RailWorksTest`, `OVFietsRainTest`, `StopBoardCoreTest` (with IntentActions), `TravelYearTest`,
+  `MotionRulesTest`: the iOS tests of 0.32–0.37, vector for vector: see "As built A6".
 
 ## CI and releases (`.github/workflows/android.yml`)
 
@@ -208,6 +212,120 @@ byte for byte, and its test vectors as JUnit tests before any screen:
 ### A5.1 — 1st class in the seat picker (0.5.1, code 6) — built ("As built A5.1" says how)
 
 - iOS 0.31.1's 1st class in the seat picker, from NS's drawings, per coach and per deck.
+
+### A6 — iOS 0.32 to 0.37 (0.6.0, code 7) — built ("As built A6" says how)
+
+- 0.32 sharing GPS points, 0.32.1 Settings in topics with search, 0.33 wake by time and motion, 0.34 same-track trains,
+  old bus GPS, tunnels, habits and change reliability, 0.35 the leaderboard's rule, today's best and worst, your year
+  in travel, 0.36 check-out, student OV, money back, works, last way home, 0.37 OV-fiets, rain, the widget, shortcuts.
+
+## As built A6 (0.6.0, version code 7): iOS 0.32 – 0.37
+
+From `docs/android-todo.md` (the iOS builders' checklist), `docs/logs-export.md` › For Android (parity), the friends
+spec's "As built (0.35)" and the iOS code and tests. The iOS app and the relay were not changed. Every pure rule is a
+port with its iOS test vectors (the Tests list above); the alarm's safety rules come first.
+
+**Wake by time (0.33, `ride/WakeRule.kt`).** `WakeBy`/`WakeSettings` (in `Settings.wake`; by time, 3 min a train, 2 a
+bus, 1–10), `SpeedSmoother` (30 s, known after 20 s, forgotten after 90 s), `RouteLeft`, `WakeRule.decide` (the distance
+rule first, as always; by time only 300 m or more from the leg's first stop, within the minutes at 160/100 km/h, by the
+stop's live arrival while ≤ 150 s old and possible, else the distance left along the road at your smoothed speed of 4
+m/s or more), `says`, `gpsWakeMetres` (the far GPS tier keeps clear of its reach). The ride: the vehicle's own trip
+answer (asked every minute for the live arrival, `OnBoardLook.wakeTrip`) gives the road from where you got on to your
+stop (`WakeRoad.cut`) and the live arrival; within 20 s of a leg's start either rule wakes silently; the ring line says
+which rule (`ring · by time 3 min (live) · …`), the alarm notification "… in about 3 min".
+
+**Tunnels and dead zones (0.34, `ride/DeadReckon.kt`).** With the vehicle known, a step every 5 s; once the newest good
+fix (≤ 100 m) is 15 s old (and under 15 min) the place goes on along that road (else the straight line from where you
+got on to your stop) at the vehicle's pace (the distance left over the time to its arrival, else your last speed; never
+over 160/100 km/h), never back, never past your stop; the ongoing notification says "no GPS here: following its route".
+**Only the time rule rings on it** (`DeadReckon.decide` / `mayRing`); a good fix ends it. Log: `reckon · …`,
+`ring · reckoned (pace) · by time …`. (The vehicle's own fresh GPS isn't used for it yet: see the todo.)
+
+**GPS points (0.32, `logs/GPSShare.kt`).** `Maker` ("Nana"), `SharedFix`, `GPSShareQueue` (the running trip, then the
+trimmed points waiting; `files/gpsshare.json`), `GPSShareRules` (one per 3 s, ≤ 150 m, rounding, the tag, 6000 a trip,
+20 000 waiting, 500 m trimmed at both ends and around Home, School and your home stops, 600 KB an upload and 4 MB a day
+on their own budget), `ShareAsk` (the texts, "this phone"). `LogShareStore` gains the second switch (`gpsShare.on`),
+the queue from the ride's own fixes (`heard`, no GPS of its own), trimming when the trip ends, `fixes` and `tz` on the
+put only with points, dropping sent points after a 200 only, clearing the queue when switched off, and the question
+(`share.asked.v1`): a setup step "Help improve Haltewekker" before All set (both off; summary row "Nothing shared" …)
+and a one-time card on the home and at the top of Settings ("Not now", "Choose…"), never in a test setup.
+
+**Settings (0.32.1, `profile/SettingsIndex.kt`, `ui/screens/SettingsScreen.kt`, `ui/SettingsIcons.kt`).** The nine
+topics in two lists with thin grey outline icons (Material Symbols Outlined, weight 200, the paths inlined: no icon
+library), a "you" card (school, home, friends) and a search over every setting (the iOS search, ranks and folding; the
+entries are this app's own settings). A result opens its topic's page.
+
+**Same-track trains (0.34, `match/TrainRules.kt`).** `rivals`, the stopping pattern (`seen`, `outByStops`), `ask`,
+`askTitle`, `stayOn`, ported and tested (with the 2026-11-19 cause reproduced on the app's own matcher). Not wired into
+the ride yet: Android's ride uses the simpler matcher of A1 (no `choose` state machine, no candidates to rule out or to
+ask between): see the todo.
+
+**Old bus GPS (0.34, `live/Advance.kt`, `match/VehicleMatch.kt`).** `Advance` (iOS `RealPositions` Leg / snap /
+observedSpeed / lateness / advance / place / ageSlack), tested; the matcher's GPS anchor now moves on at the speed it was
+seen going for up to 2 minutes, and an older fix gets more room (`ageSlack`). The home map's vehicles still move on as
+before (A1's own interpolation).
+
+**Habits and change reliability (0.34, `travel/Habits.kt`, `HabitStore`).** `HabitBook`, `Habits`, `ChangeBook`,
+`ChangeOdds`, tested. The ride notes your walks (to the first stop, across a change), your change time (getting off to
+within 50 m of the next ride's stop), the stops you get on at and the stop each trip was planned from, and per change
+whether you made it (`ChangeOdds.made`, the boarded train's departure from its trip answer; `change · made it · …`).
+The planner gets your walking speed as `pedestrianSpeed`; Fastest trip and the home's card say "this change worked on 9
+of 10 days". Settings › Trips & alarm › Learned from your rides shows the three values and "Reset what it learned".
+Android has no `Risk` ranking, so the change time and the preferred-stop bonus aren't used in a ranking yet.
+
+**The leaderboard (0.35, `friends/DailyRank.kt`).** `ScoreRules.board` (a planned trip from near Home to near School or
+back, from its first leg; where you were if that fix was ≤ 10 min old, else its first stop), `ScoreRules.decode` (entry
+by entry), `worse`; going on with a trip ended by hand keeps its start (`ResumeOffer` carries it). `ScoreTrip` gains
+`plan`, `lateLine`, `late` (the ride latest at your stop). `DayTrip`, `DailyRank` (rows, words, usual), the `scores`
+box's `today` (the 0.35 vector byte for byte; sent within 5 minutes of a new trip today, `ScoresRules.due(soon)`), the
+test friend's trip today; "Today" on top of the Leaderboard with friends and a small "Today's trips" card on Friends.
+
+**Your year in travel (0.35, `travel/TravelYear.kt`).** `RideRecord` (each leg kept in `no_backup/travel.json`, never
+sent), `TravelLog`, `TravelYear` (stats, CO₂, cards, seasonal), tested; Settings › Advanced › Your year in travel and the
+home's card in December or in the two weeks after a year of rides ("Not now" puts it away for that year). Shared as
+text without places (`shareSub`), not as a picture.
+
+**0.36 (`travel/StudentOV.kt`, `TravelHelp.kt`, `RailWorks.kt`, `TravelStores.kt`).** All ported with their tests.
+Student OV: Settings › Trips & alarm (none / weekday free / weekend free); the line under a trip on Fastest trip and the
+home's card, with the relay's `/ns/price` (once a day per station pair). Check-out: a minute after you get off where it's
+due ("Did you check out?"), taken back when two fixes in that minute are at 7 m/s or the next leg found the vehicle you
+got off; trains' companies aren't known on Android (Transitous's `agencyName` isn't parsed), so two trains are one.
+Money back: once, after a trip whose trains got you there ≥ 30 min late, the notification opens NS's claim page. Works:
+the relay's `/ns/disruptions?stations=…` at most every 4 hours while the home is on screen, for your home ⇄ school
+stations (the NS stations nearest Home and School), today and the next 7 days; the home's card for today or tomorrow and
+a notification at 19:30 the evening before (an inexact AlarmManager broadcast, `TravelNotesReceiver`), without the
+"leave N min earlier" (no replan). Last way home: after 20:00 and > 3 km from Home, asked "arrive by" 04:00 … midnight
+(at most hourly or after 1 km), the home's card and a notification 30 min before it leaves.
+
+**0.37 (`travel/OVFietsRain.kt`, `widget/`).** OV-fiets (the relay's `/ns/ovfiets`, 5 min) on the trip's notes for the
+station where its last train gets in (when a bus or a walk of ≥ 5 min follows). Rain advice (Open-Meteo hourly
+`precipitation`, 30 min) from 3 h before a trip to 5 min after: "Rain at 08:00 — take bus 305 at 07:41 …" from the
+other ways on the list, else "bring an umbrella". The widget (`StopWidget`, RemoteViews, no Glance, no Play services):
+"Next departures" from a stop picked when it's added (`StopWidgetConfig`: your home stops or a search), Transitous
+`/v6/stoptimes` asked by the widget, `StopBoardCore.timeline` (the list moves up just after each departure leaves, by an
+inexact alarm to itself; asked again every 12 min, sooner when it runs short, ≥ 5 min apart, 30 min with nothing
+leaving), "07:41 (+2)", "07:41 cancelled", tap: the app with that stop's departures (`haltewekker://stop?…`). App
+shortcuts (dynamic, long-press the icon): When's my bus? (the home stop within 600 m of home or with no fix, else the
+nearest; shown and said with text-to-speech), Plan to school, Plan home, Wake me at a stop (Fastest trip to a searched
+place: Android has no single-stop alarm), Start my trip (I'm on it when the next trip leaves within 3 min or left in
+the last 15, else Fastest trip). Nothing over a running trip (`IntentActions`).
+
+**Motion (0.33, `motion/MotionRules.kt`, `StepMotion.kt`).** `MotionRules` ported with its tests. Android has no
+Activity Recognition without Google Play services, so "Use motion to notice rides faster" (off by default; Settings ›
+Trips & alarm; the Physical activity permission on Android 10+) listens to the hardware step detector only while a trip
+runs (batched, on the sensor hub) and says "walking" (6 steps in 12 s, no gap over 4 s): walking under 43 km/h isn't a
+vehicle (`movingLikeVehicle`). No "automotive" and no "stationary": the sooner looks, the rough GPS while waiting and
+the far tier's earlier start stay as before. The alarm never depends on it.
+
+### Calls made in A6 (the user can correct)
+
+- The wake by time is on by default (as iOS); the distance rule and the backup alarm are unchanged and still ring.
+- A test setup asks the sharing question too but never changes what your own phone shares.
+- Settings' search opens the topic's page (no scroll to the row).
+- The widget is RemoteViews with its own alarms rather than Glance (no extra library); one size that stretches.
+- Shortcuts are dynamic (`ShortcutManagerCompat`), not a static `shortcuts.xml`, so the debug build's own app id works.
+- Your year in travel is shared as text, not a picture.
+- Works use the NS stations nearest Home and School (no planned trips' stations yet).
 
 ## As built A5.1 (0.5.1, version code 6): 1st class in the seat picker
 
