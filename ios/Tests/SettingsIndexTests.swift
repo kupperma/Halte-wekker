@@ -98,4 +98,13 @@ final class SettingsIndexTests: XCTestCase {
         XCTAssertEqual(SettingsIndex.search("last way home").first?.id, "notices.lastHome")
         XCTAssertEqual(SettingsIndex.search("last train").first?.topic, .notifications)
     }
+
+    func test_rainOvfietsAndWidgetRowsAreFound() {                       // (0.37)
+        XCTAssertEqual(SettingsIndex.search("umbrella").first?.id, "map.rainAdvice")
+        XCTAssertEqual(SettingsIndex.search("rain").first?.id, "map.rainAdvice")
+        XCTAssertEqual(SettingsIndex.search("ov-fiets").first?.id, "map.ovfiets")
+        XCTAssertEqual(SettingsIndex.search("rental bike").first?.id, "map.ovfiets")
+        XCTAssertEqual(SettingsIndex.search("siri").first?.id, "map.widget")
+        XCTAssertEqual(SettingsIndex.search("widget").first?.topic, .map)
+    }
 }
