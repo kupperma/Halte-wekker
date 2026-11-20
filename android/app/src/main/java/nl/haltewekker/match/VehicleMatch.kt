@@ -106,7 +106,13 @@ sealed class Decision {
 
 /** Where a vehicle's own GPS puts it on its joined path. */
 data class GPSAnchor(val along: Double, val at: Double, val speed: Double, val measured: Double?, val heading: Double?) {
-    fun position(t: Double): Double = along + speed * min(VehicleMatch.GPS_ADVANCE, max(-VehicleMatch.GPS_ADVANCE, t - at))
+    /** (A6, iOS 0.34) at the speed it was seen going (`measured`, 0.5 m/s or more) for up to 2 minutes. */
+    fun position(t: Double): Double {
+        val dt = t - at
+        val m = measured
+        if (m != null && m.isFinite() && m >= 0.5) return along + m * min(VehicleMatch.GPS_ADVANCE_SEEN, max(-VehicleMatch.GPS_ADVANCE_SEEN, dt))
+        return along + speed * min(VehicleMatch.GPS_ADVANCE, max(-VehicleMatch.GPS_ADVANCE, dt))
+    }
 }
 
 /**
@@ -139,6 +145,7 @@ object VehicleMatch {
     const val GPS_FRESH = 90.0
     const val GPS_AHEAD = 60.0
     const val GPS_ADVANCE = 60.0
+    const val GPS_ADVANCE_SEEN = nl.haltewekker.live.Advance.MAX_ADVANCE_SEEN
     const val GPS_OFF_ROUTE = 150.0
     const val GPS_SPEED_OF = 5.0
     const val BUS_MAX_SPEED_BY_TIMES = 30.0      // RealPositions.maxSpeed on iOS
@@ -250,7 +257,9 @@ object VehicleMatch {
                 return Verdict.Fail(Reject.STANDING)
             }
             if (bySpeed && e.steady && abs(e.drift) > max(DRIFT_MIN, DRIFT_SHARE * e.yourSpeed)) return Verdict.Fail(Reject.DRIFTING)
-            if (!(abs(e.offset) <= tolerance(isTrain, e.yourSpeed))) return Verdict.Fail(Reject.TOO_FAR_FROM_TIMES)
+            // (A6, iOS 0.34) by its own GPS, an older fix has more room
+            val room = if (e.gps) nl.haltewekker.live.Advance.ageSlack(e.gpsAge ?: 0.0, e.itsSpeed) else 0.0
+            if (!(abs(e.offset) <= tolerance(isTrain, e.yourSpeed) + room)) return Verdict.Fail(Reject.TOO_FAR_FROM_TIMES)
         }
         return Verdict.Pass(cost(e.offset, e.itsSpeed))
     }
