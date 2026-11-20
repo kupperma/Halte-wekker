@@ -121,6 +121,9 @@ struct LegResult: Codable {
     var replayed: Score?
     /// When the wake rules would have rung (0.33).
     var wake: WakeTimes?
+    /// 0.34: the stopping pattern (train legs, with vehicles), and dead reckoning over the gaps in the points.
+    var trains: TrainLook?
+    var reckon: ReckonLook?
 }
 
 /// All legs together.

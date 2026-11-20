@@ -256,6 +256,8 @@ struct GoViewNew: View {
                        + (alt.map { ", or take \(GoStore.what($0.first)) at \(Fmt.hhmm($0.first.departure)) (\(destWord) \(Fmt.hhmm($0.end)))." } ?? "."))
             }
             changeNote(t)
+            // (0.34) how this change went for you on other days
+            if let h = Risk.history(t) { DSNote(icon: "clock.arrow.circlepath", tint: DS.accentText, text: h) }
             Rectangle().fill(DS.divider).frame(height: 1)
             DSHeader(title: "Your trip")
             TripLine(trip: t, others: go.others, dest: destWord, newLook: true, rails: rails(t)) { r in
@@ -419,6 +421,10 @@ struct GoViewNew: View {
                 if let w = tight {
                     Text("tight: \(max(0, Int(w.slack.rounded()))) min").font(DS.footnoteStrong).monospacedDigit().foregroundStyle(DS.warning).fixedSize()
                 }
+            }
+            // (0.34) how this change went for you on other days
+            if let h = Risk.history(o) {
+                Text(h).font(DS.footnote).foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(.vertical, 10)

@@ -367,6 +367,8 @@ enum Transit {
                                  .init(name: "time", value: iso.string(from: at)),
                                  .init(name: "detailedTransfers", value: "false")]          // a third smaller: no turn-by-turn for changes
         if arriveBy { q.append(.init(name: "arriveBy", value: "true")) }       // `at` is when you want to be there
+        // (0.34) the walks at your own walking speed, once it's learned from your walks (`HabitStore`)
+        if let v = HabitStore.pedestrianSpeed() { q.append(.init(name: "pedestrianSpeed", value: String(format: "%.1f", v))) }
         if let m = modes { q.append(.init(name: "transitModes", value: m)) }
         guard let json = try? await get("/v5/plan", q) as? [String: Any], let its = json["itineraries"] as? [[String: Any]] else { return nil }
         let trips = its.compactMap(parseItinerary)

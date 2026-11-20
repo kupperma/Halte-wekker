@@ -113,6 +113,13 @@ final class RealPositionsStore: ObservableObject {
         return RealPositions.usable(fixes, tripId: tripId, now: now)
     }
 
+    /// A trip's fix before its newest (for the pace it was seen going, 0.34): a train's by its number, else OVapi's.
+    func previousFix(for tripId: String) -> GPSFix? {
+        guard Self.enabled else { return nil }
+        if let n = numbers[tripId] { return trainPrevious[n] }
+        return RealPositions.key(tripId).flatMap { previous[$0] }
+    }
+
     /// A vehicle's own GPS for the matcher: a fix of at most `RealPositions.matchFresh`, and the one before it. A
     /// train's from NS by its number; else (a bus, a tram: the app counts trams as trains) OVapi's.
     func gps(for tripId: String, isTrain: Bool, now: Date = Date()) -> VehicleGPS? {
@@ -390,10 +397,13 @@ extension LiveTrip {
 
     /// Where its GPS puts it (metres along), when the fix is on its road: `metres` moved on to `now`
     /// (`RealPositions.place`), `raw` where the fix itself is, at its own time.
-    func gpsPlace(_ fix: GPSFix, now: Date) -> (raw: Double, metres: Double)? {
+    /// `previous`: its fix before (0.34): moved on at the pace it was seen going, late as it is (`RealPositions.place`).
+    func gpsPlace(_ fix: GPSFix, previous: GPSFix? = nil, now: Date) -> (raw: Double, metres: Double)? {
         let l = legs
         guard let s = RealPositions.snap(fix, on: l) else { return nil }
-        let moved = RealPositions.advance(s, from: fix.at, on: l, now: now)
+        let seen = RealPositions.observedSpeed(fix, previous: previous, on: l)
+        let pace = seen == nil ? RealPositions.Pace() : RealPositions.Pace(speed: seen, late: RealPositions.lateness(s, at: fix.at, on: l))
+        let moved = RealPositions.advance(s, from: fix.at, on: l, now: now, pace: pace)
         return (l[s.leg].start + s.along, l[moved.leg].start + moved.along)
     }
 
@@ -433,7 +443,8 @@ struct TripPlacement {
         RealPositionsStore.shared.learn(tripId, trip: t)            // (a train: its number, for NS's position)
         let byTime = t.position(now)
         timeMetres = byTime.metres
-        if let f = RealPositionsStore.shared.fix(for: tripId, now: now), let p = t.gpsPlace(f, now: now) {
+        if let f = RealPositionsStore.shared.fix(for: tripId, now: now),
+           let p = t.gpsPlace(f, previous: RealPositionsStore.shared.previousFix(for: tripId), now: now) {
             let m = mine.flatMap { t.stops.indices.contains($0) ? Approach.drawn(advanced: p.metres, raw: p.raw, mine: t.metres(ofStop: $0)) : nil } ?? p.metres
             let held = hold.steady(tripId, m, now: now)
             w = t.position(metres: held); fix = f
@@ -497,7 +508,10 @@ final class GPSPlacer {
             guard let sp else { return nil }
             spot = sp
         }
-        let moved = RealPositions.advance(spot, from: fix.at, on: road.legs, now: now)
+        // (0.34: at the pace it was seen going between its last two fixes, late as it is)
+        let seen = RealPositions.observedSpeed(fix, previous: RealPositionsStore.shared.previousFix(for: tripId), on: road.legs)
+        let pace = seen == nil ? RealPositions.Pace() : RealPositions.Pace(speed: seen, late: RealPositions.lateness(spot, at: fix.at, on: road.legs))
+        let moved = RealPositions.advance(spot, from: fix.at, on: road.legs, now: now, pace: pace)
         let m = hold.steady(tripId, road.legs[moved.leg].start + moved.along, now: now)
         guard let at = RealPositions.spot(atMetres: m, on: road.legs), let p = RealPositions.point(at, on: road.legs) else { return nil }
         return Placed(coordinate: p.point.coordinate, bearing: p.bearing ?? fix.bearing, piece: road.pieces[at.leg], fix: fix)

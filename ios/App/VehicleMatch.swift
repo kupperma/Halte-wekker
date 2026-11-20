@@ -151,8 +151,13 @@ struct GPSAnchor: Equatable, Sendable {
     let measured: Double?
     let heading: Double?
 
+    /// 0.34: at the speed it was seen going (`measured`, when sane: 0.5 m/s or more) for up to `gpsAdvanceSeen`.
     func position(at t: Date) -> Double {
-        along + speed * min(VehicleMatch.gpsAdvance, max(-VehicleMatch.gpsAdvance, t.timeIntervalSince(at)))
+        let dt = t.timeIntervalSince(at)
+        if let m = measured, m.isFinite, m >= 0.5 {
+            return along + m * min(VehicleMatch.gpsAdvanceSeen, max(-VehicleMatch.gpsAdvanceSeen, dt))
+        }
+        return along + speed * min(VehicleMatch.gpsAdvance, max(-VehicleMatch.gpsAdvance, dt))
     }
 }
 
@@ -191,6 +196,7 @@ enum VehicleMatch {
     static let gpsFresh: TimeInterval = 90      // a fix at most this much older than your newest one is judged by
     static let gpsAhead: TimeInterval = 60      // …and at most this much newer (a clock off)
     static let gpsAdvance: TimeInterval = 60    // moved on (or back) along its road at its piece's speed this long at most
+    static let gpsAdvanceSeen: TimeInterval = RealPositions.maxAdvanceSeen     // …at the speed it was seen going (0.34)
     static let gpsOffRoute = 150.0              // m: a fix further from its road isn't used
     static let gpsSpeedOf: TimeInterval = 5     // its speed between two fixes says something about your fixes when the
                                                 //    newer one is at most this long before your oldest one
@@ -336,7 +342,9 @@ enum VehicleMatch {
             // 6. moves with you
             if bySpeed, e.steady, abs(e.drift) > max(driftMin, driftShare * e.yourSpeed) { return .failure(.drifting) }
             // 7. near its times
-            guard abs(e.offset) <= tolerance(isTrain: isTrain, speed: e.yourSpeed) else { return .failure(.tooFarFromTimes) }
+            //    (by its own GPS, an older fix has more room: 0.34)
+            let room = e.gps ? RealPositions.ageSlack(age: e.gpsAge ?? 0, speed: e.itsSpeed) : 0
+            guard abs(e.offset) <= tolerance(isTrain: isTrain, speed: e.yourSpeed) + room else { return .failure(.tooFarFromTimes) }
         }
         return .success(cost(offset: e.offset, itsSpeed: e.itsSpeed))
     }

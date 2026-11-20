@@ -220,6 +220,7 @@ struct RideViewNew: View {
         let to = trip.leg?.to.short ?? ""
         let eta = trip.legArrival ?? trip.legTo
         if let s = trip.stillOnAsk { StillOnCard(v: s) }
+        if trip.whichTrain.count == 2 { WhichTrainCard(trains: trip.whichTrain, to: trip.whichTrainTo) }
         VStack(alignment: .leading, spacing: 6) {
             Text(rideKicker).font(DS.subStrong).foregroundStyle(DS.secondary)
             HStack(spacing: 10) {
@@ -232,6 +233,11 @@ struct RideViewNew: View {
             if !trip.demo { RidePickButton { picking = true } }
         }
         gpsLine
+        if trip.reckoning {
+            // (0.34) no good GPS (a tunnel, a dead zone): it goes on along the route meanwhile
+            Text("No GPS here: following its route at its pace until GPS is back.").font(DS.sub).foregroundStyle(DS.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
         if v == nil, trip.handLock != nil {
             Text("Going by your location: it wakes you by GPS for \(to).").font(DS.sub).foregroundStyle(DS.secondary)
                 .fixedSize(horizontal: false, vertical: true)

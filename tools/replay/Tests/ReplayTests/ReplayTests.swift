@@ -47,6 +47,53 @@ final class ReplayTests: XCTestCase {
         }
     }
 
+    // MARK: 0.34
+
+    private let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+
+    /// Points every 2 s east along latitude 51.59 at `speed` m/s for `seconds`, from `m0` metres, starting `at` s.
+    private func points(from m0: Double, speed: Double, seconds: Int, at: Double = 0, veh: String = "train IC·3624") -> [ExportFix] {
+        stride(from: 0, through: seconds, by: 2).map { s in
+            let m = m0 + speed * Double(s)
+            return ExportFix(t: t0.timeIntervalSince1970 + at + Double(s), lat: 51.59, lon: 4.70 + m / (111_320 * cos(51.59 * .pi / 180)),
+                             acc: 10, spd: speed, crs: 90, leg: "1/1", veh: veh, ride: "r")
+        }
+    }
+
+    private func east(_ m: Double) -> GeoPoint { GeoPoint(lat: 51.59, lon: 4.70 + m / (111_320 * cos(51.59 * .pi / 180))) }
+
+    func test_reckoningOverAGap() {
+        // 30 m/s with a 40 s gap (a tunnel): reckoned at the same pace, it's right where the points come back
+        let pts = points(from: 0, speed: 30, seconds: 60) + points(from: 30 * 100, speed: 30, seconds: 60, at: 100)
+        let leg = ReplayLeg(install: "x", ride: "r", leg: "1/1", fixes: pts, lines: [], truth: "IC·3624", truthFrom: "given")
+        let r = ReckonReplay.of(leg)
+        XCTAssertEqual(r.gaps, 1)
+        XCTAssertLessThan(r.worst ?? .infinity, 30)
+        XCTAssertTrue(ReckonReplay.words(r).contains("1 gap"))
+        let none = ReckonReplay.of(ReplayLeg(install: "x", ride: "r", leg: "1/1", fixes: points(from: 0, speed: 30, seconds: 60),
+                                             lines: [], truth: nil, truthFrom: "given"))
+        XCTAssertEqual(none.gaps, 0)
+    }
+
+    /// The Intercity through a station at speed, where the Sprinter calls: the Sprinter is out, the Intercity isn't.
+    func test_stoppingPatternOnATrainLeg() {
+        let pts = points(from: 0, speed: 30, seconds: 200)          // 0 → 6000 m without stopping
+        let leg = ReplayLeg(install: "x", ride: "r", leg: "1/1", fixes: pts, lines: [], truth: "IC·3624", truthFrom: "given")
+        let start = t0
+        func piece(_ a: Double, _ b: Double, _ ta: Double, _ tb: Double) -> TimedPiece {
+            TimedPiece(departure: start.addingTimeInterval(ta), arrival: start.addingTimeInterval(tb), path: [east(a), east((a + b) / 2), east(b)])
+        }
+        let ic = VehicleTrack(tripId: "20261119_x_3624", line: "IC", isTrain: true, realTime: true, pieces: [piece(-1000, 7000, -30, 240)])
+        let spr = VehicleTrack(tripId: "20261119_x_6628", line: "SPR", isTrain: true, realTime: true,
+                               pieces: [piece(-1000, 3000, -30, 110), piece(3000, 7000, 140, 280)])
+        let t = try? XCTUnwrap(TrainReplay.of(leg, tracks: [ic, spr]))
+        XCTAssertEqual(t?.through, 1, "through the Sprinter's station at 3000 m")
+        XCTAssertEqual(t?.ruledOut, [FieldFormat.label(spr.tripId, [spr.tripId: "SPR"])])
+        XCTAssertEqual(t?.truthRuledOut, false)
+        XCTAssertNil(TrainReplay.of(ReplayLeg(install: "x", ride: "r", leg: "1/1", fixes: points(from: 0, speed: 10, seconds: 60, veh: "bus 305·1"),
+                                              lines: [], truth: nil, truthFrom: "given"), tracks: [ic]), "a bus leg")
+    }
+
     func test_scoring() {
         let t0 = Date(timeIntervalSince1970: 1_800_000_000)
         func tl(_ keys: [String?]) -> [Shown] { keys.enumerated().map { Shown(at: t0 + Double($0.offset) * 10, key: $0.element) } }

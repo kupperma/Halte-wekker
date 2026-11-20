@@ -187,6 +187,14 @@ track you went: an export has no live arrivals), and when the app's own `ring ·
 rule (`by distance`, `by time 3 min (live)`, `by time 2 min (speed)`). The app rings at whichever of the two comes
 first.
 
+0.34 adds two lines under each leg (`tools/replay/Sources/replay/Trains.swift`, with the app's own `TrainRules.swift`
+and `DeadReckon.swift`): on a train leg, the stations you stood at and went through at speed and the trains the
+stopping pattern rules out (`trains: stood at 2 stations, through 1 at speed · it rules out SPR·6628`; it says
+`WRONG` if the one you were on is among them, which should never happen); on every leg, how dead reckoning would have
+done over the gaps of more than 15 s in the GPS points (`reckon: 2 gaps over 15 s · the reckoned place off by 40 m
+(median), 120 m at worst`), along the track you went. Old bus GPS moved on (0.34) needs the vehicles' own GPS of that
+moment, which an export doesn't have.
+
 ## For Android (parity)
 
 The same switches, words and rules, so the relay and the replay treat both alike:
@@ -206,6 +214,56 @@ The same switches, words and rules, so the relay and the replay treat both alike
   points (their JSON) per upload and 4 MB a day, counted apart from the lines' 200 KB / 2 MB; the same moments and
   conditions as the lines (after a trip, else hourly; not during a trip, on a metered/Low Data network or in battery
   saver). Drop the sent points from the queue only after a 200; switching off clears the queue.
+
+### Trains on the same track, old GPS, tunnels, habits, change reliability (0.34)
+
+- **Trains on the same track** (`ios/App/TrainRules.swift`, tests `TrainRulesTests`):
+  - a confirmed train kept by its times or road (not by its own NS position, `gpsKeeps`) has the other trains on your
+    track looked at every 2 minutes ("rivals", each with its own NS position through the relay's `/ns/vehicles`); one
+    that passes by its own GPS while the one shown doesn't (`rivals`, best 2) starts a choice between them, which the
+    usual 0.26.1 rules settle (its GPS decides). Field log: `rivals · IC·1131 not with you by its own GPS · IC·3624 by
+    theirs → choose`;
+  - a confirmed train whose track went elsewhere (your fixes 300 m or twice their accuracy off it, `roadsParted`)
+    looks for the one you're on at once (not after two misses); choosing switches at once (`split`);
+  - the stopping pattern while choosing between trains: a station (any candidate's stop) you went through at speed
+    (from 600 m before to 600 m after, every step 8 m/s or more, fixes no more than 20 s apart, accuracy ≤ 100 m)
+    rules out the candidates that call there; one you stood at (20 s within 40 m, or 1.5 × accuracy, within 250 m of
+    it) rules out those whose track runs through it (within 150 m) without calling. Never all of them. The one shown
+    ruled out: the best other one that passes this look, at once (none passes: as before). `choose · stopping pattern
+    · not SPR·6628`;
+  - two trains still tied after 2 minutes whose headsigns differ: asked once, on the ride screen and as a notification
+    (when the app isn't in front) with both as buttons: "IC to 's-Hertogenbosch or IC to Eindhoven Centraal?"; the
+    answer is a pick by hand (the rest of the trip planned from it, not changed by itself for the rest of the leg);
+  - the trip follows the train you're on (`stayOn`): it also goes to where a later leg ends, the last one included
+    (arriving 2 minutes before the ride after it, when there is one): one leg to there, the changes in between gone
+    ("Stay on to 's-Hertogenbosch · This Intercity goes all the way …").
+- **Old bus GPS moved on** (`RealPositions.advance`/`observedSpeed`/`lateness`/`ageSlack`, tests `AdvanceTests`): at
+  the speed it was seen going (the fix's own speed, else along its road between its last two fixes 5–180 s apart,
+  0–46 m/s) for up to 120 s (else its timetable speed for 60 s, as before); at a stop on its way it stands 10 s at
+  least and leaves no earlier than its departure plus how late it is. The matcher moves its GPS anchor at that speed
+  too, and allows an older fix more room: a fifth of what it went after its first 30 s, 600 m at most.
+- **Tunnels and dead zones** (`ios/App/DeadReckon.swift`, tests `DeadReckonTests`): on a ride with its vehicle known,
+  a step every 5 s; once the newest good fix (≤ 100 m) is more than 15 s old (and less than 15 minutes), the place
+  goes on along the vehicle's road from where you got on to your stop: by the vehicle's own fresh fix (moved on at its
+  pace, 2 minutes at most), else at its pace (distance left over the time to its live or timetable arrival when that
+  is 30 s or more away, else your last speed; never faster than 160/100 km/h), never back, never past your stop. The
+  distance, ETA, ride screen ("No GPS here: following its route…") and lock screen follow it; **only the time rule may
+  ring on it** (the distance rule never rings on a reckoned place alone). A good fix ends it. Log: `reckon · no good
+  GPS for 16 s · on along its route`, `ring · reckoned (pace) · by time 3 min (live)`, `reckon · good GPS again`.
+- **Learned from your rides** (`ios/App/Habits.swift`, `HabitStore.swift`, tests `HabitsTests`), on the phone only:
+  walking speed (the median of your last walks once there are 5; a walk: 60 s or more at 0.6–2.6 m/s with fixes of
+  25 m or better: across a change, and to the first stop), sent to the planner as `pedestrianSpeed` (m/s, one decimal)
+  when 0.1 m/s or more off its 1.2; your change time (minutes from getting off to within 50 m of the next ride's stop,
+  20 at most; the 80th percentile once there are 3) as the least room a change needs in `Risk.miss` (2 minutes more
+  than the planner's walk at most); stops you get on at 3 times or more and more often than trips were planned from
+  them: a plan from there 2 minutes better in `Risk.score`. Settings › Trips & alarm › "Learned from your rides": the
+  three values and "Reset what it learned".
+- **How reliable a change is** (`ios/App/ChangeOdds.swift`, tests `ChangeOddsTests`): per change (line A > line B @
+  station, lower case) and time of week (`wd`/`we` and early < 7, am 7–9, day 9–16, pm 16–19, eve), one outcome per
+  day (the day's last), 30 days and 200 changes kept: made it when you got on the planned one or one leaving within a
+  minute of it, missed when a later one. "this change worked on 9 of 10 days" on the plan's options and the Go card
+  once there are 3 days ("At Tilburg: …" on a trip with more than one change); in `Risk.miss` the chance leans on it by
+  days / (days + 5) (a change with no time at all stays one).
 
 ### Wake by time and Motion & Fitness (0.33)
 

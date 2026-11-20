@@ -406,7 +406,33 @@ private struct TripsSettingsRows: View {
         backup
         wakeBy
         wake
+        learned
         more
+    }
+
+    @ObservedObject private var habits = HabitStore.shared
+    @State private var confirmReset = false
+
+    /// 0.34: what it learned from your rides and walks, on this phone only, and a reset.
+    @ViewBuilder private var learned: some View {
+        Section {
+            ForEach(Habits.rows(habits.book), id: \.label) { r in
+                HStack(alignment: .firstTextBaseline) {
+                    Text(r.label).foregroundStyle(DS.text)
+                    Spacer(minLength: DS.s8)
+                    Text(r.value).foregroundStyle(DS.secondary).multilineTextAlignment(.trailing)
+                }
+                .settingsAnchor(r.label == "Walking speed" ? "trips.learned" : "trips.learned.\(r.label)")
+            }
+            Button("Reset what it learned", role: .destructive) { confirmReset = true }
+                .disabled(habits.book.isEmpty && habits.changes.days.isEmpty)
+                .confirmationDialog("Forget your walking speed, change time, stops and how your changes went?", isPresented: $confirmReset,
+                                    titleVisibility: .visible) {
+                    Button("Reset", role: .destructive) { habits.reset() }
+                }
+        } header: { Text("Learned from your rides") } footer: {
+            Text("From your own rides and walks, kept on this phone only. Plans use your walking speed for the walks, your change time as the least room a change needs, and give a plan from a stop you prefer a little head start. A change you’ve made 3 times or more says how often it worked.")
+        }
     }
 
     @ViewBuilder private var ride: some View {

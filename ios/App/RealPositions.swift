@@ -299,23 +299,78 @@ enum RealPositions {
         }?.spot
     }
 
+    // MARK: moving an old fix on (0.34)
+
+    static let maxAdvanceSeen: TimeInterval = 120   // s: moved on this long at most at the pace it was seen going
+    static let dwell: TimeInterval = 10             // s it stands at a stop on its way, at least (at its seen pace)
+    static let seenMin: TimeInterval = 5            // s: its two fixes at least this far apart…
+    static let seenMax: TimeInterval = 180          // …and at most this
+    static let seenTop = 46.0                       // m/s: faster than this between two fixes isn't sane (165 km/h)
+    static let slackFrom: TimeInterval = 30         // s: a fix older than this gets more room…
+    static let slackShare = 0.2                     // …a fifth of what it went since then (its pace may have changed)…
+    static let maxSlack = 600.0                     // m: …this much at most
+
+    /// How it's going: the speed it was seen going (`observedSpeed`), and how late it is (`lateness`), when known.
+    struct Pace: Equatable, Sendable {
+        var speed: Double? = nil
+        var late: TimeInterval? = nil
+    }
+
+    /// The speed it was seen going: the one its fix gives (a train's, from NS), else along its road between its fix
+    /// before and this one, `seenMin` to `seenMax` apart, both on its road, forwards and at most `seenTop`. Nil: not
+    /// known, or not sane.
+    static func observedSpeed(_ fix: GPSFix, previous: GPSFix?, on legs: [Leg]) -> Double? {
+        if let v = fix.speed, v.isFinite, v >= 0, v <= 60 { return v }
+        guard let q = previous else { return nil }
+        let dt = fix.at.timeIntervalSince(q.at)
+        guard dt >= seenMin, dt <= seenMax, let a = snap(fix, on: legs), let b = snap(q, on: legs) else { return nil }
+        let d = (legs[a.leg].start + a.along) - (legs[b.leg].start + b.along)
+        let v = d / dt
+        guard v.isFinite, v >= 0, v <= seenTop else { return nil }
+        return v
+    }
+
+    /// How late it is at its fix (`at`, on `spot`): the fix's time minus when its times have it there (negative: early).
+    /// Nil: no times there to go by.
+    static func lateness(_ spot: Spot, at: Date, on legs: [Leg]) -> TimeInterval? {
+        guard legs.indices.contains(spot.leg) else { return nil }
+        let l = legs[spot.leg]
+        let span = l.arrival.timeIntervalSince(l.departure)
+        guard span > 0, l.length > 0 else { return nil }
+        let f = min(1, max(0, spot.along / l.length))
+        let late = at.timeIntervalSince(l.departure.addingTimeInterval(f * span))
+        return late.isFinite ? late : nil
+    }
+
+    /// m more room for a fix `age` seconds old of one going `speed`: none up to `slackFrom`, then `slackShare` of the
+    /// way it went since, `maxSlack` at most.
+    static func ageSlack(age: TimeInterval, speed: Double) -> Double {
+        guard age.isFinite, speed.isFinite, age > slackFrom else { return 0 }
+        return min(maxSlack, slackShare * max(0, speed) * (age - slackFrom))
+    }
+
     /// From the fix's spot at its own time to `now`: on along its road at each piece's speed by its times, for at
     /// most `maxAdvance`, waiting at a stop until it leaves there (a piece's departure), never on past a stop
     /// before then. Standing at the start of a piece before it leaves: it waits there too.
-    static func advance(_ spot: Spot, from at: Date, on legs: [Leg], now: Date) -> Spot {
+    /// With its `pace` (0.34): at the speed it was seen going, for up to `maxAdvanceSeen`, standing `dwell` at least at
+    /// a stop on its way; late as it is, it leaves a stop that much after its departure.
+    static func advance(_ spot: Spot, from at: Date, on legs: [Leg], now: Date, pace: Pace = Pace()) -> Spot {
         guard legs.indices.contains(spot.leg) else { return spot }
-        let end = min(now, at.addingTimeInterval(maxAdvance))
+        let seen: Double? = pace.speed.flatMap { $0.isFinite && $0 > 0.5 ? min($0, 60) : nil }
+        let late: TimeInterval = pace.late.map { $0.isFinite ? max(0, min($0, 1800)) : 0 } ?? 0
+        let end = min(now, at.addingTimeInterval(seen != nil ? maxAdvanceSeen : maxAdvance))
         var t = at, k = spot.leg, a = min(max(0, spot.along), legs[k].length)
-        if a <= 15, t < legs[k].departure { t = legs[k].departure }
+        if a <= 15, t < legs[k].departure.addingTimeInterval(late) { t = legs[k].departure.addingTimeInterval(late) }
         while t < end {
-            let l = legs[k], v = l.speed
+            let l = legs[k], v = seen ?? l.speed
             guard v > 0 else { break }
             let need = (l.length - a) / v
             if t.addingTimeInterval(need) >= end { a += v * end.timeIntervalSince(t); break }
             t = t.addingTimeInterval(need); a = l.length
             guard k + 1 < legs.count else { break }
-            // at the stop between the two: it leaves at the next piece's departure (or now, when that has passed)
-            t = max(t, legs[k + 1].departure)
+            // at the stop between the two: it leaves at the next piece's departure (or now, when that has passed),
+            // that much later when it's late, and not before it stood there a moment (at its seen pace)
+            t = max(t.addingTimeInterval(seen != nil ? dwell : 0), legs[k + 1].departure.addingTimeInterval(late))
             guard t < end else { break }
             k += 1; a = 0
         }
@@ -323,9 +378,11 @@ enum RealPositions {
     }
 
     /// Metres along the whole road to draw it at, at `now`, by the fix; nil when the fix isn't on its road.
-    static func place(_ fix: GPSFix, on legs: [Leg], now: Date) -> (metres: Double, spot: Spot)? {
+    /// `previous`: its fix before (0.34), for the pace it was seen going.
+    static func place(_ fix: GPSFix, previous: GPSFix? = nil, on legs: [Leg], now: Date) -> (metres: Double, spot: Spot)? {
         guard let s = snap(fix, on: legs) else { return nil }
-        let moved = advance(s, from: fix.at, on: legs, now: now)
+        let pace = Pace(speed: observedSpeed(fix, previous: previous, on: legs), late: lateness(s, at: fix.at, on: legs))
+        let moved = advance(s, from: fix.at, on: legs, now: now, pace: pace.speed == nil ? Pace() : pace)
         return (legs[moved.leg].start + moved.along, moved)
     }
 
