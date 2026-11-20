@@ -164,6 +164,20 @@ object Notifications {
         post(context, NEWS_ID + 1, n, tag)
     }
 
+    /** (A6) a note whose tap opens a web page (NS's claim page). */
+    fun link(context: Context, tag: String, title: String, text: String, url: String) {
+        val open = PendingIntent.getActivity(context, 40, Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val n = NotificationCompat.Builder(context, NEWS)
+            .setSmallIcon(R.drawable.ic_stat_ride)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setContentIntent(open)
+            .setAutoCancel(true)
+        post(context, NEWS_ID + 2, n, tag)
+    }
+
     fun arrived(context: Context, place: String, then: String?) {
         val n = NotificationCompat.Builder(context, ARRIVAL)
             .setSmallIcon(R.drawable.ic_stat_ride)

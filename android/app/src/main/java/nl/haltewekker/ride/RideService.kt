@@ -190,6 +190,8 @@ class RideService : Service() {
             RideStore.update(this) { it.copy(startLat = here.lat, startLon = here.lon, startFixAt = at) }
         }
         FieldLog.ride(FieldFormat.rideStart(how, vehicleText(s), m, s.index + 1, s.trip.rides.size))
+        // (A6, iOS 0.34) the stop the trip was planned from, for "stops you prefer"
+        if (s.index == 0) { nl.haltewekker.travel.HabitStore.load(this); nl.haltewekker.travel.HabitStore.update { it.plannedFrom(leg.fromStop) } }
     }
 
     private fun goForeground(looking: Boolean = false): Boolean {
@@ -207,6 +209,9 @@ class RideService : Service() {
 
     private fun begin() {
         if (intervalMs == 0L) requestLocation(RideGPS.intervalMs(false))
+        if (app.store.settings.value.motion) nl.haltewekker.motion.StepMotion.start(this)
+        nl.haltewekker.travel.HabitStore.load(this)
+        nl.haltewekker.travel.TravelLogStore.load(this)
         if (tick?.isActive != true) tick = scope.launch { tickLoop() }
         scheduleBackup()
         notifyRide(force = true)
@@ -239,6 +244,8 @@ class RideService : Service() {
         if (loc.provider == LocationManager.NETWORK_PROVIDER && fixes.lastOrNull()?.let { now - it.t < 15 && it.accuracy in 0.0..60.0 } == true) return
         fixes.addLast(fix)
         while (fixes.isNotEmpty() && now - fixes.first().t > 120) fixes.removeFirst()
+        if (fix.speed >= 0) nl.haltewekker.travel.TravelNotes.heardSpeed(fix.t, fix.speed)
+        noteChangeWalk(fix)
         val s = RideStore.state.value ?: return
         val leg = s.leg ?: return
         val to = leg.to ?: return
@@ -293,7 +300,9 @@ class RideService : Service() {
             val now = Iso.now()
             if (leg != null && !s.finished) {
                 if (s.vehicleTripId == null && s.phase == Phase.SLEEPING) {
-                    val moving = OnBoardRules.movingByTrack(fixes.toList(), now)
+                    // (A6, iOS 0.33) walking (the step detector) under 43 km/h isn't a vehicle, whatever the fixes say
+                    val moving = nl.haltewekker.motion.MotionRules.movingLikeVehicle(OnBoardRules.movingByTrack(fixes.toList(), now),
+                        if (app.store.settings.value.motion) nl.haltewekker.motion.StepMotion.now(now) else null, fixes.lastOrNull()?.speed?.takeIf { it >= 0 })
                     if (moving || fixes.size >= 3) {
                         val mine = fixes.toList()
                         val real = app.store.settings.value.realPositions
@@ -304,6 +313,7 @@ class RideService : Service() {
                                     vehicleSource = if (f.byGPS || moving) VehicleSource.BY_GPS else VehicleSource.BY_TIMES)
                             }
                             FieldLog.match(FieldFormat.detect(mine.size, "${f.line}·${f.tripId.takeLast(4)}", f.byGPS, f.tripId == leg.tripId))
+                            RideStore.state.value?.let { cur -> noteBoarding(cur, f.tripId, mine) }
                         }
                     }
                 }
@@ -371,6 +381,7 @@ class RideService : Service() {
         val s0 = RideStore.state.value ?: return
         val now = Iso.now()
         // (A6, iOS 0.35) how late this ride got you to its stop, for the leaderboard's "the 305 was 18 min late"
+        s0.leg?.let { l -> noteLegDone(s0, l, now) }
         s0.leg?.let { l ->
             val lateMin = (minOf(now, s0.legArrival ?: now) - l.scheduledArrival) / 60
             if (lateMin >= 1 && lateMin <= 600) {
@@ -388,14 +399,14 @@ class RideService : Service() {
             RideStore.update(this) {
                 it.copy(index = it.index + 1, phase = Phase.SLEEPING, legStart = now, vehicleTripId = null, vehicleLine = null,
                     vehicleSource = VehicleSource.NONE, eta = null, distance = null, quiet = false, note = null, roughGPS = false,
-                    ringMinutes = null, reckoning = false)
+                    ringMinutes = null, reckoning = false, changeArrived = now, changeFromVehicle = s.vehicleTripId)
             }
             requestLocation(RideGPS.intervalMs(false))
             scheduleBackup()
         } else {
             RideStore.update(this) { it.copy(phase = Phase.FINISHED) }
             // (A4) a trip from Home to School (or back) on your own board, for the leaderboard with friends
-            RideStore.state.value?.let { nl.haltewekker.friends.ScoreLog.finished(this, it, now) }
+            RideStore.state.value?.let { nl.haltewekker.friends.ScoreLog.finished(this, it, now); delayClaim(it) }
             cancelBackup()
             scope.launch { delay(90_000); if (RideStore.state.value?.finished == true) end(byHand = false) }
         }
@@ -445,6 +456,7 @@ class RideService : Service() {
     private fun stopRide() {
         tick?.cancel()
         stopReckon()
+        nl.haltewekker.motion.StepMotion.stop()
         try { lm.removeUpdates(listener) } catch (_: Exception) {}
         intervalMs = 0
         stopForeground(STOP_FOREGROUND_REMOVE)
@@ -457,6 +469,78 @@ class RideService : Service() {
         if (!force && s?.phase == lastPhase && now - lastNotify < 15) return
         lastNotify = now; lastPhase = s?.phase
         Notifications.post(this, Notifications.RIDE_ID, Notifications.ride(this, s))
+    }
+
+    // MARK: (A6) what a leg leaves behind: the kept ride, the check-out reminder, the habits, money back
+
+    /** Fixes since you got off at a change (for the change time and your walking speed). */
+    private val changeFixes = ArrayList<Fix>()
+
+    private fun noteChangeWalk(f: Fix) {
+        val s = RideStore.state.value ?: return
+        val arrived = s.changeArrived ?: return
+        if (s.vehicleTripId != null || changeFixes.size > 600) return
+        changeFixes.add(f)
+        val from = s.leg?.from ?: return
+        nl.haltewekker.travel.Habits.changeMinutes(arrived, changeFixes, from)?.let { m ->
+            nl.haltewekker.travel.HabitStore.update { it.addChange(m) }
+            RideStore.update(this) { it.copy(changeArrived = null) }
+        }
+    }
+
+    private fun noteLegDone(s: RideState, l: nl.haltewekker.data.Ride, now: Double) {
+        val st = app.store.settings.value
+        val lateMin = (minOf(now, s.legArrival ?: now) - l.scheduledArrival) / 60
+        // the ride kept for Your year in travel (on this phone only)
+        val dep = if (l.departure <= now) l.departure else s.legStart
+        val metres = if (l.from != null && l.to != null) Geo.metres(l.from!!, l.to!!) else 0.0
+        val label = if (l.isTrain) l.name.ifEmpty { l.line } else "Bus ${s.vehicleLine ?: l.line}"
+        val coach = if (l.isTrain) nl.haltewekker.friends.FriendTravelShare.coach.value?.n else null
+        nl.haltewekker.travel.TravelLogStore.add(this, nl.haltewekker.travel.RideRecord("${(dep).toLong()}|${s.vehicleTripId ?: l.tripId}",
+            s.startedAt, dep, now, l.isTrain, label, l.fromStop, l.toStop, nl.haltewekker.travel.TravelYear.km(metres, l.isTrain),
+            lateMin.takeIf { it >= 0 && it <= 600 }?.let { Math.round(it * 10) / 10.0 }, coach))
+        // the trains' lateness, for money back
+        if (l.isTrain) RideStore.update(this) { it.copy(trainLates = it.trainLates + lateMin, trainEndPlanned = l.scheduledArrival, trainEndActual = now) }
+        // "Did you check out?" a minute after getting off, where the card wants it (iOS 0.36)
+        if (st.checkOut) {
+            val rides = s.trip.rides.map { nl.haltewekker.travel.CheckOut.Ride(it.isTrain) }
+            if (nl.haltewekker.travel.CheckOut.due(s.index, rides)) {
+                val next = s.trip.rides.getOrNull(s.index + 1)
+                val off = s.vehicleTripId
+                nl.haltewekker.travel.TravelNotes.checkOutLater(this, l.toStop, next?.let { l.isTrain to it.isTrain }) {
+                    off != null && RideStore.state.value?.vehicleTripId == off
+                }
+            }
+        }
+        changeFixes.clear()
+    }
+
+    /** The one you got on, found: where you got on, how fast you walked there, and whether you made the change. */
+    private fun noteBoarding(s: RideState, tripId: String, mine: List<Fix>) {
+        val leg = s.leg ?: return
+        val here = mine.lastOrNull()?.p
+        if (s.index == 0 && here != null && leg.from != null && Geo.metres(here, leg.from!!) <= 300)
+            nl.haltewekker.travel.HabitStore.update { it.boarded(leg.fromStop) }
+        nl.haltewekker.travel.Habits.walkSpeed(changeFixes.ifEmpty { mine })?.let { v -> nl.haltewekker.travel.HabitStore.update { it.addWalk(v) } }
+        if (s.index > 0) {
+            val prev = s.trip.rides[s.index - 1]
+            scope.launch {
+                val dep = if (tripId == leg.tripId) null else leg.from?.let { look.departureNear(tripId, it) }
+                nl.haltewekker.travel.ChangeOdds.made(leg.tripId, leg.departure, tripId, dep)?.let { made ->
+                    nl.haltewekker.travel.HabitStore.recordChange(prev.line, leg.line, leg.fromStop, leg.departure, made)
+                    FieldLog.ride("change · ${if (made) "made it" else "missed it"} · ${prev.line} → ${leg.line} at ${leg.fromStop}")
+                }
+            }
+        }
+    }
+
+    /** Money back for a late train (iOS 0.36), once, after the trip. */
+    private fun delayClaim(s: RideState) {
+        if (!app.store.settings.value.delayClaim || s.trainLates.isEmpty()) return
+        val m = nl.haltewekker.travel.DelayClaim.minutesLate(s.trainEndPlanned, s.trainEndActual, s.trainLates)
+        if (!nl.haltewekker.travel.DelayClaim.due(m, told = false) || m == null) return
+        val (t, b) = nl.haltewekker.travel.DelayClaim.text(m)
+        Notifications.link(this, "delayclaim", t, b, nl.haltewekker.travel.DelayClaim.CLAIM_URL)
     }
 
     // MARK: (A6, iOS 0.33) wake by time; (iOS 0.34) dead reckoning

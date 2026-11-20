@@ -245,6 +245,8 @@ private fun HubSheet(b: FriendBook?, now: Double, push: (FriendsRoute) -> Unit) 
     }
     // (A4) waits for you, your wait, on campus, delays, free together today, the live link while a trip runs
     ExtrasNowCards()
+    // (A6, iOS 0.35) a small card with today's best trip (the leaderboard below has both)
+    if (friends.isNotEmpty()) TodayTripsCard()
     MoreCard(b, friends, push)
     if (friends.isNotEmpty()) LeaderboardCard()
     LiveLinkIdleNote()

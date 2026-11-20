@@ -2,6 +2,7 @@ package nl.haltewekker.ui.friends
 
 import android.content.Context
 import android.content.Intent
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -256,6 +257,15 @@ fun LeaderboardCard() {
     fun who(id: String) = if (id == "me") "You" else FriendStore.name(id)
     Card {
         Header("Leaderboard with friends", FriendTogetherStore.sharingCount.takeIf { it > 0 }?.let { "$it sharing" })
+        // (A6, iOS 0.35) today's best and worst, on top
+        val today = FriendTogetherStore.todayRows(now)
+        if (today.isNotEmpty()) {
+            Text("Today", color = DS.t.text, fontWeight = FontWeight.SemiBold)
+            today.forEach { r ->
+                Text(if (r.home) "Home" else "To school", color = DS.t.secondary, style = MaterialTheme.typography.bodySmall)
+                nl.haltewekker.friends.DailyRank.lines(r) { FriendStore.name(it) }.forEach { Text(it, color = DS.t.text) }
+            }
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             QuietButton(if (month) "• This month" else "This month") { month = true }
             QuietButton(if (!month) "• All time" else "All time") { month = false }
@@ -433,5 +443,19 @@ fun ShareAskCard() {
                 QuietButton("Choose…") { open = true }
             }
         }
+    }
+}
+
+
+/** (A6, iOS 0.35) "Today's trips" on Friends: only when there's a trip today; it opens the leaderboard (below it). */
+@Composable
+fun TodayTripsCard(onOpen: () -> Unit = {}) {
+    FriendTogetherStore.scores.collectAsState().value
+    nl.haltewekker.friends.ScoreLog.trips.collectAsState().value
+    val rows = FriendTogetherStore.todayRows(now())
+    if (rows.isEmpty()) return
+    Card(androidx.compose.ui.Modifier.clickable(onClick = onOpen)) {
+        Header("Today's trips")
+        rows.forEach { r -> nl.haltewekker.friends.DailyRank.lines(r) { FriendStore.name(it) }.take(1).forEach { Text(it, color = DS.t.text) } }
     }
 }

@@ -22,6 +22,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <!-- A3: scanning a friend's QR code (asked for only when you tap Scan) -->
     <uses-permission android:name="android.permission.CAMERA" />
+    <!-- (A6) "Use motion to notice rides faster": the step detector (Physical activity, Android 10+) -->
+    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
 
     <!-- a roster link is handed to the app that subscribes to calendars (webcal) -->
     <queries>
@@ -33,6 +35,7 @@
 
     <uses-feature android:name="android.hardware.location.gps" android:required="false" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.sensor.stepdetector" android:required="false" />
 
     <application
         android:name=".App"
@@ -68,7 +71,36 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="https" android:host="haltewekker-relay.tsfaw1.workers.dev" android:path="/add" />
             </intent-filter>
+            <!-- (A6) the widget's tap: haltewekker://stop?id=…&name=…&lat=…&lon=…&rail=1 -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="haltewekker" android:host="stop" />
+            </intent-filter>
         </activity>
+
+        <!-- (A6) Next departures: the home-screen widget, its stop picked when it's added -->
+        <receiver
+            android:name=".widget.StopWidget"
+            android:exported="true"
+            android:label="Next departures">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/stop_widget" />
+        </receiver>
+        <activity
+            android:name=".widget.StopWidgetConfig"
+            android:exported="true"
+            android:theme="@style/Theme.Haltewekker">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
+
+        <receiver
+            android:name=".travel.TravelNotesReceiver"
+            android:exported="false" />
 
         <activity
             android:name=".ride.AlarmActivity"

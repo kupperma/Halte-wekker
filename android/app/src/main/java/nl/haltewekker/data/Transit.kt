@@ -37,12 +37,15 @@ object Transit {
 
     private suspend fun planHere(from: String, to: String, at: Double, count: Int, maxTransfers: Int, arriveBy: Boolean): List<DoorTrip> {
         val minute = Math.floor(at / 60) * 60
-        val key = "$from>$to@$minute|$count|$maxTransfers|$arriveBy"
+        // (A6, iOS 0.34) your walking speed, when it's learned and clearly not the planner's own
+        val walk = nl.haltewekker.travel.HabitStore.pedestrianSpeed()
+        val key = "$from>$to@$minute|$count|$maxTransfers|$arriveBy|$walk"
         val now = Iso.now()
         plans[key]?.let { if (now - it.at < 45) return it.trips }
         val q = mutableListOf("fromPlace" to from, "toPlace" to to, "numItineraries" to "$count", "maxTransfers" to "$maxTransfers",
             "time" to Iso.format(minute), "detailedTransfers" to "false")
         if (arriveBy) q.add("arriveBy" to "true")
+        walk?.let { q.add("pedestrianSpeed" to String.format(java.util.Locale.ROOT, "%.1f", it)) }
         val trips = ask("/v5/plan", q)?.let(TransitParse::parsePlan) ?: return emptyList()
         if (trips.isNotEmpty()) {
             if (plans.size > 80) plans.clear()

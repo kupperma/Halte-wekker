@@ -52,6 +52,13 @@ data class RideState(
     /** (A6, iOS 0.35) the ride that was latest at your stop so far, and by how many minutes. */
     val lateLine: String? = null,
     val lateMins: Double? = null,
+    /** (A6, iOS 0.36) the trains' minutes late at their stops, and the train part's planned and actual end (money back). */
+    val trainLates: List<Double> = emptyList(),
+    val trainEndPlanned: Double? = null,
+    val trainEndActual: Double? = null,
+    /** (A6, iOS 0.34) when you got off at a change (for the change time you need), and the vehicle you got off. */
+    val changeArrived: Double? = null,
+    val changeFromVehicle: String? = null,
 ) {
     val leg: Ride? get() = trip.rides.getOrNull(index)
     val wakeMetres: Double get() = (wakeKm.getOrNull(index) ?: WakeRules.BUS_KM) * 1000

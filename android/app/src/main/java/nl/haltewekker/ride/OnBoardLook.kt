@@ -75,6 +75,14 @@ class OnBoardLook {
         return s.arrival ?: s.departure
     }
 
+    /** (A6, iOS 0.34) when `tripId` leaves its stop near `p` (for whether you made a change). */
+    suspend fun departureNear(tripId: String, p: GeoPoint): Double? {
+        val t = Transit.trip(tripId, maxAge = 60.0) ?: return null
+        val s = t.stops.minByOrNull { Geo.metres(it.point, p) } ?: return null
+        if (Geo.metres(s.point, p) > 1500) return null
+        return s.departure ?: s.arrival
+    }
+
     /** (A6, iOS 0.33 `noteWakeTrip`) the vehicle's road from where you got on to your stop, and your stop's arrival. */
     data class WakeTrip(val route: List<GeoPoint>, val arrival: Double?, val live: Boolean)
 
