@@ -806,9 +806,13 @@ extension VehicleMatch {
     /// - One that fits by its own GPS while every other one fails (or fits `chooseMargin` worse), `gpsLooks` looks in a
     ///   row: that one.
     /// - Otherwise as before, with `chooseMargin` (30 s) as the margin between two that pass.
+    /// 0.38: `nudge` moves each one's cost for the ranking (seconds; the usual line's tie-break, the bus stopping
+    /// pattern; never what its own GPS says, `gpsBest`); `departed`, the one that left the stop with you
+    /// (`DepartMatch.pick`), settles the choice once it passed `departLooks` looks in a row (`departLook`), after the
+    /// roads parting and its own GPS.
     static func choose(_ ids: [String], judged given: [Judgement], shown: String?, shownOffRoad: Bool, choosingFor: TimeInterval,
                        misses: inout [String: Int], state: inout SwitchState, gps: inout GPSChoice, now: Date,
-                       timeout: TimeInterval = 12 * 60) -> ChoiceLook {
+                       timeout: TimeInterval = 12 * 60, nudge: [String: Double] = [:], departed: String? = nil) -> ChoiceLook {
         noteGPSFits(given, into: &gps.fitAt, now: now)
         let judged: [Judgement] = soften(given, fits: gps.fitAt, now: now)
         let gpsPick: String? = gpsLook(ids, judged: judged, run: &gps, now: now)
@@ -825,7 +829,7 @@ extension VehicleMatch {
         // the roads parted: another one far off its path is out at once
         for id in splits where id != shown { misses[id] = max(misses[id, default: 0], dropAfter) }
         pruned = pruned.filter { $0.id == shown || !splits.contains($0.id) }
-        let ranked: [Ranked] = rank(pruned, planned: nil)
+        let ranked: [Ranked] = nudged(rank(pruned, planned: nil), nudge)
         let live: Set<String> = liveIds(judged)
         // failing by its times only, against a timetable-only best: not sure, this look (its miss undone)
         let failsByTimes: Bool = mineJudged.map { timesOnly($0) } ?? false
@@ -836,6 +840,7 @@ extension VehicleMatch {
         if let shown, shownVerdict == .fails, verdict(mine, offRoad: false) != .fails { misses[shown, default: 0] += 1 }
         let kept: Set<String> = Set(pruned.map(\.id))
         let alive: [String] = ids.filter { kept.contains($0) || !tracked.contains($0) }
+        let departPick: String? = departLook(departed, judged: judged, alive: alive, run: &gps)
         var unsure: Set<String> = Set(ids.filter { !tracked.contains($0) })
         for j in judged { if case .failure(let why) = j.result, why.notSure { unsure.insert(j.id) } }
         if let shown, shownVerdict == .fails { unsure.remove(shown) }
@@ -851,6 +856,8 @@ extension VehicleMatch {
             decision = .switchTo(other.id); settle = other.id; why = .split
         } else if let pick = gpsPick, pick != shown, alive.contains(pick) {
             decision = .switchTo(pick); settle = pick; why = .byGPS
+        } else if let pick = departPick {
+            decision = pick == shown ? .keep(pick) : .switchTo(pick); settle = pick; why = .departed
         } else {
             switch decision {
             case .switchTo(let id): settle = id; why = .decided
@@ -935,7 +942,7 @@ enum ShownVerdict: Equatable, Sendable { case passes, notSure, fails }
 
 /// One look while choosing (see `VehicleMatch.choose`).
 struct ChoiceLook: Equatable, Sendable {
-    enum Why: Equatable, Sendable { case decided, onlyOneLeft, timedOut, byGPS, split }
+    enum Why: Equatable, Sendable { case decided, onlyOneLeft, timedOut, byGPS, split, departed }
     let decision: Decision
     let alive: [String]             // still in the running, in the order given
     let settle: String?             // sure now: the one to show (nil: still choosing)

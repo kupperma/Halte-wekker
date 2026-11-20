@@ -14,9 +14,12 @@ struct GPSChoice: Equatable, Sendable {
     var leader: String? = nil
     var looks = 0
     var lastAt: Date? = nil
+    // 0.38: the one that left the stop with you (`DepartMatch.pick`), in looks in a row that it passed
+    var departLeader: String? = nil
+    var departLooks = 0
 
     /// A new choice (or a settled one): the run starts again; what each one's GPS said stays, for `gpsMemory`.
-    mutating func restart() { leader = nil; looks = 0; lastAt = nil }
+    mutating func restart() { leader = nil; looks = 0; lastAt = nil; departLeader = nil; departLooks = 0 }
 }
 
 extension VehicleMatch {
@@ -25,6 +28,7 @@ extension VehicleMatch {
     static let gpsRunGap: TimeInterval = 60     // s: at most this long between them
     static let chooseMargin = 30.0              // s: both fit; one this much better counts (the one shown wins a real tie)
     static let splitMetres = 300.0              // m: your fixes this far off its path (or twice their accuracy): the roads parted
+    static let departLooks = 2                  // 0.38: looks in a row the one that left the stop with you passes
 
     /// Passed by a fresh GPS fix of its own.
     static func passedByGPS(_ j: Judgement) -> Bool {
@@ -110,5 +114,34 @@ extension VehicleMatch {
                   case .success(let c) = j.result else { return false }
             return c < cost
         }
+    }
+}
+
+extension VehicleMatch {
+    /// 0.38: one look for the one that left the stop with you (`departed`, from `DepartMatch.pick`): it's in the running
+    /// (`alive`) and passed this look, and no other one passed by its own GPS `chooseMargin` better while it didn't (its
+    /// own GPS is the clearer evidence). `departLooks` such looks in a row: that one. Any other look starts the run again.
+    @discardableResult
+    static func departLook(_ departed: String?, judged: [Judgement], alive: [String], run: inout GPSChoice) -> String? {
+        guard let d = departed, alive.contains(d), let mine = judged.first(where: { $0.id == d }),
+              case .success(let cost) = mine.result else {
+            run.departLeader = nil; run.departLooks = 0
+            return nil
+        }
+        let mineByGPS: Bool = passedByGPS(mine)
+        let beaten: Bool = judged.contains { (j: Judgement) -> Bool in
+            guard j.id != d, alive.contains(j.id), passedByGPS(j), !mineByGPS, case .success(let c) = j.result else { return false }
+            return c + chooseMargin <= cost
+        }
+        if beaten { run.departLeader = nil; run.departLooks = 0; return nil }
+        if run.departLeader == d { run.departLooks += 1 } else { run.departLeader = d; run.departLooks = 1 }
+        return run.departLooks >= departLooks ? d : nil
+    }
+
+    /// The ranking with each one's cost moved by `nudge` (seconds; negative: better), best first, ties by id.
+    static func nudged(_ ranked: [Ranked], _ nudge: [String: Double]) -> [Ranked] {
+        guard !nudge.isEmpty else { return ranked }
+        return ranked.map { (r: Ranked) -> Ranked in Ranked(id: r.id, cost: r.cost + (nudge[r.id] ?? 0)) }
+            .sorted { $0.cost != $1.cost ? $0.cost < $1.cost : $0.id < $1.id }
     }
 }

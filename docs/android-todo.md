@@ -36,6 +36,45 @@ their tests.
       wake time and dead reckoning come from the copy ("No network: going by the stops and times saved on your phone");
       the network back: ask again at once. Vectors in `ios/Tests/RideCacheTests.swift`.
 
+## iOS 0.38.0
+
+- [ ] Departure-moment match (`DepartMatch` in `ios/App/PickRules.swift`): the moment you went from standing at a stop
+      to moving (the latest run of fixes ≤ 60 m accuracy, all within 25 m or 1.5 × accuracy of its first for 15 s or
+      more, then the newest fix 60 m (or 2 × its accuracy) away and at 4 m/s; kept 4 minutes), and per vehicle when it
+      left that stop: by its own GPS (its newest or previous fix within 80 m of where you stood from 60 s before the
+      moment to 60 s after it: left then, seconds off; its newest fix still there later: it stayed; 300 m away within
+      30 s of the moment: elsewhere), else by its live times (a piece of its trip starting within 80 m, the departure
+      nearest the moment; timetable-only times say nothing). Left then: ≤ 60 s off. Getting on, the one that alone left
+      then gets 30 s off its cost; while choosing, the one that left then while every other one clearly didn't
+      (elsewhere, ≥ 90 s off, or 45 s further off than it) settles the choice after 2 looks in a row that it passes,
+      unless another one passed by its own GPS 30 s better while it didn't (after "roads parted" and the GPS run).
+      Log: `depart · stood 40 s, left 07:42:25 · 305·7821 left then (live 5 s) · 306·7954 not then (gps elsewhere)`,
+      `choose · … · left the stop with you`.
+- [ ] Your usual line (`UsualLine`, stored in the habits book as `lines`, reset with Settings › Trips & alarm ›
+      Learned from your rides): one entry per ride, line + bus/train + the planned departure's minute of the day +
+      weekend or not, weight +1 for a ride it found by itself that you rode to the leg's end (2 minutes or more), +2 for
+      the one you said you're on ("I'm actually on…", "I'm on this one" on the board or the list, the ask card), −1 for
+      the one it had when you corrected it (another line); 150 kept. Usual: the line's entries within 20 minutes of now,
+      same kind of day, add up to 3 or more and to 70 % of the positive totals of the lines in the running, and only
+      one candidate has that line. A tie-breaker only: getting on, it wins when within 15 s of the best (the planned one
+      still goes first); while choosing it gets 20 s off its cost while it holds (enters within 15 s of the best, lets go
+      beyond 40 s: hysteresis); never when another one passed by its own GPS while it didn't. Settings row "Your usual
+      lines": "305 at 07:41 on weekdays" (the two most ridden).
+- [ ] Stop pattern for buses (`BusStops`): while choosing between buses only, the candidates' stops within 300 m of your
+      last 4 minutes of fixes; per stop who calls there (a stop within 60 m), who waits there by the timetable (45 s or
+      more between arrival and departure), whose road passes within 40 m. What you did: stood (15 s within 25 m or 1.5 ×
+      accuracy, within 40 m of it) or went through (from 120 m before to 120 m after, passing within 40 m, every step ≥
+      4 m/s, fixes ≤ 15 s apart, accuracy ≤ 50 m). Against a candidate: you stood at a stop its road passes without it
+      calling there; you went through a stop where it would wait. (Going through a stop it calls at counts for nothing:
+      a bus passes a stop with nobody at it.) Beyond the fewest any candidate has, 2 or more: 20 s each on its cost, 60
+      s at most. Log: `choose · bus stop pattern · 305·7821 +40 s (2 against it)`.
+- [ ] Ask sooner (`AskSooner`): two still in the running a minute after you left the stop (the moment as the choice
+      began, else choosing time + 20 s; 3 minutes while your usual line breaks the tie), of the same kind, differing in
+      line or destination: the ask card at once, buses too: "305 or 306?" ("306 to Uden or 306 to Den Bosch?" for one
+      line), buttons "Bus 305" / "Bus 306"; trains as 0.34 ("IC to Breda or IC to Eindhoven?"). The answer is a pick by
+      hand, as before. Log: `ask · still tied 62 s after leaving · 305·7821 or 306·7954`. Vectors for all four in
+      `ios/Tests/PickRulesTests.swift`.
+
 ## iOS 0.37.1
 
 - [ ] Notifications that work on a watch (`WristNotice`; iOS mirrors them to a paired Apple Watch while the phone is

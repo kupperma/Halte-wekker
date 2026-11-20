@@ -93,7 +93,7 @@ enum SettingsIndex {
         SettingsEntry(id: "trips.studentOV", title: "Student travel product", topic: .trips, keywords: ["student ov", "studentenreisproduct", "ov-chipkaart", "free", "weekday", "weekend", "discount", "price", "costs", "duo", "fare"]),
         SettingsEntry(id: "trips.checkOut", title: "Check-out reminder", topic: .trips, keywords: ["check out", "uitchecken", "ov-chipkaart", "card", "pole", "forgot", "reminder"]),
         SettingsEntry(id: "trips.delayClaim", title: "Money back for a late train", topic: .trips, keywords: ["delay compensation", "geld terug bij vertraging", "refund", "claim", "late", "ns", "30 min"]),
-        SettingsEntry(id: "trips.learned", title: "Learned from your rides", topic: .trips, keywords: ["habits", "walking speed", "walk", "change time", "transfer", "preferred stop", "bolkenplein", "reset", "learn", "worked on"]),
+        SettingsEntry(id: "trips.learned", title: "Learned from your rides", topic: .trips, keywords: ["habits", "walking speed", "walk", "change time", "transfer", "preferred stop", "bolkenplein", "reset", "learn", "worked on", "usual line", "which bus", "305", "306"]),
         // Your places
         SettingsEntry(id: "places.now", title: "Your school and home", topic: .places, keywords: ["profile", "timetable", "campus", "town"]),
         SettingsEntry(id: "places.list", title: "Your places", topic: .places, keywords: ["home", "school", "rename", "move", "order", "chips"]),

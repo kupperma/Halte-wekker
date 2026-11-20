@@ -91,12 +91,12 @@ final class HabitsTests: XCTestCase {
 
     func test_wordsAndReset() {
         var b = HabitBook()
-        XCTAssertEqual(Habits.rows(b).map(\.value), ["not yet", "not yet", "none yet"])
+        XCTAssertEqual(Habits.rows(b).map(\.value), ["not yet", "not yet", "none yet", "none yet"])
         for _ in 0..<Habits.walksNeeded { b.addWalk(1.5) }
         for m in [3.0, 4, 5] { b.addChange(m) }
         for _ in 0..<3 { b.boarded(at: "Breda, Bolkenplein") }
-        XCTAssertEqual(Habits.rows(b).map(\.value), ["5.4 km/h", "5 min", "Breda, Bolkenplein"])
-        XCTAssertEqual(Habits.rows(b).map(\.label), ["Walking speed", "Time you need to change", "Stops you prefer"])
+        XCTAssertEqual(Habits.rows(b).map(\.value), ["5.4 km/h", "5 min", "Breda, Bolkenplein", "none yet"])
+        XCTAssertEqual(Habits.rows(b).map(\.label), ["Walking speed", "Time you need to change", "Stops you prefer", "Your usual lines"])
         XCTAssertTrue(b.isEmpty == false)
         XCTAssertTrue(HabitBook().isEmpty)
     }

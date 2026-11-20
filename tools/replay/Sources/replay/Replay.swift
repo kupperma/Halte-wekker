@@ -124,6 +124,8 @@ struct LegResult: Codable {
     /// 0.34: the stopping pattern (train legs, with vehicles), and dead reckoning over the gaps in the points.
     var trains: TrainLook?
     var reckon: ReckonLook?
+    /// 0.38: the moment you left the stop you got on at, and which one left it then.
+    var depart: DepartLook? = nil
 }
 
 /// All legs together.

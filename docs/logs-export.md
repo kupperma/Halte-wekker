@@ -215,6 +215,22 @@ The same switches, words and rules, so the relay and the replay treat both alike
   conditions as the lines (after a trip, else hourly; not during a trip, on a metered/Low Data network or in battery
   saver). Drop the sent points from the queue only after a 200; switching off clears the queue.
 
+### Picking the one you're on (0.38)
+
+What's new in 0.38: the app picks the bus or train you're on faster and more reliably (`ios/App/PickRules.swift`,
+tests `PickRulesTests`; Android parity in [android-todo.md](android-todo.md) › iOS 0.38.0):
+
+- **The moment you left** (`DepartMatch`): standing 15 s at a stop, then moving; the vehicle whose own GPS or live
+  times have it leave that stop within a minute of you, while the others clearly didn't, settles a choice after two
+  looks (`depart · …` and `choose · … · left the stop with you` lines). The replay prints it under each leg (`depart:
+  stood 40 s, left 25 s into the leg · left then: 305·7821 · it picks 305·7821`, `WRONG` if not the one you were on).
+- **Your usual line** (`UsualLine`): line, time of day and weekday or weekend of your rides and corrections; a
+  tie-breaker with hysteresis, never against a vehicle's own GPS (`detect · usual line · …`, `choose · usual line · …`,
+  `usual line · bus 305·7821 +1`).
+- **Stop pattern for buses** (`BusStops`): a bus that drives past a stop where you stood still, or would have waited at
+  one you went through, counts worse once that's happened twice (`choose · bus stop pattern · …`).
+- **Ask sooner** (`AskSooner`): two still tied a minute after leaving: "305 or 306?" at once (`ask · still tied …`).
+
 ### Trains on the same track, old GPS, tunnels, habits, change reliability (0.34)
 
 - **Trains on the same track** (`ios/App/TrainRules.swift`, tests `TrainRulesTests`):

@@ -2,6 +2,9 @@ import Foundation
 
 // replay <export.json> [--tracks vehicles.json] [--fetch] [--save-tracks vehicles.json] [--every 10] [--looks] [--json]
 //
+// 0.38: under each leg, the moment you left the stop you got on at and which vehicle left it then by its live times
+// (`Pick.swift`, with the app's own `PickRules.swift`): the one it picks should be the one you were on.
+//
 // 0.34: under each leg, what the stopping pattern says (train legs: the stations you stood at or went through, the trains
 // it rules out) and how dead reckoning would have done over the gaps in the GPS points (`Trains.swift`).
 //
@@ -102,7 +105,8 @@ for leg in legs {
     results.append(LegResult(install: String(leg.install.prefix(8)), ride: leg.ride, leg: leg.leg, truth: leg.truth, truthFrom: leg.truthFrom,
                              minutes: leg.end.timeIntervalSince(leg.start) / 60, points: leg.fixes.count, vehicles: ids.count,
                              logged: logged, replayed: replayed, wake: WakeReplay.of(leg),
-                             trains: TrainReplay.of(leg, tracks: tracks), reckon: ReckonReplay.of(leg)))
+                             trains: TrainReplay.of(leg, tracks: tracks), reckon: ReckonReplay.of(leg),
+                             depart: DepartReplay.of(leg, tracks: tracks)))
 }
 
 let truths = results.filter { $0.truth != nil }.count
@@ -125,6 +129,7 @@ if o.json {
         if let w = r.wake { print("         wake · \(WakeReplay.words(w))") }
         if let t = r.trains { print("         \(TrainReplay.words(t))") }
         if let k = r.reckon { print("         \(ReckonReplay.words(k))") }
+        if let d = r.depart { print("         \(DepartReplay.words(d))") }
     }
     func line(_ name: String, _ s: Summary) -> String {
         "\(name): settled on the one you were on in \(s.settled) of \(s.withTruth) legs · median \(fmt(s.medianSettle)) to settle · \(s.flips) flips · on it \(pct(s.onTruth)) of the time"
