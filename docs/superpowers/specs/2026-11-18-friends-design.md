@@ -1240,3 +1240,68 @@ every deck (no letter). `—`: no 1st class. "All" = `[0, 1]`, the coach is 1st 
   the back, 1st class".
 - **Your seat** (ride screen): "Coach 2 of 10 · upper deck · 5th window from the back · 1st class" when your pick is.
   A friend's page: "Sam is in coach 3 of 8 · 1st class" the same way (from NS's drawing at the station of their coach).
+
+## As built (0.35)
+
+What 0.35.0 (build 127) adds: **today's best and worst trip** among friends, carried in the 0.30 `scores` box. Everything
+in "As built (0.25)" to "(0.31.1)" holds unchanged: no new box kind, slot or relay route; `FriendMessage.kindsVersion`
+stays. One optional field in the `scores` body, additive: an older app ignores it, a newer one reads a body without it.
+
+### The leaderboard (why trips stopped showing, fixed in 0.35)
+- Until 0.34 a finished trip was scored only when it was one of the corridor's two fixed routes ("Via Den Bosch") or,
+  off the corridor only, a door-to-door trip (0.24's `DoorScore`). Since 0.19 the new look's home starts every trip as a
+  planned trip (Go's board, "I'm on it", the home map, the auto-start off the corridor), and a fixed route planned again
+  on board becomes one too: on the corridor no trip reached the board any more.
+- Now (`ScoreRules.board`): not the demo, started at the trip's first leg; a fixed route by its name; a planned trip that
+  started near Home (≤ 2.5 km; where you were if that fix was ≤ 10 min old, else its first stop) and ended near School
+  (≤ 1.5 km), or the other way, as `"home→school"` / `"school→home"`, **on or off the corridor**. A single stop: never.
+  Going on with a trip ended by hand (0.26.2) is still that trip. Keys and the saved board (UserDefaults `trips`) are
+  unchanged; it now reads entry by entry (one bad entry no longer empties it). Android: the same rule.
+
+### `today` in the `scores` box
+- Body (0.30) gains `"today"?: [day]` (0–12, newest first): the sender's trips on the leaderboard that ended **today in
+  the sender's own time zone**; absent when there are none (so a body without trips today is byte for byte 0.30's).
+  day = `{"home": bool (required), "mins": number (required, 5–600, one decimal: from starting the alarm to the last
+  stop), "at": t (required, when it ended), "plan"?: number (5–600: planned minutes, from starting the alarm to the
+  scheduled arrival at the last stop; a planned trip only), "line"?: string (≤ 20: the ride that was latest at your
+  stop, "305" for a bus, "Intercity" / "Sprinter" / the line for a train), "late"?: number (1–600: its minutes late)}`.
+  `line` and `late` come together or not at all.
+- Readers (`DayTrip.valid`): minutes outside 5–600 drop the trip; a `plan` outside 5–600 drops the plan; `line` cleaned
+  as a name (no control characters, single spaces, ≤ 20), and an empty one or a `late` outside 1–600 drops both; at
+  most 12 (the first kept). `{"on": false}` carries none.
+- **Sending**: as 0.30, with one change: when `today` differs from the `today` that last went to every friend (FNV-1a 64
+  over `{"on":true,"today":[…]}`, sorted keys), the body goes to every friend once the last went ≥ **5 minutes** ago
+  (else a change still waits 12 h). Only while "Share my scores" is on.
+
+### Today's best and worst (`DailyRank`, on the phone)
+- Today is the **reader's** own day (local midnight to midnight): only trips whose `at` is today count, yours (from the
+  leaderboard) and those of friends who share their scores; it starts again at local midnight.
+- Per direction (to school first, then home): the **fastest** (least `mins`) and the **slowest** (most), ties to the
+  earlier `at`, then you, then by account; no slowest with a single trip that way today.
+- **With friends** (a friend's trip that way today): "🏆 Fastest today: Sam, 41 min", "🐌 Slowest today: Tom, 1 h 12 —
+  the 305 was 18 min late" (you are "you"). The reason: " — the {line} was {late} min late" when `late` ≥ 3; else
+  " — {mins − plan} min more than planned" when that's ≥ 5; else nothing.
+- **On your own** (only your trips that way today): "🏆 Fastest today: 41 min · 9 min quicker than usual", "🐌 Slowest
+  today: 1 h 05 — the Intercity was 9 min late"; one trip: "Today: 51 min · about your usual". Usual = the median of
+  your trips that way in the 28 days before today, from 3 trips (none: no comparison); within 2 min is "about your
+  usual", else "{n} min quicker" / "slower than usual".
+- Durations: under 60 "41 min"; else "1 h", "1 h 05", "1 h 12" (minutes rounded).
+- Shown: Settings › Trips & alarm › Leaderboard and Friends › Leaderboard with friends ("Today", on top), and a small
+  "Today's trips" card on Friends (only when there's a trip today; it opens the leaderboard).
+
+### Test vectors (checked in `ios/Tests/FriendExtrasBTests.swift` and `ios/Tests/DailyRankTests.swift`)
+- Body (exact bytes, sorted keys, unix seconds):
+  `{"month":"2027-01","on":true,"today":[{"at":1799998200,"home":false,"late":18,"line":"305","mins":72,"plan":52}]}`.
+- Worked (Friday 15 January 2027, Europe/Amsterdam, now 09:00): to school today you 48.5 min (ended 08:30), Sam 41
+  (08:20, plan 40), Tom 72 (08:50, plan 52, the 305 18 min late) → "🏆 Fastest today: Sam, 41 min", "🐌 Slowest today:
+  Tom, 1 h 12 — the 305 was 18 min late". On your own with 50, 46 and 52 min to school the three days before (and 30,
+  40 days ago, not counted): usual 50; today 41 and 65 (the Intercity 9 min late) → "🏆 Fastest today: 41 min · 9 min
+  quicker than usual", "🐌 Slowest today: 1 h 05 — the Intercity was 9 min late". A trip at 23:59 the day before: none.
+- Test friend (0.30.1): its `scores` now also has `today` = one trip to school an hour ago, 52.4 min, plan 45, the 305
+  7 min late.
+
+### App (0.35)
+- Pure, tested: `ScoreRules` (the board's rule, the score, reading the board), `DayTrip` / `DailyRank`; `ScoresShare.today`,
+  `ScoresRules.build(today:)`, `ScoresRules.due(soon:)` (`FriendExtrasB.swift`).
+- `FriendTogetherStore`: `todayPeople`, and `scoresToday` in Friends/together.json (what `today` last went).
+- Your year in travel (Settings › Advanced) is on the phone only and sends nothing.
