@@ -152,8 +152,10 @@ object LogShareRules {
     }
 
     /** On, no trip running, not in battery saver, the day's 2 MB not used up, the last try long enough ago. */
-    fun due(s: LogShareState, enabled: Boolean, trigger: Trigger, tripRunning: Boolean, lowPower: Boolean, now: Double, today: String): Boolean {
-        if (!enabled || tripRunning || lowPower || budget(s, today) <= 0) return false
+    fun due(s: LogShareState, enabled: Boolean, trigger: Trigger, tripRunning: Boolean, lowPower: Boolean, now: Double, today: String,
+            fixes: Boolean = false): Boolean {
+        val room = budget(s, today) > 0 || (fixes && GPSShareRules.budget(s, today) > 0)
+        if (!enabled || tripRunning || lowPower || !room) return false
         val last = s.lastTry ?: return true
         val age = now - last
         if (age < 0) return true
@@ -162,9 +164,10 @@ object LogShareRules {
 
     fun tried(s: LogShareState, now: Double) = s.copy(lastTry = now)
 
-    fun sent(s: LogShareState, b: LogShareBatch, now: Double, today: String): LogShareState {
+    fun sent(s: LogShareState, b: LogShareBatch, now: Double, today: String, fixBytes: Int = 0): LogShareState {
         var n = s
-        if (n.day != today) n = n.copy(day = today, sentToday = 0)
+        if (n.day != today) n = n.copy(day = today, sentToday = 0, fixBytesToday = null)
+        if (fixBytes > 0) n = n.copy(fixBytesToday = (n.fixBytesToday ?: 0) + fixBytes)
         return n.copy(sentToday = n.sentToday + b.bytes, through = b.through ?: n.through, sentEver = true, lastSent = now)
     }
 }
@@ -180,6 +183,8 @@ data class LogShareState(
     val day: String = "",
     val sentToday: Int = 0,
     val sentEver: Boolean = false,
+    /** (A6, iOS 0.32) bytes of GPS points sent today (their own 4 MB a day). */
+    val fixBytesToday: Int? = null,
 ) {
     fun rotated(random: (Int) -> ByteArray = ::randomBytes) =
         copy(install = hex(random(16)), secret = hex(random(32)), sentEver = false, lastSent = null)
@@ -204,7 +209,9 @@ data class LogShareState(
 }
 
 /** The body of a put: what the relay is sent, and nothing else. */
-@Serializable data class LogSharePut(val install: String, val secret: String, val app: String, val lines: List<String>)
+@Serializable data class LogSharePut(val install: String, val secret: String, val app: String, val lines: List<String>,
+                                     /** (A6, iOS 0.32) GPS points, and the phone's offset from UTC (s), only when there are points. */
+                                     val fixes: List<SharedFix>? = null, val tz: Int? = null)
 
 @Serializable data class LogShareDelete(val install: String, val secret: String)
 

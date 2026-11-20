@@ -365,6 +365,8 @@ fun RideExtrasCards(s: RideState) {
 @Composable
 fun LogShareCard() {
     val on by LogShareStore.on.collectAsState()
+    val fixesOn by LogShareStore.fixesOn.collectAsState()
+    val waiting by LogShareStore.fixesWaiting.collectAsState()
     val st by LogShareStore.state.collectAsState()
     val busy by LogShareStore.busy.collectAsState()
     val note by LogShareStore.note.collectAsState()
@@ -374,7 +376,11 @@ fun LogShareCard() {
         Header("Help improve Haltewekker")
         SwitchRow("Share ride logs", "Off unless you turn it on. After each trip it sends the lines about how the app picked your bus or train and how the ride went: " +
             "line numbers, distances in metres, how old a GPS fix was, what it decided. Never where you are, your places’ names, your friends or your account. " +
-            "Not with Data Saver on a metered network; kept 60 days.", on) { LogShareStore.setOn(it) }
+            "Not with Data Saver on a metered network; kept 60 days.", on) { LogShareStore.setOn(it); LogShareStore.markAsked() }
+        // (A6, iOS 0.32) GPS points during rides, trimmed at both ends and around your places
+        SwitchRow(nl.haltewekker.logs.ShareAsk.FIXES_TITLE, nl.haltewekker.logs.ShareAsk.FIXES_TEXT +
+            if (fixesOn && waiting > 0) " $waiting points wait to go." else "", fixesOn) { LogShareStore.setFixesOn(it); LogShareStore.markAsked() }
+        Text(nl.haltewekker.logs.ShareAsk.who, color = DS.t.secondary, style = MaterialTheme.typography.bodySmall)
         QuietButton(if (details) "Hide what’s sent" else "What’s sent") { details = !details }
         if (details) {
             Text("A line as it’s sent", color = DS.t.text, fontWeight = FontWeight.SemiBold)
@@ -384,14 +390,48 @@ fun LogShareCard() {
                 "Not sent" to "Coordinates, addresses, the names of your places (Home and School become “Home” and “School”), friends’ names, account ids and the requests the app makes. Public stop and station names may stay.",
                 "Grouped by" to "A random id made on this phone for this only: not your Friends account, not your phone’s name.",
                 "When" to "After each trip ends, and at most once an hour otherwise. Never during a trip, with Data Saver on a metered network or in battery saver. At most 200 KB at a time and 2 MB a day.",
-                "Kept" to "60 days, then deleted. Only the developer can read them, to make the app pick the right bus or train more often.",
+                "Kept" to "60 days, then deleted. Only ${nl.haltewekker.logs.Maker.NAME} can read them, to make the app pick the right bus or train more often.",
+                "A GPS point" to nl.haltewekker.logs.ShareAsk.SAMPLE_FIX,
+                "GPS points" to "Only while a trip runs, one every 3 s at most, accuracy 150 m or better. When the trip ends the first and last 500 m go, and so does everything within 500 m of Home, School or your home stops. At most 600 KB at a time and 4 MB a day.",
             ).forEach { (t, d) -> Text(t, color = DS.t.text, fontWeight = FontWeight.SemiBold); Text(d, color = DS.t.secondary, style = MaterialTheme.typography.bodySmall) }
         }
         if (st != null) QuietButton(if (busy) "Deleting…" else "Delete what I sent") { if (!busy) confirm = true }
         note?.let { Text(it, color = DS.t.secondary, style = MaterialTheme.typography.bodySmall) }
     }
-    if (confirm) AlertDialog(onDismissRequest = { confirm = false }, title = { Text("Delete the ride logs this phone sent?") },
-        text = { Text("Everything this phone sent is deleted from the server now. Sharing stays as it is; what comes later goes under a new random id.") },
+    if (confirm) AlertDialog(onDismissRequest = { confirm = false }, title = { Text("Delete what this phone sent?") },
+        text = { Text("The ride logs and GPS points this phone sent are deleted from the server now. Sharing stays as it is; what comes later goes under a new random id.") },
         confirmButton = { TextButton(onClick = { confirm = false; LogShareStore.deleteSent() }) { Text("Delete what I sent") } },
         dismissButton = { TextButton(onClick = { confirm = false }) { Text("Cancel") } })
+}
+
+
+/**
+ * (A6, iOS 0.32) "Help improve Haltewekker?": once, on the home and at the top of Settings, for a setup done before the
+ * setup asked it. "Not now" puts it away for good; "Choose…" opens the two switches here.
+ */
+@Composable
+fun ShareAskCard() {
+    val asked by LogShareStore.asked.collectAsState()
+    val testLive by nl.haltewekker.profile.TestSetup.live.collectAsState()
+    val app = androidx.compose.ui.platform.LocalContext.current.applicationContext as nl.haltewekker.App
+    val p by app.store.profile.collectAsState()
+    if (!nl.haltewekker.logs.ShareAsk.showCard(p.setupDone, asked, testLive)) return
+    var open by remember { mutableStateOf(false) }
+    var logs by remember { mutableStateOf(false) }
+    var fixes by remember { mutableStateOf(false) }
+    Card {
+        Header("Help improve Haltewekker?")
+        Text(nl.haltewekker.logs.ShareAsk.intro, color = DS.t.secondary, style = MaterialTheme.typography.bodySmall)
+        if (open) {
+            SwitchRow(nl.haltewekker.logs.ShareAsk.LOGS_TITLE, nl.haltewekker.logs.ShareAsk.LOGS_TEXT, logs) { logs = it }
+            SwitchRow(nl.haltewekker.logs.ShareAsk.FIXES_TITLE, nl.haltewekker.logs.ShareAsk.FIXES_TEXT, fixes) { fixes = it }
+            Text(nl.haltewekker.logs.ShareAsk.who, color = DS.t.secondary, style = MaterialTheme.typography.bodySmall)
+            QuietButton("Done") { LogShareStore.answer(logs, fixes) }
+        } else {
+            androidx.compose.foundation.layout.Row(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
+                QuietButton("Not now") { LogShareStore.markAsked() }
+                QuietButton("Choose…") { open = true }
+            }
+        }
+    }
 }

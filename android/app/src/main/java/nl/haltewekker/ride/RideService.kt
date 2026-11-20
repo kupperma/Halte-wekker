@@ -116,6 +116,17 @@ class RideService : Service() {
     private var lookFrom = 0.0
     private val autoLook = OnBoardLook()
 
+    // (A6, iOS 0.33) wake by time: your smoothed speed, the vehicle's road from where you got on to your stop and your
+    // stop's live arrival (from the vehicle's own trip answer)
+    private val smoother = SpeedSmoother()
+    private var lastSpeedFix: Fix? = null
+    private var wakeRoute: List<GeoPoint> = emptyList()
+    private var wakeLive: Pair<Double, Double>? = null          // (arrival, asked at)
+    // (A6, iOS 0.34) dead reckoning: the newest good fix (≤ 100 m), and where the reckoning started on the route
+    private var lastGood: Fix? = null
+    private var reckonFrom: Pair<Double, Double>? = null        // (metres along, at)
+    private var reckonJob: Job? = null
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
@@ -223,21 +234,40 @@ class RideService : Service() {
         val d = Geo.metres(fix.p, to)
         RideStore.update(this) { it.copy(distance = d, accuracy = fix.accuracy, speed = fix.speed.takeIf { v -> v >= 0 }, lastFixAt = now,
             lastLat = Math.round(fix.p.lat * 100_000) / 100_000.0, lastLon = Math.round(fix.p.lon * 100_000) / 100_000.0) }
-        when (WakeRules.onFix(s.phase, d, fix.accuracy, now - s.legStart, s.wakeMetres)) {
-            WakeRules.Action.RING -> ring("approach")
-            WakeRules.Action.AWAKE_SILENTLY -> {
-                FieldLog.ride(FieldFormat.rideWake(d))
-                RideStore.update(this) { it.copy(phase = Phase.AWAKE, note = "You started close to your stop: it tells you when you're there.") }
+        // (A6) a good fix: where you are, and the end of any reckoning
+        if (DeadReckon.good(fix.accuracy)) {
+            lastGood = fix
+            if (reckonFrom != null || s.reckoning) {
+                reckonFrom = null
+                RideStore.update(this) { it.copy(reckoning = false) }
+                FieldLog.ride("reckon · good GPS again: where you are")
             }
-            WakeRules.Action.ARRIVE -> arrive()
-            WakeRules.Action.NONE -> {}
         }
+        noteSpeed(fix)
+        // (A6, iOS 0.33) the distance rule as it always was; by time also the time rule, whichever comes first
+        // (`WakeRule`). Within 20 s of the leg's start either one wakes it silently.
+        val good = fix.accuracy >= 0 && fix.accuracy < WakeRules.GOOD_ACCURACY
+        if (s.phase == Phase.SLEEPING) {
+            val fire = if (good) wakeFire(fix, d, s) else null
+            if (fire != null) {
+                if (now - s.legStart < WakeRules.EARLY_LEG) {
+                    FieldLog.ride(FieldFormat.rideWake(d))
+                    RideStore.update(this) { it.copy(phase = Phase.AWAKE, note = "You started close to your stop: it tells you when you're there.") }
+                } else ring(WakeRule.log(fire), fire)
+            }
+        } else if (WakeRules.onFix(s.phase, d, fix.accuracy, now - s.legStart, s.wakeMetres) == WakeRules.Action.ARRIVE) arrive()
+        // (A6, iOS 0.32) Share GPS points during rides (when on): the trip's own fixes, nothing asked for
+        nl.haltewekker.logs.LogShareStore.heard(fix.t, fix.p.lat, fix.p.lon, fix.accuracy, fix.speed, fix.course,
+            nl.haltewekker.logs.GPSShareRules.leg(s.index, s.trip.rides.size), vehicleText(s))
+        if (s.vehicleTripId != null) startReckon()
         // rough GPS far from the stop on a confirmed vehicle (iOS RideGPS)
         val cur = RideStore.state.value ?: return
         val far = RideGPS.far(RideGPS.Input(
             enabled = app.store.settings.value.roughGPSOnLongRides, asleep = cur.phase == Phase.SLEEPING,
             confirmed = cur.vehicleSource == VehicleSource.BY_GPS || cur.vehicleSource == VehicleSource.BY_HAND,
-            metresToStop = d, accuracy = fix.accuracy, fixAge = now - fix.t, wakeMetres = cur.wakeMetres, isTrain = leg.isTrain,
+            metresToStop = d, accuracy = fix.accuracy, fixAge = now - fix.t,
+            // (A6) by time, the far tier keeps clear of the time rule's reach
+            wakeMetres = WakeRule.gpsWakeMetres(cur.wakeMetres, app.store.settings.value.wake, leg.isTrain), isTrain = leg.isTrain,
             speed = fix.speed.takeIf { it >= 0 }, secondsToStop = cur.legArrival?.let { it - now }, wasFar = cur.roughGPS))
         if (far != cur.roughGPS) RideStore.update(this) { it.copy(roughGPS = far) }
         requestLocation(RideGPS.intervalMs(far))
@@ -269,7 +299,12 @@ class RideService : Service() {
                 val v = RideStore.state.value?.vehicleTripId ?: leg.tripId
                 if (now - etaAt >= 60 && leg.to != null) {
                     etaAt = now
-                    look.arrival(v, leg.to!!)?.let { eta -> RideStore.update(this) { it.copy(eta = eta) } }
+                    val w = look.wakeTrip(v, leg.from, leg.to!!)
+                    if (w != null) {
+                        wakeRoute = w.route
+                        wakeLive = w.arrival?.takeIf { w.live }?.let { it to Iso.now() }
+                        w.arrival?.let { eta -> RideStore.update(this) { it.copy(eta = eta) } }
+                    }
                     scheduleBackup()
                 }
                 notifyRide(force = false)
@@ -280,14 +315,16 @@ class RideService : Service() {
         }
     }
 
-    private fun ring(why: String) {
+    private fun ring(why: String, fire: WakeRule.Fire? = null) {
         val s = RideStore.state.value ?: return
         if (s.phase != Phase.SLEEPING) return
         val st = app.store.settings.value
         val quiet = WakeRules.quiet(st.headphonesOnly, AudioRoute.privateOutput(this))
         val leg = s.leg
-        FieldLog.ride(FieldFormat.rideRing(why, s.distance, Iso.now() - s.legStart, null))
-        RideStore.update(this) { it.copy(phase = Phase.ALARM, quiet = quiet, note = why, roughGPS = false) }
+        FieldLog.ride(FieldFormat.rideRing(why, s.distance, Iso.now() - s.legStart, startMetres(s)))
+        val minutes = (fire as? WakeRule.Fire.Time)?.minutes
+        RideStore.update(this) { it.copy(phase = Phase.ALARM, quiet = quiet, note = null, roughGPS = false, ringMinutes = minutes) }
+        stopReckon()
         cancelBackup()
         requestLocation(RideGPS.intervalMs(false))
         AlarmPlayer.ring(this, if (st.announce && leg != null) WakeRules.announcement(leg.toStop, leg.isTrain, true) else null, quiet)
@@ -324,10 +361,12 @@ class RideService : Service() {
         val now = Iso.now()
         look.reset()
         etaAt = 0.0
+        resetLegWake()
         if (s.index + 1 < s.trip.rides.size) {
             RideStore.update(this) {
                 it.copy(index = it.index + 1, phase = Phase.SLEEPING, legStart = now, vehicleTripId = null, vehicleLine = null,
-                    vehicleSource = VehicleSource.NONE, eta = null, distance = null, quiet = false, note = null, roughGPS = false)
+                    vehicleSource = VehicleSource.NONE, eta = null, distance = null, quiet = false, note = null, roughGPS = false,
+                    ringMinutes = null, reckoning = false)
             }
             requestLocation(RideGPS.intervalMs(false))
             scheduleBackup()
@@ -383,6 +422,7 @@ class RideService : Service() {
 
     private fun stopRide() {
         tick?.cancel()
+        stopReckon()
         try { lm.removeUpdates(listener) } catch (_: Exception) {}
         intervalMs = 0
         stopForeground(STOP_FOREGROUND_REMOVE)
@@ -395,6 +435,95 @@ class RideService : Service() {
         if (!force && s?.phase == lastPhase && now - lastNotify < 15) return
         lastNotify = now; lastPhase = s?.phase
         Notifications.post(this, Notifications.RIDE_ID, Notifications.ride(this, s))
+    }
+
+    // MARK: (A6, iOS 0.33) wake by time; (iOS 0.34) dead reckoning
+
+    private fun resetLegWake() {
+        smoother.reset(); lastSpeedFix = null; wakeLive = null; wakeRoute = emptyList()
+        lastGood = null; stopReckon()
+    }
+
+    private fun startMetres(s: RideState): Double? {
+        val here = lastGood?.p ?: fixes.lastOrNull()?.p ?: return null
+        return s.leg?.from?.let { Geo.metres(here, it) }
+    }
+
+    /** Your speed for the time rule, from a good fix (`SpeedSmoother`). */
+    private fun noteSpeed(f: Fix) {
+        if (f.accuracy < 0 || f.accuracy >= 100) return
+        SpeedSmoother.reading(f, lastSpeedFix)?.let { smoother.add(it, f.t) }
+        lastSpeedFix = f
+    }
+
+    private fun wakeInput(s: RideState, metres: Double, route: Double?, speed: Double?, now: Double): WakeRule.Input? {
+        val leg = s.leg ?: return null
+        val w = app.store.settings.value.wake
+        val here = lastGood?.p ?: fixes.lastOrNull()?.p
+        return WakeRule.Input(by = w.by, minutes = w.minutes(leg.isTrain), isTrain = leg.isTrain, metres = metres, routeMetres = route,
+            wakeMetres = s.wakeMetres, liveArrival = wakeLive?.first, liveAge = wakeLive?.let { now - it.second }, speed = speed,
+            fromStartMetres = if (here != null && leg.from != null) Geo.metres(here, leg.from!!) else null, now = now)
+    }
+
+    /** What rings this leg now, from a good fix `d` metres from its stop (`WakeRule.decide`; null: nothing yet). */
+    private fun wakeFire(f: Fix, d: Double, s: RideState): WakeRule.Fire? {
+        val now = Iso.now()
+        val i = wakeInput(s, d, RouteLeft.metres(f.p, wakeRoute), smoother.speed(f.t), now) ?: return null
+        return WakeRule.decide(i)
+    }
+
+    private fun startReckon() {
+        if (reckonJob?.isActive == true) return
+        reckonJob = scope.launch {
+            while (isActive) {
+                delay((DeadReckon.EVERY * 1000).toLong())
+                reckonStep()
+            }
+        }
+    }
+
+    private fun stopReckon() {
+        reckonJob?.cancel(); reckonJob = null
+        reckonFrom = null
+    }
+
+    /**
+     * No good fix for 15 s on a ride with its vehicle known (a tunnel, a dead zone): the place goes on along the
+     * vehicle's route from your last good fix at its pace (the distance left over the time to its arrival, else your
+     * last speed). Only the time rule may ring on it (`DeadReckon.mayRing`). A good fix ends it (`onLocation`).
+     */
+    private fun reckonStep() {
+        val s = RideStore.state.value ?: run { stopReckon(); return }
+        val leg = s.leg ?: return
+        if (s.vehicleTripId == null || !(s.phase == Phase.SLEEPING || s.phase == Phase.AWAKE)) { stopReckon(); return }
+        val now = Iso.now()
+        val g = lastGood ?: return
+        val route = wakeRoute.takeIf { it.size >= 2 } ?: listOfNotNull(leg.from, leg.to).takeIf { it.size == 2 } ?: return
+        if (!DeadReckon.needed(g.t, now)) return
+        val end = Geo.length(route)
+        if (reckonFrom == null) {
+            val pr = Geo.project(g.p, route) ?: return
+            if (pr.crossTrack > RouteLeft.OFF_ROUTE) return
+            reckonFrom = pr.along to g.t
+            RideStore.update(this) { it.copy(reckoning = true) }
+            FieldLog.ride("reckon · no good GPS for ${(now - g.t).toInt()} s · on along its route")
+        }
+        val from = reckonFrom ?: return
+        val pace = DeadReckon.pace(end - from.first, s.legArrival, from.second, smoother.speed(g.t) ?: g.speed.takeIf { it >= 0 }, leg.isTrain)
+        val e = DeadReckon.along(from.first, from.second, now, pace, null, null, end, leg.isTrain)
+        val at = Geo.pointAtMetres(e.metres, route) ?: return
+        val to = leg.to ?: return
+        val d = Geo.metres(at, to)
+        RideStore.update(this) { it.copy(distance = d) }
+        if (s.phase == Phase.SLEEPING && now - s.legStart >= WakeRules.EARLY_LEG) {
+            val i = wakeInput(s, d, maxOf(0.0, end - e.metres), pace, now) ?: return
+            val fire = DeadReckon.decide(i)
+            if (DeadReckon.mayRing(fire, deadReckoned = true) && fire != null) {
+                ring("reckoned (${e.source.raw}) · " + WakeRule.log(fire), fire)
+                return
+            }
+        }
+        notifyRide(force = false)
     }
 
     // MARK: the backup alarm by time

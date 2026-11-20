@@ -41,6 +41,10 @@ data class RideState(
     val lastLon: Double? = null,
     /** (A4) The leg the ride started at (0: from the start, so a finished trip counts on the leaderboard). */
     val firstLeg: Int? = null,
+    /** (A6, iOS 0.33) Rung by time: the minutes it rang at (the alarm says "in about 3 min"). */
+    val ringMinutes: Int? = null,
+    /** (A6, iOS 0.34) No good GPS for a while: the place goes on along the vehicle's route. */
+    val reckoning: Boolean = false,
 ) {
     val leg: Ride? get() = trip.rides.getOrNull(index)
     val wakeMetres: Double get() = (wakeKm.getOrNull(index) ?: WakeRules.BUS_KM) * 1000

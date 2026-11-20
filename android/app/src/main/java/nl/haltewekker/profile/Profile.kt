@@ -50,6 +50,24 @@ data class Settings(
     val autoStart: Boolean = true,
     /** (A2) Reaching School switches the next trip to home, once a day. */
     val autoHome: Boolean = true,
+    /** (A6, iOS 0.33) "Wake me … before my stop": by time (default) or by distance; the distance stays the safety net. */
+    val wake: nl.haltewekker.ride.WakeSettings = nl.haltewekker.ride.WakeSettings(),
+    /** (A6, iOS 0.33) "Use motion to notice rides faster" (off by default; Android: the step detector, see plan A6). */
+    val motion: Boolean = false,
+    /** (A6, iOS 0.36) "Did you check out?" after getting off. */
+    val checkOut: Boolean = true,
+    /** (A6, iOS 0.36) Money back for a late train. */
+    val delayClaim: Boolean = true,
+    /** (A6, iOS 0.36) Works and disruptions on your routes. */
+    val railWorks: Boolean = true,
+    /** (A6, iOS 0.36) Last way home. */
+    val lastHome: Boolean = true,
+    /** (A6, iOS 0.36) Student travel product: "none", "week", "weekend". */
+    val studentOV: String = "none",
+    /** (A6, iOS 0.37) OV-fiets at the station. */
+    val ovFiets: Boolean = true,
+    /** (A6, iOS 0.37) Rain advice for the walk. */
+    val rainAdvice: Boolean = true,
 )
 
 /** The profile and settings, in SharedPreferences, as state the screens follow. */

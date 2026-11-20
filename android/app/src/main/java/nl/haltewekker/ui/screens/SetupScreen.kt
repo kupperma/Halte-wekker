@@ -98,7 +98,10 @@ fun SetupScreen(test: Boolean = false, onDone: () -> Unit, onCancel: (() -> Unit
     var early by remember { mutableStateOf(ownCfg.earlyMinutes) }
     var wake by remember { mutableStateOf(ownCfg.wakeMinutes) }
     var wakeOn by remember { mutableStateOf(ownCfg.on) }
-    val titles = listOf("Welcome", "Your school", "Your home", "Stops near home", "Your timetable", "Mornings", "Allow the alarms", "All set")
+    // (A6, iOS 0.32) both off unless turned on; an earlier answer is kept when setting up again
+    var shareLogs by remember { mutableStateOf(!test && nl.haltewekker.logs.LogShareStore.on.value) }
+    var shareFixes by remember { mutableStateOf(!test && nl.haltewekker.logs.LogShareStore.fixesOn.value) }
+    val titles = listOf("Welcome", "Your school", "Your home", "Stops near home", "Your timetable", "Mornings", "Allow the alarms", "Help improve Haltewekker", "All set")
     BackHandler(enabled = step > 0) { step -= 1 }
 
     fun schedule(): ScheduleSource = when (timetable) {
@@ -130,6 +133,8 @@ fun SetupScreen(test: Boolean = false, onDone: () -> Unit, onCancel: (() -> Unit
         SchoolAlarm.setConfig(context, SchoolConfig(on = wakeOn && sch != ScheduleSource.NONE,
             calendarIds = if (sch == ScheduleSource.CALENDARS) calendarIds.toList() else emptyList(), earlyMinutes = early, wakeMinutes = wake))
         if (test) TestSetup.done(context)
+        // (a test setup asks too, but never changes what your own phone shares)
+        else nl.haltewekker.logs.LogShareStore.answer(shareLogs, shareFixes)
         Regions.update(context)
         onDone()
     }
@@ -205,6 +210,15 @@ fun SetupScreen(test: Boolean = false, onDone: () -> Unit, onCancel: (() -> Unit
                 BigButton("Next") { step = 7 }
             }
             7 -> {
+                Text(nl.haltewekker.logs.ShareAsk.intro, color = DS.t.text)
+                Card {
+                    SwitchRow(nl.haltewekker.logs.ShareAsk.LOGS_TITLE, nl.haltewekker.logs.ShareAsk.LOGS_TEXT, shareLogs) { shareLogs = it }
+                    SwitchRow(nl.haltewekker.logs.ShareAsk.FIXES_TITLE, nl.haltewekker.logs.ShareAsk.FIXES_TEXT, shareFixes) { shareFixes = it }
+                }
+                Text(nl.haltewekker.logs.ShareAsk.who, color = DS.t.secondary, style = MaterialTheme.typography.bodySmall)
+                BigButton("Next") { step = 8 }
+            }
+            8 -> {
                 Text(if (test) "This is what a new student has now. Try it for real: trips, the board and the school alarm use this test setup until you go back to your own."
                     else "That's all it needs. Change any of it later in Settings.", color = DS.t.text)
                 Card {
@@ -212,13 +226,14 @@ fun SetupScreen(test: Boolean = false, onDone: () -> Unit, onCancel: (() -> Unit
                     Summary("Your home", if (home != null) "Set · ${picked.size} stop${if (picked.size == 1) "" else "s"}" else "Not set") { step = 2 }
                     Summary("Timetable", timetableWords()) { step = 4 }
                     Summary("Mornings", "At school $early min early · wake $wake min before you leave · school alarm ${if (wakeOn && schedule() != ScheduleSource.NONE) "on" else "off"}") { step = 5 }
+                    Summary("Help improve Haltewekker", nl.haltewekker.logs.ShareAsk.words(shareLogs, shareFixes)) { step = 7 }
                 }
                 BigButton("Done", enabled = school != null && home != null) { finish() }
                 if (school == null || home == null) Text("Your school and home are needed.", color = DS.t.warning)
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (step in 1..7) QuietButton("Back") { step -= 1 }
+            if (step in 1..8) QuietButton("Back") { step -= 1 }
             if (onCancel != null) QuietButton("Cancel") { onCancel() }
         }
         Spacer(Modifier.height(24.dp))

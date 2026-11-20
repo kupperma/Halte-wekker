@@ -74,4 +74,37 @@ class OnBoardLook {
         if (Geo.metres(s.point, stop) > 500) return null
         return s.arrival ?: s.departure
     }
+
+    /** (A6, iOS 0.33 `noteWakeTrip`) the vehicle's road from where you got on to your stop, and your stop's arrival. */
+    data class WakeTrip(val route: List<GeoPoint>, val arrival: Double?, val live: Boolean)
+
+    suspend fun wakeTrip(tripId: String, from: GeoPoint?, stop: GeoPoint): WakeTrip? {
+        val t = Transit.trip(tripId, maxAge = 60.0) ?: return null
+        if (t.stops.size < 2) return null
+        val mine = t.stops.indices.minByOrNull { Geo.metres(t.stops[it].point, stop) } ?: return null
+        if (Geo.metres(t.stops[mine].point, stop) > 1500) return null
+        val board = from?.let { f -> (0 until mine).minByOrNull { Geo.metres(t.stops[it].point, f) }?.takeIf { Geo.metres(t.stops[it].point, f) < 1500 } } ?: 0
+        val s = t.stops[mine]
+        val arrival = if (Geo.metres(s.point, stop) <= 500) (s.arrival ?: s.departure) else null
+        return WakeTrip(WakeRoad.cut(t.path, t.stops[board].point, s.point) ?: t.stops.subList(board, mine + 1).map { it.point }, arrival, t.live)
+    }
+}
+
+/** The bit of a trip's road between two of its stops (by where they fall on it), for the distance left along it. */
+object WakeRoad {
+    fun cut(path: List<GeoPoint>, a: GeoPoint, b: GeoPoint): List<GeoPoint>? {
+        if (path.size < 2) return null
+        val pa = Geo.project(a, path) ?: return null
+        val pb = Geo.project(b, path) ?: return null
+        if (pa.crossTrack > 500 || pb.crossTrack > 500 || pb.along <= pa.along) return null
+        val out = ArrayList<GeoPoint>()
+        Geo.pointAtMetres(pa.along, path)?.let { out.add(it) }
+        var acc = 0.0
+        for (i in path.indices) {
+            if (i > 0) acc += Geo.metres(path[i - 1], path[i])
+            if (acc > pa.along && acc < pb.along) out.add(path[i])
+        }
+        Geo.pointAtMetres(pb.along, path)?.let { out.add(it) }
+        return out.takeIf { it.size >= 2 }
+    }
 }

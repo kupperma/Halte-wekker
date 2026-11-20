@@ -94,7 +94,11 @@ object Notifications {
         val parts = ArrayList<String>()
         s.distance?.let { parts.add("${WakeRules.distanceText(it)} to go") }
         s.legArrival?.let { parts.add("there ${time(it)}") }
-        if (s.phase == Phase.SLEEPING) parts.add("rings ${WakeRules.distanceText(s.wakeMetres)} before")
+        if (s.reckoning) parts.add("no GPS here: following its route")
+        if (s.phase == Phase.SLEEPING) {
+            val w = (context.applicationContext as nl.haltewekker.App).store.settings.value.wake
+            parts.add("rings ${WakeRule.says(w, leg.isTrain, s.wakeMetres).removeSuffix(" before your stop").replace(" before your stop", "")} before")
+        }
         if (s.trip.rides.size > 1) parts.add("leg ${s.index + 1} of ${s.trip.rides.size}")
         b.setContentTitle(title).setContentText(parts.joinToString(" · "))
         val total = (leg.arrival - leg.departure).coerceAtLeast(60.0)
@@ -124,7 +128,7 @@ object Notifications {
         return NotificationCompat.Builder(context, ALARM)
             .setSmallIcon(R.drawable.ic_stat_ride)
             .setContentTitle("Wake up")
-            .setContentText("${leg?.toStop ?: "Your stop"} in about ${WakeRules.distanceText(s.distance ?: s.wakeMetres)}.")
+            .setContentText("${leg?.toStop ?: "Your stop"} in about ${s.ringMinutes?.let { "$it min" } ?: WakeRules.distanceText(s.distance ?: s.wakeMetres)}.")
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
