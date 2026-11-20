@@ -13,6 +13,7 @@ struct HomeLoops: ViewModifier {
     @EnvironmentObject var near: NearMe
     @EnvironmentObject var goStore: GoStore
     @Environment(\.scenePhase) private var scene
+    @ObservedObject private var motion = Motion.shared
 
     func body(content: Content) -> some View {
         content
@@ -21,9 +22,14 @@ struct HomeLoops: ViewModifier {
                 Task { await live.refresh(trip.direction, at: near.position) }
             }
             .onAppear { Handoff.fromBoards = false; followIfHome() }
-            .onDisappear { near.follow(false) }
+            .onDisappear { near.follow(false); Motion.shared.live(false, for: "home") }
             .onChange(of: goStore.isOpen) { _, _ in followIfHome() }
             .onChange(of: trip.phase) { _, _ in followIfHome() }
+            // (0.33) Motion & Fitness started saying "automotive": the on-board look now, not on the next fix or tick
+            .onChange(of: motion.vehicleKicks) { _, _ in
+                guard scene == .active, !goStore.isOpen, trip.phase == .idle else { return }
+                Task { await live.refresh(trip.direction, at: near.position) }
+            }
             // seen on the same bus or train twice in a row: the trip starts by itself (0.20.5)
             .onChange(of: live.onBoardLooks) { _, _ in HomeActions.autoStartOnBoard(live: live, trip: trip, goStore: goStore) }
             .task(id: trip.direction) {
@@ -77,7 +83,9 @@ struct HomeLoops: ViewModifier {
     /// The GPS keeps following you while the home is in front with no trip on and Fastest trip closed (they have their
     /// own), so being on a bus is noticed; else one position at a time, as before.
     private func followIfHome() {
-        near.follow(scene == .active && !goStore.isOpen && trip.phase == .idle)
+        let home = scene == .active && !goStore.isOpen && trip.phase == .idle
+        near.follow(home)
+        Motion.shared.live(home, for: "home")             // (its live updates only while the home is in front, 0.33)
     }
 
     /// `step` now and every 30 s after, while the app is in front and Fastest trip isn't open, until cancelled.

@@ -856,6 +856,7 @@ struct ManualWeekEditor: View {
 
 private struct SetupMorningStep: View {
     @Binding var draft: SetupDraft
+    @ObservedObject private var motion = Motion.shared
     @State private var permission: String?
     @State private var allowed = false
 
@@ -897,6 +898,22 @@ private struct SetupMorningStep: View {
             if draft.wakeOn && SetupLogic.schedule(draft) == ScheduleSource.none {
                 DSNote(icon: "calendar.badge.exclamationmark",
                        text: "It needs your timetable to know your first class: go back a step, or set it later in Settings › School & mornings.")
+            }
+            // (0.33) asked here, in context, once: iOS asks for Motion & Fitness when it's turned on
+            if Motion.available {
+                VStack(alignment: .leading, spacing: DS.s8) {
+                    Toggle(isOn: $motion.on) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(MotionWords.title).font(DS.bodyStrong).foregroundStyle(DS.text)
+                            Text(MotionWords.detail).font(DS.footnote).foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    if motion.on && motion.denied {
+                        Label(MotionWords.denied, systemImage: "info.circle.fill")
+                            .font(DS.footnote).foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .dsPanel()
             }
         }
         .onChange(of: draft.wakeOn) { _, on in if on { Task { await askAlarm() } } }

@@ -477,7 +477,7 @@ final class GoStore: ObservableObject {
         if let c = chosen, let k = await reboarded([c], loc: loc, now: now, fetch: false).first, k.id != c.id { chosen = k }
         // Nothing from here, and you were just going at train or bus speed (slowing down, or stopped at a signal between
         // stations): you're on board. Find which one, and don't say there's no way.
-        if found.isEmpty, best == nil, trip?.movedRecently == true, onBoard == nil, trip?.phase == .idle, !demo {
+        if found.isEmpty, best == nil, trip?.movingLikeVehicle == true, onBoard == nil, trip?.phase == .idle, !demo {
             lookAgain()
             movingUnknown = true; error = nil
             return
@@ -782,13 +782,15 @@ final class GoStore: ObservableObject {
             guard watching else { return }
         }
         // (0.26.2: also by where your fixes went: in a train the GPS's own speed is often unknown or unsure)
-        guard let f = fix ?? trip.lastFix,
-              LiveStore.movingFix(f) || trip.movedRecently || OnBoardRules.movingByTrack(trip.recentFixes, now: Date()) else { return }      // not moving like a bus
+        // (0.33: Motion & Fitness's "automotive" is moving like one at once; walking quickly or cycling isn't)
+        guard let f = fix ?? trip.lastFix else { return }
+        let byFixes = LiveStore.movingFix(f) || trip.movedRecently || OnBoardRules.movingByTrack(trip.recentFixes, now: Date())
+        guard MotionRules.movingLikeVehicle(byFixes: byFixes, motion: Motion.shared.now(), speed: f.speed) else { return }      // not moving like a bus
         // moving like one: now it's really checking (and says so)
         lookingOnBoard = true
         defer { lookingOnBoard = false }
         let d = dest
-        let moving = trip.movedRecently
+        let moving = trip.movingLikeVehicle
         let history: @MainActor @Sendable () -> [Fix] = { trip.recentFixes }        // (read once its request is in)
         guard var ob = await Transit.$urgent.withValue(true, operation: { await Net.within(10, { await LiveStore.onBoardTrips(f, to: d, wasMoving: moving, reuse: true, history: history) }) }) ?? nil,
               watching, dest == d, trip.phase == .idle, !ob.1.isEmpty else { return }

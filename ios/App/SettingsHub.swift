@@ -391,6 +391,7 @@ struct SettingsValueRow: View {
 
 private struct TripsSettingsRows: View {
     @EnvironmentObject var trip: TripManager
+    @ObservedObject private var motion = Motion.shared
     @State private var showSteady = false
 
     var body: some View {
@@ -403,6 +404,7 @@ private struct TripsSettingsRows: View {
             .settingsAnchor("alarm.test")
         }
         backup
+        wakeBy
         wake
         more
     }
@@ -422,7 +424,34 @@ private struct TripsSettingsRows: View {
                 .settingsAnchor("trips.chime")
             SettingsSwitch(title: "Switch to Home at school", detail: "When you reach \(RoleWords.current.school), the app switches to going home once that day. Switch back whenever you like.", isOn: $trip.autoHome)
                 .settingsAnchor("trips.autoHome")
+            if Motion.available {
+                SettingsSwitch(title: MotionWords.title, detail: MotionWords.detail, isOn: $motion.on)
+                    .settingsAnchor("trips.motion")
+                if motion.on && motion.denied {
+                    Text(MotionWords.denied).font(DS.footnote).foregroundStyle(DS.secondary)
+                }
+            }
         } header: { Text("When you ride") }
+    }
+
+    @ViewBuilder private var wakeBy: some View {
+        Section {
+            Picker("Wake me", selection: $trip.wake.by) {
+                Text("By time").tag(WakeBy.time)
+                Text("By distance").tag(WakeBy.distance)
+            }
+            .settingsAnchor("wake.by")
+            if trip.wake.by == .time {
+                Stepper("Train: \(trip.wake.trainMinutes) min", value: $trip.wake.trainMinutes, in: WakeSettings.range)
+                    .settingsAnchor("wake.trainMin")
+                Stepper("Bus: \(trip.wake.busMinutes) min", value: $trip.wake.busMinutes, in: WakeSettings.range)
+                    .settingsAnchor("wake.busMin")
+            }
+        } header: { Text("Wake me … before my stop") } footer: {
+            Text(trip.wake.by == .time
+                 ? "It rings this long before your stop, by the bus or train’s live arrival, else by how far it still has to go at your speed. The wake distance below stays as a safety net: whichever comes first."
+                 : "It rings at the wake distance below, as before.")
+        }
     }
 
     @ViewBuilder private var alarm: some View {

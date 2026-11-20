@@ -34,6 +34,7 @@ targets:
         NSCalendarsUsageDescription: Haltewekker reads your school timetable (only the calendars you pick) to plan the trip to your first class and set your wake-up alarm.
         NSAlarmKitUsageDescription: Haltewekker wakes you for school, an hour before you have to leave for your first class.
         NSCameraUsageDescription: Haltewekker uses the camera to scan a friend’s code when you add them as a friend, and to scan the barcode on food.
+        NSMotionUsageDescription: Haltewekker uses Motion & Fitness to notice sooner when you get on a bus or train, and to save battery while you wait at a stop.
         UIDesignRequiresCompatibility: true
         CFBundleURLTypes:
           - CFBundleURLName: nl.haltewekker.app

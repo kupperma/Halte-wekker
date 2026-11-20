@@ -75,6 +75,16 @@ final class SettingsIndexTests: XCTestCase {
         XCTAssertTrue(SettingsIndex.search("new look", in: SettingsIndex.entries(corridor: false, testSetup: false)).isEmpty)
     }
 
+    /// 0.33: waking by time, and Motion & Fitness, on Trips & alarm.
+    func test_wakeByTimeAndMotionAreFound() {
+        XCTAssertEqual(SettingsIndex.search("wake me").first?.id, "wake.by")
+        XCTAssertTrue(titles("minutes before").contains("Wake me … before my stop"))
+        XCTAssertTrue(titles("by time").contains("Wake me … before my stop"))
+        XCTAssertEqual(SettingsIndex.search("motion").first?.id, "trips.motion")
+        XCTAssertTrue(titles("cycling").contains("Use motion to notice rides faster"))
+        XCTAssertEqual(SettingsIndex.search("motion").first?.topic, .trips)
+    }
+
     func test_topicsInTwoGroups() {
         XCTAssertEqual(SettingsTopic.inGroup(1), [.trips, .places, .school, .friends, .map, .notifications])
         XCTAssertEqual(SettingsTopic.inGroup(2), [.battery, .share, .advanced])

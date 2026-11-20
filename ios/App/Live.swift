@@ -167,6 +167,13 @@ final class LiveStore: ObservableObject {
     }
 
     /// A GPS fix good enough to tell speed from (inside a station they're often off by 50 m and more).
+    /// Your speed by your track: the first to the newest of your fixes of the last minute (nil: under 10 s of them).
+    nonisolated static func trackSpeed(_ fixes: [Fix], now: Date) -> Double? {
+        let w = fixes.filter { now.timeIntervalSince($0.t) <= OnBoardRules.trackWindow }.sorted { $0.t < $1.t }
+        guard let a = w.first, let b = w.last, b.t.timeIntervalSince(a.t) >= 10 else { return nil }
+        return Geo.metres(a.p, b.p) / b.t.timeIntervalSince(a.t)
+    }
+
     nonisolated static func goodFix(_ l: CLLocation) -> Bool { l.horizontalAccuracy >= 0 && l.horizontalAccuracy <= 40 }
     /// The GPS itself says bus or train speed, and is sure of it.
     /// (The GPS's speed comes from the Doppler shift, not from positions, so it's good even when the position isn't, as in
@@ -482,14 +489,19 @@ final class LiveStore: ObservableObject {
     func refresh(_ dir: Direction, at loc: CLLocation? = nil, force: Bool = false) async {
         scheduleTakesOver()
         let wasMoving = lastMoving.map { Date().timeIntervalSince($0) < 180 } ?? false
+        // (0.33) Motion & Fitness: "automotive" is moving like a bus or train at once; walking quickly, running or
+        // cycling at your own speeds isn't, whatever the fixes say (`MotionRules`). Off: as before.
+        let motion = Motion.shared.now()
+        if MotionRules.inVehicle(motion) { lastMoving = Date() }
         if let loc {
+            func vehicleLike(_ v: Double?) -> Bool { !MotionRules.notAVehicle(motion, speed: v) }
             // moving at bus or train speed (by the GPS, or between two positions): you're probably on board. Only on good
             // fixes, far enough apart: inside a big station the GPS jumps about and a few seconds can look like 20 km/h.
-            if Self.movingFix(loc) { lastMoving = loc.timestamp }
+            if Self.movingFix(loc), vehicleLike(loc.speed) { lastMoving = loc.timestamp }
             if let p = lastSeen, loc.timestamp > p.timestamp {
                 let dt = loc.timestamp.timeIntervalSince(p.timestamp)
                 if dt >= 20, dt < 300, loc.horizontalAccuracy >= 0, loc.horizontalAccuracy <= 25, p.horizontalAccuracy >= 0, p.horizontalAccuracy <= 25,
-                   loc.distance(from: p) / dt >= 5 { lastMoving = loc.timestamp }
+                   loc.distance(from: p) / dt >= 5, vehicleLike(loc.distance(from: p) / dt) { lastMoving = loc.timestamp }
             }
             lastSeen = loc
             if loc.horizontalAccuracy >= 0, loc.horizontalAccuracy <= 100, loc.timestamp > (fixes.last?.t ?? .distantPast) {
@@ -498,7 +510,9 @@ final class LiveStore: ObservableObject {
             }
             // (0.26.2) or by where your fixes went: in a train the GPS's speed is often unknown or unsure, and the two
             // positions above are never 20 s apart while the home asks on every fix
-            if OnBoardRules.movingByTrack(fixes, now: loc.timestamp) { lastMoving = loc.timestamp }
+            if OnBoardRules.movingByTrack(fixes, now: loc.timestamp), vehicleLike(Self.trackSpeed(fixes, now: loc.timestamp)) {
+                lastMoving = loc.timestamp
+            }
         }
         // Away from your usual start (or going somewhere you picked): trips start from where you are.
         // Going to school, anywhere in Veghel counts as home (your Veghel bus board); going home, only the BUas campus
