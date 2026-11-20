@@ -232,8 +232,8 @@ The same switches, words and rules, so the relay and the replay treat both alike
   - what it says now: the latest activity (automotive first when several), its run back over the same kind (a
     low-confidence other one in between doesn't break it); from a history answer (not live updates) at most 5 minutes
     old; "sure" is medium or high;
-  - **automotive** (sure): moving like a bus or train at once (the home's on-board look and Fastest trip's look run
-    now; a trip waiting for the one you get on, at its first stop or a change, looks at once instead of after 7 s;
+  - **automotive** (sure): moving like a bus or train at once (the home's on-board look runs now; Fastest trip's look
+    counts it as moving); a trip waiting for the one you get on, at its first stop or a change, looks at once instead of after 7 s;
     leaving one of your stations, the first look after 12 s instead of 35);
   - **walking, running or cycling** (sure) under 12 m/s (43 km/h) isn't a vehicle, whatever the fixes say (faster:
     you're walking down a moving train);

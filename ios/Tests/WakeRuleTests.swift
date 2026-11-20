@@ -97,6 +97,10 @@ final class WakeRuleTests: XCTestCase {
         XCTAssertEqual(WakeRule.log(.distance), "by distance")
         XCTAssertEqual(WakeRule.log(.time(minutes: 3, source: .live, seconds: 170)), "by time 3 min (live)")
         XCTAssertEqual(WakeRule.log(.time(minutes: 2, source: .speed, seconds: 100)), "by time 2 min (speed)")
+        // the ride log's ring line says which rule fired
+        XCTAssertEqual(FieldFormat.rideRing(WakeRule.log(.time(minutes: 3, source: .live, seconds: 170)), metres: 5400, legAge: 600, started: 21_000),
+                       "ring · by time 3 min (live) · 5400 m · leg 600 s old · started 21000 m")
+        XCTAssertTrue(FieldFormat.rideRing(WakeRule.log(.distance), metres: 1990, legAge: 300, started: 9000).hasPrefix("ring · by distance · "))
     }
 
     func test_whatItSays() {
