@@ -47,6 +47,8 @@ struct HaltewekkerApp: App {
                     Task { await FriendStore.shared.sync(.auto) }
                     // (0.28.1: shared ride logs, only when you turned it on; at most once an hour)
                     LogShareStore.shared.tick()
+                    // (0.36) works on your routes (at most every 4 h), the last way home (hourly, evenings away)
+                    Task { await TravelNotes.shared.tick() }
                 }
                 .onAppear {
                     Watchdog.shared.mark("drawing the first screen")
@@ -65,6 +67,8 @@ struct HaltewekkerApp: App {
                     FriendExtrasStore.shared.attach(t)
                     // (0.30) the live link for people without the app: ends with the trip, read only
                     LiveLinkStore.shared.attach(t)
+                    // (0.36) the travel help: where you are, for the last way home
+                    TravelNotes.shared.trip = t
                     // (0.28.1) shared ride logs: a trip that ended is a moment to send (only when turned on)
                     LogShareStore.shared.attach(t)
                     Task { await NoticeLog.shared.collectDelivered() }

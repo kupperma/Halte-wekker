@@ -195,6 +195,7 @@ final class Planner: ObservableObject {
             preferred = top.firstIndex { t in t.rides.contains { want.contains($0.tripId) } }
         }
         arriveOptions = top
+        TravelNotes.shared.noteRails(top)                             // (0.36)
         arrivePick = arriveOptions.firstIndex { $0.first.tripId == old } ?? preferred ?? 0
         arriveError = nil
         remind()
@@ -294,6 +295,7 @@ final class Planner: ObservableObject {
         guard trip == t else { return }
         for o in opts { Ratings.shared.learn(o.from, o.to, [o.train]) }
         options = opts
+        TravelNotes.shared.noteRails(opts.map(\.train))              // (0.36) planned trips' trains, for works on them
         inexact = exact.isEmpty
         holdWatch = true
         if pick >= opts.count { pick = 0 }

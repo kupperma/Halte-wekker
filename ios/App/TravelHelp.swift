@@ -65,11 +65,16 @@ enum DelayClaim {
     static let threshold = 30.0
     static let claimURL = "https://www.ns.nl/service-en-contact/geld-terug/geld-terug-bij-vertraging"
 
+    /// A train must have been at least this late at your stop for the planned arrival to count (else a later train you
+    /// took yourself would look like a delay).
+    static let someDelay = 3.0
+
     /// How late the trip's trains got you there, in minutes: the train part's live arrival against its planned one
-    /// (a missed change counts), or the latest delay a train had at your stop, whichever is more. Nil: nothing known.
+    /// (a missed change counts, once a train was late), or the latest delay a train had at your stop, whichever is
+    /// more. Nil: nothing known.
     static func minutesLate(plannedEnd: Date?, actualEnd: Date?, trainDelays: [Double]) -> Double? {
         var worst: Double? = trainDelays.filter(\.isFinite).max()
-        if let p = plannedEnd, let a = actualEnd {
+        if let p = plannedEnd, let a = actualEnd, (worst ?? 0) >= someDelay {
             let m = a.timeIntervalSince(p) / 60
             if m.isFinite { worst = max(worst ?? m, m) }
         }

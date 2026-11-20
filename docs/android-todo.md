@@ -3,6 +3,28 @@
 The rules and numbers for each are in [logs-export.md](logs-export.md) › For Android (parity), with the iOS files and
 their tests.
 
+## iOS 0.36
+
+- [ ] Check-out reminder (`CheckOut`, Settings › Trips & alarm, on by default): "Did you check out?" a minute after you
+      get off at the end of a trip, off a bus, between bus and train, and between train companies (Transitous's
+      `agencyName`); not between two NS trains. Taken back when the next leg finds the vehicle you got off, or (at the
+      end) two fixes at ≥ 7 m/s in that minute. No NFC.
+- [ ] Student travel product (`StudentOV`, Settings › Trips & alarm: none / weekday free / weekend free): DUO's windows
+      (days 04:00–04:00; week product free Mon 04:00 – Sat 04:00; weekend product free Fri 12:00 – Mon 04:00, Tue–Fri
+      04:00–09:00 full fare; summer 16 Jul – 16 Aug discount for the week product; holidays), 40% off trains, 34% off
+      buses; "Free with your student OV" / "Costs money now (weekday) — ~€3.60 with 40% off" on plan options and the Go
+      card, the price from the relay's `/ns/price`. Windows in `ios/Tests/StudentOVTests.swift`.
+- [ ] Money back for a late train (`DelayClaim`, on by default): once per trip, after it, when its trains got you there
+      ≥ 30 min late (the planned arrival counts once a train was ≥ 3 min late), with a tap to NS's claim page.
+- [ ] Works and disruptions on your routes (`RailWorks`, Settings › Notifications): the relay's
+      `/ns/disruptions?stations=…` at most every 4 hours, matched to your usual train rides (home ⇄ school, planned
+      trips; stations on the way by the straight line ± 2.5 km), today and the next 7 days; the home's card for today or
+      tomorrow and a notification at 19:30 the evening before ("Thursday: no trains Tilburg–Breda (works). Leave 10 min
+      earlier — buses replace trains"; the minutes from a replan for that school day against the usual door-to-door).
+- [ ] Last way home (`LastTrip`, Settings › Notifications): after 20:00 and > 3 km from Home, the latest way home (asked
+      "arrive by" 04:00, 02:00, 01:00, midnight), refreshed at most hourly or after 1 km, on the home's card and a
+      notification 30 min before it leaves.
+
 ## iOS 0.35
 
 - [ ] The leaderboard's rule (`ScoreRules.board`): a planned trip between Home and School is scored on the corridor too

@@ -99,6 +99,8 @@ struct PlannedRide: Hashable {
     let line: String
     let isTrain: Bool
     let departure: Date
+    /// (0.36) Who runs it, when Transitous said (the check-out reminder at a change between train companies).
+    var agency: String? = nil
 }
 
 /// Your two routes. Going home is the same route backwards.
@@ -128,7 +130,7 @@ struct RoutePlan: Identifiable, Hashable {
         }
         guard let last = legs.last else { return nil }
         return RoutePlan(id: "trip-\(t.id)", name: "To \(last.to.short)", station: last.to, custom: legs,
-                         planned: t.rides.map { PlannedRide(tripId: $0.tripId, line: $0.line, isTrain: $0.isTrain, departure: $0.departure) },
+                         planned: t.rides.map { PlannedRide(tripId: $0.tripId, line: $0.line, isTrain: $0.isTrain, departure: $0.departure, agency: $0.agency) },
                          plannedEnd: t.last.scheduledArrival)
     }
 

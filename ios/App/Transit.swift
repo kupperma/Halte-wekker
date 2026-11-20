@@ -26,6 +26,8 @@ struct Ride: Identifiable, Hashable, Codable {
     var fromLon: Double? = nil
     var toLat: Double? = nil
     var toLon: Double? = nil
+    /// (0.36) Who runs it ("NS", "Arriva"), from Transitous; for where you check out at a change between train companies.
+    var agency: String? = nil
     var delay: Int { live ? Int((departure.timeIntervalSince(scheduledDeparture) / 60).rounded()) : 0 }
     var rideMinutes: Int { Fmt.mins(arrival.timeIntervalSince(departure)) }
     var badge: String { isTrain ? line : "BUS \(line)" }
@@ -42,7 +44,7 @@ extension Ride {
         Ride(tripId: tripId, line: line, name: name, isTrain: isTrain, departure: departure, scheduledDeparture: scheduledDeparture,
              arrival: arrival, scheduledArrival: scheduledArrival, fromStop: fromStop, fromId: fromId, toStop: toStop, platform: platform,
              live: live, cancelled: cancelled, walkBefore: minutes, num: num, headsign: headsign, plannedPlatform: plannedPlatform,
-             fromLat: fromLat, fromLon: fromLon, toLat: toLat, toLon: toLon)
+             fromLat: fromLat, fromLon: fromLon, toLat: toLat, toLon: toLon, agency: agency)
     }
 
     /// The same ride, got on at another stop of its trip (`BoardAt`, 0.25.1), with the walk there: its time, platform
@@ -58,7 +60,7 @@ extension Ride {
                     arrival: arrival, scheduledArrival: scheduledArrival, fromStop: stopName,
                     fromId: stopId, toStop: toStop, platform: platform,
                     live: live, cancelled: cancelled, walkBefore: minutes, num: num, headsign: headsign, plannedPlatform: planned,
-                    fromLat: s.point.lat, fromLon: s.point.lon, toLat: toLat, toLon: toLon)
+                    fromLat: s.point.lat, fromLon: s.point.lon, toLat: toLat, toLon: toLon, agency: agency)
     }
 }
 
@@ -344,7 +346,8 @@ enum Transit {
                               live: (l["realTime"] as? Bool) ?? false, cancelled: (l["cancelled"] as? Bool) ?? false, walkBefore: walk,
                               num: Self.text(l["tripShortName"]), headsign: (l["headsign"] as? String) ?? "",
                               plannedPlatform: (from["scheduledTrack"] as? String) ?? (from["track"] as? String),
-                              fromLat: from["lat"] as? Double, fromLon: from["lon"] as? Double, toLat: to["lat"] as? Double, toLon: to["lon"] as? Double))
+                              fromLat: from["lat"] as? Double, fromLon: from["lon"] as? Double, toLat: to["lat"] as? Double, toLon: to["lon"] as? Double,
+                              agency: l["agencyName"] as? String))
         }
         guard !rides.isEmpty, let s = date(it["startTime"]), let e = date(it["endTime"]) else { return nil }
         return DoorTrip(rides: rides, start: s, end: e)
@@ -645,7 +648,9 @@ enum Transit {
         let all = await plan(from: from, to: to, modes: nil, at: now.addingTimeInterval(-120), count: 4, maxTransfers: 3)
             .filter { $0.first.departure >= now.addingTimeInterval(-60) }
         let kept = all.filter { t in !all.contains { $0.id != t.id && $0.first.departure >= t.first.departure && $0.end < t.end } }
-        return Array(kept.prefix(4))
+        let next = Array(kept.prefix(4))
+        Task { @MainActor in TravelNotes.shared.noteRails(next) }      // (0.36) your usual trains, for works on them
+        return next
     }
 
     /// The departure board of stops. `from` a time in the past also gives the ones that already left (or were cancelled).

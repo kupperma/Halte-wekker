@@ -406,6 +406,7 @@ private struct TripsSettingsRows: View {
         backup
         wakeBy
         wake
+        TravelHelpTripRows()                      // (0.36) student OV, check-out reminder, money back for a late train
         learned
         more
     }
@@ -692,6 +693,7 @@ private struct NoticesSettingsRows: View {
         } footer: {
             Text("The buses and trains it watches for you, the way to stop them all, and every notification you had.")
         }
+        TravelHelpNoticeRows()                    // (0.36) works on your routes, the last way home
         LockScreenSection()
     }
 }

@@ -61,6 +61,9 @@ final class TravelHelpTests: XCTestCase {
         XCTAssertEqual(DelayClaim.minutesLate(plannedEnd: nil, actualEnd: nil, trainDelays: [12, 34]), 34)
         XCTAssertEqual(DelayClaim.minutesLate(plannedEnd: p, actualEnd: p.addingTimeInterval(-60), trainDelays: [3]), 3)
         XCTAssertNil(DelayClaim.minutesLate(plannedEnd: nil, actualEnd: nil, trainDelays: []))
+        // no train was late: a later train you took yourself isn't a delay
+        XCTAssertEqual(DelayClaim.minutesLate(plannedEnd: p, actualEnd: p.addingTimeInterval(32 * 60), trainDelays: [1, 0]), 1)
+        XCTAssertNil(DelayClaim.minutesLate(plannedEnd: p, actualEnd: p.addingTimeInterval(32 * 60), trainDelays: []))
     }
 
     func test_claim_words() {

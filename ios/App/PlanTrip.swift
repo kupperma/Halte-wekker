@@ -494,6 +494,7 @@ struct OptionCard: View {
                 }
             }
             .font(DS.sub).monospacedDigit().lineLimit(2)
+            StudentFareLine(rides: trip.rides)           // (0.36) with a student travel product
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
