@@ -89,13 +89,17 @@ enum OutfitWords {
             + (raincoat ? [Chip(label: "Raincoat", symbols: ["umbrella.fill"], rain: true)] : [])
     }
 
-    /// The SF Symbols for a piece, by what it is (iOS 17 has a T-shirt, a jacket and a coat; no sweater or scarf).
+    /// A drawn glyph the app makes itself (SF Symbols has no sweater): the chip draws `SweaterGlyph` for it (0.37.2).
+    static let sweaterGlyph = "hw.sweater"
+
+    /// The SF Symbols for a piece, by what it is (iOS 17 has a T-shirt, a jacket and a coat; no sweater or scarf: a
+    /// sweater gets the app's own drawn glyph).
     static func symbols(for piece: String) -> [String] {
         let p = piece.lowercased()
         if p.contains("coat") { return ["coat.fill", "jacket.fill"] }
         if p.contains("jacket") { return ["jacket.fill"] }
         if p.contains("scarf") || p.contains("hat") { return ["hat.widebrim.fill"] }
-        if p.hasPrefix("sweater") { return [] }
+        if p.hasPrefix("sweater") || p.contains("jumper") { return [sweaterGlyph] }
         if p.contains("shirt") { return ["tshirt.fill"] }
         return []
     }

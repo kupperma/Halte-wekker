@@ -120,9 +120,14 @@ struct OutfitSheetNew: View {
     }
 
     private func chip(_ c: OutfitWords.Chip) -> some View {
+        let drawn = c.symbols.first == OutfitWords.sweaterGlyph
         let symbol = c.symbols.first { UIImage(systemName: $0) != nil }
         return HStack(spacing: 6) {
-            if let symbol {
+            if drawn {
+                SweaterGlyph().fill(c.rain ? Self.rainBlue : DS.accentText)
+                    .frame(width: 17, height: 17)
+                    .accessibilityHidden(true)
+            } else if let symbol {
                 Image(systemName: symbol).font(.subheadline.weight(.semibold))
                     .foregroundStyle(c.rain ? Self.rainBlue : DS.accentText)
                     .accessibilityHidden(true)
@@ -343,5 +348,33 @@ struct ChipFlow: Layout {
             rowHeight = max(rowHeight, size.height)
         }
         return rows
+    }
+}
+
+
+/// A long-sleeved sweater, drawn like an SF Symbol (there is none): body, neckline, sleeves and a ribbed hem (0.37.2).
+struct SweaterGlyph: Shape {
+    func path(in r: CGRect) -> Path {
+        let s = min(r.width, r.height) / 24, ox = r.minX + (r.width - 24 * s) / 2, oy = r.minY + (r.height - 24 * s) / 2
+        func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: ox + x * s, y: oy + y * s) }
+        var path = Path()
+        path.move(to: p(8.6, 2.5))
+        path.addQuadCurve(to: p(15.4, 2.5), control: p(12, 6.2))
+        path.addLine(to: p(19.6, 4.2))
+        path.addQuadCurve(to: p(21.4, 6.4), control: p(20.9, 4.9))
+        path.addLine(to: p(23.4, 16.6))
+        path.addLine(to: p(20.2, 17.4))
+        path.addLine(to: p(18.4, 10.2))
+        path.addLine(to: p(18.4, 19.6))
+        path.addLine(to: p(5.6, 19.6))
+        path.addLine(to: p(5.6, 10.2))
+        path.addLine(to: p(3.8, 17.4))
+        path.addLine(to: p(0.6, 16.6))
+        path.addLine(to: p(2.6, 6.4))
+        path.addQuadCurve(to: p(4.4, 4.2), control: p(3.1, 4.9))
+        path.closeSubpath()
+        // the ribbed hem and cuffs
+        path.addRoundedRect(in: CGRect(origin: p(5.6, 20.3), size: CGSize(width: 12.8 * s, height: 2.2 * s)), cornerSize: CGSize(width: 0.8 * s, height: 0.8 * s))
+        return path
     }
 }
