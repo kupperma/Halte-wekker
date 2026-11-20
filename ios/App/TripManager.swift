@@ -158,7 +158,9 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     private var farTask: Task<Void, Never>?                // while far: a look every minute (time can bring the stop near)
     private var lastEnd: (place: String, at: Date)?        // where a leg last ended (no station look right after)
     private var lastEndSpot: (spot: CLLocationCoordinate2D, at: Date)?     // and where that was (off the corridor, 0.24)
-    private var tripStartSpot: CLLocationCoordinate2D?    // where you were when the trip started (its score, off the corridor)
+    private var tripStartSpot: CLLocationCoordinate2D?    // where you were when the trip started (its score), if that fix was fresh
+    private var tripPlannedEnd: Date?                     // (0.35) the trip's scheduled arrival as it started (a replan keeps it)
+    private var tripLate: (line: String, mins: Double)?   // (0.35) its latest ride at your stop so far
     private var activityLater: Task<Void, Never>?          // a Live Activity change held back for the 30 s
     private var gpsWhy: GPSReason?                         // why GPS is on, as the battery log has it
     private var sameOK: (tripId: String, looks: Int)?      // "still the same bus?" looks in a row that passed, for this one
@@ -429,7 +431,9 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             for (l, k) in zip(legs, kms) { kmMem["\(l.mode.rawValue):\(l.to.key)"] = k }
             UserDefaults.standard.set(kmMem, forKey: "kmMem")
         }
-        tripStart = Date(); startedAtLeg = index; lastScore = nil; tripStartSpot = lastFix?.coordinate
+        tripStart = Date(); startedAtLeg = index; lastScore = nil
+        tripStartSpot = lastFix.flatMap { Date().timeIntervalSince($0.timestamp) < ScoreRules.freshStart ? $0.coordinate : nil }
+        tripPlannedEnd = r.plannedEnd; tripLate = nil
         boardedNoted = demo || index > 0 || r.custom == nil; changeArrived = nil
         if !demo, index == 0, let first = r.custom?.first { HabitStore.shared.plannedFrom(first.from.name) }
         setBackup(backup ?? backupMinutes)
@@ -567,22 +571,33 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         } else {
             phase = .finished
             finishedAt = Date()
-            if let r = route, r.isFixed, startedAtLeg == 0, let s = tripStart {
-                lastScore = ScoreBook.shared.log(route: r, home: direction == .home, start: s)
-            } else if RoleSnapshot.corridor == nil, !demo, let r = route, r.custom != nil, startedAtLeg == 0, let s = tripStart,
-                      let a = tripStartSpot ?? r.custom?.first?.from.coordinate, let b = legs.last?.to.coordinate {
-                // off the corridor (0.24): a door-to-door trip between Home and School is scored too
-                let home = Place.home.coordinate, school = Place.school.coordinate
-                if let k = DoorScore.key(start: GeoPoint(lat: a.latitude, lon: a.longitude), end: GeoPoint(lat: b.latitude, lon: b.longitude),
-                                         home: GeoPoint(lat: home.latitude, lon: home.longitude), school: GeoPoint(lat: school.latitude, lon: school.longitude)) {
-                    lastScore = ScoreBook.shared.log(door: k.route, home: k.home, start: s)
-                }
-            }
+            scoreTrip()
         }
         applyGPS()                  // a change: as on the ride, until you stand still a while; the end: off
         pushActivity(force: true)
         if phase == .finished { afterArrival() }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { WatchStore.shared.showNext() }
+    }
+
+    /// The trip at its last stop goes on the leaderboard (`ScoreRules.board`): a corridor route by its name, a planned
+    /// trip between Home and School as "home→school" / "school→home", on or off the corridor (0.35: until then a
+    /// planned trip on the corridor, which is every trip the new look's home starts, was never scored).
+    private func scoreTrip() {
+        guard let r = route, let s = tripStart else { return }
+        let kind: ScoreRules.Kind = r.isFixed ? .fixed(r.name) : r.single != nil ? .single : .custom
+        var starts: [GeoPoint] = []
+        if let a = tripStartSpot { starts.append(GeoPoint(a)) }
+        if let f = r.custom?.first?.from.coordinate { starts.append(GeoPoint(f)) }
+        let f = ScoreRules.Finished(kind: kind, demo: demo, startedAtLeg: startedAtLeg, home: direction == .home, starts: starts,
+                                    end: legs.last.map { GeoPoint($0.to.coordinate) },
+                                    homePlace: Place.home.point, school: Place.school.point)
+        guard let k = ScoreRules.board(f) else { return }
+        if case .fixed = kind {
+            lastScore = ScoreBook.shared.log(route: r, home: k.home, start: s)
+        } else {
+            let plan = tripPlannedEnd.map { $0.timeIntervalSince(s) / 60 }
+            lastScore = ScoreBook.shared.log(door: k.route, home: k.home, start: s, plan: plan, lateLine: tripLate?.line, late: tripLate?.mins)
+        }
     }
 
     /// After the last stop: once the arrival chime has played, the silent keep-alive sound, the music look and the lock
@@ -648,6 +663,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         let leg: Int
         let legs: [Leg]
         let endedAt: Date
+        /// (0.35) How the trip began, so going on with it is still the same trip on the leaderboard.
+        var began: (start: Date, leg: Int, spot: CLLocationCoordinate2D?, plannedEnd: Date?, late: (line: String, mins: Double)?)?
         var from: Place { legs[leg].from }
         var next: Leg { legs[leg] }
         var destName: String { legs.last?.to.short ?? route.station.short }
@@ -660,6 +677,10 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         resumable = nil
         if direction != r.direction { pick(r.direction) }
         start(r.route, at: r.leg, how: "go on after ending by hand")
+        // (0.35) the same trip as before: scored from where and when it first started
+        if let b = r.began {
+            tripStart = b.start; startedAtLeg = b.leg; tripStartSpot = b.spot; tripPlannedEnd = b.plannedEnd; tripLate = b.late
+        }
     }
 
     /// "Not now" on the home's offer to go on with it.
@@ -671,7 +692,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         if byHand, phase != .idle, !demo {
             rideLog(FieldFormat.rideEnd(phase == .transfer ? "by hand at a change" : "by hand"))
             if let r = route, let n = TripResume.leg(atChange: phase == .transfer, finished: phase == .finished, index: index, count: legs.count) {
-                resume = Resumable(route: r, direction: direction, leg: n, legs: legs, endedAt: Date())
+                resume = Resumable(route: r, direction: direction, leg: n, legs: legs, endedAt: Date(),
+                                   began: tripStart.map { (start: $0, leg: startedAtLeg, spot: tripStartSpot, plannedEnd: tripPlannedEnd, late: tripLate) })
             }
         }
         if phase != .idle, !demo { BatteryMeter.rideEnd(legs: max(1, index - startedAtLeg + 1)) }   // its line in the field log
@@ -1754,7 +1776,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     /// It got you there: how late it was against its timetable (by its own live times when it has them), so next time
     /// a change after it gets the room it needs.
     private func noteDelay(_ v: Vehicle, at stop: Place) {
-        let now = Date()
+        let now = Date(), start = tripStart
         Task {
             guard let t = await Transit.liveTrip(v.tripId) else { return }
             let target = CLLocation(latitude: stop.coordinate.latitude, longitude: stop.coordinate.longitude)
@@ -1762,8 +1784,19 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             guard let i = t.stops.indices.min(by: { d($0) < d($1) }), d(i) < 1200, let sch = t.stops[i].scheduled else { return }
             // no live times: when you got there (it notices a little before the stop)
             let real = t.live ? (t.stops[i].arrival ?? now) : now.addingTimeInterval(45)
-            DelayBook.shared.record(line: v.line, stop: t.stops[i].name, scheduled: sch, delay: real.timeIntervalSince(sch) / 60)
+            let late = real.timeIntervalSince(sch) / 60
+            DelayBook.shared.record(line: v.line, stop: t.stops[i].name, scheduled: sch, delay: late)
+            self.noteLate(v, mins: late, tripStart: start)
         }
+    }
+
+    /// (0.35) A ride's delay at your stop, for today's ranking ("the 305 was 18 min late"): the trip keeps its latest
+    /// ride; once it's scored already (the last ride's delay comes after), its board entry gets it. Not a trip since then.
+    private func noteLate(_ v: Vehicle, mins: Double, tripStart start: Date?) {
+        guard mins >= 1, start != nil, start == tripStart else { return }
+        let w = ScoreRules.worse(tripLate, (line: v.isTrain ? v.title : v.line, mins: mins))
+        tripLate = w
+        if let id = lastScore?.entry.id { ScoreBook.shared.noteLate(id, line: w.line, mins: w.mins) }
     }
 
     // MARK: "I'm actually on…": picked by hand during the ride (0.20.5)
