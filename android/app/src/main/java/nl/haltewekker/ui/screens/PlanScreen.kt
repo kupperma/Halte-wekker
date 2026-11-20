@@ -139,6 +139,7 @@ fun PlanScreen(start: Direction?, canStart: Boolean, onBack: () -> Unit, onStart
                 TripRow(t, now, selected = selected == t.id) { selected = if (selected == t.id) null else t.id }
                 if (selected == t.id) Card {
                     t.rides.forEach { LegRow(it) }
+                    TripNotes(t, trips, now)
                     if (t.walkAfter > 0) Text("Walk ${t.walkAfter} min to ${d.name}", color = DS.t.secondary, style = MaterialTheme.typography.bodySmall)
                     if (canStart) BigButton("I'm on it: start the ride") { onStart(t, d.name) }
                     else Text("A ride is running: end it first.", color = DS.t.secondary)

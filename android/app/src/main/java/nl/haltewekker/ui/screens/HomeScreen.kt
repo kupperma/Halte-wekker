@@ -77,7 +77,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 /** The home: the live map, the next trip to school or home, Fastest trip, and the departures around you. */
 @Composable
 fun HomeScreen(ride: RideState?, onPlan: (Direction?) -> Unit, onRide: () -> Unit, onStart: (DoorTrip, String) -> Unit, onSettings: () -> Unit,
-               onDay: () -> Unit, onResume: (ResumeOffer) -> Unit, onFriends: () -> Unit = {}) {
+               onDay: () -> Unit, onResume: (ResumeOffer) -> Unit, onFriends: () -> Unit = {}, onYear: () -> Unit = {}) {
     val context = LocalContext.current
     val app = context.applicationContext as App
     val model: HomeModel = viewModel()
@@ -173,6 +173,8 @@ fun HomeScreen(ride: RideState?, onPlan: (Direction?) -> Unit, onRide: () -> Uni
                     first != null -> {
                         Text("Leave ${Fmt.inMinutes(first.start, now)}", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = DS.t.text)
                         TripRow(first, now) { onPlan(dir) }
+                        // (A6, iOS 0.36–0.37) student OV, a change's record, rain on the walk, OV-fiets
+                        TripNotes(first, next, now)
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             QuietButton("More trips") { onPlan(dir) }
                             if (ride == null) QuietButton("I'm on it: start the ride") { onStart(first, target.name) }
@@ -181,6 +183,9 @@ fun HomeScreen(ride: RideState?, onPlan: (Direction?) -> Unit, onRide: () -> Uni
                 }
             }
             SchoolHomeCard(onDay = onDay, onSettings = onSettings)
+            // (A6) works on your route, the last way home, your year in travel; "Help improve Haltewekker?" once
+            HomeTravelCards(here, onYear)
+            nl.haltewekker.ui.friends.ShareAskCard()
             BigButton("Fastest trip") { onPlan(null) }
             if (!Locator.granted(context)) Note("Allow location (Settings) for the map around you, the stops near you and trips from where you are.")
             Card {
