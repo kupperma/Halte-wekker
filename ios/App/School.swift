@@ -569,12 +569,15 @@ enum WakeAlarm {
         let c = UNUserNotificationCenter.current()
         for i in 0..<3 {
             let n = UNMutableNotificationContent()
-            n.title = i == 0 ? "⏰ \(title)" : "⏰ \(title) (again)"
+            n.title = WristNotice.wakeTitle(title, repeat: i)
             n.body = body
             n.sound = .default
             n.interruptionLevel = .timeSensitive
             n.userInfo = ["kind": "go"]
-            n.categoryIdentifier = "WAKE"                 // swiping it away is reported, so the repeats stop
+            // swiping it away is reported, so the repeats stop; Stop alarm (also on a paired Apple Watch) does the same
+            n.categoryIdentifier = WristNotice.wakeCategory
+            n.threadIdentifier = WristNotice.wakeThread(day: day)
+            n.relevanceScore = WristNotice.relevance(.schoolWake)
             let at = date.addingTimeInterval(Double(i) * 120)
             c.add(UNNotificationRequest(identifier: "wake-\(day)-\(i)", content: n, trigger: UNTimeIntervalNotificationTrigger(timeInterval: max(1, at.timeIntervalSinceNow), repeats: false))) { _ in }
         }

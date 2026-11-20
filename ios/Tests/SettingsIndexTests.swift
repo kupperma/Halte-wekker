@@ -107,4 +107,12 @@ final class SettingsIndexTests: XCTestCase {
         XCTAssertEqual(SettingsIndex.search("siri").first?.id, "map.widget")
         XCTAssertEqual(SettingsIndex.search("widget").first?.topic, .map)
     }
+
+    func test_appleWatchRowIsFound() {                                   // (0.37.1)
+        XCTAssertEqual(SettingsIndex.search("apple watch").first?.id, "alarm.watch")
+        XCTAssertEqual(SettingsIndex.search("watch").first?.id, "alarm.watch")
+        XCTAssertEqual(SettingsIndex.search("wrist").first?.id, "alarm.watch")
+        XCTAssertEqual(SettingsIndex.search("apple watch").first?.topic, .trips)
+        XCTAssertEqual(titles("alarm").first, "Alarm sound")
+    }
 }
