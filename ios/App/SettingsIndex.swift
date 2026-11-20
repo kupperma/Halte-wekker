@@ -81,6 +81,7 @@ enum SettingsIndex {
         SettingsEntry(id: "alarm.test", title: "Test the alarm", topic: .trips, keywords: ["try", "hear", "preview sound"]),
         SettingsEntry(id: "alarm.headphones", title: "Sound only with headphones", topic: .trips, keywords: ["vibrate", "silent", "earbuds", "bluetooth", "airpods", "quiet"]),
         SettingsEntry(id: "alarm.music", title: "If music is playing", topic: .trips, keywords: ["pause music", "keep playing", "volume", "louder"]),
+        SettingsEntry(id: "alarm.watch", title: "Apple Watch", topic: .trips, keywords: ["wrist", "smartwatch", "tap", "haptic", "stop alarm", "watchos"]),
         SettingsEntry(id: "alarm.backup", title: "Backup alarm", topic: .trips, keywords: ["minutes", "timer", "gps drops", "safety"]),
         SettingsEntry(id: "wake.by", title: "Wake me … before my stop", topic: .trips, keywords: ["by time", "by distance", "minutes", "min", "eta", "arrival", "how soon", "when to wake", "train", "bus"]),
         SettingsEntry(id: "wake.bus", title: "Wake distance by bus", topic: .trips, keywords: ["km", "kilometres", "how far", "usual distance"]),

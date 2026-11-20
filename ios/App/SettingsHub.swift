@@ -499,6 +499,11 @@ private struct TripsSettingsRows: View {
             Text(trip.pauseMusic ? "The loudest option: your music stops while it rings. To start it again, press play on your earbuds."
                                  : "The alarm plays over your music, a little louder than it.")
                 .font(DS.footnote).foregroundStyle(DS.secondary)
+            // (0.37.1) the phone's notifications on a paired Apple Watch (no watch app: it can't be installed without
+            // a paid developer account)
+            Label { Text("On an Apple Watch: the wake-up taps your wrist; tap Stop alarm there.") } icon: { Image(systemName: "applewatch") }
+                .font(DS.footnote).foregroundStyle(DS.secondary)
+                .settingsAnchor("alarm.watch")
         } header: { Text("Alarm") } footer: {
             Text("It also rings in silent mode (with headphones, or out loud when Sound only with headphones is off). Keep the volume up. Stop it from the lock screen: Stop alarm on the trip, or on the notification.")
         }

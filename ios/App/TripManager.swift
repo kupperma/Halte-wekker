@@ -147,6 +147,10 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     private var tightTold: String?                        // the leg (and bus) it told you had a tight change after it
     private var maxDistance: Double?                      // furthest from the stop on this leg, for progress without times
     private var tripStart: Date?
+    // (0.37.1) the alarm's one repeat after 30 s, for a paired Apple Watch: which ring it's for, and whether it went
+    private var againTask: Task<Void, Never>?
+    private var ringSerial = 0
+    private var againSent = false
     private var startedAtLeg = 0
     private var backupTask: Task<Void, Never>?
     private var lastWatchCheck = Date.distantPast
@@ -392,15 +396,21 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             }
         }
         AlarmControl.stop = { [weak self] in self?.stopAlarm() }
-        // "Stop alarm" right on the alarm notification.
-        let stop = UNNotificationAction(identifier: "STOP", title: "Stop alarm", options: [])
+        // "Stop alarm" right on the alarm notification. (No .foreground or .authenticationRequired: it runs on the
+        // phone in the background, locked or not, so it also works from a paired Apple Watch, 0.37.1.)
+        let stop = UNNotificationAction(identifier: WristNotice.stopAction, title: WristNotice.stopTitle, options: [],
+                                        icon: UNNotificationActionIcon(systemImageName: "stop.circle.fill"))
         // "Still on bus 306?" after a pick by hand (0.20.5): Yes, or Pick again (that one opens the app)
         let yes = UNNotificationAction(identifier: "STILL_YES", title: "Yes", options: [])
         let again = UNNotificationAction(identifier: "STILL_PICK", title: "Pick again", options: [.foreground])
         UNUserNotificationCenter.current().setNotificationCategories([
             // (customDismissAction: swiping the alarm away is reported, and stops it, 0.24.6)
-            UNNotificationCategory(identifier: "ALARM", actions: [stop], intentIdentifiers: [], options: [.customDismissAction]),
-            UNNotificationCategory(identifier: "WAKE", actions: [], intentIdentifiers: [], options: [.customDismissAction]),
+            UNNotificationCategory(identifier: WristNotice.alarmCategory, actions: [stop], intentIdentifiers: [], options: [.customDismissAction]),
+            // (0.37.1) the heads-up, arriving and the backup: Stop alarm too (the chime, the announcement, or the alarm
+            // ringing meanwhile)
+            UNNotificationCategory(identifier: WristNotice.tripCategory, actions: [stop], intentIdentifiers: [], options: []),
+            // the school wake-up's notifications: Stop alarm takes the repeats away (0.37.1)
+            UNNotificationCategory(identifier: WristNotice.wakeCategory, actions: [stop], intentIdentifiers: [], options: [.customDismissAction]),
             UNNotificationCategory(identifier: Self.stillOnCategory, actions: [yes, again], intentIdentifiers: [], options: []),
             // 0.34: "IC to 's-Hertogenbosch or IC to Eindhoven?" (its buttons are named when it asks)
             Self.whichTrainButtons(["The first one", "The other one"]),
@@ -548,6 +558,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
 
     func stopAlarm() {
         sound.stop()
+        cancelAgain()
         UNUserNotificationCenter.current().removeAllDeliveredNotifications()
         guard case .alarm(let approach) = phase else { return }
         if approach && (ringAtStop || forceArrival) { phase = .awake; pushActivity(force: true); WatchStore.shared.showNext() } else { legDone(why: "alarm stopped") }
@@ -563,6 +574,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         handLock = nil; stillOnAsk = nil                   // (a pick by hand holds for its leg only)
         UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [Self.stillOnId])
         sound.stop()
+        cancelAgain()
         setBackup(0)
         arrivedAt = leg?.to.short
         if let l = leg { lastEnd = (l.to.key, Date()); lastEndSpot = (l.to.coordinate, Date()) }
@@ -1216,17 +1228,19 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
 
     /// At the stop: the jingle and the announcement once, and a notification. The leg ends by itself: no second alarm.
     private func arrive() {
-        let place = leg?.to.short ?? "your stop"
+        let place = leg?.to.short
         let text = announcement(approach: false)
         let then = nextText
         legDone(why: "by GPS")
         sound.chime(announcement: text)
         let c = UNMutableNotificationContent()
-        c.title = "You’re at \(place)"
-        c.body = then ?? (phase == .finished ? "Get off here: your trip is done." : "Get off here.")
+        let t = WristNotice.arrived(stop: place, then: then, finished: phase == .finished)
+        c.title = t.title
+        c.body = t.body
         c.sound = sound.quietNow ? nil : .default         // no headphones: no ding for the whole train
         c.interruptionLevel = .timeSensitive
         c.userInfo = ["kind": "ok"]
+        tripNotice(c, .arrived, category: WristNotice.tripCategory)
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "arrived-\(Int(Date().timeIntervalSince1970))", content: c, trigger: nil)) { _ in }
     }
 
@@ -1243,25 +1257,68 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         rideLog(FieldFormat.rideRing(why + (inUse ? ", phone in use: a notification" : ""), metres: distance,
                                      legAge: Date().timeIntervalSince(legStart), started: legStartMetres))
         setBackup(0)
+        // (0.37.1) short and the stop first, for a glance at a paired Apple Watch: "Get off at Breda · 2 min"
+        var secs: Double?
+        if case .time(_, _, let s)? = fire { secs = s }
+        let t = WristNotice.ring(approach: approach, stop: leg?.to.short, soon: soonText(secs), inUse: inUse)
         let c = UNMutableNotificationContent()
-        c.title = approach ? "Wake up" : "Get off now"
-        let soon: String
-        if case .time(_, _, let secs)? = fire { soon = "\(max(1, Int((secs / 60).rounded(.up)))) min" } else { soon = Fmt.distance(distance ?? 0) }
-        c.body = approach ? "\(leg?.to.short ?? "Your stop") in about \(soon)." : "You’re at \(leg?.to.short ?? "your stop")."
+        c.title = t.title
+        c.body = t.body
         c.sound = sound.quietNow ? nil : .default         // no headphones: it buzzes instead
         c.interruptionLevel = .timeSensitive
+        c.userInfo = ["kind": "go"]
         // Using your phone right now? Then you're awake: one notification is enough.
         if inUse {
-            c.body += approach ? " Get ready to get off." : ""
+            tripNotice(c, .headsUp, category: WristNotice.tripCategory)
             UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "heads-up-\(approach)", content: c, trigger: nil)) { _ in }
             if approach && (ringAtStop || forceArrival) { phase = .awake; pushActivity(force: true); WatchStore.shared.showNext() } else { legDone(why: "phone in use") }
             return
         }
         phase = .alarm(approach: approach)
         sound.ring(announcement: announcement(approach: approach))
-        c.categoryIdentifier = "ALARM"
-        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "alarm", content: c, trigger: nil))
+        tripNotice(c, .alarm, category: WristNotice.alarmCategory)
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: WristNotice.alarmId, content: c, trigger: nil))
         pushActivity(force: true)
+        scheduleAgain(approach: approach, secs: secs)
+    }
+
+    /// How soon, as the title says it: by the time rule's seconds, else the distance.
+    private func soonText(_ secs: Double?) -> String { secs.map(WristNotice.minutes) ?? Fmt.distance(distance ?? 0) }
+
+    /// The trip's notifications: grouped per trip, the ringing ones on top, and their Stop alarm button (0.37.1).
+    private func tripNotice(_ c: UNMutableNotificationContent, _ kind: WristNotice.Kind, category: String) {
+        c.categoryIdentifier = category
+        c.threadIdentifier = WristNotice.thread(tripStart: tripStart)
+        c.relevanceScore = WristNotice.relevance(kind)
+    }
+
+    /// (0.37.1) The alarm's notification once more after 30 s while it still rings, so a paired Apple Watch taps your
+    /// wrist again. Only for that same alarm (a new ring, Stop alarm or the leg ending cancels it), and only once.
+    private func scheduleAgain(approach: Bool, secs: Double?) {
+        cancelAgain()
+        ringSerial += 1
+        let serial = ringSerial, rangAt = Date()
+        againTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(WristNotice.againAfter * 1_000_000_000))
+            guard let self, !Task.isCancelled, self.ringSerial == serial else { return }
+            let ringing: Bool = { if case .alarm(let a) = self.phase { return a == approach }; return false }()
+            guard WristNotice.againDue(rangAt: rangAt, now: Date(), stillRinging: ringing, sent: self.againSent) else { return }
+            self.againSent = true
+            let t = WristNotice.ring(approach: approach, stop: self.leg?.to.short, soon: self.soonText(WristNotice.secsAtAgain(secs)), again: true)
+            let c = UNMutableNotificationContent()
+            c.title = t.title
+            c.body = t.body
+            c.sound = self.sound.quietNow ? nil : .default
+            c.interruptionLevel = .timeSensitive
+            c.userInfo = ["kind": "go"]
+            self.tripNotice(c, .again, category: WristNotice.alarmCategory)
+            UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: WristNotice.againId, content: c, trigger: nil)) { _ in }
+        }
+    }
+
+    private func cancelAgain() {
+        againTask?.cancel(); againTask = nil
+        againSent = false
     }
 
     /// Unlocked and in use. (Without a passcode the phone never says it's locked, so then it always rings.)
@@ -1316,8 +1373,14 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             FriendChats.tapped(response.notification.request.content.userInfo)
         }
         Task { @MainActor in
-            if action == "STOP" || (id == "alarm" && (action == UNNotificationDefaultActionIdentifier || action == UNNotificationDismissActionIdentifier)) { self.stopAlarm() }
-            if id.hasPrefix("wake-") { WakeAlarm.cancelRepeats(of: id) }
+            // (Stop alarm from a paired Apple Watch comes here too, the phone still locked, 0.37.1)
+            let isAlarm = id == WristNotice.alarmId || id == WristNotice.againId
+            if id.hasPrefix("wake-") {
+                WakeAlarm.cancelRepeats(of: id)
+                if action == WristNotice.stopAction { WakeAlarm.stopRinging() }
+            } else if action == WristNotice.stopAction || (isAlarm && (action == UNNotificationDefaultActionIdentifier || action == UNNotificationDismissActionIdentifier)) {
+                self.stopAlarm()
+            }
             // (0.36) "claim money back from NS": NS's claim page
             if id.hasPrefix("nsclaim-"), action == UNNotificationDefaultActionIdentifier, let u = URL(string: DelayClaim.claimURL) {
                 _ = await UIApplication.shared.open(u)
@@ -1341,7 +1404,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         let title = c.title, body = c.body, kind = Notices.kind(of: c.title, c.userInfo)
         let at = notification.date
         Task { @MainActor in NoticeLog.shared.add(key: id, title: title, body: body, kind: kind, at: at) }
-        if id == "alarm" || id.hasPrefix("platform-") { done([]); return }
+        if id == WristNotice.alarmId || id == WristNotice.againId || id.hasPrefix("platform-") { done([]); return }
         // the calorie limit: from the Recomp sheets, so a system banner, over them
         if id.hasPrefix(RecompKcalNotice.idPrefix) { done([.banner, .list, .sound]); return }
         // in the app as a banner, with its sound; kept in the app's list instead of the notification centre
@@ -1371,10 +1434,13 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         }
         // A notification as well, in case iOS stops the app.
         let c = UNMutableNotificationContent()
-        c.title = "Wake up"
-        c.body = "Your backup alarm: \(leg?.to.short ?? "your stop") should be close."
+        let t = WristNotice.backup(stop: leg?.to.short)
+        c.title = t.title
+        c.body = t.body
         c.sound = .default
         c.interruptionLevel = .timeSensitive
+        c.userInfo = ["kind": "go"]
+        tripNotice(c, .backup, category: WristNotice.tripCategory)
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "backup", content: c,
                                                                      trigger: UNTimeIntervalNotificationTrigger(timeInterval: Double(minutes) * 60, repeats: false))) { _ in }
     }

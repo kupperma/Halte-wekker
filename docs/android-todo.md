@@ -3,6 +3,20 @@
 The rules and numbers for each are in [logs-export.md](logs-export.md) › For Android (parity), with the iOS files and
 their tests.
 
+## iOS 0.37.1
+
+- [ ] Notifications that work on a watch (`WristNotice`; iOS mirrors them to a paired Apple Watch while the phone is
+      locked, Wear OS mirrors Android's the same way, so no watch app is needed): the trip alarm, the heads-up, arriving,
+      the backup alarm and the school wake-up all high priority (iOS: time sensitive), short with the stop first ("Get
+      off at Breda · 2 min", "Get off now at Breda", "You’re at Breda", "Get off at Breda soon"; stop names cut to 22
+      characters with "…"), with a **Stop alarm** action that runs on the phone without opening the app (Android: a
+      notification action to a BroadcastReceiver; Wear OS shows it) and goes the same way as the app's own stop. While
+      the alarm still rings 30 s later, its notification once more ("Still ringing: …", once per ring; a new ring, stop
+      or the leg ending cancels it; never for the heads-up). Grouped per trip (`trip-<trip start epoch>`; Android:
+      `setGroup`) and the school ones per day; the ringing ones on top. Settings › Trips & alarm: "On an Apple Watch:
+      the wake-up taps your wrist; tap Stop alarm there." (Android: "On a Wear OS watch: …"). Vectors in
+      `ios/Tests/WristNoticeTests.swift`.
+
 ## Left after Android 0.6.0 (A6)
 
 Android 0.6.0 (version code 7) ported iOS 0.32–0.37 (see [android/plan.md](android/plan.md) › As built A6): every pure
