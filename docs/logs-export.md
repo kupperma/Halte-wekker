@@ -167,7 +167,9 @@ What it prints for the fixture:
 ```
 install  ride      leg  min  truth (from)               | app: settle  flips  on it | replay: settle  flips  on it  ended on
 00000000 5a5a5a5a  1/2    10  305·7821 (hand pick)       | app:   84 s      1    86% | replay:   30 s      0    97%  305·7821
+         wake · bus: distance rule 2.8 min (1984 m) · time rule 1.9 min (1408 m) before the end · no ring in its log
 00000000 5a5a5a5a  2/2     5  400·1111 (ended on)        | app:    0 s      0   100% | replay:   30 s      0    93%  400·1111
+         wake · bus: distance rule 2.8 min (1980 m) · time rule 1.9 min (1404 m) before the end · no ring in its log
 
 app (as logged): settled on the one you were on in 2 of 2 legs · median 42 s to settle · 1 flips · on it 93% of the time
 replay (matcher now): settled on the one you were on in 2 of 2 legs · median 30 s to settle · 0 flips · on it 95% of the time
@@ -177,6 +179,13 @@ Read it as: the app showed bus 306 first and was put right by hand after 84 s; t
 shown 305 after 30 s (its first look with 20 s of points) and kept it. To try a change to the matcher, edit
 `ios/App/VehicleMatch.swift` (or the other linked files), run the same command on the same export and vehicles file,
 and compare the two summaries.
+
+The `wake` line under each leg (0.33, `tools/replay/Sources/replay/Wake.swift`, with the app's own `WakeRule.swift`)
+says when each wake rule would have rung, in minutes before the leg's last point (taken as its stop): the distance
+rule (2 km a bus, 5 km a train) and the time rule alone (2 min a bus, 3 min a train, by your smoothed speed along the
+track you went: an export has no live arrivals), and when the app's own `ring · …` line says it rang and by which
+rule (`by distance`, `by time 3 min (live)`, `by time 2 min (speed)`). The app rings at whichever of the two comes
+first.
 
 ## For Android (parity)
 
@@ -197,3 +206,43 @@ The same switches, words and rules, so the relay and the replay treat both alike
   points (their JSON) per upload and 4 MB a day, counted apart from the lines' 200 KB / 2 MB; the same moments and
   conditions as the lines (after a trip, else hourly; not during a trip, on a metered/Low Data network or in battery
   saver). Drop the sent points from the queue only after a 200; switching off clears the queue.
+
+### Wake by time and Motion & Fitness (0.33)
+
+- Settings › Trips & alarm › "Wake me … before my stop": **By time** (default) or **By distance**; by time, minutes
+  for trains (default 3) and buses (default 2), 1–10 (`wake.by` "time"/"distance", `wake.trainMin`, `wake.busMin`).
+  The usual wake distance stays, as the safety net. Rules (`ios/App/WakeRule.swift`, tests in `WakeRuleTests`):
+  - the distance rule first, as before (straight line from the newest good fix ≤ the wake distance) → `by distance`;
+  - by time, only once you're 300 m or more from the leg's first stop, the distance left (along the vehicle's road
+    from where you got on to your stop when known, never less than straight) within the minutes at top speed
+    (160 km/h a train, 100 km/h a bus), and the estimate ≤ the minutes: the stop's **live** arrival from the vehicle's
+    own trip answer while it is 150 s old or newer, in the future and not faster than top speed from here; else the
+    distance left ÷ your **smoothed speed** (exponential, 30 s time constant; known after 20 s of readings, forgotten
+    after 90 s without; the GPS's own speed, else between two fixes of ≤ 50 m, 2 s apart; > 100 m/s dropped), only at
+    4 m/s or more (halted at a station before yours, or in a jam, it doesn't ring);
+  - within 20 s of a leg's start either rule wakes it silently (as a leg that starts inside its wake distance);
+  - the ring line says which fired: `ring · by time 3 min (live) · …`, `ring · by time 2 min (speed) · …`,
+    `ring · by distance · …`; the notification "Wake up · <stop> in about 3 min." by time;
+  - the far GPS tier and its backstop region keep clear of the time rule's reach (`WakeRule.gpsWakeMetres`).
+- "Use motion to notice rides faster" (off by default; Settings › Trips & alarm, and the setup's Mornings step, which
+  asks for the permission when it's turned on). Android: Activity Recognition (`ActivityRecognitionClient`,
+  `ACTIVITY_RECOGNITION` permission at runtime, transitions API) with the same kinds; iOS: `CMMotionActivityManager`
+  (`NSMotionUsageDescription`). Rules (`ios/App/MotionRules.swift`, tests in `MotionRulesTests`), each only next to
+  the GPS, never instead of it; the alarm, the wake distance and the backup alarm never depend on it:
+  - what it says now: the latest activity (automotive first when several), its run back over the same kind (a
+    low-confidence other one in between doesn't break it); from a history answer (not live updates) at most 5 minutes
+    old; "sure" is medium or high;
+  - **automotive** (sure): moving like a bus or train at once (the home's on-board look and Fastest trip's look run
+    now; a trip waiting for the one you get on, at its first stop or a change, looks at once instead of after 7 s;
+    leaving one of your stations, the first look after 12 s instead of 35);
+  - **walking, running or cycling** (sure) under 12 m/s (43 km/h) isn't a vehicle, whatever the fixes say (faster:
+    you're walking down a moving train);
+  - **standing or walking about** (sure), the fixes not moving, waiting for the one you get on (a leg's first stop with
+    nothing found yet, or at a change) and further from the stop it goes to than its wake distance (by time: the
+    reach) + 2 km: the rough GPS (100 m, every 50 m) and looks every 15 s instead of 7; anything else, the best at once;
+  - **automotive for 3 minutes** on a confirmed ride: the far tier from 6 minutes at full speed beyond the wake point
+    instead of 8, without the extra kilometre to switch on;
+  - live updates only while a trip runs or the home is in front with no trip; else one history question (the last
+    15 minutes) on a wake-up (leaving one of your stations); no loop of its own. Ride log: `motion · automotive
+    (high)`, `motion · automotive: looking for the one you're on now`, `gps · waiting, standing or walking about
+    (motion): 100 m, every 50 m`.

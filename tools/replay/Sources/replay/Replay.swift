@@ -119,6 +119,8 @@ struct LegResult: Codable {
     var vehicles: Int
     var logged: Score
     var replayed: Score?
+    /// When the wake rules would have rung (0.33).
+    var wake: WakeTimes?
 }
 
 /// All legs together.

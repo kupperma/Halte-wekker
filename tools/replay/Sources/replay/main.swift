@@ -2,6 +2,9 @@ import Foundation
 
 // replay <export.json> [--tracks vehicles.json] [--fetch] [--save-tracks vehicles.json] [--every 10] [--looks] [--json]
 //
+// 0.33: under each leg, when the wake rules would have rung (the distance rule, and the time rule by your speed along
+// the track you went: `WakeReplay`), and when the app's own ring line says it rang, and by which rule.
+//
 // Every leg with GPS points in an export (docs/logs-export.md) through the app's on-board matcher, scored against the
 // vehicle you were on: the one you picked by hand in the ride, else the one the app ended the leg on (or a fixture's
 // `truth`). The vehicles come from the fixture, from --tracks, or with --fetch from Transitous (then --save-tracks
@@ -95,7 +98,7 @@ for leg in legs {
     let ids = Set(leg.fixes.compactMap(\.veh))
     results.append(LegResult(install: String(leg.install.prefix(8)), ride: leg.ride, leg: leg.leg, truth: leg.truth, truthFrom: leg.truthFrom,
                              minutes: leg.end.timeIntervalSince(leg.start) / 60, points: leg.fixes.count, vehicles: ids.count,
-                             logged: logged, replayed: replayed))
+                             logged: logged, replayed: replayed, wake: WakeReplay.of(leg)))
 }
 
 let truths = results.filter { $0.truth != nil }.count
@@ -115,6 +118,7 @@ if o.json {
         let app = "\(fmt(r.logged.settle).leftPad(6))  \(String(r.logged.flips).leftPad(5))  \(pct(r.logged.onTruth).leftPad(5))"
         let rep = r.replayed.map { "\(fmt($0.settle).leftPad(6))  \(String($0.flips).leftPad(5))  \(pct($0.onTruth).leftPad(5))  \($0.endedOn ?? "-")" } ?? "(no vehicles: --fetch or --tracks)"
         print("\(r.install) \(r.ride.padding(toLength: 9, withPad: " ", startingAt: 0)) \(r.leg.padding(toLength: 4, withPad: " ", startingAt: 0)) \(String(format: "%4.0f", r.minutes))  \(truth) | app: \(app) | replay: \(rep)")
+        if let w = r.wake { print("         wake · \(WakeReplay.words(w))") }
     }
     func line(_ name: String, _ s: Summary) -> String {
         "\(name): settled on the one you were on in \(s.settled) of \(s.withTruth) legs · median \(fmt(s.medianSettle)) to settle · \(s.flips) flips · on it \(pct(s.onTruth)) of the time"
