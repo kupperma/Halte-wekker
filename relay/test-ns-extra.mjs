@@ -43,6 +43,29 @@ async function local() {
   assert.equal(r.status, 200);
   assert.equal(asked.at(-1).u, "https://gateway.apiportal.ns.nl/disruptions/v3?lang=en");
 
+  // stations=: only those on a stretch with one of them, slimmed
+  assert.equal((await go("/ns/disruptions?stations=")).status, 400);
+  assert.equal((await go("/ns/disruptions?stations=TB,b-d")).status, 400);
+  assert.equal((await go("/ns/disruptions?stations=TB&station=BD")).status, 400);
+  const sec = (codes) => ({ stations: codes.map((c) => ({ stationCode: c, name: c, uicCode: "1", coordinate: {} })), direction: "BOTH" });
+  answers["https://gateway.apiportal.ns.nl/disruptions/v3"] = { status: 200, body: JSON.stringify([
+    { id: "a", type: "MAINTENANCE", title: "Tilburg - Breda.", isActive: false, start: "s", end: "e", extra: "x".repeat(500),
+      timespans: [{ start: "s", end: "e", alternativeTransport: { label: "er rijden bussen" }, advices: ["…"] }],
+      publicationSections: [{ section: sec(["TB", "GZ", "BD"]), consequence: { section: sec(["GZ", "BD"]), level: "LESS_TRAINS" }, sectionType: "NL" }] },
+    { id: "b", type: "DISRUPTION", title: "Arnhem - Doetinchem.", publicationSections: [{ section: sec(["AH", "DTC"]) }] },
+    { id: "c", type: "CALAMITY", title: "Elsewhere" },
+  ]) };
+  r = await go("/ns/disruptions?stations=bd,ehv");
+  assert.equal(r.status, 200);
+  const slim = await r.json();
+  assert.deepEqual(slim.map((x) => x.id), ["a"]);
+  assert.equal(slim[0].extra, undefined);
+  assert.equal(slim[0].timespans[0].advices, undefined);
+  assert.equal(slim[0].timespans[0].alternativeTransport.label, "er rijden bussen");
+  assert.deepEqual(slim[0].publicationSections[0].section.stations, [{ stationCode: "TB", name: "TB" }, { stationCode: "GZ", name: "GZ" }, { stationCode: "BD", name: "BD" }]);
+  assert.equal(slim[0].publicationSections[0].consequence.level, "LESS_TRAINS");
+  assert.equal(asked.at(-1).u, "https://gateway.apiportal.ns.nl/disruptions/v3?lang=en");
+
   // price: v3, else v2, else the trips' fares
   answers["https://gateway.apiportal.ns.nl/reisinformatie-api/api/v2/price"] = { status: 200, body: '{"priceOptions":[]}' };
   r = await go("/ns/price?from=tb&to=bd&dateTime=2026-11-20T08:00:00%2B01:00");
@@ -80,6 +103,9 @@ async function live(base) {
   assert.ok(Array.isArray(list) || Array.isArray(list.payload));
   const s = await get("/ns/disruptions?station=BD");
   console.log("/ns/disruptions?station=BD", s.status, s.text.length, "bytes");
+  const f = await get("/ns/disruptions?stations=UT,BD,TB,EHV,HT");
+  console.log("/ns/disruptions?stations=…", f.status, f.text.length, "bytes", JSON.parse(f.text).length, "entries");
+  assert.equal(f.status, 200);
   const p = await get("/ns/price?from=TB&to=BD");
   console.log("/ns/price", p.status, p.text.slice(0, 300).replace(/\s+/g, " "));
   assert.equal(p.status, 200);

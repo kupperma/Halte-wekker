@@ -2,6 +2,9 @@
 //  /ns/disruptions[?station=BD][&lang=en]   NS disruptions, calamities and planned engineering works (Reisinformatie
 //                                           API v3; the separate Disruptions API when that one isn't there). The
 //                                           answer is NS's own list, passed on as it is.
+//  /ns/disruptions?stations=TB,BD,HT        The app's way (some 650 KB is the whole country): only the disruptions and
+//                                           works on a stretch with one of these stations, slimmed to what the app
+//                                           reads (id, type, title, start, end, isActive, timespans, sections).
 //  /ns/price?from=TB&to=BD[&dateTime=…][&travelClass=2]
 //                                           What a single journey costs: NS's price endpoint (v3, then v2). When neither
 //                                           answers, the fares NS puts on its first trip for that journey, as
@@ -20,6 +23,35 @@ function json(text, status, cors, maxAge) {
   });
 }
 
+const slimStations = (sec) => ({
+  stations: (((sec || {}).stations) || []).map((x) => ({ stationCode: x.stationCode, name: x.name })),
+  direction: (sec || {}).direction,
+});
+
+/** Only the disruptions and works on a stretch with one of `codes`, with only what the app reads. */
+export function slimDisruptions(list, codes) {
+  const all = Array.isArray(list) ? list : (list && Array.isArray(list.payload) ? list.payload : []);
+  const out = [];
+  for (const d of all) {
+    const secs = (d && d.publicationSections) || [];
+    const hit = secs.some((p) => [p.section, (p.consequence || {}).section].some((s) => ((s || {}).stations || []).some((x) => codes.has(x.stationCode))));
+    if (!hit) continue;
+    out.push({
+      id: d.id, type: d.type, title: d.title, isActive: d.isActive, start: d.start, end: d.end,
+      timespans: (d.timespans || []).map((t) => ({
+        start: t.start, end: t.end, situation: t.situation, cause: t.cause, alternativeTransport: t.alternativeTransport,
+        additionalTravelTime: t.additionalTravelTime,
+      })),
+      publicationSections: secs.map((p) => ({
+        section: slimStations(p.section),
+        consequence: p.consequence ? { section: slimStations(p.consequence.section), description: p.consequence.description, level: p.consequence.level } : null,
+        sectionType: p.sectionType,
+      })),
+    });
+  }
+  return out;
+}
+
 export async function nsExtra(url, env, cors, fetchImpl = fetch) {
   const NS_KEY = env.NS_KEY || env["NS-KEY"];
   const headers = { "Ocp-Apim-Subscription-Key": NS_KEY || "" };
@@ -27,14 +59,19 @@ export async function nsExtra(url, env, cors, fetchImpl = fetch) {
   if (url.pathname === "/ns/disruptions") {
     const station = (url.searchParams.get("station") || "").toUpperCase();
     const lang = (url.searchParams.get("lang") || "en").toLowerCase();
-    for (const k of url.searchParams.keys()) if (k !== "station" && k !== "lang") return new Response("Bad request", { status: 400, headers: cors });
+    const many = url.searchParams.has("stations")
+      ? (url.searchParams.get("stations") || "").toUpperCase().split(",").filter((x) => x) : null;
+    for (const k of url.searchParams.keys()) if (k !== "station" && k !== "lang" && k !== "stations") return new Response("Bad request", { status: 400, headers: cors });
     if ((station && !STATION.test(station)) || !/^(en|nl)$/.test(lang)) return new Response("Bad request", { status: 400, headers: cors });
+    if (many && (station || many.length === 0 || many.length > 40 || !many.every((c) => STATION.test(c))))
+      return new Response("Bad request", { status: 400, headers: cors });
     if (!NS_KEY) return new Response("No NS key set", { status: 501, headers: cors });
     try {
       const tail = (station ? `/station/${station}` : "") + `?lang=${lang}`;
       let r = await fetchImpl(`${GW}/reisinformatie-api/api/v3/disruptions${tail}`, { headers });
       if (r.status === 404) r = await fetchImpl(`${GW}/disruptions/v3${tail}`, { headers });
-      return json(await r.text(), r.status, cors, 300);
+      if (!many || r.status !== 200) return json(await r.text(), r.status, cors, 300);
+      return json(JSON.stringify(slimDisruptions(await r.json(), new Set(many))), 200, cors, 300);
     } catch (e) {
       return new Response("NS didn't answer", { status: 502, headers: cors });
     }
