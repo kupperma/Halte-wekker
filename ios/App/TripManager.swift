@@ -237,6 +237,13 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     private var rivalLookAt = Date.distantPast            // the next look at the other trains on your track (0.34)
     private var trainSeen: [String: TrainRules.Seen] = [:] // what you did at the stations while choosing between trains
     private var lastJudged: [Judgement] = []              // the matcher's last look (`matchByJudging`), for the rivals look
+    // 0.38: picking the one you're on (`PickRules`)
+    private var departure: Departure?                     // the last time you went from standing at a stop to moving
+    private var departLogged: (at: Date, line: String)?   // …its field log line, once per moment and outcome
+    private var busSeen: [String: BusStops.Seen] = [:]    // what you did at the bus stops while choosing between buses
+    private var busLogged = ""                            // the stop pattern's last field log line, this choice
+    private var usualHeld: String?                        // your usual line's tie-break holds this one (hysteresis)
+    private var candLeftAt: Date?                         // when you left the stop, as a choice began (for asking sooner)
     private var lastLines: [String: String] = [:]
     nonisolated static let whichTrainId = "which-train"
     nonisolated static let whichTrainCategory = "WHICHTRAIN"
@@ -597,6 +604,9 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         if !demo, TravelNotes.shared.checkOut { remindCheckOut(gotOff: gotOff) }     // (0.36)
         let rideId: String? = demo ? nil : leg.flatMap { l in tripStart.flatMap { keepRide(l, tripStart: $0) } }
         if let v = vehicle, let l = leg, !demo { noteDelay(v, at: l.to, rideId: rideId) }
+        // 0.38: a ride it found by itself and you rode to the end of the leg teaches your usual line (a pick by hand
+        // taught it already)
+        if let v = vehicle, !pickedByHand, handLock == nil, Date().timeIntervalSince(legStart) >= 120 { learnLine(v, weight: UsualLine.confirmed) }
         handLock = nil; stillOnAsk = nil                   // (a pick by hand holds for its leg only)
         UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [Self.stillOnId])
         sound.stop()
@@ -1559,6 +1569,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
                 // one it planned wins when it fits nearly as well.
                 if let p = planned, m.vehicle.tripId != p.tripId,
                    let pm = ranked.first(where: { $0.vehicle.tripId == p.tripId }), pm.score < m.score + R.plannedEdge { m = pm }
+                // 0.38: nothing planned decides it: your usual line here at this time breaks a tie (`UsualLine.tieBreak`)
+                if planned.map({ $0.tripId != m.vehicle.tripId }) ?? true, let u = self.usualTie(kind.isEmpty ? ranked : kind, best: m) { m = u }
                 // One look is enough for one it expects, or one right with you of the line it planned; others it wants
                 // to see twice.
                 let otherKind = mode != nil && m.vehicle.isTrain != (mode == .train)
@@ -1806,8 +1818,10 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         if enough {
             judged = VehicleMatch.judgeAll(fixesNow, tracks)
             // (0.26.2) getting on: a train by its own GPS before one of about the same fit by its times (`trainGPSEdge`)
-            let byRank: [Ranked] = Self.fastLanePlaces.contains(place) ? OnBoardRules.rank(judged, planned: planned)
+            var byRank: [Ranked] = Self.fastLanePlaces.contains(place) ? OnBoardRules.rank(judged, planned: planned)
                                                                          : VehicleMatch.rank(judged, planned: planned)
+            // 0.38: getting on, the one that alone left your stop when you did comes first (`DepartMatch.bonuses`)
+            if Self.fastLanePlaces.contains(place) { byRank = VehicleMatch.nudged(byRank, departBonuses(judged, tracks: tracks)) }
             ranked = VehicleMatch.top(byRank, keep: planned)
         } else {
             // the fast lane: with 2 fixes over 8 s, only one by its own GPS right with you, nothing else near
@@ -1867,7 +1881,9 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         if let p = upcoming.first(where: { $0.trip.first.tripId == d.tripId }) { choose(p); return }
         detectTask?.cancel()
         pickedByHand = true
-        Task { await vehicleFound(Vehicle(tripId: d.tripId, line: d.line, isTrain: false), meters: nil) }
+        let v = Vehicle(tripId: d.tripId, line: d.line, isTrain: false)
+        learnLine(v, weight: UsualLine.said, at: d.scheduled)       // (0.38)
+        Task { await vehicleFound(v, meters: nil) }
     }
 
     /// "I'm on this one": you picked it in the list.
@@ -1875,7 +1891,9 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         let f = p.trip.first
         detectTask?.cancel()
         pickedByHand = true
-        Task { await vehicleFound(Vehicle(tripId: f.tripId, line: f.line, isTrain: f.isTrain), meters: nil, dest: p.to) }
+        let v = Vehicle(tripId: f.tripId, line: f.line, isTrain: f.isTrain)
+        learnLine(v, weight: UsualLine.said, at: f.scheduledDeparture)       // (0.38)
+        Task { await vehicleFound(v, meters: nil, dest: p.to) }
     }
 
     /// Found it: use that vehicle's own live arrival at your stop. On the first leg it follows the route
@@ -2114,6 +2132,9 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         handLock = HandLock(tripId: p.vehicle.tripId, leg: index)
         stillOnAsk = nil; whichTrain = []; whichTrainTo = [:]
         UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [Self.stillOnId])
+        // 0.38: what you said teaches your usual line (the one it had: not this one)
+        learnLine(p.vehicle, weight: UsualLine.said)
+        if let o = old, o.tripId != p.vehicle.tripId, o.line != p.vehicle.line { learnLine(o, weight: UsualLine.notThis) }
         await vehicleFound(p.vehicle, stops: p.stops)
         rideLog(FieldFormat.handPick(Self.logLabel(p.vehicle), was: old.map { FieldFormat.label($0.tripId, [$0.tripId: $0.line]) },
                                      metres: p.metres, byGPS: p.metres == nil ? nil : p.byGPS))
@@ -2264,6 +2285,154 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         return TrainRules.outByStops(calls: calls, runsThrough: through, seen: trainSeen)
     }
 
+    // MARK: picking the one you're on (0.38, `PickRules`)
+
+    private static let pickCalendar: Calendar = {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = TimeZone(identifier: "Europe/Amsterdam") ?? .current
+        return c
+    }()
+
+    /// The moment you last went from standing at a stop to moving (`DepartMatch.moment`, from the last 4 minutes of
+    /// fixes), while it's fresh enough to judge by.
+    private func departureNow(_ now: Date = Date()) -> Departure? {
+        let fixes: [Fix] = samples.map { Fix($0) }
+        if let d = DepartMatch.moment(fixes), d.t > (departure?.t ?? .distantPast) { departure = d }
+        return DepartMatch.usable(departure, now: now)
+    }
+
+    /// "depart · stood 40 s, left 07:42:25 · 305·7821 left then (live 5 s) · …", once per moment and outcome.
+    private func logDeparture(_ d: Departure, _ clues: [DepartClue], lines: [String: String]) {
+        let said: [DepartClue] = Array(clues.filter { $0.offBy != nil || $0.elsewhere }.prefix(4))
+        let line: String = DepartMatch.logLine(d, said, lines: lines, calendar: Self.pickCalendar)
+        if let l = departLogged, l.at == d.t, l.line == line { return }
+        departLogged = (d.t, line)
+        FieldLog.shared.add(.match, line)
+    }
+
+    /// Looking for the one you got on: `DepartMatch.bonus` off the one of those that passed that alone left your stop when
+    /// you did.
+    private func departBonuses(_ judged: [Judgement], tracks: [VehicleTrack]) -> [String: Double] {
+        guard let d = departureNow() else { return [:] }
+        let passed: Set<String> = Set(judged.filter { (j: Judgement) -> Bool in
+            if case .success = j.result { return true }
+            return false
+        }.map(\.id))
+        let clues: [DepartClue] = tracks.filter { passed.contains($0.tripId) }.map { DepartMatch.clue($0, at: d) }
+        guard !clues.isEmpty else { return [:] }
+        let lines: [String: String] = Dictionary(tracks.map { ($0.tripId, $0.line) }, uniquingKeysWith: { a, _ in a })
+        logDeparture(d, clues, lines: lines)
+        return DepartMatch.bonuses(clues, ids: clues.map(\.id))
+    }
+
+    /// While choosing: the one of `ids` that left the stop with you (`DepartMatch.pick`), by their tracks (with their
+    /// own GPS). Nil: no fresh moment, or it doesn't tell them apart.
+    private func departPick(_ tracks: [VehicleTrack], ids: [String], lines: [String: String], now: Date) -> String? {
+        guard ids.count > 1, let d = departureNow(now) else { return nil }
+        let clues: [DepartClue] = tracks.map { DepartMatch.clue($0, at: d) }
+        logDeparture(d, clues, lines: lines)
+        return DepartMatch.pick(clues, ids: ids)
+    }
+
+    /// While choosing between buses: the stopping pattern (`BusStops`). Every candidate's stop near your fixes of the
+    /// last 4 minutes, which of them call there (a stop within 60 m), wait there by their timetable, or drive past it
+    /// (their road within 40 m); what you did there, kept for the rest of the choice (standing wins). Seconds added to
+    /// each one's cost.
+    private func busPatternNudge(_ list: [Candidate], lines: [String: String]) -> [String: Double] {
+        let fixes: [Fix] = samples.map { Fix($0) }
+        guard fixes.count >= 3 else { return [:] }
+        var stops: [String: BusStops.Stop] = [:]
+        for c in list {
+            guard let t = c.trip else { continue }
+            for st in t.stops {
+                let p = GeoPoint(st.coordinate)
+                guard fixes.contains(where: { Geo.metres($0.p, p) <= 300 }) else { continue }
+                let k = Habits.key(st.name) + String(format: "|%.4f,%.4f", p.lat, p.lon)
+                if stops[k] == nil { stops[k] = BusStops.Stop(key: k, point: p) }
+            }
+        }
+        guard !stops.isEmpty else { return [:] }
+        for c in list {
+            guard let t = c.trip else { continue }
+            let id = c.vehicle.tripId
+            let path: [GeoPoint] = t.path.map { GeoPoint($0) }
+            for k in Array(stops.keys) {
+                guard var s = stops[k] else { continue }
+                let calls: [LiveTrip.Stop] = t.stops.filter { Geo.metres(GeoPoint($0.coordinate), s.point) <= BusStops.serves }
+                if !calls.isEmpty { s.served.insert(id) }
+                for x in calls {
+                    let a: Date? = x.scheduledArrival ?? x.arrival, dp: Date? = x.scheduledDeparture ?? x.departure
+                    if let a, let dp, dp.timeIntervalSince(a) >= BusStops.dwell { s.waits.insert(id) }
+                }
+                if path.count >= 2, let pr = Geo.project(s.point, on: path), pr.crossTrack <= BusStops.passes { s.passing.insert(id) }
+                stops[k] = s
+            }
+        }
+        for (k, s) in stops where busSeen[k] != .stood {
+            if let seen = BusStops.seen(fixes, at: s.point) { busSeen[k] = seen }
+        }
+        let ids: [String] = list.map(\.vehicle.tripId)
+        let against: [String: Int] = BusStops.against(Array(stops.values), seen: busSeen, ids: ids)
+        let pen: [String: Double] = BusStops.penalties(against, ids: ids)
+        if !pen.isEmpty {
+            let words: [String] = pen.keys.sorted().map { id in
+                "\(FieldFormat.label(id, lines)) +\(Int(pen[id] ?? 0)) s (\(against[id] ?? 0) against it)"
+            }
+            let line = "choose · bus stop pattern · " + words.joined(separator: ", ")
+            if line != busLogged { busLogged = line; FieldLog.shared.add(.match, line) }
+        }
+        return pen
+    }
+
+    /// While choosing: your usual line breaks a tie (`UsualLine.tieBreak`, held with hysteresis for the rest of the
+    /// choice while it stays close). Its slot: the moment you left, else the planned departure, else when choosing began.
+    private func usualChoice(_ list: [Candidate], judged: [Judgement], nudge: [String: Double], now: Date) -> String? {
+        let planned: Date? = route?.planned?[safe: index]?.departure
+        let at: Date = DepartMatch.usable(departure, now: now)?.t ?? planned ?? candSince ?? now
+        let cands: [(id: String, line: String, train: Bool)] = list.map { (id: $0.vehicle.tripId, line: $0.vehicle.line, train: $0.vehicle.isTrain) }
+        let u: String? = HabitStore.shared.usual(cands, at: at)
+        let costs: [UsualLine.Cand] = judged.compactMap { (j: Judgement) -> UsualLine.Cand? in
+            guard case .success(let c) = j.result else { return nil }
+            return UsualLine.Cand(id: j.id, cost: c + (nudge[j.id] ?? 0), byGPS: VehicleMatch.passedByGPS(j))
+        }
+        let was = usualHeld
+        usualHeld = UsualLine.tieBreak(costs, usual: u, held: was)
+        let names: [String: String] = Dictionary(list.map { ($0.vehicle.tripId, $0.vehicle.line) }, uniquingKeysWith: { a, _ in a })
+        if let h = usualHeld, h != was {
+            FieldLog.shared.add(.match, "choose · usual line · \(FieldFormat.label(h, names)) breaks the tie (\(Int(UsualLine.bonus)) s)")
+        } else if let w = was, usualHeld == nil {
+            FieldLog.shared.add(.match, "choose · usual line · lets go of \(FieldFormat.label(w, names))")
+        }
+        return usualHeld
+    }
+
+    /// Looking for the one you got on: of `list` (best first), your usual line here at this time when it fits about as
+    /// well as `best` (`UsualLine.tieBreak`; never over one that fits by its own GPS while it doesn't).
+    private func usualTie(_ list: [Match], best: Match) -> Match? {
+        guard list.count > 1 else { return nil }
+        let at: Date = DepartMatch.usable(departure, now: Date())?.t ?? Date()
+        let cands: [(id: String, line: String, train: Bool)] = list.map { (id: $0.vehicle.tripId, line: $0.vehicle.line, train: $0.vehicle.isTrain) }
+        guard let u = HabitStore.shared.usual(cands, at: at), u != best.vehicle.tripId,
+              let um = list.first(where: { $0.vehicle.tripId == u }) else { return nil }
+        let byGPS: Set<String> = Set(lastJudged.filter { VehicleMatch.passedByGPS($0) }.map(\.id))
+        let costs: [UsualLine.Cand] = list.map { UsualLine.Cand(id: $0.vehicle.tripId, cost: $0.score, byGPS: byGPS.contains($0.vehicle.tripId)) }
+        guard UsualLine.tieBreak(costs, usual: u, held: nil) == u else { return nil }
+        let names: [String: String] = [u: um.vehicle.line, best.vehicle.tripId: best.vehicle.line]
+        let gap = Int((um.score - best.score).rounded())
+        FieldLog.shared.add(.match, "detect · usual line · \(FieldFormat.label(u, names)) over \(FieldFormat.label(best.vehicle.tripId, names)) (\(gap) s apart)")
+        return um
+    }
+
+    /// 0.38: what you rode teaches your usual line (`UsualLine`): `weight` confirmed, said, or not this one; its slot the
+    /// planned departure (`at`, else the planned one's for this leg, else the moment you left, else when it left).
+    private func learnLine(_ v: Vehicle, weight: Int, at: Date? = nil) {
+        guard !demo, !v.line.isEmpty else { return }
+        let planned: Date? = route?.planned?[safe: index].flatMap { $0.tripId == v.tripId ? $0.departure : nil }
+        let when: Date = at ?? planned ?? DepartMatch.usable(departure, now: Date())?.t ?? legFrom ?? Date()
+        HabitStore.shared.rode(line: v.line, train: v.isTrain, at: when, weight: weight)
+        rideLog("usual line · \(Self.logLabel(v)) \(weight > 0 ? "+" : "")\(weight)")
+    }
+
     /// The notification's buttons for "IC to 's-Hertogenbosch or IC to Eindhoven?".
     nonisolated static func whichTrainButtons(_ titles: [String]) -> UNNotificationCategory {
         let a = UNNotificationAction(identifier: "TRAIN_A", title: titles.first ?? "The first one", options: [])
@@ -2277,9 +2446,11 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         whichTrainAsked = true
         whichTrain = [a, b]
         whichTrainTo = dest.filter { $0.key == a.tripId || $0.key == b.tripId }
-        let words = [a, b].map { TrainRules.answer(line: $0.line, to: dest[$0.tripId] ?? "") }
-        let title = TrainRules.askTitle((a.line, dest[a.tripId] ?? ""), (b.line, dest[b.tripId] ?? ""))
-        rideLog("which train · asked: " + title)
+        let train = a.isTrain
+        let same = a.line.lowercased() == b.line.lowercased()
+        let words = [a, b].map { AskSooner.answer(line: $0.line, to: dest[$0.tripId] ?? "", train: train, sameLine: same) }
+        let title = AskSooner.title((a.line, dest[a.tripId] ?? ""), (b.line, dest[b.tripId] ?? ""), train: train)
+        rideLog("which \(train ? "train" : "bus") · asked: " + title)
         guard UIApplication.shared.applicationState != .active else { return }
         let center = UNUserNotificationCenter.current()
         center.getNotificationCategories { cats in
@@ -2288,7 +2459,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             center.setNotificationCategories(all)
             let c = UNMutableNotificationContent()
             c.title = title
-            c.body = "Two trains run on the same track here. Which one are you on? Then it wakes you at the right stop."
+            c.body = AskSooner.body(train: train)
             c.sound = .default
             c.categoryIdentifier = TripManager.whichTrainCategory
             c.userInfo = ["kind": "info"]
@@ -2302,8 +2473,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         guard let v = whichTrain.first(where: { $0.tripId == tripId }) else { return }
         whichTrain = []; whichTrainTo = [:]
         UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [Self.whichTrainId])
-        rideLog("which train · " + Self.logLabel(v) + (fromNotification ? " (notification)" : " (ride screen)"))
-        let row = RidePick.Row(tripId: v.tripId, line: v.line, isTrain: true, metres: nil, byGPS: false, moves: true,
+        rideLog("which \(v.isTrain ? "train" : "bus") · " + Self.logLabel(v) + (fromNotification ? " (notification)" : " (ride screen)"))
+        let row = RidePick.Row(tripId: v.tripId, line: v.line, isTrain: v.isTrain, metres: nil, byGPS: false, moves: true,
                                current: v.tripId == vehicle?.tripId, candidate: true)
         guard let p = await previewHandPick(row) else { return }
         await applyHandPick(p)
@@ -2834,6 +3005,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         choosing = list
         candSince = Date(); candLead = nil; candSwitch = SwitchState(); candMisses = [:]; candGPS.restart()
         whichTrainAsked = false; trainSeen = [:]
+        busSeen = [:]; busLogged = ""; usualHeld = nil; candLeftAt = departureNow()?.t
         candCheckAt = Date().addingTimeInterval(8)
         applyGPS()                                            // (choosing: the best GPS, at once)
     }
@@ -2930,10 +3102,17 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         let mine = kept.first { $0.vehicle.tripId == shown }
         let road = mine?.trip.flatMap { $0.path.count >= 2 ? Self.metres(from: last.coordinate, to: $0.path) : nil }
         let away = VehicleMatch.offRoad(road, isTrain: mine?.vehicle.isTrain ?? false)
-        let c = VehicleMatch.choose(kept.map(\.vehicle.tripId), judged: judged, shown: shown, shownOffRoad: away,
-                                    choosingFor: candSince.map { now.timeIntervalSince($0) } ?? 0,
-                                    misses: &candMisses, state: &candSwitch, gps: &candGPS, now: now)
         let lines = Dictionary(kept.map { ($0.vehicle.tripId, $0.vehicle.line) }, uniquingKeysWith: { a, _ in a })
+        // 0.38: the one that left the stop with you (`DepartMatch`), the bus stopping pattern (`BusStops`) and your usual
+        // line (`UsualLine`, a tie-breaker)
+        let keptIds: [String] = kept.map(\.vehicle.tripId)
+        let keptTracks: [VehicleTrack] = tracks.filter { t in keptIds.contains(t.tripId) }
+        let departed: String? = departPick(keptTracks, ids: keptIds, lines: lines, now: now)
+        var nudge: [String: Double] = kept.allSatisfy({ !$0.vehicle.isTrain }) ? busPatternNudge(kept, lines: lines) : [:]
+        if let u = usualChoice(kept, judged: judged, nudge: nudge, now: now) { nudge[u, default: 0] -= UsualLine.bonus }
+        let choosingFor: TimeInterval = candSince.map { now.timeIntervalSince($0) } ?? 0
+        let c = VehicleMatch.choose(keptIds, judged: judged, shown: shown, shownOffRoad: away, choosingFor: choosingFor,
+                                    misses: &candMisses, state: &candSwitch, gps: &candGPS, now: now, nudge: nudge, departed: departed)
         var note = ""
         if away, VehicleMatch.verdict(judged.first(where: { $0.id == shown })?.result, offRoad: false) == .notSure { note += " · off its road" }
         switch c.why {
@@ -2941,6 +3120,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         case .timedOut?: note += " · 12 minutes"
         case .byGPS?: note += " · by its GPS"
         case .split?: note += " · roads split"
+        case .departed?: note += " · left the stop with you"
         case .decided?, nil: break
         }
         FieldLog.shared.add(.match, FieldFormat.match("choose", judged, outcome: FieldFormat.outcome(c, shown: shown, lines: lines) + note,
@@ -2948,12 +3128,19 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         if c.why == .timedOut { candTimedOut = TimedOut(ids: Set(c.alive), at: now) }
         cands = kept.filter { c.alive.contains($0.vehicle.tripId) }
         choosing = cands.map(\.vehicle)
-        // 0.34: two trains still tied after 2 minutes that go different ways: ask once which one
-        if c.settle == nil, whichTrain.isEmpty, kept.allSatisfy({ $0.vehicle.isTrain }) {
+        // 0.34: two trains still tied that go different ways: ask once which one. 0.38: buses too ("305 or 306?"), a
+        // minute after you left the stop (`AskSooner`; 3 minutes while your usual line breaks the tie)
+        let sameKind: Bool = kept.allSatisfy({ $0.vehicle.isTrain }) || kept.allSatisfy({ !$0.vehicle.isTrain })
+        if c.settle == nil, whichTrain.isEmpty, sameKind {
             let dest = Dictionary(kept.compactMap { x in x.trip.map { (x.vehicle.tripId, Fmt.place($0.headsign)) } }, uniquingKeysWith: { a, _ in a })
-            if let pair = TrainRules.ask(alive: c.alive, choosingFor: candSince.map { now.timeIntervalSince($0) } ?? 0, trains: true,
-                                         destinations: dest, asked: whichTrainAsked),
-               let a = kept.first(where: { $0.vehicle.tripId == pair.0 })?.vehicle, let b = kept.first(where: { $0.vehicle.tripId == pair.1 })?.vehicle {
+            let ago: TimeInterval? = candLeftAt.map { now.timeIntervalSince($0) }
+            let movingFor: TimeInterval = min(ago ?? .infinity, choosingFor + VehicleMatch.minSpan)
+            if AskSooner.due(alive: c.alive, movingFor: movingFor, asked: whichTrainAsked, tieBroken: usualHeld != nil),
+               let a = kept.first(where: { $0.vehicle.tripId == c.alive[0] })?.vehicle,
+               let b = kept.first(where: { $0.vehicle.tripId == c.alive[1] })?.vehicle,
+               AskSooner.worthAsking(lines: (a.line, b.line), destinations: (dest[a.tripId] ?? "", dest[b.tripId] ?? "")) {
+                FieldLog.shared.add(.match, "ask · still tied \(Int(movingFor.rounded())) s after leaving · "
+                                    + FieldFormat.label(a.tripId, lines) + " or " + FieldFormat.label(b.tripId, lines))
                 askWhichTrain(a, b, to: dest)
             }
         }

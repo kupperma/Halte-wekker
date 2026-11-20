@@ -168,20 +168,24 @@ struct RidePickButton: View {
 
 /// "Still on bus 306?" (0.20.5): the one you picked has been off its road for 3 minutes. Yes, or pick again.
 /// 0.34: two trains on the same track still tied after 2 minutes, going different ways: which one are you on?
+/// 0.38: buses too ("305 or 306?"), and a minute after you left the stop (`AskSooner`).
 struct WhichTrainCard: View {
     @EnvironmentObject var trip: TripManager
     let trains: [Vehicle]
     let to: [String: String]
     var body: some View {
         let a = trains[0], b = trains[1]
+        let train: Bool = a.isTrain
+        let same: Bool = a.line.lowercased() == b.line.lowercased()
+        let title: String = AskSooner.title((a.line, to[a.tripId] ?? ""), (b.line, to[b.tripId] ?? ""), train: train)
         VStack(alignment: .leading, spacing: DS.s12) {
-            Label(TrainRules.askTitle((a.line, to[a.tripId] ?? ""), (b.line, to[b.tripId] ?? "")), systemImage: "questionmark.circle.fill")
+            Label(title, systemImage: "questionmark.circle.fill")
                 .font(DS.headline).foregroundStyle(DS.text)
-            Text("Two trains run on the same track here. Which one are you on? Then it wakes you at the right stop.")
+            Text(AskSooner.body(train: train))
                 .font(DS.sub).foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
             HStack(spacing: DS.s8) {
                 ForEach(trains, id: \.tripId) { v in
-                    DSQuietButton(title: TrainRules.answer(line: v.line, to: to[v.tripId] ?? ""), full: true) {
+                    DSQuietButton(title: AskSooner.answer(line: v.line, to: to[v.tripId] ?? "", train: train, sameLine: same), full: true) {
                         Task { await trip.answerWhichTrain(v.tripId) }
                     }
                 }

@@ -11,8 +11,15 @@ struct HabitBook: Codable, Equatable, Sendable {
     var boardedAt: [String: Int] = [:]      // stop (`Habits.key`) → rides you got on there
     var plannedAt: [String: Int] = [:]      // stop → trips you started whose first ride was planned from there
     var names: [String: String] = [:]       // stop key → its name as shown
+    var lines: [LineRide] = []              // 0.38: the lines you rode, by time of day and kind of day (`UsualLine`)
 
-    var isEmpty: Bool { walks.isEmpty && changes.isEmpty && boardedAt.isEmpty && plannedAt.isEmpty }
+    var isEmpty: Bool { walks.isEmpty && changes.isEmpty && boardedAt.isEmpty && plannedAt.isEmpty && lines.isEmpty }
+
+    /// 0.38: a ride on `line` (its planned departure at `minute` of the day): confirmed (`UsualLine.confirmed`), the one
+    /// you said you're on (`said`), or the one you said you're not on (`notThis`).
+    mutating func rode(_ line: String, train: Bool, minute: Int, weekend: Bool, weight: Int) {
+        lines = UsualLine.add(LineRide(line: line, train: train, minute: minute, weekend: weekend, weight: weight), to: lines)
+    }
 
     mutating func addWalk(_ speed: Double) {
         guard speed.isFinite, speed >= Habits.walkMin, speed <= Habits.walkMax else { return }
@@ -50,6 +57,19 @@ struct HabitBook: Codable, Equatable, Sendable {
         }
         let used = Set(boardedAt.keys).union(plannedAt.keys)
         names = names.filter { used.contains($0.key) }
+    }
+}
+
+extension HabitBook {
+    /// A book saved before 0.38 has no `lines`: it reads as none (not as no book at all).
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        walks = try c.decodeIfPresent([Double].self, forKey: .walks) ?? []
+        changes = try c.decodeIfPresent([Double].self, forKey: .changes) ?? []
+        boardedAt = try c.decodeIfPresent([String: Int].self, forKey: .boardedAt) ?? [:]
+        plannedAt = try c.decodeIfPresent([String: Int].self, forKey: .plannedAt) ?? [:]
+        names = try c.decodeIfPresent([String: String].self, forKey: .names) ?? [:]
+        lines = try c.decodeIfPresent([LineRide].self, forKey: .lines) ?? []
     }
 }
 
@@ -146,9 +166,11 @@ enum Habits {
         let walk = walkSpeed(b).map { String(format: "%.1f km/h", $0 * 3.6) } ?? "not yet"
         let change = changeMinutes(b).map { "\(Int($0)) min" } ?? "not yet"
         let stops = preferredStops(b)
+        let usual = UsualLine.words(b.lines)
         return [Row(label: "Walking speed", value: walk),
                 Row(label: "Time you need to change", value: change),
-                Row(label: "Stops you prefer", value: stops.isEmpty ? "none yet" : stops.prefix(3).joined(separator: ", "))]
+                Row(label: "Stops you prefer", value: stops.isEmpty ? "none yet" : stops.prefix(3).joined(separator: ", ")),
+                Row(label: "Your usual lines", value: usual.isEmpty ? "none yet" : usual.joined(separator: ", "))]
     }
 
     private static func median(_ xs: [Double]) -> Double? {
