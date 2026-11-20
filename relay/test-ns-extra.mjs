@@ -83,6 +83,35 @@ async function local() {
   assert.equal(j.source, "trips");
   assert.equal(j.fares[0].priceInCents, 600);
   assert.equal(j.productFare.priceInCents, 600);
+  // ovfiets: the Places API's v2 ovfiets, slimmed; else v2 places
+  assert.equal((await go("/ns/ovfiets")).status, 400);
+  assert.equal((await go("/ns/ovfiets?station=b1")).status, 400);
+  assert.equal((await go("/ns/ovfiets?station=BD&x=1")).status, 400);
+  assert.equal((await go("/ns/ovfiets?station=BD", {})).status, 501);
+  answers["https://gateway.apiportal.ns.nl/places-api/v2/ovfiets"] = { status: 200, body: JSON.stringify({
+    links: { self: { uri: "x" } },
+    payload: [{ type: "ovfiets", name: "OV-fiets", locations: [
+      { name: "Breda", stationCode: "BD", lat: 51.595, lng: 4.78, open: "Yes", extra: { locationCode: "bd001", rentalBikes: "12", fetchTime: "1" }, openingHours: [] },
+      { name: "Breda Achterzijde", stationCode: "BD", lat: 51.596, lng: 4.781, extra: { locationCode: "bd002" } },
+      { name: "Elsewhere", stationCode: "UT", lat: 52, lng: 5, extra: { locationCode: "ut001", rentalBikes: 99 } },
+    ] }],
+  }) };
+  r = await go("/ns/ovfiets?station=bd");
+  assert.equal(r.status, 200);
+  assert.equal(asked.at(-1).u, "https://gateway.apiportal.ns.nl/places-api/v2/ovfiets?station_code=BD");
+  assert.equal(r.headers.get("Cache-Control"), "max-age=300");
+  const ov = await r.json();
+  assert.equal(ov.station, "BD");
+  assert.deepEqual(ov.locations.map((x) => [x.code, x.bikes]), [["bd001", 12], ["bd002", null]]);
+  assert.equal(ov.locations[0].lon, 4.78);
+  r = await go("/ns/ovfiets?station=BD&raw=1");
+  assert.ok((await r.text()).includes("fetchTime"));
+  delete answers["https://gateway.apiportal.ns.nl/places-api/v2/ovfiets"];
+  answers["https://gateway.apiportal.ns.nl/places-api/v2/places"] = { status: 200, body: '{"payload":[]}' };
+  r = await go("/ns/ovfiets?station=BD");
+  assert.equal(r.status, 200);
+  assert.deepEqual(await r.json(), { station: "BD", locations: [] });
+  assert.equal(asked.at(-1).u, "https://gateway.apiportal.ns.nl/places-api/v2/places?type=ovfiets&station_code=BD");
   // NS down
   const boom = async () => { throw new Error("down"); };
   assert.equal((await nsExtra(new URL("https://relay.test/ns/disruptions"), env, cors, boom)).status, 502);
@@ -109,6 +138,9 @@ async function live(base) {
   const p = await get("/ns/price?from=TB&to=BD");
   console.log("/ns/price", p.status, p.text.slice(0, 300).replace(/\s+/g, " "));
   assert.equal(p.status, 200);
+  const o = await get("/ns/ovfiets?station=BD");
+  console.log("/ns/ovfiets?station=BD", o.status, o.text.slice(0, 300).replace(/\s+/g, " "));
+  assert.equal(o.status, 200);
   console.log("live: ok");
 }
 

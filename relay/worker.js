@@ -14,6 +14,7 @@
 //    the phone with a key the relay never sees (/live/v1/put, /live/v1/end, /live/v1/get; see live.js).
 // 9. (0.36) NS disruptions and planned works: /ns/disruptions[?station=BD]; what a journey costs: /ns/price?from=TB&to=BD
 //    (see ns-extra.js).
+// 10. (0.37) How many OV-fiets are left at a station: /ns/ovfiets?station=BD (see ns-extra.js).
 import { DurableObject } from "cloudflare:workers";
 import { friends, FriendsCore } from "./friends.js";
 import { logs, LogsCore } from "./logs.js";
@@ -65,7 +66,7 @@ export default {
     // The key may be saved as NS_KEY or NS-KEY.
     const NS_KEY = env.NS_KEY || env["NS-KEY"];
 
-    if (url.pathname === "/ns/disruptions" || url.pathname === "/ns/price") {
+    if (url.pathname === "/ns/disruptions" || url.pathname === "/ns/price" || url.pathname === "/ns/ovfiets") {
       const r = await nsExtra(url, env, cors);
       if (r) return r;
     }

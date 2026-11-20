@@ -10,6 +10,10 @@
 //                                           answers, the fares NS puts on its first trip for that journey, as
 //                                           {"source":"trips","fares":[…],"productFare":{…}} (the same fare objects:
 //                                           priceInCents, travelClass, discountType).
+//  /ns/ovfiets?station=BD[&raw=1]          (0.37) How many OV-fiets (NS rental bikes) are left at a station: NS's
+//                                           Places API (v2 ovfiets, then v2 places of type ovfiets), slimmed to
+//                                           {"station":"BD","locations":[{"name","code","bikes","lat","lon","open"}]}
+//                                           (bikes: null when NS doesn't say). raw=1 passes NS's answer on as it is.
 // Nothing about where you are is sent: station codes only. Returns null for any other path.
 
 const GW = "https://gateway.apiportal.ns.nl";
@@ -50,6 +54,42 @@ export function slimDisruptions(list, codes) {
     });
   }
   return out;
+}
+
+const toNum = (v) => {
+  const n = typeof v === "number" ? v : typeof v === "string" && v.trim() !== "" ? Number(v) : NaN;
+  return Number.isFinite(n) ? n : null;
+};
+
+/** The OV-fiets places in NS's Places answer (any depth: `payload[].locations[]`), each with how many bikes are left. */
+export function slimOvfiets(answer, station) {
+  const out = [];
+  const seen = new Set();
+  const walk = (x, depth) => {
+    if (!x || typeof x !== "object" || depth > 6) return;
+    if (Array.isArray(x)) { for (const y of x) walk(y, depth + 1); return; }
+    const extra = x.extra && typeof x.extra === "object" ? x.extra : {};
+    const has = "rentalBikes" in extra || "rentalBikes" in x;
+    const lat = toNum(x.lat), lon = toNum(x.lng ?? x.lon);
+    if (has || (lat !== null && lon !== null && typeof x.name === "string" && (x.stationCode || extra.locationCode))) {
+      const code = String(extra.locationCode || x.locationCode || x.id || x.name || "");
+      if (!seen.has(code)) {
+        seen.add(code);
+        const sc = typeof x.stationCode === "string" ? x.stationCode.toUpperCase() : null;
+        if (!sc || sc === station) {
+          out.push({
+            name: typeof x.name === "string" ? x.name : "", code,
+            bikes: toNum(extra.rentalBikes ?? x.rentalBikes), lat, lon,
+            open: typeof x.open === "string" ? x.open : null,
+          });
+        }
+      }
+      return;
+    }
+    for (const k of Object.keys(x)) if (k !== "links") walk(x[k], depth + 1);
+  };
+  walk(answer, 0);
+  return { station, locations: out };
 }
 
 export async function nsExtra(url, env, cors, fetchImpl = fetch) {
@@ -101,6 +141,35 @@ export async function nsExtra(url, env, cors, fetchImpl = fetch) {
       const trip = ((d && d.trips) || []).find((x) => x && (x.productFare || x.fares)) || null;
       if (!trip) return json(JSON.stringify({ source: "trips", fares: [] }), 200, cors, 600);
       return json(JSON.stringify({ source: "trips", fares: trip.fares || [], productFare: trip.productFare || null }), 200, cors, 3600);
+    } catch (e) {
+      return new Response("NS didn't answer", { status: 502, headers: cors });
+    }
+  }
+
+  if (url.pathname === "/ns/ovfiets") {
+    const station = (url.searchParams.get("station") || "").toUpperCase();
+    const raw = url.searchParams.get("raw") === "1";
+    for (const k of url.searchParams.keys()) if (k !== "station" && k !== "raw") return new Response("Bad request", { status: 400, headers: cors });
+    if (!STATION.test(station)) return new Response("Bad request", { status: 400, headers: cors });
+    if (!NS_KEY) return new Response("No NS key set", { status: 501, headers: cors });
+    try {
+      let last = null;
+      for (const path of [`/places-api/v2/ovfiets?station_code=${station}`, `/places-api/v2/places?type=ovfiets&station_code=${station}`]) {
+        const r = await fetchImpl(GW + path, { headers });
+        if (r.status === 200) {
+          const text = await r.text();
+          if (raw) return json(text, 200, cors, 300);
+          let d = null;
+          try { d = JSON.parse(text); } catch (e) { d = null; }
+          const slim = slimOvfiets(d, station);
+          if (slim.locations.length > 0 || path.includes("/places?")) return json(JSON.stringify(slim), 200, cors, 300);
+          last = { status: 200, text: JSON.stringify(slim) };
+          continue;
+        }
+        if (r.status === 401 || r.status === 403 || r.status === 429) return json(await r.text(), r.status, cors, 60);
+        last = { status: r.status, text: await r.text() };
+      }
+      return json(last.text, last.status, cors, 60);
     } catch (e) {
       return new Response("NS didn't answer", { status: 502, headers: cors });
     }
