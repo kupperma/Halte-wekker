@@ -253,6 +253,22 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     private var reckonFrom: (metres: Double, at: Date)?   // where along the leg's route it reckons from
     /// The ride's place is reckoned along its route now (no good GPS: a tunnel, a dead zone).
     @Published private(set) var reckoning = false
+    // 0.39: smoother rides
+    /// The change ahead (`ChangeGuide`): platforms, the walk, the minutes; that you'll miss it and what instead.
+    @Published private(set) var changeGuide: ChangeGuide.Guide?
+    /// Switching the rest of the trip onto the next one you make (the change guide's button).
+    @Published private(set) var switchingChange = false
+    /// The platform you get in at on this ride, and how late it is there (minutes), by its live times.
+    @Published private(set) var arrivePlatform: String?
+    @Published private(set) var legDelay: Int?
+    /// No answer from the network: the ride goes on from the stops and times saved when it started (`RideCache`).
+    @Published private(set) var offline = false
+    @Published private(set) var usingSaved = false
+    private var nextOptions: [Ride] = []                  // the next leg's rides after this one gets in (`refreshEta`)
+    private var readyTold = false                         // "Get ready" one stop before yours, told for this leg
+    /// The ring before your stop, for the adaptive wake-up (`AdaptiveWake`): when, which mode, when you stopped it.
+    private var ringNote: (at: Date, train: Bool, stopped: Date?)?
+    private var plannedNextAt = Date.distantPast           // the next leg's planned ride last asked (its live time, platform)
     // 0.34: what it learns from your rides (`HabitStore`)
     private var changeArrived: (at: Date, fromLine: String)?   // at a change: when you got off, and off what
     private var changeToRecord = false                    // the next leg's change outcome isn't noted yet
@@ -278,10 +294,13 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     func km(for l: Leg) -> Double { kmMem["\(l.mode.rawValue):\(l.to.key)"] ?? (l.mode == .bus ? busKm : trainKm) }
     /// This leg is by train (the one you're on, else the plan).
     private var legIsTrain: Bool { vehicle?.isTrain ?? (leg?.mode == .train) }
+    /// The wake settings the rules go by (0.39): yours, a little earlier where the adaptive wake-up learned that
+    /// (`AdaptiveWake`: only ever earlier, never later than you set it).
+    var effectiveWake: WakeSettings { AdaptiveWakeStore.shared.effective(wake) }
     /// The wake distance the far GPS tier and its backstop keep clear of: by time, the time rule's reach (0.33).
-    private var gpsWakeMetres: Double { WakeRule.gpsWakeMetres(wakeMetres: wakeKm * 1000, wake, isTrain: legIsTrain) }
+    private var gpsWakeMetres: Double { WakeRule.gpsWakeMetres(wakeMetres: wakeKm * 1000, effectiveWake, isTrain: legIsTrain) }
     /// What the notifications say it rings: "3 min before your stop (or 5 km)", "2 km before your stop".
-    var wakeWords: String { WakeRule.says(wake, isTrain: legIsTrain, wakeMetres: wakeKm * 1000) }
+    var wakeWords: String { WakeRule.says(effectiveWake, isTrain: legIsTrain, wakeMetres: wakeKm * 1000) }
     var here: CLLocationCoordinate2D? { location.location?.coordinate }
     /// Your last GPS fix.
     var lastFix: CLLocation? { samples.last ?? location.location }
@@ -437,6 +456,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         updateWatching()
         // a trip doesn't outlive the app: whatever is still on the lock screen from before is stale
         Self.endLeftoverActivities()
+        RideCacheStore.shared.clear()                     // (0.39) and so is a saved copy of its rides
     }
 
     // MARK: trip flow
@@ -474,6 +494,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         if onIt, v == nil { heldPick = r.planned?[safe: index]?.tripId }
         if let v { beginChoosing([v] + couldBe) }
         startActivity()
+        saveRidesAhead()                                  // (0.39) the trip's rides on the phone, for stretches without signal
     }
 
     private func beginLeg(vehicle v: Vehicle? = nil, stops: [TripStop]? = nil, how: String = "hand") {
@@ -499,6 +520,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         smoother = SpeedSmoother(); lastSpeedFix = nil; wakeLive = nil; wakeRoute = []
         whichTrain = []; whichTrainTo = [:]; whichTrainAsked = false; trainSeen = [:]; rivalLookAt = Date().addingTimeInterval(60)
         lastGood = nil; reckonFrom = nil; reckoning = false
+        readyTold = false; ringNote = nil; arrivePlatform = nil; legDelay = nil; changeGuide = nil; nextOptions = []; usingSaved = false
         if index > 0, !demo, let a = changeArrived, let l = leg { noteChangeWalk(arrived: a.at, at: l.from) }
         changeToRecord = index > 0 && changeArrived != nil
         Motion.shared.live(!demo, for: "trip")
@@ -568,12 +590,16 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         cancelAgain()
         UNUserNotificationCenter.current().removeAllDeliveredNotifications()
         guard case .alarm(let approach) = phase else { return }
+        if approach, var n = ringNote, n.stopped == nil { n.stopped = Date(); ringNote = n }   // (0.39) how soon you reacted
         if approach && (ringAtStop || forceArrival) { phase = .awake; pushActivity(force: true); WatchStore.shared.showNext() } else { legDone(why: "alarm stopped") }
     }
 
     /// You're at the end of a leg (by GPS, by the alarm, or "I'm off"); `why`, for the field log.
     func legDone(why: String = "by hand") {
         rideLog(FieldFormat.rideArrive(why: why, metres: distance, accuracy: accuracy, legAge: Date().timeIntervalSince(legStart), started: legStartMetres))
+        // (0.39) at your stop (by GPS, or you said you're off): how much time the ring before it left you
+        if ["by GPS", "by GPS, quietly", "by hand"].contains(why) { noteWakeOutcome(arrivedRinging: false) }
+        ringNote = nil
         let gotOff = vehicle?.tripId
         if !demo, TravelNotes.shared.checkOut { remindCheckOut(gotOff: gotOff) }     // (0.36)
         let rideId: String? = demo ? nil : leg.flatMap { l in tripStart.flatMap { keepRide(l, tripStart: $0) } }
@@ -601,6 +627,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             // you just got off (unless the next leg was planned with it too).
             let exclude = gotOff.flatMap { id in route?.planned?[safe: index + 1]?.tripId == id ? nil : id }
             vehicle = nil; pickedByHand = false; startDetecting(forNextLeg: true, excluding: exclude)
+            updateChangeGuide()                           // (0.39) the platforms, the walk, the minutes to the next one
             Task { await loadUpcoming(force: true) }
         } else {
             phase = .finished
@@ -798,6 +825,9 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         handLock = nil; stillOnAsk = nil; pickAgain = false; headsignOf = [:]
         smoother = SpeedSmoother(); lastSpeedFix = nil; wakeLive = nil; wakeRoute = []; waitLowOn = false
         stopReckon(); whichTrain = []; whichTrainTo = [:]; changeArrived = nil; changeToRecord = false
+        changeGuide = nil; switchingChange = false; arrivePlatform = nil; legDelay = nil; nextOptions = []; readyTold = false; ringNote = nil
+        offline = false; usingSaved = false; plannedNextAt = .distantPast
+        RideCacheStore.shared.clear()                     // (0.39) the saved copy of the trip's rides goes with it
         UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [Self.whichTrainId])
         Motion.shared.live(false, for: "trip")
         let a = activity, e = endedActivity; activity = nil; endedActivity = nil
@@ -928,7 +958,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         if phase == .transfer, let n = legs[safe: index + 1], let f = lastFix {
             let d = f.distance(from: CLLocation(latitude: n.to.coordinate.latitude, longitude: n.to.coordinate.longitude))
             return MotionRules.waitLow(waiting: true, motion: Motion.shared.now(), movingByFixes: fixesMove, metresToStop: d,
-                                       wakeMetres: WakeRule.gpsWakeMetres(wakeMetres: km(for: n) * 1000, wake, isTrain: n.mode == .train))
+                                       wakeMetres: WakeRule.gpsWakeMetres(wakeMetres: km(for: n) * 1000, effectiveWake, isTrain: n.mode == .train))
         }
         return MotionRules.waitLow(waiting: waitingToBoard && detectTask != nil, motion: Motion.shared.now(), movingByFixes: fixesMove,
                                    metresToStop: metresToLegStop, wakeMetres: gpsWakeMetres)
@@ -1134,7 +1164,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         if tick { lastNetTick = now; onNetTick?() }
         if phase == .transfer {
             transferAnchor = TransferPolicy.update(transferAnchor, with: Fix(loc))     // (standing at the change: for the hour's end)
-            if tick { Task { await loadUpcoming() } }
+            if tick { Task { await loadUpcoming() }; updateChangeGuide(); pushActivity(force: false) }
         }
         // Fastest trip: rough GPS while you stand with long to go, the best as soon as you move (`GoGPS`)
         if phase == .idle, going { applyGPS() }
@@ -1190,8 +1220,12 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             } else { ring(approach: true, why: WakeRule.log(fire), fire: fire) }
         } else if phase == .awake && d <= arriveM && loc.horizontalAccuracy <= 600 {
             if ringAtStop || forceArrival { arrive() } else { legDone(why: "by GPS, quietly") }
+        } else if case .alarm(approach: true) = phase, d <= arriveM, loc.horizontalAccuracy <= 600 {
+            noteWakeOutcome(arrivedRinging: true)         // (0.39) there before you stopped it: next time a little earlier
         }
+        if phase == .sleeping { checkGetReady() }         // (0.39) "Get ready" one stop before yours
         applyGPS()                                        // (far from the stop, or the best again: `RideGPS`)
+        if tick { noteNetwork(); refreshPlannedNext(); updateChangeGuide() }
         if tick { refreshEta(force: false) }
         pushActivity(force: false)
         if tick, now.timeIntervalSince(lastWatchCheck) >= 59 { lastWatchCheck = now; Task { await WatchStore.shared.check() } }
@@ -1209,6 +1243,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     private func wakeFire(_ loc: CLLocation, metres d: Double) -> WakeRule.Fire? {
         let train = legIsTrain
         let w = wakeKm * 1000
+        let wake = effectiveWake                          // (0.39: a little earlier where it learned that)
         // (further than the time rule ever rings from: only the distance rule could, and it doesn't)
         if d > w, wake.by == .distance || d > WakeRule.reach(isTrain: train, minutes: wake.minutes(isTrain: train)) { return nil }
         let now = Date()
@@ -1285,6 +1320,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             return
         }
         phase = .alarm(approach: approach)
+        if approach, !demo { ringNote = (Date(), legIsTrain, nil) }      // (0.39) for the adaptive wake-up
         sound.ring(announcement: announcement(approach: approach))
         tripNotice(c, .alarm, category: WristNotice.alarmCategory)
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: WristNotice.alarmId, content: c, trigger: nil))
@@ -1867,8 +1903,10 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         if let meters { matchMeters = Int(meters) }
         if v.isTrain { WatchStore.shared.boarded(num: upcoming.first(where: { $0.trip.first.tripId == v.tripId })?.trip.first.num ?? "") }
         else { LineWatchStore.shared.boarded(line: v.line) }
-        let stops: [TripStop]
+        var stops: [TripStop]
         if let known { stops = known } else { stops = await Transit.tripStops(v.tripId) }
+        // (0.39) no answer: the copy saved when the trip started (`RideCache`)
+        if stops.isEmpty, !demo { stops = RideCacheStore.shared.tripStops(v.tripId, trip: tripStart); if !stops.isEmpty { noteNoAnswer() } }
         if index == 0, let r = route, r.isFixed {
             let names = stops.map { $0.name.lowercased() }
             func goes(_ p: Place) -> Bool { names.contains { $0.contains(p == .denBosch ? "hertogenbosch" : "eindhoven") } }
@@ -1881,6 +1919,16 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         noteBoarding(v, stops: stops)
         stayOnIfItGoes(stops)
         applyStops(stops)
+        if !demo {
+            // (0.39) its road, platforms and delay; saved on the phone for the stretches without signal
+            if let c = await Transit.cachedLiveTrip(v.tripId), vehicle == v {
+                noteRideDetails(c.trip)
+                RideCacheStore.shared.save(c.trip, tripId: v.tripId, at: c.at, trip: tripStart, force: true)
+                if wakeRoute.isEmpty { noteWakeTrip(c.trip, at: c.at) }
+            } else if vehicle == v {
+                useSaved(v)
+            }
+        }
         refreshEta(force: true)
         pushActivity(force: true)
     }
@@ -2483,6 +2531,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         if tick { lastNetTick = now; onNetTick?() }
         if tick, now.timeIntervalSince(lastVehicleRefresh) >= RideTick.vehicleEvery - 1 { lastVehicleRefresh = now; Task { await refreshVehicle() } }
         if phase == .sleeping, now.timeIntervalSince(legStart) >= 20 {
+            let wake = effectiveWake
             let input = WakeRule.Input(by: wake.by, minutes: wake.minutes(isTrain: train), isTrain: train, metres: d,
                                        routeMetres: max(0, end - e.metres), wakeMetres: wakeKm * 1000,
                                        liveArrival: wakeLive?.arrival, liveAge: wakeLive.map { now.timeIntervalSince($0.at) },
@@ -2493,8 +2542,248 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
                 return
             }
         }
-        if tick { refreshEta(force: false) }
+        if phase == .sleeping { checkGetReady() }
+        if tick { noteNetwork(); updateChangeGuide(); refreshEta(force: false) }
         pushActivity(force: false)
+    }
+
+    // MARK: smoother rides (0.39)
+
+    /// The network said so, or a ride's answer didn't come: `offline` (the ride goes on from its saved copy). Back
+    /// online after it was gone: ask again at once.
+    private var netDown = false
+    private var noAnswer = false
+    private func setOffline() {
+        let o = netDown || noAnswer
+        if o != offline { offline = o }
+    }
+
+    private func noteNetwork() {
+        let on = Net.online
+        if RideCache.backOnline(wasOffline: netDown, online: on) {
+            netDown = false
+            rideLog("network · back: asking again", once: "net-back", every: 60)
+            lastVehicleRefresh = Date()
+            Task { await refreshVehicle() }
+            refreshEta(force: true)
+            refreshPlannedNext(force: true)
+        } else if !on, !netDown {
+            netDown = true
+            rideLog("network · gone: the ride goes by its saved stops and times", once: "net-gone", every: 60)
+        }
+        setOffline()
+    }
+
+    private func noteAnswer() {
+        noAnswer = false
+        if usingSaved { usingSaved = false }
+        setOffline()
+    }
+
+    private func noteNoAnswer() {
+        noAnswer = true
+        setOffline()
+    }
+
+    /// No answer for the ride: its stops, times, platform and road from the copy saved on the phone (`RideCache`), where
+    /// the ride doesn't have them already. The ride screen, the wake rules and the following without GPS go on by it.
+    private func useSaved(_ v: Vehicle) {
+        guard !demo, let c = RideCacheStore.shared.liveTrip(v.tripId, trip: tripStart) else { return }
+        if vehicleStops.isEmpty || legTo == nil { applyStops(RideCacheStore.shared.tripStops(v.tripId, trip: tripStart)) }
+        if wakeRoute.isEmpty { noteWakeTrip(c.trip, at: c.at) }
+        if arrivePlatform == nil { noteRideDetails(c.trip) }
+        if !usingSaved {
+            usingSaved = true
+            rideLog("saved · no answer: going by the copy saved at \(Fmt.hhmm(c.at))", once: "saved|\(v.tripId)", every: 300)
+        }
+        updateChangeGuide()
+        pushActivity(force: false)
+    }
+
+    /// The ride's own answer: the platform you get in at, and how late it is at your stop.
+    private func noteRideDetails(_ t: LiveTrip) {
+        guard let l = leg, t.stops.count >= 2 else { return }
+        let mine = GeoPoint(l.to.coordinate)
+        func d(_ i: Int) -> Double { Geo.metres(GeoPoint(t.stops[i].coordinate), mine) }
+        guard let i = t.stops.indices.min(by: { d($0) < d($1) }), d(i) < RideCache.near else { return }
+        let s = t.stops[i]
+        let track: String? = s.track?.trimmingCharacters(in: .whitespaces)
+        arrivePlatform = (track?.isEmpty ?? true) ? nil : track
+        if t.live, let sch = s.scheduledArrival ?? s.scheduled, let a = s.arrival ?? s.departure {
+            legDelay = Int((a.timeIntervalSince(sch) / 60).rounded())
+        } else {
+            legDelay = nil
+        }
+    }
+
+    /// As the trip starts: its planned rides (from this leg on) saved on the phone, for the stretches without signal.
+    private func saveRidesAhead() {
+        guard !demo, let start = tripStart else { return }
+        let ids: [String] = (route?.planned ?? []).dropFirst(index).map(\.tripId).filter { !$0.isEmpty && !Demo.isDemo($0) }
+        let list: [String] = Array(ids.prefix(RideCache.maxRides))
+        guard !list.isEmpty else { return }
+        Task { [weak self] in
+            var n = 0
+            for id in list {
+                guard let t = await Transit.liveTrip(id) else { continue }
+                guard let me = self, me.tripStart == start else { return }
+                RideCacheStore.shared.save(t, tripId: id, at: Date(), trip: start, force: true)
+                n += 1
+            }
+            self?.rideLog("saved · \(n) of \(list.count) rides of the trip on the phone")
+        }
+    }
+
+    /// With a change within 25 minutes (or at it): the next leg's planned ride asked again every 2 minutes, for its live
+    /// time and platform (and saved).
+    private func refreshPlannedNext(force: Bool = false) {
+        guard !demo, index + 1 < legs.count, let p = route?.planned?[safe: index + 1], Net.online else { return }
+        let now = Date()
+        let soon: Bool = phase == .transfer || ((legTo ?? legArrival).map { $0.timeIntervalSince(now) < 25 * 60 } ?? false)
+        guard soon, force || now.timeIntervalSince(plannedNextAt) >= RideCache.every else { return }
+        plannedNextAt = now
+        let start = tripStart, id = p.tripId
+        Task { [weak self] in
+            guard let t = await Transit.liveTrip(id, maxAge: 60), let me = self, me.tripStart == start else { return }
+            RideCacheStore.shared.save(t, tripId: id, at: Date(), trip: start, force: true)
+            me.updateChangeGuide()
+            me.pushActivity(force: false)
+        }
+    }
+
+    /// A ride as the change guide takes it: its platform by NS's live one when there is.
+    private func guideRide(_ r: Ride) -> ChangeGuide.Ride {
+        let plat: String? = NSStore.shared.rail(r)?.track ?? r.platform
+        return ChangeGuide.Ride(tripId: r.tripId, line: r.line, isTrain: r.isTrain, departure: r.departure, platform: plat, walk: r.walkBefore)
+    }
+
+    /// The next leg's planned ride at its live time (the planner's answer, the change's list, or its own saved answer),
+    /// else the next one found.
+    private func plannedGuideRide() -> ChangeGuide.Ride? {
+        let pool: [Ride] = [next].compactMap { $0 } + nextOptions + (phase == .transfer ? upcoming.map(\.trip.first) : [])
+        guard let p = route?.planned?[safe: index + 1] else { return next.map(guideRide) }
+        if let r = pool.first(where: { $0.tripId == p.tripId }) { return guideRide(r) }
+        var dep: Date = p.departure
+        var plat: String? = p.platform
+        if let l = legs[safe: index + 1], let sr = RideCacheStore.shared.ride(p.tripId, trip: tripStart),
+           let k = RideCache.stop(near: GeoPoint(l.from.coordinate), in: sr) {
+            if let d = sr.stops[k].departure ?? sr.stops[k].arrival { dep = d }
+            plat = sr.stops[k].platform ?? plat
+        }
+        return ChangeGuide.Ride(tripId: p.tripId, line: p.line, isTrain: p.isTrain, departure: dep, platform: plat, walk: next?.walkBefore ?? 0)
+    }
+
+    /// The change ahead (or at it): the platforms, the walk and the minutes; when your ride's live times have you there
+    /// too late for the planned one, which one you make instead (`ChangeGuide`).
+    private func updateChangeGuide() {
+        let on: Bool = phase == .sleeping || phase == .awake || phase == .transfer
+        guard !demo, on, index + 1 < legs.count else {
+            if changeGuide != nil { changeGuide = nil }
+            return
+        }
+        let now = Date()
+        let arrive: Date? = phase == .transfer ? (changeSince ?? now) : (legTo ?? legArrival)
+        guard let arr = arrive, let planned = plannedGuideRide() else {
+            if changeGuide != nil { changeGuide = nil }
+            return
+        }
+        var later: [ChangeGuide.Ride] = []
+        var seen = Set<String>()
+        let pool: [Ride] = nextOptions + (phase == .transfer ? upcoming.map(\.trip.first) : [])
+        for r in pool where !r.cancelled && seen.insert(r.tripId).inserted { later.append(guideRide(r)) }
+        let learned: Double? = Habits.changeMinutes(HabitStore.shared.book)
+        let fromTrain: Bool = phase == .transfer ? legs[index].mode == .train : legIsTrain
+        let grade: String? = phase == .transfer ? nil : rideGradeNow
+        let g = ChangeGuide.guide(arrive: arr, arrivePlatform: arrivePlatform, fromTrain: fromTrain, grade: grade, next: planned,
+                                  later: later, learned: learned, now: now, hhmm: { Fmt.hhmm($0) })
+        guard g != changeGuide else { return }
+        if g.missed, changeGuide?.missed != true { rideLog("change · \(g.missText ?? "missed")", once: "miss|\(index)|\(planned.tripId)", every: 300) }
+        changeGuide = g
+    }
+
+    /// The change guide's switch is offered: the planned one is missed, another one is made, and the trip is a planned
+    /// one (its rides known leg by leg) so the rest can be planned again.
+    var canSwitchChange: Bool {
+        guard let g = changeGuide, g.missed, let p = g.planned, g.target.tripId != p.tripId, let r = route,
+              let c = r.custom, let pl = r.planned, pl.count == c.count else { return false }
+        return index + 1 < c.count
+    }
+
+    /// One tap: the rest of the trip from the change, planned again onto the one you make (`ChangeGuide.pickPlan`).
+    func switchChange() async {
+        guard canSwitchChange, !switchingChange, let g = changeGuide, let r = route, let custom = r.custom, let planned = r.planned,
+              let final = custom.last?.to else { return }
+        let to = g.target, i = index
+        switchingChange = true
+        defer { switchingChange = false }
+        let from = custom[i + 1].from
+        let changes = max(0, custom.count - i - 2) + 1
+        let opts = await Transit.$urgent.withValue(true) {
+            await Transit.plan(from: from, to: final, modes: nil, at: to.departure.addingTimeInterval(-5 * 60), count: 6, maxTransfers: changes)
+        }
+        guard route?.id == r.id, index == i, phase != .idle else { return }
+        let firsts: [(tripId: String, departure: Date)] = opts.map { (tripId: $0.first.tripId, departure: $0.first.departure) }
+        guard let k = ChangeGuide.pickPlan(firsts, instead: to), let rest = RoutePlan.from(opts[k]), let restLegs = rest.custom,
+              let restPlanned = rest.planned else {
+            toast = "Couldn’t plan the rest from the \(Fmt.hhmm(to.departure)) just now. Try again in a minute."
+            return
+        }
+        let t = opts[k]
+        let legsNow: [Leg] = Array(custom[...i]) + restLegs
+        let plannedNow: [PlannedRide] = Array(planned[...i]) + restPlanned
+        let nr = RoutePlan(id: r.id, name: r.name, station: r.station, custom: legsNow, planned: plannedNow, plannedEnd: r.plannedEnd)
+        route = nr
+        legs = nr.legs(direction)
+        next = t.first
+        arrival = t.last.arrival
+        if phase == .transfer { changePlanned = TransferPolicy.Listed(id: t.first.tripId, departure: t.first.departure) }
+        rideLog("change · switched to \(t.first.line) \(Fmt.hhmm(t.first.departure)) at \(from.short)")
+        let plat: String = guideRide(t.first).platform.map { " from platform \($0)" } ?? ""
+        toast = "Switched to the \(Fmt.hhmm(t.first.departure))\(plat)"
+        updateChangeGuide()
+        saveRidesAhead()
+        refreshEta(force: true)
+        Task { await loadUpcoming(force: true) }
+        pushActivity(force: true)
+    }
+
+    /// "Get ready" one stop before yours (`GetReady`), once a leg, while the alarm hasn't rung: quiet.
+    private func checkGetReady() {
+        guard !demo, phase == .sleeping, !readyTold, let b = GetReady.before(count: vehicleStops.count) else { return }
+        let yours: Date? = legTo ?? vehicleStops.last?.arrival
+        let ew = effectiveWake
+        let within: TimeInterval = ew.by == .time ? Double(ew.minutes(isTrain: legIsTrain)) * 60 : 0
+        let now = Date()
+        guard GetReady.due(beforeYours: vehicleStops[b].arrival, yours: yours, now: now, alarmWithin: within, asleep: true, told: false) else { return }
+        readyTold = true
+        let w = GetReady.words(stop: leg?.to.short ?? "", secondsLeft: yours.map { $0.timeIntervalSince(now) })
+        rideLog("get ready · one stop before yours", once: "ready|\(index)", every: 600)
+        let c = UNMutableNotificationContent()
+        c.title = w.title
+        c.body = w.body
+        c.sound = nil                                     // quiet: the alarm is what rings
+        c.interruptionLevel = .active
+        c.userInfo = ["kind": "info"]
+        tripNotice(c, .arrived, category: WristNotice.tripCategory)
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: GetReady.id(tripStart: tripStart, leg: index), content: c, trigger: nil)) { _ in }
+        if UIApplication.shared.applicationState == .active { UINotificationFeedbackGenerator().notificationOccurred(.warning) }
+        pushActivity(force: true)
+    }
+
+    /// (adaptive wake-up) The ring before your stop, as it went: how soon you stopped it, against how soon you were at
+    /// your stop (`arrivedRinging`: there with it still ringing). Learned per mode (`AdaptiveWake`).
+    private func noteWakeOutcome(arrivedRinging: Bool) {
+        guard !demo, let n = ringNote else { return }
+        ringNote = nil
+        let now = Date()
+        let react: Double? = arrivedRinging ? nil : n.stopped.map { $0.timeIntervalSince(n.at) }
+        guard arrivedRinging || react != nil else { return }
+        let s = WakeSample(train: n.train, react: react, lead: now.timeIntervalSince(n.at), at: now)
+        let before = AdaptiveWakeStore.shared.book.extra(isTrain: n.train)
+        if AdaptiveWakeStore.shared.note(s) {
+            let after = AdaptiveWakeStore.shared.book.extra(isTrain: n.train)
+            rideLog("wake · learned: \(n.train ? "trains" : "buses") \(before) → \(after) min earlier")
+        }
     }
 
     // MARK: what it learns from your rides (0.34)
@@ -3118,10 +3407,22 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     private func refreshVehicle() async {
         guard let v = vehicle, !demo else { return }
         let stops = await Transit.tripStops(v.tripId, maxAge: RideTick.tripCache)
-        guard vehicle == v, !stops.isEmpty else { return }
+        guard vehicle == v else { return }
+        guard !stops.isEmpty else {
+            // (0.39) no answer (a tunnel, bad 5G): on from the copy saved when the trip started
+            noteNoAnswer()
+            useSaved(v)
+            return
+        }
+        noteAnswer()
         applyStops(stops)
         // (the same answer, as it was asked: no request of its own)
-        if let c = await Transit.cachedLiveTrip(v.tripId), vehicle == v { noteWakeTrip(c.trip, at: c.at) }
+        if let c = await Transit.cachedLiveTrip(v.tripId), vehicle == v {
+            noteWakeTrip(c.trip, at: c.at)
+            noteRideDetails(c.trip)
+            RideCacheStore.shared.save(c.trip, tripId: v.tripId, at: c.at, trip: tripStart)
+        }
+        updateChangeGuide()
         pushActivity(force: false)
     }
 
@@ -3507,17 +3808,20 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
                 window = (on.first.departure, t)
             }
             var firstNext: Ride?
+            var options: [Ride] = []
             for k in (i + 1)..<max(i + 1, legs.count) {
                 let l = legs[k]
                 let opts = await Transit.plan(from: l.from, to: l.to, modes: l.mode.transitModes, at: t.addingTimeInterval(120), count: 4, maxTransfers: l.mode == .train ? 1 : 0)
                     .filter { $0.start >= t.addingTimeInterval(60) }
                 guard let best = opts.min(by: { ($0.rides.last!.arrival, $0.first.departure) < ($1.rides.last!.arrival, $1.first.departure) }) else { return }
-                if firstNext == nil { firstNext = best.first }
+                if firstNext == nil { firstNext = best.first; options = opts.map(\.first) }   // (0.39) the others, for the change guide
                 t = best.rides.last!.arrival
             }
             await MainActor.run {
                 guard self.index == i, self.phase != .idle else { return }
                 self.arrival = t; self.next = firstNext
+                if !options.isEmpty { self.nextOptions = options }
+                self.updateChangeGuide()
                 if let window, self.legArrival == nil { self.legFrom = window.0; self.legTo = window.1 }
                 self.pushActivity(force: true)
                 self.checkTightChange()
@@ -3562,7 +3866,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         case .finished: return "YOU’RE THERE"
         case .alarm(let a): return a ? "WAKE UP" : "GET OFF NOW"
         case .awake: return "GET READY"
-        default: return waitingToBoard ? "WAITING TO BOARD" : "NOW RIDING"
+        // (0.39) the quiet "Get ready" one stop before yours
+        default: return waitingToBoard ? "WAITING TO BOARD" : readyTold ? "GET READY" : "NOW RIDING"
         }
     }
 
@@ -3580,12 +3885,36 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         if case .alarm = phase { awake = true } else if phase == .awake { awake = true }
         let song = music.song
         let ride = rideKind
-        return .init(legTitle: title, isTrain: leg?.mode == .train, distanceText: distance.map { Fmt.distance($0) } ?? "–",
+        let extra = lockExtras
+        var st: TripAttributes.ContentState = .init(legTitle: title, isTrain: leg?.mode == .train, distanceText: distance.map { Fmt.distance($0) } ?? "–",
                      arrival: arrival, finalName: finalName, nextText: nextText, awake: awake, goingHome: direction == .home,
                      kicker: kicker, stopName: leg?.to.spoken ?? "", progress: (progress() * 100).rounded() / 100,
                      legFrom: legFrom, legTo: legTo, song: song?.title, artist: song?.artist, songPlaying: song?.playing ?? false,
                      musicApp: song?.app, stops: stopMarks.map(\.fraction), ringing: { () -> Bool in if case .alarm = phase { return true }; return false }(),
                      vehicle: ride.kind.rawValue, line: ride.line)
+        // (0.39) the next stop, the delay and the platform; the change ahead
+        st.nextStop = extra.nextStop
+        st.delay = extra.delay
+        st.platform = extra.platform
+        st.changeText = extra.changeText
+        st.changeLeaves = extra.changeLeaves
+        st.changeMiss = extra.changeMiss
+        return st
+    }
+
+    /// (0.39) The lock screen's next stop (not yours), delay and platform, and the change ahead.
+    private var lockExtras: (nextStop: String?, delay: Int?, platform: String?, changeText: String?, changeLeaves: Date?, changeMiss: String?) {
+        var nextName: String?
+        let riding = phase == .sleeping || phase == .awake
+        if riding, let n = nextStop, let last = vehicleStops.last, !(n.name == last.name && n.arrival == last.arrival) { nextName = Fmt.stop(n.name) }
+        var text: String?
+        if let g = changeGuide {
+            let parts: [String] = [g.lockLine, g.countdown].filter { !$0.isEmpty }
+            text = parts.joined(separator: " · ")
+        }
+        let delay: Int? = riding ? legDelay : nil
+        let platform: String? = riding ? arrivePlatform : nil
+        return (nextName, delay, platform, text, changeGuide?.target.departure, changeGuide?.missText)
     }
 
     /// What the Live Activity draws on its track and puts on its pill: from the bus or train you're on (else the one
@@ -3620,10 +3949,12 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         // riding without one (it couldn't start, or it was lost): start it now
         guard let activity else { if isRiding { startActivity() }; return }
         let s = state
-        let key = "\(s.legTitle)|\(s.distanceText)|\(s.arrival?.timeIntervalSince1970 ?? 0)|\(s.awake)|\(ActivityThrottle.progressStep(s.progress))"
+        var key: String = "\(s.legTitle)|\(s.distanceText)|\(s.arrival?.timeIntervalSince1970 ?? 0)|\(s.awake)|\(ActivityThrottle.progressStep(s.progress))"
             + "|\(s.song ?? "")|\(s.artist ?? "")|\(s.songPlaying)|\(s.ringing)|\(s.nextText ?? "")|\(s.vehicle)|\(s.line)"
             + "|\(s.legFrom?.timeIntervalSince1970 ?? 0)|\(s.legTo?.timeIntervalSince1970 ?? 0)|\(s.stops.count)|\(s.finalName)"
-        let say = "\(s.legTitle)|\(s.awake)|\(s.ringing)|\(s.kicker)"
+        let more: String = "|\(s.nextStop ?? "")|\(s.delay ?? -999)|\(s.platform ?? "")|\(s.changeText ?? "")|\(s.changeMiss ?? "")"
+        key += more                                                       // (0.39)
+        let say = "\(s.legTitle)|\(s.awake)|\(s.ringing)|\(s.kicker)|\(s.changeMiss ?? "")"
         let since = Date().timeIntervalSince(lastActivity)
         let changed = key != lastActivityKey
         guard ActivityThrottle.send(changed: changed, phaseChanged: say != lastActivitySay, sinceLast: since) else {

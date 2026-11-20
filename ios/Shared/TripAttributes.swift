@@ -27,6 +27,13 @@ struct TripAttributes: ActivityAttributes {
         var vehicle = ""            // what's drawn on the track: a `VehicleKind` ("bus", "ic", "sprinter", "tram", "metro",
                                     // "train"); "" (a state from before 0.20.4): a train or a bus by `isTrain`
         var line = ""               // the line on its pill: "5", "306", "IC" ("" not known)
+        // 0.39: a richer lock screen (all optional: a state from before still decodes)
+        var nextStop: String? = nil     // the next stop it calls at, when it isn't yours ("Vught")
+        var delay: Int? = nil           // minutes late at your stop (negative: early; nil: not live)
+        var platform: String? = nil     // the platform you get in at
+        var changeText: String? = nil   // the change ahead: "Platform 5 → 7 · 3 min walk · 4 min to change"
+        var changeLeaves: Date? = nil   // when the next one leaves (the countdown at the change)
+        var changeMiss: String? = nil   // "You’ll miss the 08:12 — take the 08:27 from platform 4"
 
         /// The kind to draw.
         var kind: VehicleKind { VehicleKind.stored(vehicle, isTrain: isTrain) }
@@ -34,12 +41,13 @@ struct TripAttributes: ActivityAttributes {
     var routeName: String
 }
 
-// A state written without the newer fields (`stops`, `ringing`, `vehicle`, `line`) still decodes: they take their
-// defaults. (The synthesized decoding would throw on a missing key, defaults or not.)
+// A state written without the newer fields (`stops`, `ringing`, `vehicle`, `line`; 0.39 `nextStop`, `delay`, `platform`,
+// `changeText`, `changeLeaves`, `changeMiss`) still decodes: they take their defaults. (The synthesized decoding would throw on a missing key, defaults or not.)
 extension TripAttributes.ContentState {
     enum CodingKeys: String, CodingKey {
         case legTitle, isTrain, distanceText, arrival, finalName, nextText, awake, goingHome, kicker, stopName, progress,
-             legFrom, legTo, song, artist, songPlaying, musicApp, stops, ringing, vehicle, line
+             legFrom, legTo, song, artist, songPlaying, musicApp, stops, ringing, vehicle, line,
+             nextStop, delay, platform, changeText, changeLeaves, changeMiss
     }
 
     init(from decoder: Decoder) throws {
@@ -65,5 +73,40 @@ extension TripAttributes.ContentState {
         ringing = try c.decodeIfPresent(Bool.self, forKey: .ringing) ?? false
         vehicle = try c.decodeIfPresent(String.self, forKey: .vehicle) ?? ""
         line = try c.decodeIfPresent(String.self, forKey: .line) ?? ""
+        nextStop = try c.decodeIfPresent(String.self, forKey: .nextStop)
+        delay = try c.decodeIfPresent(Int.self, forKey: .delay)
+        platform = try c.decodeIfPresent(String.self, forKey: .platform)
+        changeText = try c.decodeIfPresent(String.self, forKey: .changeText)
+        changeLeaves = try c.decodeIfPresent(Date.self, forKey: .changeLeaves)
+        changeMiss = try c.decodeIfPresent(String.self, forKey: .changeMiss)
+    }
+
+    /// (0.39) The line under the ride on the lock screen: "Next: Vught · 3 min late · platform 5" (nil: nothing known).
+    var rideLine: String? { LockWords.ride(nextStop: nextStop, delay: delay, platform: platform) }
+
+    /// (0.39) The change ahead as the lock screen says it: the miss first, else the platforms and the minutes.
+    var changeLine: String? {
+        if let m = changeMiss, !m.isEmpty { return m }
+        if let c = changeText, !c.isEmpty { return c }
+        return nil
+    }
+}
+
+/// (0.39) The lock screen's words for a ride. Plain, so they can be tested.
+enum LockWords {
+    /// "3 min late", "on time", "2 min early"; nil: not live.
+    static func delay(_ m: Int?) -> String? {
+        guard let m else { return nil }
+        if m == 0 { return "on time" }
+        return m > 0 ? "\(m) min late" : "\(-m) min early"
+    }
+
+    /// "Next: Vught · 3 min late · platform 5": what's known of the three.
+    static func ride(nextStop: String?, delay d: Int?, platform: String?) -> String? {
+        var parts: [String] = []
+        if let n = nextStop?.trimmingCharacters(in: .whitespaces), !n.isEmpty { parts.append("Next: \(n)") }
+        if let t = delay(d) { parts.append(t) }
+        if let p = platform?.trimmingCharacters(in: .whitespaces), !p.isEmpty { parts.append("platform \(p)") }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 }

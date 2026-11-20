@@ -50,8 +50,10 @@ private func mainLine(_ s: TripState) -> String {
 
 /// Under the track, on the left: the song while riding (as before), else the next ride ("Then bus 5 at 16:27").
 /// At a change the next ride comes first: it's what you need there.
-private enum Footnote { case song, next(String) }
+private enum Footnote { case song, next(String), change(String, warm: Bool) }
 private func footnote(_ s: TripState) -> Footnote? {
+    // (0.39) a change ahead comes first: the platforms, the walk, the minutes, or that you'll miss it and what instead
+    if let c = s.changeLine, s.kicker != "YOU’RE THERE" { return .change(c, warm: s.changeMiss != nil) }
     if riding(s) {
         if s.song != nil { return .song }
         return s.nextText.map { .next($0) }
@@ -110,16 +112,21 @@ private struct StatusLabel: View {
     }
 }
 
-/// The top of the trip: the line's pill and "to Breda", or the state's words.
+/// The top of the trip: the line's pill and "to Breda", or the state's words. `detail` (the lock screen, 0.39): the next
+/// stop, the delay and the platform instead of "to Breda" (the big line says where already).
 private struct TripHeading: View {
     let s: TripAttributes.ContentState
     let look: LiveLook
     var size: CGFloat = 15
+    var detail = false
     var body: some View {
         HStack(spacing: 8) {
             if riding(s) { LivePill(s: s, look: look, size: size - 1) }
             if let st = status(s) {
                 StatusLabel(text: st.text, icon: st.icon, color: st.warm ? look.warning : look.accent, size: size)
+            } else if detail, let r = s.rideLine {
+                Text(r).font(.system(size: size - 1, weight: .semibold)).monospacedDigit()
+                    .foregroundStyle((s.delay ?? 0) >= 3 ? look.warning : look.secondary).lineLimit(1)
             } else if !s.stopName.isEmpty {
                 Text("to \(s.stopName)").font(.system(size: size, weight: .semibold)).foregroundStyle(look.secondary).lineLimit(1)
             }
@@ -155,12 +162,36 @@ private struct TripFooter: View {
                 switch f {
                 case .song: SongLine(s: s, look: look, size: size)
                 case .next(let n): Text(n).font(.system(size: size, weight: .medium)).foregroundStyle(look.secondary).lineLimit(1)
+                case .change(let c, let warm):
+                    ChangeLine(text: c, leaves: s.kicker == "CHANGE HERE" ? s.changeLeaves : nil, warm: warm, look: look, size: size)
                 }
             }
             Spacer(minLength: 6)
             if showArrival, let a = s.arrival {
                 Text("\(s.finalName) \(hhmm.string(from: a))").font(.system(size: size, weight: .semibold)).monospacedDigit()
                     .foregroundStyle(look.text).lineLimit(1).fixedSize().layoutPriority(2)
+            }
+        }
+    }
+}
+
+/// (0.39) The change ahead: "Platform 5 → 7 · 3 min walk · 4 min to change", or that you'll miss it; at the change
+/// itself the time to when the next one leaves, running.
+private struct ChangeLine: View {
+    let text: String
+    let leaves: Date?
+    let warm: Bool
+    let look: LiveLook
+    var size: CGFloat = 13
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: warm ? "exclamationmark.triangle.fill" : "arrow.triangle.swap")
+                .font(.system(size: size - 1, weight: .bold)).foregroundStyle(warm ? look.warning : look.accent)
+            Text(text).font(.system(size: size, weight: .semibold)).foregroundStyle(warm ? look.warning : look.text)
+                .lineLimit(1).minimumScaleFactor(0.8).layoutPriority(1)
+            if let l = leaves, l > Date() {
+                Text(timerInterval: Date()...l, countsDown: true, showsHours: false).monospacedDigit()
+                    .font(.system(size: size, weight: .bold)).foregroundStyle(look.accent).fixedSize()
             }
         }
     }
@@ -190,7 +221,7 @@ struct LockScreenTrip: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 10) {
                 VStack(alignment: .leading, spacing: 6) {
-                    TripHeading(s: s, look: look)
+                    TripHeading(s: s, look: look, detail: true)
                     Text(mainLine(s)).font(.system(size: 20, weight: .bold)).monospacedDigit().foregroundStyle(look.text)
                         .lineLimit(1).minimumScaleFactor(0.7)
                 }

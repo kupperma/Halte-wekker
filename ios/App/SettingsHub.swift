@@ -405,6 +405,7 @@ private struct TripsSettingsRows: View {
         }
         backup
         wakeBy
+        learnWake
         wake
         TravelHelpTripRows()                      // (0.36) student OV, check-out reminder, money back for a late train
         learned
@@ -478,6 +479,30 @@ private struct TripsSettingsRows: View {
             Text(trip.wake.by == .time
                  ? "It rings this long before your stop, by the bus or train’s live arrival, else by how far it still has to go at your speed. The wake distance below stays as a safety net: whichever comes first."
                  : "It rings at the wake distance below, as before.")
+        }
+    }
+
+    @ObservedObject private var wakeLearn = AdaptiveWakeStore.shared
+    @State private var confirmWakeReset = false
+
+    /// 0.39: the adaptive wake-up: how soon you get up after it rings, learned per bus and train; only ever earlier.
+    @ViewBuilder private var learnWake: some View {
+        Section {
+            SettingsSwitch(title: "Learn when I get up",
+                           detail: "Notices how soon you stop the alarm and how much time that leaves before your stop. Short of time again and again? It wakes you a minute earlier (3 at most on a train, 2 on a bus), never later than you set it.",
+                           isOn: $wakeLearn.on)
+                .settingsAnchor("wake.learn")
+            if wakeLearn.on {
+                Text(AdaptiveWake.summary(wakeLearn.book, by: trip.wake.by)).font(DS.body).foregroundStyle(DS.secondary)
+            }
+            Button("Reset what it learned about waking", role: .destructive) { confirmWakeReset = true }
+                .disabled(wakeLearn.book.isEmpty)
+                .confirmationDialog("Wake you as you set it again, and forget how soon you got up?", isPresented: $confirmWakeReset,
+                                    titleVisibility: .visible) {
+                    Button("Reset", role: .destructive) { wakeLearn.reset() }
+                }
+        } footer: {
+            Text("Kept on this phone only. The wake distance stays as the safety net, and the alarm always rings.")
         }
     }
 

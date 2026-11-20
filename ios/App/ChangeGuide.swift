@@ -1,0 +1,124 @@
+import Foundation
+
+/// 0.39: the change ahead, as the ride screen and the lock screen guide you through it: where you get in and where the
+/// next one leaves ("Platform 5 → 7"), the walk, and the minutes you have ("4 min to change"). When your ride's live
+/// times have you there too late for the planned one (less room than you need: the walk, or your own change time once
+/// it's learned), it says so at once with the next one you do make: "You’ll miss the 08:12 — take the 08:27 from
+/// platform 4", for one tap to switch the rest of the trip to it. Plain values, so it can be tested.
+enum ChangeGuide {
+    /// The least room a change has, in minutes, even across the platform.
+    static let least = 1.0
+
+    /// A ride you could change onto.
+    struct Ride: Equatable, Sendable {
+        var tripId: String
+        var line: String            // "IC", "SPR", "306"
+        var isTrain: Bool
+        var departure: Date
+        var platform: String? = nil
+        var walk: Int = 0           // minutes the planner walks to it
+    }
+
+    struct Guide: Equatable, Sendable {
+        /// The one to take: the planned one, or the next you make when that's missed (`missed`).
+        let target: Ride
+        /// Minutes from arriving (at the change already: from now) to `target` leaving; negative: it has gone by then.
+        let minutes: Int
+        let platforms: String?      // "Platform 5 → 7"
+        let walk: String?           // "3 min walk"
+        let countdown: String       // "4 min to change"
+        let tight: Bool             // under the room it needs (after a slow bus: more), or missed
+        /// The planned one can't be made: less room than `need`.
+        let missed: Bool
+        /// The planned one, when missed (what `missText` names).
+        let planned: Ride?
+        let missText: String?       // "You’ll miss the 08:12 — take the 08:27 from platform 4"
+
+        /// What the lock screen shows under the ride: "Platform 5 → 7 · 3 min walk".
+        var lockLine: String { [platforms, walk].compactMap { $0 }.joined(separator: " · ") }
+    }
+
+    /// Your own change time counts for this much more than the walk at most (as `HabitStore.changeNeed`: one number
+    /// for every station).
+    static let learnedExtraMax = 2.0
+
+    /// The minutes a change onto a ride `walk` minutes away needs: the walk, or your own change time when it's learned
+    /// and more (`Habits.changeMinutes`, at most `learnedExtraMax` over the walk), never under `least`.
+    static func need(walk: Int, learned: Double?) -> Double {
+        let w = Double(max(0, walk))
+        let mine: Double = learned.flatMap { $0.isFinite ? min($0, w + learnedExtraMax) : nil } ?? w
+        return max(least, max(w, mine))
+    }
+
+    /// "Platform 5 → 7"; across the same platform "Same platform (5)"; onto a bus "Platform 5 → bus 306"; from a bus
+    /// "To platform 7"; only where you get in "Arrive at platform 5"; nothing known: nil.
+    static func platforms(arrive a: String?, next: Ride) -> String? {
+        let a = clean(a), d = clean(next.platform)
+        switch (a, d) {
+        case (let a?, let d?) where next.isTrain:
+            return a == d ? "Same platform (\(a))" : "Platform \(a) → \(d)"
+        case (let a?, _) where !next.isTrain:
+            return "Platform \(a) → bus \(next.line)"
+        case (nil, let d?) where next.isTrain:
+            return "To platform \(d)"
+        case (let a?, nil):
+            return "Arrive at platform \(a)"
+        default:
+            return nil
+        }
+    }
+
+    /// The change ahead. `arrive`: when you're at the change (live); `arrivePlatform` where (nil: not known, a bus);
+    /// `fromTrain`/`grade`: the ride you're on (a slow bus's change wants more room, `ChangeRoom.changeNote`); `next`:
+    /// the planned next ride (at its live time); `later`: the next leg's other rides; `learned`: your own change time
+    /// (nil: not learned yet).
+    static func guide(arrive: Date, arrivePlatform: String?, fromTrain: Bool, grade: String?, next: Ride, later: [Ride],
+                      learned: Double?, now: Date, hhmm: (Date) -> String) -> Guide {
+        let from: Date = max(arrive, now)
+        let room: Double = next.departure.timeIntervalSince(from) / 60
+        let missed: Bool = room < need(walk: next.walk, learned: learned)
+        var target = next
+        var instead: Ride?
+        if missed {
+            instead = nextMade(after: next, later: later, from: from, learned: learned)
+            if let i = instead { target = i }
+        }
+        let m = Int((target.departure.timeIntervalSince(from) / 60).rounded(.down))
+        let note = ChangeRoom.changeNote(minutes: m, walk: max(0, target.walk), isTrain: fromTrain, grade: grade)
+        let countdown: String = m < 0 ? "It leaves before you’re there" : "\(m) min to change"
+        let walk: String? = target.walk > 0 ? "\(target.walk) min walk" : nil
+        var text: String?
+        if missed { text = missWords(planned: next, instead: instead, hhmm: hhmm) }
+        return Guide(target: target, minutes: m, platforms: platforms(arrive: arrivePlatform, next: target), walk: walk,
+                     countdown: countdown, tight: missed || note.red, missed: missed, planned: missed ? next : nil, missText: text)
+    }
+
+    /// The first of `later` after `planned` that you make from `from`: room for its own walk (or your change time).
+    static func nextMade(after planned: Ride, later: [Ride], from: Date, learned: Double?) -> Ride? {
+        let options: [Ride] = later.filter { $0.tripId != planned.tripId && $0.departure > planned.departure }
+            .sorted { $0.departure < $1.departure }
+        return options.first { r in r.departure.timeIntervalSince(from) / 60 >= need(walk: r.walk, learned: learned) }
+    }
+
+    /// "You’ll miss the 08:12 — take the 08:27 from platform 4"; a bus "… — take bus 306 at 08:27"; none found yet:
+    /// "You’ll likely miss the 08:12".
+    static func missWords(planned: Ride, instead: Ride?, hhmm: (Date) -> String) -> String {
+        guard let i = instead else { return "You’ll likely miss the \(hhmm(planned.departure))" }
+        let head = "You’ll miss the \(hhmm(planned.departure)) — "
+        if !i.isTrain { return head + "take bus \(i.line) at \(hhmm(i.departure))" }
+        let p: String = clean(i.platform).map { " from platform \($0)" } ?? ""
+        return head + "take the \(hhmm(i.departure))\(p)"
+    }
+
+    /// Switch the trip onto `instead`: the rest planned again from the change, the plan whose first ride is that one
+    /// (else the first that leaves with it, within a minute). Nil: no plan has it.
+    static func pickPlan(_ firstRides: [(tripId: String, departure: Date)], instead: Ride) -> Int? {
+        if let k = firstRides.firstIndex(where: { $0.tripId == instead.tripId }) { return k }
+        return firstRides.firstIndex { abs($0.departure.timeIntervalSince(instead.departure)) <= 60 }
+    }
+
+    private static func clean(_ s: String?) -> String? {
+        guard let t = s?.trimmingCharacters(in: .whitespaces), !t.isEmpty else { return nil }
+        return t
+    }
+}
