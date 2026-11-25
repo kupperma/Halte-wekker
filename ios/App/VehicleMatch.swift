@@ -852,8 +852,12 @@ extension VehicleMatch {
             splits.contains(s) || (shownOffRoad && judged.contains { $0.id != s && passedByGPS($0) })
         } ?? false
         var settle: String?, why: ChoiceLook.Why?
+        // 0.39.1: the one shown far from you by its own GPS while another one fits by its GPS: that one, at once
+        let rescue: String? = gpsRescue(shown: shown, judged: judged, alive: alive, fits: gps.fitAt, splits: splits)
         if shownSplit, let other = ranked.first(where: { $0.id != shown }) {
             decision = .switchTo(other.id); settle = other.id; why = .split
+        } else if let r = rescue {
+            decision = .switchTo(r); settle = r; why = .farByGPS
         } else if let pick = gpsPick, pick != shown, alive.contains(pick) {
             decision = .switchTo(pick); settle = pick; why = .byGPS
         } else if let pick = departPick {
@@ -942,7 +946,7 @@ enum ShownVerdict: Equatable, Sendable { case passes, notSure, fails }
 
 /// One look while choosing (see `VehicleMatch.choose`).
 struct ChoiceLook: Equatable, Sendable {
-    enum Why: Equatable, Sendable { case decided, onlyOneLeft, timedOut, byGPS, split, departed }
+    enum Why: Equatable, Sendable { case decided, onlyOneLeft, timedOut, byGPS, split, departed, farByGPS }
     let decision: Decision
     let alive: [String]             // still in the running, in the order given
     let settle: String?             // sure now: the one to show (nil: still choosing)

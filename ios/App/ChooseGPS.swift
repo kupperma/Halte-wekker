@@ -138,6 +138,34 @@ extension VehicleMatch {
         return run.departLooks >= departLooks ? d : nil
     }
 
+    // 0.39.1: the planned 305 kept for a quarter of an hour while its own GPS had it 1.7 km from you, and the 154 you
+    // were on had fitted by its GPS a moment before ("keep 305 · the only one left").
+    static let farBus = 1000.0                  // m: its own GPS this far from you along its road: you're not on it…
+    static let farTrain = 2500.0                // …for a train
+
+    /// Failed by its own GPS, clearly far from you (`farBus`, `farTrain`): not a times-only doubt, not off its path (the
+    /// roads parting has its own rule), not "not sure".
+    static func farByGPS(_ j: Judgement) -> Bool {
+        guard let e = j.evidence, e.gps, case .failure(let why) = j.result, !why.notSure, why != .offItsPath else { return false }
+        let far: Double = j.isTrain ? farTrain : farBus
+        return abs(e.offset) >= far
+    }
+
+    /// The one shown is far by its own GPS (`farByGPS`): the other one of `alive` that fits by its own GPS, this look
+    /// (the lowest cost) or a moment ago (`fits`, the newest), not one whose road went elsewhere. Nil: none.
+    static func gpsRescue(shown: String?, judged: [Judgement], alive: [String], fits: [String: Date], splits: Set<String>) -> String? {
+        guard let s = shown, let mine = judged.first(where: { $0.id == s }), farByGPS(mine) else { return nil }
+        let others: [String] = alive.filter { $0 != s && !splits.contains($0) }
+        var best: (id: String, cost: Double)?
+        for j in judged where others.contains(j.id) && passedByGPS(j) {
+            guard case .success(let c) = j.result else { continue }
+            if best.map({ c < $0.cost }) ?? true { best = (id: j.id, cost: c) }
+        }
+        if let b = best { return b.id }
+        let recent: [(id: String, at: Date)] = others.compactMap { id in fits[id].map { (id: id, at: $0) } }
+        return recent.max { $0.at != $1.at ? $0.at < $1.at : $0.id > $1.id }?.id
+    }
+
     /// The ranking with each one's cost moved by `nudge` (seconds; negative: better), best first, ties by id.
     static func nudged(_ ranked: [Ranked], _ nudge: [String: Double]) -> [Ranked] {
         guard !nudge.isEmpty else { return ranked }
