@@ -130,6 +130,7 @@ struct GoViewNew: View {
         } else if let t = go.best {
             if t.first.fromId != "onboard" { goToCard(t) }
             heroCard(t)
+            if t.first.fromId != "onboard" && !t.first.fromId.isEmpty { fromStopCard(t) }
             watchingCard(t)
             if !go.others.isEmpty { compareCard(t) }
         } else if go.movingUnknown {
@@ -175,15 +176,17 @@ struct GoViewNew: View {
         let fromLine = aboard ? "Stay on until \(Fmt.place(f.toStop))" : "From \(Fmt.place(f.fromStop))" + (track.isEmpty ? "" : " · platform \(track)")
         let toName = Fmt.place(f.headsign.isEmpty ? f.toStop : f.headsign)
         let changes = t.rides.count > 1 ? " · \(t.rides.count - 1) change\(t.rides.count > 2 ? "s" : "")" : ""
+        // (0.40) when to leave at your own walking speed, with 2 minutes spare (`WalkPlan`)
+        let leaveAt: Date = WalkPlan.leave(t.start, WalkPlan.mine(f, metres: walkMetres))
         return VStack(alignment: .leading, spacing: DS.s12) {
             Text(heading)
                 .font(DS.subStrong).foregroundStyle(DS.secondary).accessibilityAddTraits(.isHeader)
             // the one big number: when to set off (from the saved answer: just the time)
             TimelineView(.periodic(from: .now, by: 15)) { tl in
                 let c: RideAhead.Countdown = go.asOf != nil && !aboard
-                    ? .init(value: Fmt.hhmm(t.start), unit: "leave by", spoken: "Leave by \(Fmt.hhmm(t.start))")
-                    : RideAhead.leave(start: t.start, aboard: aboard, now: tl.date)
-                let soon = !aboard && t.start <= tl.date.addingTimeInterval(60)
+                    ? .init(value: Fmt.hhmm(leaveAt), unit: "leave by", spoken: "Leave by \(Fmt.hhmm(leaveAt))")
+                    : RideAhead.leave(start: leaveAt, aboard: aboard, now: tl.date)
+                let soon = !aboard && leaveAt <= tl.date.addingTimeInterval(60)
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
                     if c.unit == "leave by" { Text(c.unit).font(DS.body).foregroundStyle(DS.secondary) }
                     else if !aboard && !soon { Text("Leave in").font(DS.body).foregroundStyle(DS.secondary) }
@@ -321,16 +324,36 @@ struct GoViewNew: View {
         }
         var walk: (() -> Void)? = nil
         if let tg = target { walk = { walkTo = tg } }
+        // (0.40) your own walk, with 2 minutes spare: "6 min walk · leave in 4 min (2 min spare)"
+        let ws: WalkPlan.Shown = WalkPlan.mine(f, metres: walkMetres)
+        let leaveBy: Date? = f.walkBefore > 0 ? WalkPlan.leave(t.start, ws) : nil
         return GoToCard(ride: f, info: f.isTrain ? ns.rail(f) : nil, stop: stop, here: go.here, walkMetres: walkMetres,
-                        leaveBy: f.walkBefore > 0 ? t.start : nil, saved: saved,
+                        leaveBy: leaveBy, saved: saved,
                         hereNote: "You can see it coming on the map. It notices by itself when you get on.",
                         later: saved || gpsLater?.trip != f.tripId ? nil : gpsLater?.at,
+                        walkShown: ws,
                         walk: walk,
                         onMap: { mapFocus += 1 },
                         route: {
                             liveTrack = LiveTrackTarget(tripId: f.tripId, line: f.line, headsign: f.headsign.isEmpty ? Fmt.place(f.toStop) : f.headsign,
                                                         stopName: f.fromStop, time: f.departure, rail: f.isTrain)
                         })
+    }
+
+    // MARK: from the stop (0.40)
+
+    /// "From Bolkenplein": the next departures from where you get on, the lines that get you there first; tap one to
+    /// take it (the rest is planned from it).
+    private func fromStopCard(_ t: DoorTrip) -> some View {
+        let f = t.first
+        let here: String = Fmt.place(f.fromStop)
+        let pool: [DoorTrip] = [t] + go.others
+        let lines: Set<String> = Set(pool.filter { Fmt.place($0.first.fromStop) == here }.map(\.first.line))
+        let stopId: String = f.fromId
+        return FromStopCard(ride: f, usefulLines: lines, saved: go.asOf != nil) { row in
+            Task { await go.chooseDeparture(tripId: row.dep.tripId, departure: row.dep.time, stopId: stopId) }
+        }
+        .id(f.fromId)
     }
 
     // MARK: it watches for you

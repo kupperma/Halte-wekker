@@ -28,6 +28,9 @@ enum DepartureGroups {
         let platform: String?
         let train: Bool
         var stopName: String = ""
+        /// (0.40) No live data close to leaving, on a line that has it: "may not run" (`GhostDepartures`); it sorts
+        /// `GhostDepartures.unsurePenalty` later.
+        var unsure = false
         var delay: Int { live ? Int((time.timeIntervalSince(scheduled) / 60).rounded()) : 0 }
         /// When it goes (a cancelled one: when it would have).
         var leaves: Date { cancelled ? scheduled : time }
@@ -50,11 +53,31 @@ enum DepartureGroups {
             var seen = Set<String>()
             let next = departures
                 .filter { $0.stopId == s.id && $0.leaves > now.addingTimeInterval(-60) }
-                .sorted { $0.leaves < $1.leaves }
+                .sorted { rank($0) < rank($1) }
                 .filter { seen.insert($0.tripId.isEmpty ? $0.id : $0.tripId).inserted }
             out.append(Card(stop: s, departures: Array(next.prefix(perCard))))
         }
         return out
+    }
+
+    /// When a departure sorts: when it goes, one that may not run a bit later (below the live ones around then).
+    static func rank(_ d: Departure) -> Date { d.unsure ? d.leaves.addingTimeInterval(GhostDepartures.unsurePenalty) : d.leaves }
+
+    /// (0.40) The ghost rules (`GhostDepartures.clean`): each journey once, no cancelled ones, none past their time
+    /// without a sign, and "may not run" marked. `alsoLive`: lines seen live today.
+    static func cleaned(_ deps: [Departure], now: Date, alsoLive: Set<String> = []) -> [Departure] {
+        let ghost: [GhostDepartures.Dep] = deps.enumerated().map { k, d in
+            GhostDepartures.Dep(id: String(k), tripId: d.tripId, line: d.line, headsign: d.headsign,
+                                stop: d.stopName.isEmpty ? d.stopId : d.stopName, time: d.leaves, scheduled: d.scheduled,
+                                live: d.live, cancelled: d.cancelled)
+        }
+        let rows: [GhostDepartures.Row] = GhostDepartures.clean(ghost, now: now, alsoLive: alsoLive)
+        return rows.compactMap { r -> Departure? in
+            guard let k = Int(r.dep.id), deps.indices.contains(k) else { return nil }
+            var d: Departure = deps[k]
+            d.unsure = r.status == .unsure
+            return d
+        }
     }
 
     /// The station you're near first, then by distance (unknown distances last, in the order given).

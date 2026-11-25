@@ -349,10 +349,21 @@ struct LiveBusSheet: View {
     }
 
     /// Where to draw it at `now` (metres along): by its GPS or its times, but not past your stop before it has left there.
+    /// (0.40) And not at your stop while its time there is more than two minutes off (`WaitMarker`).
     private func shownMetres(_ t: LiveTrip, _ now: Date) -> Double {
-        let w = placement(t, now).w
+        let p = placement(t, now)
+        let w = p.w
         guard let m = mine, m < t.stops.count else { return w.metres }
-        return LiveTimes.shown(w.metres, mine: t.metres(ofStop: m), left: LiveTimes.hasLeft(t.stops[m].times, now: now))
+        let me: Double = t.metres(ofStop: m)
+        let left: Bool = LiveTimes.hasLeft(t.stops[m].times, now: now)
+        let drawn: Double = LiveTimes.shown(w.metres, mine: me, left: left)
+        let g: LiveTrip = given ?? t
+        guard !left, m < g.stops.count, let eta = atMine(g.departure(m) ?? g.arrival(m)) else { return drawn }
+        let byTime = t.position(now)
+        let waiting: Bool = byTime.atStop && byTime.started && byTime.next == m
+        let s: WaitMarker.Shown = WaitMarker.place(drawn: drawn, byTime: min(byTime.metres, me), mine: me, mineIsFirst: m == 0,
+                                                    started: byTime.started, gpsRaw: p.raw, waitingByTimes: waiting, eta: eta, now: now)
+        return s.metres ?? min(byTime.metres, me)
     }
 
     /// Where its position comes from: "Live times, updated 12:30. Position from the bus’s GPS, 40 s ago."

@@ -112,7 +112,7 @@ final class LiveStore: ObservableObject {
     }
 
     private func forgetForMove() {
-        next = []; nextAsOf = nil; nextError = nil; updated = nil; loadedFor = nil; loadedKey = nil
+        next = []; nextAsOf = nil; nextError = nil; updated = nil; loadedFor = nil; loadedKey = nil; heldTrip = nil
         trains = []; buas = []; toVeghel = []; boardRides = [:]; panelsAsOf = nil
         lastPanels = .distantPast; lastGrades = .distantPast
     }
@@ -571,10 +571,13 @@ final class LiveStore: ObservableObject {
         else { onBoard = nil; onTheMove = false; trips = await Transit.nextTrips(dir) }
         guard loadedFor == key else { await boards; return }
         // One empty answer from Transitous doesn't wipe what you had: keep the trips that haven't left yet, and ask again sooner.
-        if trips.isEmpty {
-            next = next.filter { $0.first.departure > Date().addingTimeInterval(-60) }
-        } else {
-            next = trips; nextAsOf = nil; nextAt = Date()
+        // (0.40) And a new answer doesn't take away the trip you're heading for (`StickyTrips`): it stays until it has left.
+        updateHeld()
+        let onIt: Bool = heldTrip != nil && onBoard?.vehicle.tripId == heldTrip
+        next = Self.sticky(kept: next, answer: trips, held: heldTrip, onIt: onIt, now: Date())
+        updateHeld()
+        if !trips.isEmpty {
+            nextAsOf = nil; nextAt = Date()
             SnapshotStore.shared.save(SavedTrips(trips: trips, lat: from?.coordinate.latitude, lon: from?.coordinate.longitude), key: "next|\(key)")
             // off the corridor the home's last card lists these (0.24): NS fills in a train's platform, at any station
             if RoleSnapshot.corridor == nil, from == nil, trips.contains(where: { $0.rides.contains(where: \.isTrain) }) {
@@ -592,6 +595,75 @@ final class LiveStore: ObservableObject {
         await panels
     }
 
+    // MARK: sticky upcoming trips (0.40)
+
+    /// The first ride's trip id of the trip you're heading for: the one the card shows first (`StickyTrips.pick`), kept
+    /// while it's still to come and you can still get to its stop.
+    @Published private(set) var heldTrip: String?
+
+    nonisolated static func stickyItem(_ t: DoorTrip) -> StickyTrips.Item {
+        StickyTrips.Item(id: t.id, firstTrip: t.first.tripId, departs: t.first.departure, leave: t.start, cancelled: t.first.cancelled)
+    }
+
+    /// Can you still get to the trip's first stop before it leaves, from where you were last seen (nil: not known).
+    func reachable(_ t: DoorTrip, from p: CLLocation?, now: Date = Date()) -> Bool? {
+        guard let p, now.timeIntervalSince(p.timestamp) < 180, p.horizontalAccuracy >= 0, p.horizontalAccuracy < 150,
+              let la = t.first.fromLat, let lo = t.first.fromLon else { return nil }
+        let m: Double = p.distance(from: CLLocation(latitude: la, longitude: lo))
+        return StickyTrips.reachable(metres: m, departs: t.first.departure, now: now)
+    }
+
+    /// Which of `next` the card shows (`StickyTrips.pick`): the held one while you're heading for it, else the first
+    /// you can still leave for. `at`: where you are (the home's position).
+    func shownIndex(at p: CLLocation?, now: Date = Date()) -> Int? {
+        let items: [StickyTrips.Item] = next.map(Self.stickyItem)
+        let h: Int? = heldTrip.flatMap { id in next.firstIndex { $0.first.tripId == id } }
+        let reach: Bool? = h.flatMap { reachable(next[$0], from: p, now: now) }
+        return StickyTrips.pick(items: items, heldIndex: h, reachable: reach, now: now, grace: NextTrip.grace)
+    }
+
+    private func updateHeld(now: Date = Date()) {
+        let i: Int? = shownIndex(at: lastSeen, now: now)
+        heldTrip = StickyTrips.held(shown: i.map { Self.stickyItem(next[$0]) }, now: now)
+    }
+
+    /// The trips after an answer (`StickyTrips.merge`), the ones that may not run (no live data close to leaving on a
+    /// line that has it) after the others (`GhostDepartures`).
+    static func sticky(kept: [DoorTrip], answer: [DoorTrip], held: String?, onIt: Bool, now: Date) -> [DoorTrip] {
+        let ids: [String] = StickyTrips.merge(kept: kept.map(stickyItem), answer: answer.map(stickyItem), kind: .whole,
+                                              held: held, onIt: onIt, now: now)
+        var byId: [String: DoorTrip] = [:]
+        for t in kept { byId[t.id] = t }
+        for t in answer { byId[t.id] = t }
+        let merged: [DoorTrip] = ids.compactMap { byId[$0] }
+        return ghostOrdered(merged, now: now)
+    }
+
+    /// Trips with the ones whose first ride may not run after the others (`GhostDepartures.order`).
+    static func ghostOrdered(_ trips: [DoorTrip], now: Date) -> [DoorTrip] {
+        let alsoLive: Set<String> = Set(LiveDelays.shared.seen.values.map(\.line))
+        let opts: [GhostDepartures.Option] = trips.map { t in
+            GhostDepartures.Option(id: t.id, line: t.first.line, departs: t.first.departure, scheduled: t.first.scheduledDeparture,
+                                   live: t.first.live || t.first.fromId == "onboard", cancelled: t.first.cancelled)
+        }
+        let order: [String] = GhostDepartures.order(opts, now: now, alsoLive: alsoLive)
+        var byId: [String: DoorTrip] = [:]
+        for t in trips { byId[t.id] = t }
+        let out: [DoorTrip] = order.compactMap { byId[$0] }
+        return out.isEmpty ? trips : out
+    }
+
+    /// The trip's first ride may not run (`GhostDepartures`: no live data close to leaving on a line that has it).
+    static func mayNotRun(_ t: DoorTrip, among all: [DoorTrip], now: Date = Date()) -> Bool {
+        guard t.first.fromId != "onboard" else { return false }
+        let alsoLive: Set<String> = Set(LiveDelays.shared.seen.values.map(\.line))
+        let opts: [GhostDepartures.Option] = all.map { x in
+            GhostDepartures.Option(id: x.id, line: x.first.line, departs: x.first.departure, scheduled: x.first.scheduledDeparture,
+                                   live: x.first.live, cancelled: x.first.cancelled)
+        }
+        return GhostDepartures.statuses(opts, now: now, alsoLive: alsoLive)[t.id] == .unsure
+    }
+
     /// The planning key changed, or it's the first load. Your next trips: the new key's saved answer (asked within 300 m
     /// of where you are, minus what has left); else, when only the start changed, the trips you had; else none. The lists
     /// per leg depend only on the direction: a new one shows its saved lists. The boards near you stay while you're within
@@ -607,14 +679,19 @@ final class LiveStore: ObservableObject {
         }
         switch Snapshots.onKeyChange(from: old, to: new, hasSaved: saved != nil) {
         case .showSaved:
-            if let saved { next = saved.trips; nextAsOf = saved.at; nextAt = saved.at }
+            if let saved {
+                // (0.40) only the start changed (you walked away from home): the trip you're heading for stays
+                let sameWay: Bool = old.map { $0.dir == new.dir && $0.dest == new.dest } ?? false
+                next = sameWay ? Self.sticky(kept: next, answer: saved.trips, held: heldTrip, onIt: false, now: now) : saved.trips
+                nextAsOf = saved.at; nextAt = saved.at
+            }
             pick = 0
         case .keep:
             next = Snapshots.upcoming(next, now: now) { $0.first.departure }
             nextAsOf = next.isEmpty ? nil : (nextAsOf ?? nextAt)
             if pick >= next.count { pick = 0 }
         case .clear:
-            next = []; nextAsOf = nil; nextAt = nil; pick = 0
+            next = []; nextAsOf = nil; nextAt = nil; pick = 0; heldTrip = nil
         }
         nextError = nil; updated = nil; panelsUpdated = nil; lastPanels = .distantPast
         onBoard = nil; onTheMove = false        // (the bus or train you're on is found again for the new key)

@@ -239,6 +239,9 @@ struct NewHome: View {
     @StateObject private var plan = PlanTripModel()
     @State private var planOpen = false
     @State private var planFromSearch = false
+    /// (0.40) Search: a sheet over this map (not a screen of its own), and the stops it found, drawn on this map.
+    @State private var searchOpen = false
+    @State private var searchHits: [Transit.StopHit] = []
     @State private var warmedUp = false                    // the first seconds after appearing: no vehicles yet
     @State private var idsChangedAt = Date.distantPast     // when the cards last changed (not a swipe: the map stays)
     @State private var weekOpen = false                    // Next trip first: Your week over the map
@@ -351,7 +354,17 @@ struct NewHome: View {
         }
         .onChange(of: cardIds) { _, _ in idsChangedAt = Date() }
         .onChange(of: live.updated) { _, u in if u != nil { warmedUp = true } }
-        .onChange(of: plan.focused) { _, _ in if planOpen { fitRoute() } }
+        .onChange(of: plan.focused) { _, _ in
+            if planOpen { fitRoute() } else if searchOpen { showRouteIfHidden() }
+        }
+        // (0.40) search over this map: its sheet leaves the map as it is, half of it in view
+        .sheet(isPresented: $searchOpen, onDismiss: searchClosed) {
+            HomeSearchSheet(model: plan, hits: $searchHits, morePlan: { searchToPlan() }, close: { searchOpen = false })
+                .presentationDetents([.fraction(0.5), .large])
+                .presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.5)))
+                .presentationDragIndicator(.visible)
+                .presentationBackground(DS.page)
+        }
         .onChange(of: goStore.isOpen) { _, open in if open { planOpen = false; dayOpen = false; weekOpen = false } }
         // (0.27) "Take this trip" from a friend: Plan, filled in
         .onChange(of: friends.planRequest) { _, r in
@@ -458,7 +471,8 @@ struct NewHome: View {
     private var map: some View {
         let drawn: (stops: [Transit.NearStop], names: Bool) = region.map { mapStops.drawn(in: $0) } ?? (stops: [], names: false)
         let showV = VehiclePick.shows(vehicleGate) && region != nil && !planOpen
-        let route = planOpen ? plan.route(plan.focused) : []
+        let route = planOpen || (searchOpen && plan.to != nil) ? plan.route(plan.focused) : []
+        let hits: [Transit.StopHit] = searchOpen && plan.to == nil ? searchHits : []
         // (the vehicles slide along their road every 2 s while there are any; else the map is redrawn only when it changes)
         return TimelineView(.periodic(from: .now, by: showV && !vehicles.segs.isEmpty ? 2 : 3600)) { tl in
             let moving: [LiveVehiclesModel.Moving] = showV ? region.map { vehicles.moving(at: tl.date, in: $0) } ?? [] : []
@@ -475,6 +489,12 @@ struct NewHome: View {
                 if route.count > 1 {
                     MapPolyline(coordinates: route)
                         .stroke(DS.accent, style: StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round))
+                }
+                ForEach(hits) { h in
+                    Annotation(Fmt.place(h.name), coordinate: CLLocationCoordinate2D(latitude: h.lat, longitude: h.lon), anchor: .bottom) {
+                        SearchHitMark(hit: h) { pickHit(h) }
+                    }
+                    .annotationTitles(.hidden)
                 }
                 ForEach(moving) { v in
                     Annotation(v.line, coordinate: shownAt(v), anchor: .center) {
@@ -866,6 +886,11 @@ struct NewHome: View {
                                          train: train, stopName: d.stopName)
     }
 
+    /// (0.40) The ghost rules on the cards' departures (`DepartureGroups.cleaned`).
+    private func ghostClean(_ deps: [DepartureGroups.Departure], now: Date) -> [DepartureGroups.Departure] {
+        DepartureGroups.cleaned(deps, now: now, alsoLive: Set(LiveDelays.shared.seen.values.map(\.line)))
+    }
+
     private var cardData: (cards: [DepartureGroups.Card], loading: Bool, asOf: Date?, note: String?) {
         let now = Date()
         switch cardSource {
@@ -874,16 +899,16 @@ struct NewHome: View {
             // `panelsUpdated` is set when they're done, from anywhere)
             let stops = live.nearStops.map { DepartureGroups.Stop(id: $0.id, name: $0.name, rail: $0.rail, metres: metres($0.lat, $0.lon, fallback: $0.meters), lat: $0.lat, lon: $0.lon) }
             let rail = Set(live.nearStops.filter(\.rail).map(\.id))
-            let deps = live.nearBoard.map { departure($0, rail: rail.contains($0.stopId)) }
+            let deps = ghostClean(live.nearBoard.map { departure($0, rail: rail.contains($0.stopId)) }, now: now)
             return (DepartureGroups.cards(stops: stops, departures: deps, now: now), live.nearBoard.isEmpty && live.panelsUpdated == nil, live.nearAsOf, nil)
         case .homeBoard:
             let stops = stopsStore.boardStops.map { DepartureGroups.Stop(id: $0.id, name: $0.name, rail: false, metres: nil) }
-            let deps = live.board.map { departure($0, rail: false) }
+            let deps = ghostClean(live.board.map { departure($0, rail: false) }, now: now)
             return (DepartureGroups.cards(stops: stops, departures: deps, now: now), live.panelsUpdated == nil, live.panelsAsOf, nil)
         case .own:
             let stops = nearDeps.stops.map { DepartureGroups.Stop(id: $0.id, name: $0.name, rail: $0.rail, metres: metres($0.lat, $0.lon, fallback: $0.meters), lat: $0.lat, lon: $0.lon) }
             let rail = Set(nearDeps.stops.filter(\.rail).map(\.id))
-            let deps = nearDeps.board.map { departure($0, rail: rail.contains($0.stopId)) }
+            let deps = ghostClean(nearDeps.board.map { departure($0, rail: rail.contains($0.stopId)) }, now: now)
             var note: String?
             if near.position == nil {
                 note = trip.locationDenied ? "Turn on location for Haltewekker to see what leaves around you." : "Finding where you are…"
@@ -935,14 +960,14 @@ struct NewHome: View {
         if trip.phase == .idle, nudgeOwnCard(Date()) {
             return AnyView(TimelineView(.periodic(from: .now, by: 15)) { tl in
                 NextTripCard(content: heroContent(now: tl.date), now: tl.date, chip: AnyView(destinationChip), start: startHero,
-                             otherTimes: heroOtherTimes, plan: { openPlan(to: nil, when: .now) }, notNow: { trip.forgetResumable() })
+                             otherTimes: heroOtherTimes, plan: { openPlan(to: nil, when: .now) }, notNow: { trip.forgetResumable() }, fromStop: fromStopPick)
             })
         }
         guard let d = HomeActions.due(trip: trip, planner: planner, now: Date()) else {
             guard live.custom != nil, trip.phase == .idle else { return nil }
             return AnyView(TimelineView(.periodic(from: .now, by: 15)) { tl in
                 NextTripCard(content: heroContent(now: tl.date), now: tl.date, chip: AnyView(destinationChip), start: startHero,
-                             otherTimes: heroOtherTimes, plan: { openPlan(to: nil, when: .now) }, notNow: { trip.forgetResumable() })
+                             otherTimes: heroOtherTimes, plan: { openPlan(to: nil, when: .now) }, notNow: { trip.forgetResumable() }, fromStop: fromStopPick)
             })
         }
         return AnyView(NudgeCard(leave: d.leave, ride: d.trip.first, sub: d.sub) {
@@ -978,7 +1003,7 @@ struct NewHome: View {
                             // the trip picked again with the countdown's clock, so a trip that has gone makes way
                             TimelineView(.periodic(from: .now, by: 15)) { tl in
                                 NextTripCard(content: heroContent(now: tl.date), now: tl.date, chip: AnyView(destinationChip), start: startHero, otherTimes: heroOtherTimes,
-                                             plan: { openPlan(to: nil, when: .now) }, notNow: { trip.forgetResumable() })
+                                             plan: { openPlan(to: nil, when: .now) }, notNow: { trip.forgetResumable() }, fromStop: fromStopPick)
                             }
                         }
                     }
@@ -1042,8 +1067,10 @@ struct NewHome: View {
         }
         let due = HomeActions.due(trip: trip, planner: planner, now: now)
         let dest = live.destination(trip.direction).key
+        // (0.40) the trip you're heading for stays the card's until it has left (`StickyTrips`)
+        let liveIndex: Int? = live.onTheMove ? nil : live.shownIndex(at: near.position ?? trip.lastFix, now: now)
         let pick = NextTrip.pick(dest: dest, dueDest: due?.dest.key, schoolDue: due?.school == true, plannedDue: due.map { !$0.school } ?? false,
-                                 liveDest: dest, liveLeaves: live.onTheMove ? [] : live.next.map(\.start), now: now)
+                                 liveDest: dest, liveIndex: liveIndex, now: now)
         switch pick.source {
         case .school, .planned:
             guard let d = due else { return .empty(note: nil) }
@@ -1053,7 +1080,12 @@ struct NewHome: View {
             guard let i = pick.index, let t = live.next[safe: i] else { return .empty(note: nil) }
             if leaveHidden(t) { return .empty(note: Self.onTheMoveNote) }
             let dest = placeName(live.destination(trip.direction))
-            return .trip(.init(title: "", leave: t.start, trip: t, destName: dest, asOf: live.nextAsOf, startTitle: "Start"))
+            // (0.40) when to leave at your own walking speed, with 2 minutes spare; one that may not run says so
+            let walk: WalkPlan.Shown = WalkPlan.mine(t.first)
+            let here: String = Fmt.place(t.first.fromStop)
+            let lines: Set<String> = Set(live.next.filter { Fmt.place($0.first.fromStop) == here }.map(\.first.line))
+            return .trip(.init(title: "", leave: WalkPlan.leave(t.start, walk), trip: t, destName: dest, asOf: live.nextAsOf, startTitle: "Start",
+                               walk: walk, mayNotRun: LiveStore.mayNotRun(t, among: live.next, now: now), lines: lines))
         case .none:
             if live.onTheMove { return .empty(note: Self.onTheMoveNote) }
             if live.updated == nil && live.nextError == nil { return .loading }
@@ -1156,6 +1188,24 @@ struct NewHome: View {
         }
     }
 
+    /// (0.40) A departure picked in the card's "From <stop>": Fastest trip on that one (one of your next trips that
+    /// starts with it, else planned from that stop with it).
+    private func fromStopPick(_ row: FromStop.Row, _ t: DoorTrip) {
+        guard trip.phase == .idle else { return }
+        let dest: Place = live.destination(trip.direction)
+        if let mine = live.next.first(where: { $0.first.tripId == row.dep.tripId }) {
+            withAnimation(.easeInOut(duration: 0.35)) { goStore.open(to: dest, from: near.position, seed: live.next, chosen: mine) }
+            return
+        }
+        HomeActions.openGo(live: live, trip: trip, goStore: goStore, near: near)
+        let stopId: String = t.first.fromId
+        let walk: Int = t.first.walkBefore
+        let g: GoStore = goStore
+        Task { @MainActor in
+            await g.chooseDeparture(tripId: row.dep.tripId, departure: row.dep.time, stopId: stopId, walk: walk)
+        }
+    }
+
     /// Other times: Plan to the card's place (to be there in time, for a due trip with a deadline).
     private func heroOtherTimes() {
         let now = Date()
@@ -1172,13 +1222,70 @@ struct NewHome: View {
 
     private func openDay() { withAnimation(DS.move) { dayOpen = true } }
 
-    /// Search anywhere: Plan from your location, straight to picking where to.
+    /// Search anywhere (0.40): a sheet over this map, the map staying as it is (the same camera; the stops found and the
+    /// way there drawn on it). Not Plan's own screen any more; its "more options" opens that.
     private func openSearch() {
         weekOpen = false
-        rememberForPlan()
-        plan.from = .here; plan.to = nil; plan.when = .now; plan.clear()
-        planFromSearch = true
-        withAnimation(DS.quick) { planOpen = true }
+        plan.from = .here; plan.to = nil; plan.when = .now; plan.modes = nil; plan.clear()
+        searchHits = []
+        searchMoved = false
+        searchOpen = true
+    }
+
+    /// Whether the search moved the map to show a way (it goes back when the search closes).
+    @State private var searchMoved = false
+
+    /// A stop the search found, tapped on the map: the ways there (in the sheet).
+    private func pickHit(_ h: Transit.StopHit) {
+        let d = Destination(id: h.id, name: h.name, lat: h.lat, lon: h.lon)
+        PlanTripModel.remember(d)
+        plan.from = .here; plan.when = .now
+        plan.to = .place(d.place)
+    }
+
+    /// The way you look at in the search, on this map: moved there only when it isn't in view already.
+    private func showRouteIfHidden() {
+        let c = plan.route(plan.focused)
+        guard c.count > 1 else { return }
+        if let r = region {
+            let inView: Bool = c.allSatisfy { p in
+                abs(p.latitude - r.center.latitude) <= r.span.latitudeDelta / 2 && abs(p.longitude - r.center.longitude) <= r.span.longitudeDelta / 2
+            }
+            if inView { return }
+        }
+        if !searchMoved { rememberForPlan(); searchMoved = true }
+        fitRoute()
+    }
+
+    /// The search sheet went: what it found goes from the map, and the map goes back if the search moved it.
+    private func searchClosed() {
+        searchHits = []
+        guard !planOpen else { return }
+        plan.clear()
+        if searchMoved {
+            searchMoved = false
+            let back = planReturn
+            planReturn = nil
+            if back?.following == true {
+                setFollowing(true)
+                withAnimation(DS.move) { camera = .userLocation(followsHeading: false, fallback: camera) }
+            } else if let c = back?.camera {
+                withAnimation(DS.move) { camera = .camera(c) }
+            }
+        }
+    }
+
+    /// "More options" in the search: the whole Plan over the map, with where to as picked.
+    private func searchToPlan() {
+        let moved: Bool = searchMoved
+        searchMoved = false
+        searchOpen = false
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            if !moved { rememberForPlan() }
+            planFromSearch = false
+            withAnimation(DS.quick) { planOpen = true }
+        }
     }
 
     /// A place's chip: Plan from your location to there, leaving now.

@@ -3,6 +3,50 @@
 The rules and numbers for each are in [logs-export.md](logs-export.md) › For Android (parity), with the iOS files and
 their tests.
 
+## iOS 0.40.0
+
+- [ ] "From <stop>" in a trip's detail (`FromStop`, Fastest trip under the big card; folded away as "Buses from
+      Bolkenplein ▾" in the home's next-trip card): the next departures from the stop you get on at (Transitous
+      `/v6/stoptimes` for that stop, n 20, every 30 s while shown; a failed answer keeps the last list). Up to 6 of the
+      lines that get you there (your trip's first line and the other ways' first lines from the same stop; your own
+      ride always among them, tagged "Your trip"), then up to 3 other lines, smaller. Each: line pill, headsign, time,
+      "in 4 min" under the hour, "+3" / "live" / "timetable" / "may not run", "Stand B" / "Platform 5". Greyed when you
+      can't be at the stop for it (leaves more than 30 s before now + your walk). Tap one that gets you there: the trip
+      switches to it (one of the ways already found, else the rest planned from that stop: the planner from the stop to
+      the destination at its departure − 1 min, the itinerary whose first ride is that trip, with your walk to the stop
+      put in front). It stays your pick like a ride chosen in Plan, but missing from later answers doesn't drop it, only
+      leaving or being cancelled. Vectors in `ios/Tests/FromStopTests.swift`.
+- [ ] Sticky upcoming trips (`StickyTrips`): a failed or empty answer keeps what's still to come (not left 60 s past its
+      live departure, not cancelled); a partial answer adds to the list; a whole answer replaces it but keeps the trip
+      you're heading for (the one shown first, by its first ride's trip id) until it has left, unless you're on it; a
+      trip in both is the new answer's. The card holds that trip once its time to leave is within 5 min: while you can
+      still reach its stop (straight-line metres × 1.3 at 1.7 m/s, before its departure + 30 s), or with no position
+      known until 2 min past its time to leave (as before); else the first you can still leave for. Also across a
+      planning-key change that only changes the start (walking away from home). Vectors in
+      `ios/Tests/StickyTripsTests.swift`.
+- [ ] The bus you wait for on the map agrees with its time (`WaitMarker`, Fastest trip's map and the live sheet): drawn
+      within 150 m of your stop (or past it) while its time there is more than 2 min off doesn't add up. Then: its own GPS
+      fix within 35 m of your stop and your stop is where its trip starts (or its times have it standing there): at the
+      stop, labelled "Waiting · leaves 17:42"; else where its times put it when that's more than 150 m before your stop;
+      its trip not started and nothing says where it is: not drawn (the stop's pin has the time); else 150 m short of
+      the stop. Causes seen: a layover at the terminus that is your stop, GPS of the vehicle's previous journey, and a
+      fix moved on too far at its pace. Vectors in `ios/Tests/WaitMarkerTests.swift`.
+- [ ] The walk at your own speed (`WalkPlan`): once 5 walks are learned (`Habits.walkSpeed`), your walk = the walk's
+      metres (the map's walking route, else the planner's minutes × the speed it planned with) / your speed, rounded up,
+      never more than the planner's. Shown "6 min walk · leave in 4 min (2 min spare)". The time to leave (and "Time to
+      go") moves later by max(0, planner's walk − your walk − 2) minutes only; nothing learned: as before. School and
+      planned-trip alarms unchanged. Vectors in `ios/Tests/WalkPlanTests.swift`.
+- [ ] Search on the home map: a bottom sheet over the same map (half height, the map still usable behind it, the same
+      camera): your places, recent ones, stops found by name (also drawn as pins on the map; tap one), then the ways there
+      in the sheet with Go and the route drawn on the map (the map moves only when the route isn't in view, and goes back
+      when the search closes). "Another time or more options" opens the full Plan as before.
+- [ ] Ghost departures (`GhostDepartures`, the home's departure cards, "From <stop>", the home's trips and Plan's
+      options): the same journey from two sources once (same trip at the same stop, or same line + stop + timetable minute
+      + headsign equal or one the start of the other; the live copy kept); cancelled ones hidden; for a line that has live
+      data (live elsewhere in the list, or seen live today), one with no live data and no vehicle seen within 15 min of
+      leaving is "No live info · may not run" and sorts as if 10 min later (trip options: after the others); past its
+      time + 60 s with no sign of it: gone. Vectors in `ios/Tests/GhostDeparturesTests.swift`.
+
 ## iOS 0.39.1
 
 From the field report of 25 November (the 154 to Schijndel taken for the 306 at 's-Hertogenbosch station). Log lines in
