@@ -47,6 +47,42 @@ their tests.
       leaving is "No live info · may not run" and sorts as if 10 min later (trip options: after the others); past its
       time + 60 s with no sign of it: gone. Vectors in `ios/Tests/GhostDeparturesTests.swift`.
 
+## iOS 0.39.1
+
+From the field report of 25 November (the 154 to Schijndel taken for the 306 at 's-Hertogenbosch station). Log lines in
+[logs-export.md](logs-export.md) › The wrong bus, a miss at the change, the bus at your stop (0.39.1).
+
+- [ ] A miss at the change (`MissRule` in `ChangeGuide.swift`): before you're there, as before (live arrival + the room
+      the change needs > live departure). At the change: missed only once the next ride's live departure has gone by
+      60 s with you not on it, and never while its own GPS (fix ≤ 180 s old) has it at or before the stop (≤ 40 m past
+      it along its road). The next ride's time: its own trip answer of the last 3 min (asked every 2 min at the change
+      too), else the change's list, else the saved copy, else the plan's.
+- [ ] Never start a leg by the planned one's timetable more than 2 min before its live departure, nor 20 min after it
+      (`TimetableStart`); meanwhile keep looking for the one you're on.
+- [ ] Choosing: the one shown failing by its own GPS 1000 m (a train 2500 m) or more from you (not off its path, not
+      "not sure") while another one fitted by its own GPS this look or in the last 90 s: switch to that one at once
+      (`farByGPS`, `gpsRescue`). What the "find another" look's GPS said goes into the choice that follows (a fit 10 s
+      ago protects it from "the only one left").
+- [ ] Wrong bus (`WrongBus`): the ride the leg was planned with is remembered (a switch or replan the app made itself
+      keeps it; a pick by hand: no alert). On another line, or the same line to another destination, that doesn't go
+      to that leg's stop, and sure (the roads split, or its own GPS has fitted you for 75 s: fits at most 3 min apart,
+      the newest at most 2 min old): once a trip a time-sensitive notification `wrongbus-<trip start>` (gone after
+      20 min) and a ride-screen card "You’re on the 154 to Schijndel, not your 306" with the best way on from the
+      planner: "Get off at Kloosterstraat — 306 back at 17:52" (its next stop) or "Stay on to Schijndel — 306 from
+      there at 18:11"; buttons "Pick again" and "Got it". Vectors in `ios/Tests/WrongBusTests.swift`.
+- [ ] Another line at your stop (`OtherAtStop`): waiting for a bus (before the first leg or at a change), within 150 m
+      of the stop and yours leaving within 10 min: the stop's whole board (every line, asked once a minute from 5 min
+      ago) and each one's own GPS; another line's bus within 80 m of you (fix ≤ 120 s), leaving within 5 min of now
+      and not after yours (+1 min): a card "That’s the 154 to Schijndel — not yours" / "Your 306: 2 min" (closable) and
+      once a bus a notification `otherbus-<trip id>` (gone after 10 min). Your own routes: every line of the list is
+      yours. "This bus becomes the 306" is not shown: neither Transitous nor OVapi's positions give a reliable
+      block/vehicle link to the next trip.
+- [ ] Usual line (`UsualLine.learnsFound`): a ride it found by itself teaches +1 only on the line the leg was planned
+      with (nothing planned: any); another line only by your own pick.
+- [ ] The moment you left (`DepartMatch`): "not then" by live times alone needs 180 s off (by its own GPS still 90 s, or
+      45 s more than the one that left); two or more of them at the stop by their own GPS around the moment: no
+      evidence (no pick, no bonus).
+
 ## iOS 0.39.0
 
 - [ ] Change guidance (`ChangeGuide`): at a change (bus → train, train → train), on the ride screen, at the change and on

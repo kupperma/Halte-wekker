@@ -269,6 +269,20 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     /// The ring before your stop, for the adaptive wake-up (`AdaptiveWake`): when, which mode, when you stopped it.
     private var ringNote: (at: Date, train: Bool, stopped: Date?)?
     private var plannedNextAt = Date.distantPast           // the next leg's planned ride last asked (its live time, platform)
+    private var plannedNextTrip: (id: String, trip: LiveTrip, at: Date)?   // …and its answer (where its own GPS puts it)
+    // 0.39.1: the field report of 25 November (`MissRule`, `TimetableStart`, `WrongBus`, `OtherAtStop`)
+    private var meant: PlannedRide?                       // the ride this leg was planned with (a switch it made itself keeps it)
+    private var meantTo: Place?                           // …and where that leg went
+    private var gpsRuns: [String: WrongBus.Run] = [:]     // each vehicle's run of fits by its own GPS
+    private var wrongBusTold = false                      // "You're on the 154, not your 306": told on this trip
+    /// "You're on the 154 to Schijndel, not your 306" and the best way on, on the ride screen (`WrongBus`).
+    @Published private(set) var wrongBus: WrongBus.Alert?
+    /// Waiting at your stop: "That's the 154 to Schijndel — not yours" (`OtherAtStop`).
+    @Published private(set) var otherAtStop: WrongBus.Alert?
+    private var otherTold: Set<String> = []               // …told by notification, by trip id
+    private var otherClosed: Set<String> = []             // …its card closed, by trip id
+    private var otherBoard: (key: String, at: Date, list: [BoardDeparture])?   // the stop's whole board, every line
+    private var otherLooking = false
     // 0.34: what it learns from your rides (`HabitStore`)
     private var changeArrived: (at: Date, fromLine: String)?   // at a change: when you got off, and off what
     private var changeToRecord = false                    // the next leg's change outcome isn't noted yet
@@ -478,6 +492,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             UserDefaults.standard.set(kmMem, forKey: "kmMem")
         }
         tripStart = Date(); startedAtLeg = index; lastScore = nil
+        wrongBusTold = false; wrongBus = nil; gpsRuns = [:]; otherTold = []; otherClosed = []; otherAtStop = nil; otherBoard = nil
         tripStartSpot = lastFix.flatMap { Date().timeIntervalSince($0.timestamp) < ScoreRules.freshStart ? $0.coordinate : nil }
         tripPlannedEnd = r.plannedEnd; tripLate = nil; trainLate = []
         if !demo { TravelNotes.shared.tripStarted(); TravelNotes.shared.noteLegs(legs) }   // (0.36) your usual trains
@@ -521,6 +536,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         whichTrain = []; whichTrainTo = [:]; whichTrainAsked = false; trainSeen = [:]; rivalLookAt = Date().addingTimeInterval(60)
         lastGood = nil; reckonFrom = nil; reckoning = false
         readyTold = false; ringNote = nil; arrivePlatform = nil; legDelay = nil; changeGuide = nil; nextOptions = []; usingSaved = false
+        meant = route?.planned?[safe: index]; meantTo = leg?.to; wrongBus = nil; otherAtStop = nil      // (0.39.1)
         if index > 0, !demo, let a = changeArrived, let l = leg { noteChangeWalk(arrived: a.at, at: l.from) }
         changeToRecord = index > 0 && changeArrived != nil
         Motion.shared.live(!demo, for: "trip")
@@ -606,7 +622,14 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         if let v = vehicle, let l = leg, !demo { noteDelay(v, at: l.to, rideId: rideId) }
         // 0.38: a ride it found by itself and you rode to the end of the leg teaches your usual line (a pick by hand
         // taught it already)
-        if let v = vehicle, !pickedByHand, handLock == nil, Date().timeIntervalSince(legStart) >= 120 { learnLine(v, weight: UsualLine.confirmed) }
+        // 0.39.1: only on the line it was planned with (`UsualLine.learnsFound`): not the 154 you were on by mistake
+        if let v = vehicle, !pickedByHand, handLock == nil, Date().timeIntervalSince(legStart) >= 120 {
+            if UsualLine.learnsFound(line: v.line, train: v.isTrain, plannedLine: meant?.line, plannedTrain: meant?.isTrain) {
+                learnLine(v, weight: UsualLine.confirmed)
+            } else {
+                rideLog("usual line · not learned: \(Self.logLabel(v)) isn't the planned \(meant?.line ?? "?")")
+            }
+        }
         handLock = nil; stillOnAsk = nil                   // (a pick by hand holds for its leg only)
         UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [Self.stillOnId])
         sound.stop()
@@ -826,7 +849,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         smoother = SpeedSmoother(); lastSpeedFix = nil; wakeLive = nil; wakeRoute = []; waitLowOn = false
         stopReckon(); whichTrain = []; whichTrainTo = [:]; changeArrived = nil; changeToRecord = false
         changeGuide = nil; switchingChange = false; arrivePlatform = nil; legDelay = nil; nextOptions = []; readyTold = false; ringNote = nil
-        offline = false; usingSaved = false; plannedNextAt = .distantPast
+        offline = false; usingSaved = false; plannedNextAt = .distantPast; plannedNextTrip = nil
+        meant = nil; meantTo = nil; gpsRuns = [:]; wrongBus = nil; otherAtStop = nil; otherTold = []; otherClosed = []; otherBoard = nil
         RideCacheStore.shared.clear()                     // (0.39) the saved copy of the trip's rides goes with it
         UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [Self.whichTrainId])
         Motion.shared.live(false, for: "trip")
@@ -1164,7 +1188,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         if tick { lastNetTick = now; onNetTick?() }
         if phase == .transfer {
             transferAnchor = TransferPolicy.update(transferAnchor, with: Fix(loc))     // (standing at the change: for the hour's end)
-            if tick { Task { await loadUpcoming() }; updateChangeGuide(); pushActivity(force: false) }
+            if tick { Task { await loadUpcoming() }; refreshPlannedNext(); updateChangeGuide(); checkOtherAtStop(); pushActivity(force: false) }
         }
         // Fastest trip: rough GPS while you stand with long to go, the best as soon as you move (`GoGPS`)
         if phase == .idle, going { applyGPS() }
@@ -1188,7 +1212,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         }
         if vehicle != nil, !demo { startReckon() }
         startDistance = loc.distance(from: CLLocation(latitude: leg.from.coordinate.latitude, longitude: leg.from.coordinate.longitude))
-        if vehicle == nil { if handLock == nil, tick { Task { await loadUpcoming() } } }
+        if vehicle == nil { if handLock == nil, tick { Task { await loadUpcoming() }; checkOtherAtStop() } }
         else if tick, now.timeIntervalSince(lastVehicleRefresh) >= RideTick.vehicleEvery - 1 { lastVehicleRefresh = now; Task { await refreshVehicle() } }
         // (choosing between buses is doubt: on its own 12 s clock)
         if vehicle != nil, !cands.isEmpty, Date() >= candCheckAt { candCheckAt = Date().addingTimeInterval(12); Task { await resolveCandidates() } }
@@ -1553,7 +1577,18 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
                     // (The matcher before your fixes span 20 s isn't "no match" but not sure yet: it waits, but a minute
                     // at most once you've clearly left: sparse GPS, on a train, may never give it enough fixes.)
                     let now = Date()
-                    let left = planned.flatMap { p in self.legs[safe: li].map { self.clearlyLeft(on: p, from: $0.from) } } ?? false
+                    // 0.39.1: by its live departure, and never more than 2 minutes before it (`TimetableStart`): the
+                    // 305 that leaves at 17:35 isn't the one you're on at 17:24, so the looks for the one you're on go on
+                    var left = false
+                    if let p = planned, let l = self.legs[safe: li], self.leftAtSpeed(from: l.from) {
+                        let dep: Date = self.liveDeparture(of: p, leg: li).at
+                        left = TimetableStart.allowed(now: now, departure: dep)
+                        if !left, now < dep {
+                            let label = TripManager.logLabel(Vehicle(tripId: p.tripId, line: p.line, isTrain: p.isTrain))
+                            let mins = Int((dep.timeIntervalSince(now) / 60).rounded())
+                            self.rideLog(TimetableStart.waitLine(label: label, leaves: Fmt.hhmm(dep), minutes: mins), once: "tt-wait|\(p.tripId)", every: 120)
+                        }
+                    }
                     leftSince = VehicleMatch.heldSince(leftSince, holds: left, now: now)
                     let sure = MatchSettings.classic()
                         || VehicleMatch.fallbackSure(enough: VehicleMatch.enough(self.recentFixes), leftSince: leftSince, now: now)
@@ -1699,10 +1734,9 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         return (at: fix.timestamp, metres: Self.metres(from: fix.coordinate, to: t.path))
     }
 
-    /// You've left the start of the leg at bus or train speed, around when the planned one leaves.
-    private func clearlyLeft(on p: PlannedRide, from start: Place) -> Bool {
+    /// You've left the start of the leg at bus or train speed (when the planned one leaves: `TimetableStart`, 0.39.1).
+    private func leftAtSpeed(from start: Place) -> Bool {
         let now = Date()
-        guard now > p.departure.addingTimeInterval(-120), now < p.departure.addingTimeInterval(20 * 60) else { return false }
         let last3 = samples.suffix(3)
         guard last3.count == 3, let last = last3.last, last.timestamp > now.addingTimeInterval(-30), last.horizontalAccuracy < 150,
               last3.allSatisfy({ $0.speed >= 4 }) else { return false }
@@ -1833,6 +1867,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         }
         let lines = Dictionary(tracks.map { ($0.tripId, $0.line) }, uniquingKeysWith: { a, _ in a })
         lastJudged = judged; lastLines = lines
+        noteGPSRuns(judged)                               // (0.39.1)
         let outcome = ranked.first.map { (lane != nil ? "fast lane " : "best ") + FieldFormat.label($0.id, lines) } ?? "none"
         let plannedLeftOut = planned.map { p in all.contains { $0.tripId == p } && !tracks.contains { $0.tripId == p } } ?? false
         FieldLog.shared.add(.match, FieldFormat.match(place, judged, outcome: outcome, planned: planned, count: judged.count, plannedExcluded: plannedLeftOut))
@@ -2646,6 +2681,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         Task { [weak self] in
             guard let t = await Transit.liveTrip(id, maxAge: 60), let me = self, me.tripStart == start else { return }
             RideCacheStore.shared.save(t, tripId: id, at: Date(), trip: start, force: true)
+            RealPositionsStore.shared.learn(id, trip: t)
+            me.plannedNextTrip = (id: id, trip: t, at: Date())      // (0.39.1: where its own GPS puts it)
             me.updateChangeGuide()
             me.pushActivity(force: false)
         }
@@ -2658,19 +2695,55 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     }
 
     /// The next leg's planned ride at its live time (the planner's answer, the change's list, or its own saved answer),
-    /// else the next one found.
+    /// else the next one found. 0.39.1: its own answer of the last minutes first (asked every 2 minutes at a change):
+    /// the change's list can be older, and the plan's time is the timetable's.
     private func plannedGuideRide() -> ChangeGuide.Ride? {
-        let pool: [Ride] = [next].compactMap { $0 } + nextOptions + (phase == .transfer ? upcoming.map(\.trip.first) : [])
         guard let p = route?.planned?[safe: index + 1] else { return next.map(guideRide) }
-        if let r = pool.first(where: { $0.tripId == p.tripId }) { return guideRide(r) }
-        var dep: Date = p.departure
+        let pool: [Ride] = [next].compactMap { $0 } + nextOptions + (phase == .transfer ? upcoming.map(\.trip.first) : [])
+        let found: Ride? = pool.first(where: { $0.tripId == p.tripId })
+        let d = liveDeparture(of: p, leg: index + 1)
+        if let r = found, !d.fresh { return guideRide(r) }
         var plat: String? = p.platform
-        if let l = legs[safe: index + 1], let sr = RideCacheStore.shared.ride(p.tripId, trip: tripStart),
+        if let r = found, let rp = guideRide(r).platform { plat = rp }
+        if plat == nil, let l = legs[safe: index + 1], let sr = RideCacheStore.shared.ride(p.tripId, trip: tripStart),
            let k = RideCache.stop(near: GeoPoint(l.from.coordinate), in: sr) {
-            if let d = sr.stops[k].departure ?? sr.stops[k].arrival { dep = d }
-            plat = sr.stops[k].platform ?? plat
+            plat = sr.stops[k].platform
         }
-        return ChangeGuide.Ride(tripId: p.tripId, line: p.line, isTrain: p.isTrain, departure: dep, platform: plat, walk: next?.walkBefore ?? 0)
+        let walk: Int = found?.walkBefore ?? next?.walkBefore ?? 0
+        return ChangeGuide.Ride(tripId: p.tripId, line: p.line, isTrain: p.isTrain, departure: d.at, platform: plat, walk: walk)
+    }
+
+    /// 0.39.1: a planned ride's departure from leg `li`'s stop, live when it can be had: its own answer saved in the last
+    /// `liveFresh` (`fresh`), else the planner's answer or the leg's list, else its own saved answer, else the plan's.
+    private func liveDeparture(of p: PlannedRide, leg li: Int) -> (at: Date, live: Bool, fresh: Bool) {
+        let now = Date()
+        var saved: (at: Date, live: Bool, savedAt: Date)?
+        if let l = legs[safe: li], let sr = RideCacheStore.shared.ride(p.tripId, trip: tripStart),
+           let k = RideCache.stop(near: GeoPoint(l.from.coordinate), in: sr), let d = sr.stops[k].departure ?? sr.stops[k].arrival {
+            saved = (at: d, live: sr.live, savedAt: sr.savedAt)
+        }
+        if let s = saved, s.live, now.timeIntervalSince(s.savedAt) <= Self.liveFresh { return (s.at, true, true) }
+        let pool: [Ride] = [next].compactMap { $0 } + nextOptions + upcoming.map(\.trip.first)
+        if let r = pool.first(where: { $0.tripId == p.tripId }) { return (r.departure, r.live, false) }
+        if let s = saved { return (s.at, s.live, false) }
+        return (p.departure, false, false)
+    }
+
+    /// s: a planned ride's own answer this new is its live time (`liveDeparture`).
+    private static let liveFresh: TimeInterval = 180
+
+    /// 0.39.1: the next leg's planned ride is at its stop or still before it by its own GPS (`MissRule.notLeft`).
+    private func plannedNotLeft(_ id: String) -> Bool {
+        guard let c = plannedNextTrip, c.id == id, let l = legs[safe: index + 1], c.trip.stops.count >= 2,
+              let f = RealPositionsStore.shared.fix(for: id) else { return false }
+        let trip: LiveTrip = c.trip
+        let mine = GeoPoint(l.from.coordinate)
+        let ds: [Double] = trip.stops.map { Geo.metres(GeoPoint($0.coordinate), mine) }
+        guard let k = ds.indices.min(by: { ds[$0] < ds[$1] }), ds[k] < RideCache.near else { return false }
+        let now = Date()
+        let at: Double? = trip.gpsPlace(f, now: now)?.raw
+        let stopAt: Double = trip.metres(ofStop: k)
+        return MissRule.notLeft(vehicleMetres: at, stopMetres: stopAt, fixAge: now.timeIntervalSince(f.at))
     }
 
     /// The change ahead (or at it): the platforms, the walk and the minutes; when your ride's live times have you there
@@ -2694,8 +2767,18 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         let learned: Double? = Habits.changeMinutes(HabitStore.shared.book)
         let fromTrain: Bool = phase == .transfer ? legs[index].mode == .train : legIsTrain
         let grade: String? = phase == .transfer ? nil : rideGradeNow
+        // 0.39.1: at the change, missed only once it has left without you (`MissRule`): its own GPS at or before the stop
+        // is still coming; near its time the positions are fetched for it
+        let atChange: Bool = phase == .transfer
+        let toGo: TimeInterval = planned.departure.timeIntervalSince(now)
+        if atChange, toGo < 5 * 60, toGo > -20 * 60 { RealPositionsStore.shared.matcherLooks(trains: planned.isTrain) }
+        let notLeft: Bool = atChange && plannedNotLeft(planned.tripId)
         let g = ChangeGuide.guide(arrive: arr, arrivePlatform: arrivePlatform, fromTrain: fromTrain, grade: grade, next: planned,
-                                  later: later, learned: learned, now: now, hhmm: { Fmt.hhmm($0) })
+                                  later: later, learned: learned, now: now, hhmm: { Fmt.hhmm($0) }, atChange: atChange, notLeft: notLeft)
+        if notLeft, now.timeIntervalSince(planned.departure) > MissRule.grace {
+            rideLog("change · the \(Fmt.hhmm(planned.departure)) is still at or before the stop by its own GPS: not missed",
+                    once: "notleft|\(planned.tripId)", every: 300)
+        }
         guard g != changeGuide else { return }
         if g.missed, changeGuide?.missed != true { rideLog("change · \(g.missText ?? "missed")", once: "miss|\(index)|\(planned.tripId)", every: 300) }
         changeGuide = g
@@ -2935,6 +3018,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         // its own GPS fitted a moment ago (0.26.1): a failure by its times alone is not sure, not a miss (so it doesn't
         // go looking for another one, and flip back to the one it just left, while the bus's GPS feed is quiet)
         VehicleMatch.noteGPSFits(judged, into: &candGPS.fitAt, now: now)
+        noteGPSRuns(judged, kept: byGPS ? v.tripId : nil)                 // (0.39.1)
         if verdict == .fails, !away, let m = mine, VehicleMatch.softened(m, fitAt: candGPS.fitAt[v.tripId], now: now) {
             verdict = .notSure; keptNote = " · its GPS fitted a moment ago"
         }
@@ -2978,6 +3062,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
                     beginChoosing([v] + near)
                 }
             }
+            // 0.39.1: still on another line than planned, its own GPS with you long enough now: say so (once a trip)
+            if verdict == .passes, !far, cands.isEmpty, vehicle == v { await checkWrongBus() }
             return
         }
         offRoad += 1
@@ -3080,6 +3166,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         guard list.map(\.vehicle.tripId) == cands.map(\.vehicle.tripId), phase == .sleeping || phase == .awake else { return }
         BatteryLog.shared.check()
         let judgedAll = VehicleMatch.judgeAll(recentFixes, tracks, strictTimes: false)
+        noteGPSRuns(judgedAll)                            // (0.39.1: how long each one's own GPS has fitted you)
         // 0.34: trains: the stopping pattern rules out the ones that call where you went through at speed, or run through
         // where you stood (never all of them)
         var out: Set<String> = list.allSatisfy({ $0.vehicle.isTrain }) ? trainPatternOut(list) : []
@@ -3121,6 +3208,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         case .byGPS?: note += " · by its GPS"
         case .split?: note += " · roads split"
         case .departed?: note += " · left the stop with you"
+        case .farByGPS?: note += " · its own GPS far from you, the other one's fits"
         case .decided?, nil: break
         }
         FieldLog.shared.add(.match, FieldFormat.match("choose", judged, outcome: FieldFormat.outcome(c, shown: shown, lines: lines) + note,
@@ -3145,13 +3233,13 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             }
         }
         guard let id = c.settle, let w = kept.first(where: { $0.vehicle.tripId == id })?.vehicle else { return }
-        await settle(w)
+        await settle(w, split: c.why == .split)
         // the one it shows keeps failing and every other one is out: a detour, or none of these; look again in a while
         if c.why == .onlyOneLeft, c.shownFailing { sameCheckAt = Date().addingTimeInterval(120) }
     }
 
     /// Sure now: the one it showed (just stop saying "checking"), or the other one (switch to it, and tell you).
-    private func settle(_ w: Vehicle) async {
+    private func settle(_ w: Vehicle, split: Bool = false) async {
         cands = []; choosing = []; candLead = nil; candSince = nil; candSwitch = SwitchState(); candMisses = [:]; candGPS.restart()
         if !whichTrain.isEmpty {
             whichTrain = []; whichTrainTo = [:]
@@ -3162,7 +3250,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         let urgentAsk = isRiding || going      // on a ride: a pause after a 429 mustn't leave it without stops
         let stops = await Transit.$urgent.withValue(urgentAsk) { await Transit.tripStops(w.tripId) }
         guard vehicle == old else { return }
-        await switchVehicle(from: old, to: w, stops: stops)
+        await switchVehicle(from: old, to: w, stops: stops, split: split)
     }
 
     /// The one you're on, when it's not the one it thought: first the one planned for this leg and the others it was
@@ -3236,6 +3324,10 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         // (each with its own fresh GPS fix, when the open data has one)
         tracks = await RealPositionsStore.shared.forMatcher(tracks)
         let judged = VehicleMatch.judgeAll(recentFixes, tracks, strictTimes: false)
+        // 0.39.1: what their own GPS said here goes into the choice that follows (one that fitted a moment ago isn't
+        // dropped as "the only one left", and wins when the one shown is far by its own GPS)
+        VehicleMatch.noteGPSFits(judged, into: &candGPS.fitAt, now: Date())
+        noteGPSRuns(judged)
         let ranked = VehicleMatch.rank(judged, planned: planned?.tripId)
         var state = SwitchState()
         let live = VehicleMatch.liveIds(judged)
@@ -3256,7 +3348,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     }
 
     /// Switch to the bus you're really on, and tell you.
-    private func switchVehicle(from old: Vehicle, to v: Vehicle, stops: [TripStop]) async {
+    private func switchVehicle(from old: Vehicle, to v: Vehicle, stops: [TripStop], split: Bool = false) async {
         // (a pick by hand meanwhile holds: never switched away by itself)
         guard HandLock.autoSwitch(handLock, leg: index) else { return }
         roadOf = nil
@@ -3273,6 +3365,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         await vehicleFound(v, stops: stops)
         rideLog(FieldFormat.rideStart(how: "switch", vehicle: Self.logLabel(v), stopMetres: metresToLegStop, leg: index + 1, of: legs.count))
         cands = []; choosing = []
+        // 0.39.1: on another line than planned, and sure of it: "You're on the 154 to Schijndel, not your 306" instead
+        if await checkWrongBus(split: split) { return }
         let to = leg?.to.short ?? "your stop"
         let when = legArrival.map { " · there \(Fmt.hhmm($0))" } ?? ""
         if v.line == old.line {
@@ -3323,6 +3417,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         rideLog(FieldFormat.rideStart(how: "wrong way", vehicle: Self.logLabel(v), stopMetres: metresToLegStop, leg: index + 1, of: legs.count))
         let rest = pool.filter { $0.tripId != v.tripId }.prefix(2).map { Vehicle(tripId: $0.tripId, line: $0.line, isTrain: $0.isTrain) }
         if !rest.isEmpty { beginChoosing([v] + rest) }
+        if await checkWrongBus() { pushActivity(force: true); return }        // (0.39.1)
         tellBus(old.map { "You’re on the \(v.title), not the \($0.title)" } ?? "You’re going another way than planned",
                 "It was taking you the other way, so the rest is planned from the \(v.title): off at \(legs.first?.to.short ?? "the next stop"), \(final.short) at \(Fmt.hhmm(t.end)).")
         pushActivity(force: true)
@@ -3354,16 +3449,180 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         if refusesAtItsStop(nr, what: atChange ? "replan at a change onto" : "replan onto", vehicle: v) { return .refused }
         boardAlternatives = ob.1
         if atChange {
+            // (0.39.1) the ride you meant for the next leg stays what it was planned with
+            let was: PlannedRide? = route?.planned?[safe: index + 1]
+            let wasTo: Place? = legs[safe: index + 1]?.to
             route = nr; legs = nr.legs(direction); index = 0
             beginLeg(vehicle: v, stops: stops, how: "replan at a change")
+            meant = was; meantTo = wasTo
         } else {
             setRoute(nr)
             await vehicleFound(v, stops: stops)
             rideLog(FieldFormat.rideStart(how: "replan on board", vehicle: Self.logLabel(v), stopMetres: metresToLegStop, leg: index + 1, of: legs.count))
         }
+        // 0.39.1: on another line than planned, and sure of it: "You're on the 154 to Schijndel, not your 306" instead
+        if await checkWrongBus() { pushActivity(force: true); return .done }
         tellBus("You’re on the \(v.title)", "Not the one it planned, so the rest is planned from this one: off at \(legs.first?.to.short ?? "the next stop"), \(final.short) at \(Fmt.hhmm(t.end)).")
         pushActivity(force: true)
         return .done
+    }
+
+    // MARK: the wrong bus (0.39.1)
+
+    /// This look's fits by each vehicle's own GPS (and `kept`: the ride's own one kept by its GPS), for how long its GPS
+    /// has been with you (`WrongBus.Run`).
+    private func noteGPSRuns(_ judged: [Judgement], kept: String? = nil) {
+        var ids: [String] = judged.filter { VehicleMatch.passedByGPS($0) }.map(\.id)
+        if let k = kept { ids.append(k) }
+        gpsRuns = WrongBus.note(gpsRuns, fitted: ids, now: Date())
+    }
+
+    /// Where a trip goes ("Schijndel"), from its own answer.
+    private func headsign(_ tripId: String) async -> String {
+        if let c = await Transit.cachedLiveTrip(tripId) { return Fmt.place(c.trip.headsign) }
+        let urgentAsk = isRiding || going
+        let t = await Transit.$urgent.withValue(urgentAsk) { await Transit.liveTrip(tripId) }
+        return t.map { Fmt.place($0.headsign) } ?? ""
+    }
+
+    /// Sure you're on another line than the leg was planned with (or the same line somewhere else), one that doesn't
+    /// take you where that leg went: say so once a trip, on the ride screen and as a notification, with the best way on
+    /// from here (`WrongBus`). Sure: the roads parted (`split`), or its own GPS has been with you 75 s. Never for one you
+    /// picked yourself. True: it told you now.
+    @discardableResult
+    private func checkWrongBus(split: Bool = false) async -> Bool {
+        guard !demo, !wrongBusTold, let v = vehicle, let m = meant, m.tripId != v.tripId, !pickedByHand, handLock == nil,
+              cands.isEmpty, phase == .sleeping || phase == .awake else { return false }
+        let now = Date()
+        guard WrongBus.sure(gpsRuns[v.tripId], split: split, now: now) else { return false }
+        let urgentAsk = isRiding || going
+        let stops: [TripStop] = await Transit.$urgent.withValue(urgentAsk) { await Transit.tripStops(v.tripId) }
+        // (one that takes you where that leg went anyway is no wrong bus)
+        if let dest = meantTo, !stops.isEmpty, goesAhead(stops, to: dest) { return false }
+        let to: String = await headsign(v.tripId)
+        let sameLine: Bool = WrongBus.norm(m.line) == WrongBus.norm(v.line)
+        var plannedTo = ""
+        if sameLine { plannedTo = await headsign(m.tripId) }
+        guard WrongBus.differs(plannedLine: m.line, plannedTo: plannedTo, line: v.line, to: to) else { return false }
+        guard !wrongBusTold, vehicle == v, !pickedByHand, handLock == nil else { return false }
+        wrongBusTold = true
+        let next: String? = stops.first(where: { ($0.arrival ?? .distantPast) > Date() }).map { Fmt.place($0.name) }
+        let fix: String = await wrongBusFix(v, nextStop: next)
+        let title: String = WrongBus.title(line: v.line, to: to, planned: m.line)
+        wrongBus = WrongBus.Alert(title: title, body: fix, tripId: v.tripId)
+        rideLog(WrongBus.logLine(label: Self.logLabel(v), to: to, planned: m.line, fix: fix) + (split ? " · roads split" : ""))
+        let c = UNMutableNotificationContent()
+        c.title = title
+        c.body = fix
+        c.sound = .default
+        c.interruptionLevel = .timeSensitive
+        c.userInfo = ["kind": "info"]
+        let id = WrongBus.id(tripStart: tripStart ?? now)
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: id, content: c, trigger: nil)) { _ in }
+        pushActivity(force: true)
+        return true
+    }
+
+    /// The best way on from the wrong one, by the planner: the trip planned again from it already (Fastest trip: where
+    /// it has you get off, and what then), else planned now from where you are.
+    private func wrongBusFix(_ v: Vehicle, nextStop: String?) async -> String {
+        if let pl = route?.planned, pl[safe: index]?.tripId == v.tripId, let l = leg {
+            let stop: String = l.to.short
+            guard let n = pl[safe: index + 1] else { return WrongBus.fix(getOff: stop, nextStop: nextStop == stop, then: nil, at: nil) }
+            return WrongBus.fix(getOff: stop, nextStop: nextStop == stop, then: n.line, at: Fmt.hhmm(n.departure))
+        }
+        guard let here = samples.last, let final = legs.last?.to else { return WrongBus.noFix }
+        let ob = await Transit.$urgent.withValue(true) { await LiveStore.onBoardTrips(here, to: final, tripId: v.tripId) }
+        guard let t = ob?.1.first else { return WrongBus.noFix }
+        let stop: String = Fmt.place(t.first.toStop)
+        guard t.rides.count >= 2 else { return WrongBus.fix(getOff: stop, nextStop: nextStop == stop, then: nil, at: nil) }
+        let n: Ride = t.rides[1]
+        return WrongBus.fix(getOff: stop, nextStop: nextStop == stop, then: n.line, at: Fmt.hhmm(n.departure))
+    }
+
+    /// The ride screen's wrong-bus card, closed.
+    func dismissWrongBus() { wrongBus = nil }
+
+    /// The "not yours" card at the stop, closed.
+    func dismissOtherAtStop() {
+        if let a = otherAtStop { otherClosed.insert(a.tripId) }
+        otherAtStop = nil
+    }
+
+    /// The one you wait for at leg `li`'s stop: the planned one at its live time, else (your own routes) the first of
+    /// the leg's list, every line of it yours.
+    private func yoursAtStop(leg li: Int, now: Date) -> OtherAtStop.Yours? {
+        if let p = route?.planned?[safe: li] {
+            let dep: Date = liveDeparture(of: p, leg: li).at
+            return OtherAtStop.Yours(line: p.line, departure: dep, lines: [p.line])
+        }
+        let rides: [Ride] = upcoming.map(\.trip.first).filter { !$0.cancelled && !$0.isTrain && $0.departure > now.addingTimeInterval(-60) }
+        guard let first = rides.min(by: { $0.departure < $1.departure }) else { return nil }
+        return OtherAtStop.Yours(line: first.line, departure: first.departure, lines: Set(rides.map(\.line)))
+    }
+
+    /// 0.39.1: waiting at the stop you get on at (at a change, or before the first leg), another line's bus stands there
+    /// before yours, by its own GPS (`OtherAtStop`): a card, and once a bus a notification. Quiet when you're not at the
+    /// stop, or yours is more than 10 minutes off. The stop's whole board is asked once a minute meanwhile.
+    private func checkOtherAtStop() {
+        let li: Int = phase == .transfer ? index + 1 : index
+        let waiting: Bool = phase == .transfer || (phase == .sleeping && vehicle == nil && handLock == nil)
+        let now = Date()
+        guard !demo, waiting, let l = legs[safe: li], l.mode == .bus, let f = lastFix, f.horizontalAccuracy >= 0,
+              f.horizontalAccuracy < 100, now.timeIntervalSince(f.timestamp) < 60, let y = yoursAtStop(leg: li, now: now) else {
+            if otherAtStop != nil { otherAtStop = nil }
+            return
+        }
+        let stop = CLLocation(latitude: l.from.coordinate.latitude, longitude: l.from.coordinate.longitude)
+        let toStop: Double = f.distance(from: stop)
+        let wait: TimeInterval = y.departure.timeIntervalSince(now)
+        guard toStop <= OtherAtStop.near, wait >= -60, wait <= OtherAtStop.within else {
+            if otherAtStop != nil { otherAtStop = nil }
+            return
+        }
+        RealPositionsStore.shared.matcherLooks(trains: false)     // (the buses' own positions, while it may matter)
+        guard !otherLooking else { return }
+        otherLooking = true
+        let key: String = l.from.key
+        let me = GeoPoint(f.coordinate)
+        Task { [weak self] in
+            guard let self else { return }
+            defer { self.otherLooking = false }
+            var list: [BoardDeparture] = self.otherBoard.flatMap { $0.key == key ? $0.list : nil } ?? []
+            let stale: Bool = self.otherBoard.map { $0.key != key || Date().timeIntervalSince($0.at) >= 60 } ?? true
+            if stale {
+                let b = await Transit.board(stopIds: l.from.ids, from: Date().addingTimeInterval(-5 * 60), n: 30)
+                if !b.isEmpty { list = b; self.otherBoard = (key: key, at: Date(), list: b) }
+            }
+            guard self.phase == .transfer || self.phase == .sleeping, self.legs[safe: li]?.from.key == key else { return }
+            let at = Date()
+            let seen: [OtherAtStop.Seen] = list.filter { !$0.cancelled && !$0.train }.map { (d: BoardDeparture) -> OtherAtStop.Seen in
+                let g: GPSFix? = RealPositionsStore.shared.fix(for: d.tripId, now: at)
+                let m: Double? = g.map { Geo.metres($0.point, me) }
+                let age: TimeInterval? = g.map { at.timeIntervalSince($0.at) }
+                return OtherAtStop.Seen(tripId: d.tripId, line: d.line, to: Fmt.place(d.headsign), departure: d.time, metres: m, fixAge: age)
+            }
+            guard let s = OtherAtStop.pick(seen, yours: y, youToStop: toStop, now: at) else {
+                if self.otherAtStop != nil { self.otherAtStop = nil }
+                return
+            }
+            let w = OtherAtStop.words(s, yours: y, now: at)
+            let a = WrongBus.Alert(title: w.title, body: w.body, tripId: s.tripId)
+            if self.otherClosed.contains(s.tripId) {                // (closed: stays closed)
+                if self.otherAtStop != nil { self.otherAtStop = nil }
+            } else if self.otherAtStop != a {
+                self.otherAtStop = a
+            }
+            guard self.otherTold.insert(s.tripId).inserted else { return }
+            let label = FieldFormat.label(s.tripId, [s.tripId: s.line])
+            self.rideLog("other at stop · \(label) to \(s.to) by its own GPS \(Int((s.metres ?? 0).rounded())) m from you · not yours · your \(y.line) at \(Fmt.hhmm(y.departure))")
+            let c = UNMutableNotificationContent()
+            c.title = w.title
+            c.body = w.body
+            c.sound = .default
+            c.userInfo = ["kind": "info"]
+            UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: OtherAtStop.id(s.tripId), content: c, trigger: nil)) { _ in }
+        }
     }
 
     /// The rest of the trip, changed under way (still on its first leg).
