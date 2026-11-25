@@ -123,6 +123,7 @@ struct RideViewNew: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         gpsLine
+        if let o = trip.otherAtStop { OtherAtStopCard(alert: o) }  // (0.39.1)
         Text("It notices which one you get on by itself: your GPS against the live position of every \(rail ? "train" : "bus") nearby. Or tap the one you’re on.")
             .font(DS.sub).foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
         if !trip.demo { RidePickButton { picking = true } }
@@ -219,6 +220,7 @@ struct RideViewNew: View {
         let v = trip.vehicle
         let to = trip.leg?.to.short ?? ""
         let eta = trip.legArrival ?? trip.legTo
+        if let w = trip.wrongBus { WrongBusCard(alert: w) }        // (0.39.1)
         if let s = trip.stillOnAsk { StillOnCard(v: s) }
         if trip.whichTrain.count == 2 { WhichTrainCard(trains: trip.whichTrain, to: trip.whichTrainTo) }
         VStack(alignment: .leading, spacing: 6) {
@@ -671,6 +673,7 @@ struct ArrivalViewNew: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityAddTraits(.isHeader)
         }
+        if let o = trip.otherAtStop { OtherAtStopCard(alert: o) }  // (0.39.1)
         if let g = trip.changeGuide {
             // (0.39) the platforms, the walk, the minutes; missed: the one you make instead, one tap to switch
             ChangeGuideRows(guide: g, at: trip.leg?.to.short ?? n.from.short).dsPanel()

@@ -26,6 +26,8 @@ struct DepartClue: Equatable, Sendable {
     var offBy: TimeInterval? = nil
     var elsewhere = false
     var byGPS = false
+    /// 0.39.1: its own GPS had it standing at that stop around the moment (while you stood there, or as you left).
+    var atStop = false
 }
 
 enum DepartMatch {
@@ -36,7 +38,9 @@ enum DepartMatch {
     static let maxAccuracy = 60.0               // m: rougher fixes are left out
     static let fresh: TimeInterval = 4 * 60     // s: an older moment says nothing about now
     static let window: TimeInterval = 60        // ± s: it left that stop this close to when you did
-    static let notThen: TimeInterval = 90       // s: this far off, it didn't
+    static let notThen: TimeInterval = 90       // s: this far off by its own GPS, it didn't
+    static let notThenLive: TimeInterval = 180  // s: …by its live times alone (0.39.1: a live time is a forecast, 90 s off
+                                                //    is no proof: the 306 "not then (live 91 s)" was the one you got on)
     static let clearer: TimeInterval = 45       // s: …or this much further off than the one that did
     static let stopNear = 80.0                  // m: a piece of its trip that starts this close to where you stood
     static let gpsNear = 80.0                   // m: its own fix this close to where you stood is at that stop
@@ -110,15 +114,17 @@ enum DepartMatch {
                 if m <= gpsNear {
                     // (only its newest fix says it stayed: an older one is followed by a newer one)
                     if dt > stillThere {
-                        if k == 0 { c.elsewhere = true; c.byGPS = true; c.offBy = nil; return c }
+                        if k == 0 { c.elsewhere = true; c.byGPS = true; c.offBy = nil; c.atStop = false; return c }
                         continue
                     }
+                    // (0.39.1) it stood at the stop while you did, or as you left
+                    if dt >= -(d.stood + window) { c.atStop = true }
                     if dt >= -window {
                         let off = abs(dt)
                         c.offBy = min(c.offBy ?? off, off); c.byGPS = true
                     }
                 } else if m >= gpsAway, abs(dt) <= gpsAround {
-                    c.elsewhere = true; c.byGPS = true; c.offBy = nil
+                    c.elsewhere = true; c.byGPS = true; c.offBy = nil; c.atStop = false
                     return c
                 }
             }
@@ -137,17 +143,28 @@ enum DepartMatch {
         return o <= window
     }
 
-    /// Not then: elsewhere, or `notThen` off, or `clearer` further off than `than`.
+    /// Not then: elsewhere, or by its own GPS `notThen` off or `clearer` further off than `than`; by its live times
+    /// alone (0.39.1) only `notThenLive` off.
     static func notThen(_ c: DepartClue, than best: TimeInterval) -> Bool {
         if c.elsewhere { return true }
         guard let o = c.offBy else { return false }
+        if !c.byGPS { return o >= notThenLive }
         return o >= notThen || o >= best + clearer
+    }
+
+    /// 0.39.1: two or more of `ids` stood at the stop by their own GPS around the moment: you could have got on either,
+    /// so the moment says nothing.
+    static func severalAtStop(_ clues: [DepartClue], ids: [String]) -> Bool {
+        let set = Set(ids)
+        let n: Int = clues.filter { set.contains($0.id) && $0.atStop && !$0.elsewhere }.count
+        return n >= 2
     }
 
     /// The one of `ids` that left the stop with you: exactly one left then, and every other one of `ids` clearly
     /// didn't (one the evidence says nothing about leaves it open: nil).
     static func pick(_ clues: [DepartClue], ids: [String]) -> String? {
         let byId = Dictionary(clues.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        if severalAtStop(clues, ids: ids) { return nil }
         let near: [DepartClue] = ids.compactMap { byId[$0] }.filter(leftThen)
         guard near.count == 1, let one = near.first, let o = one.offBy, ids.count > 1 else { return nil }
         let others: [String] = ids.filter { $0 != one.id }
@@ -161,6 +178,7 @@ enum DepartMatch {
     /// While looking for the one you got on: `bonus` seconds off the one that alone left then (others may say nothing).
     static func bonuses(_ clues: [DepartClue], ids: [String]) -> [String: Double] {
         let set = Set(ids)
+        if severalAtStop(clues, ids: ids) { return [:] }
         let near: [DepartClue] = clues.filter { set.contains($0.id) && leftThen($0) }
         guard near.count == 1, let one = near.first else { return [:] }
         return [one.id: -bonus]
@@ -176,9 +194,13 @@ enum DepartMatch {
             if x.elsewhere { return "\(label) not then (gps elsewhere)" }
             guard let o = x.offBy else { return "\(label) no word" }
             let s = Int(o.rounded())
-            return "\(label) \(o <= window ? "left then" : "not then") (\(how) \(s) s)"
+            // (0.39.1) by its live times alone, under `notThenLive` off: no proof either way
+            let word: String = o <= window ? "left then" : (x.byGPS || o >= notThenLive ? "not then" : "not sure")
+            return "\(label) \(word) (\(how) \(s) s)"
         }
-        return "depart · stood \(Int(d.stood.rounded())) s, left \(at)" + (parts.isEmpty ? "" : " · " + parts.joined(separator: " · "))
+        let ids: [String] = clues.map(\.id)
+        let both: String = severalAtStop(clues, ids: ids) ? " · \(clues.filter { $0.atStop && !$0.elsewhere }.count) at the stop: says nothing" : ""
+        return "depart · stood \(Int(d.stood.rounded())) s, left \(at)" + (parts.isEmpty ? "" : " · " + parts.joined(separator: " · ")) + both
     }
 }
 
@@ -209,6 +231,14 @@ enum UsualLine {
     static func minute(_ d: Date, calendar: Calendar) -> Int {
         let c = calendar.dateComponents([.hour, .minute], from: d)
         return (c.hour ?? 0) * 60 + (c.minute ?? 0)
+    }
+
+    /// 0.39.1: a ride it found by itself (not one you picked) teaches your usual line only when it's the line the leg
+    /// was planned with: the 154 you were on by mistake isn't your usual line. Nothing planned (your own routes): any.
+    static func learnsFound(line: String, train: Bool, plannedLine: String?, plannedTrain: Bool?) -> Bool {
+        guard let p = plannedLine?.trimmingCharacters(in: .whitespaces), !p.isEmpty else { return true }
+        if let t = plannedTrain, t != train { return false }
+        return p.lowercased() == line.trimmingCharacters(in: .whitespaces).lowercased()
     }
 
     /// Saturday or Sunday.

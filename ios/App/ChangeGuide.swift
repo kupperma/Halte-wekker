@@ -72,11 +72,14 @@ enum ChangeGuide {
     /// `fromTrain`/`grade`: the ride you're on (a slow bus's change wants more room, `ChangeRoom.changeNote`); `next`:
     /// the planned next ride (at its live time); `later`: the next leg's other rides; `learned`: your own change time
     /// (nil: not learned yet).
+    /// 0.39.1 (`MissRule`): `atChange`, you're at the change already: the planned one is missed only once its live
+    /// departure has gone by with you not on it, and never while its own GPS has it at or before the stop (`notLeft`).
     static func guide(arrive: Date, arrivePlatform: String?, fromTrain: Bool, grade: String?, next: Ride, later: [Ride],
-                      learned: Double?, now: Date, hhmm: (Date) -> String) -> Guide {
+                      learned: Double?, now: Date, hhmm: (Date) -> String, atChange: Bool = false, notLeft: Bool = false) -> Guide {
         let from: Date = max(arrive, now)
-        let room: Double = next.departure.timeIntervalSince(from) / 60
-        let missed: Bool = room < need(walk: next.walk, learned: learned)
+        let needed: Double = need(walk: next.walk, learned: learned)
+        let missed: Bool = MissRule.missed(arrive: arrive, departure: next.departure, need: needed, now: now,
+                                           atChange: atChange, notLeft: notLeft)
         var target = next
         var instead: Ride?
         if missed {
@@ -120,5 +123,39 @@ enum ChangeGuide {
     private static func clean(_ s: String?) -> String? {
         guard let t = s?.trimmingCharacters(in: .whitespaces), !t.isEmpty else { return nil }
         return t
+    }
+}
+
+/// 0.39.1: when the next ride of a change is missed. The field report of 25 November: "You’ll miss the 08:14", "… the
+/// 16:39", "… the 17:21" while you stood at the change and the one you wanted was late and still coming (made it twice;
+/// the third time the board said "in 2 min"). Its live departure decides, and its own GPS: a bus or train still at the
+/// stop, or before it, hasn't left.
+enum MissRule {
+    /// s past its live departure before it has gone without you (a live time is a forecast; a bus pulls out late).
+    static let grace: TimeInterval = 60
+    /// m: its own GPS this far past your stop along its road still counts as at it.
+    static let atStopSlack = 40.0
+    /// s: an older fix of its own says nothing about now.
+    static let fixFresh: TimeInterval = 180
+
+    /// Its own GPS has it at your stop or still before it: `vehicleMetres` where its fix puts it along its road,
+    /// `stopMetres` where your stop is along that road, `fixAge` how old the fix is. False when any is unknown.
+    static func notLeft(vehicleMetres: Double?, stopMetres: Double?, fixAge: TimeInterval?) -> Bool {
+        guard let v = vehicleMetres, let s = stopMetres, let a = fixAge, v.isFinite, s.isFinite, a.isFinite else { return false }
+        guard a >= -60, a <= fixFresh else { return false }
+        return v <= s + atStopSlack
+    }
+
+    /// Missed. Still on the way there: your live arrival plus the room you `need` (minutes) is after its live
+    /// departure. At the change (`atChange`): only once its live departure has gone by `grace` with you not on it, and
+    /// never while its own GPS has it at or before the stop (`notLeft`).
+    static func missed(arrive: Date, departure: Date, need: Double, now: Date, atChange: Bool, notLeft: Bool) -> Bool {
+        if atChange {
+            if notLeft { return false }
+            return now.timeIntervalSince(departure) > grace
+        }
+        let from: Date = max(arrive, now)
+        let room: Double = departure.timeIntervalSince(from) / 60
+        return room < need
     }
 }
