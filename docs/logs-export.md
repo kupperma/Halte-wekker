@@ -215,6 +215,28 @@ The same switches, words and rules, so the relay and the replay treat both alike
   conditions as the lines (after a trip, else hourly; not during a trip, on a metered/Low Data network or in battery
   saver). Drop the sent points from the queue only after a 200; switching off clears the queue.
 
+### The wrong bus, a miss at the change, the bus at your stop (0.39.1)
+
+What's new in 0.39.1 (`ios/App/WrongBus.swift`, `MissRule` in `ChangeGuide.swift`, `DepartMatch`/`UsualLine` in
+`PickRules.swift`, `farByGPS`/`gpsRescue` in `ChooseGPS.swift`; tests `WrongBusTests`; Android parity in
+[android-todo.md](android-todo.md) › iOS 0.39.1). New lines in the ride log:
+
+- `ride change · the 17:21 is still at or before the stop by its own GPS: not missed`: at a change the next ride is
+  missed only once its live departure has gone by a minute with you not on it, never while its own GPS has it at or
+  before the stop.
+- `ride wait · not by its timetable: bus 305·0551 leaves 17:35 (in 11 min) · finding the one you're on`: a leg isn't
+  started by the planned one's timetable more than 2 minutes before its live departure.
+- `match choose · … → switch to 154·0855 · its own GPS far from you, the other one's fits`: the one shown is 1 km (a
+  train 2.5 km) from you by its own GPS while another one fitted by its own GPS this look or in the last 90 s.
+- `ride wrong bus · on 154·0855 to Schijndel, planned 306 · Stay on to Schijndel — 306 from there at 18:11` (and
+  ` · roads split`): once a trip, the notification `wrongbus-…` and the ride screen's card.
+- `ride other at stop · 154·0855 to Schijndel by its own GPS 30 m from you · not yours · your 306 at 17:23`: the
+  notification `otherbus-<trip>` and the card while you wait.
+- `ride usual line · not learned: bus 154·0855 isn't the planned 306`: a ride it found by itself on another line than
+  planned doesn't teach your usual line.
+- `match depart · …`: by live times alone "not then" takes 180 s off (under that: `not sure (live 91 s)`); two at the
+  stop by their own GPS: ` · 2 at the stop: says nothing`.
+
 ### Picking the one you're on (0.38)
 
 What's new in 0.38: the app picks the bus or train you're on faster and more reliably (`ios/App/PickRules.swift`,

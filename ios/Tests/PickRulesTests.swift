@@ -58,15 +58,16 @@ final class PickRulesTests: XCTestCase {
     func test_clue_byLiveTimes() {
         let d = Departure(t: t0.addingTimeInterval(32), p: Fx.east(0), stood: 32)
         let a = DepartMatch.clue(bus("305-0001", line: "305", leaves: 40), at: d)
-        let b = DepartMatch.clue(bus("306-0002", line: "306", leaves: 150), at: d)
+        // (0.39.1: by its live times alone "not then" takes 180 s off: this one leaves 218 s after you)
+        let b = DepartMatch.clue(bus("306-0002", line: "306", leaves: 250), at: d)
         XCTAssertEqual(a.offBy ?? -1, 8, accuracy: 0.01)
-        XCTAssertEqual(b.offBy ?? -1, 118, accuracy: 0.01)
+        XCTAssertEqual(b.offBy ?? -1, 218, accuracy: 0.01)
         XCTAssertTrue(DepartMatch.leftThen(a))
         XCTAssertFalse(DepartMatch.leftThen(b))
         XCTAssertEqual(DepartMatch.pick([a, b], ids: ["306-0002", "305-0001"]), "305-0001")
         XCTAssertEqual(DepartMatch.bonuses([a, b], ids: ["305-0001", "306-0002"]), ["305-0001": -DepartMatch.bonus])
         XCTAssertEqual(DepartMatch.logLine(d, [a, b], lines: ["305-0001": "305", "306-0002": "306"], calendar: utc),
-                       "depart · stood 32 s, left 08:00:32 · 305·0001 left then (live 8 s) · 306·0002 not then (live 118 s)")
+                       "depart · stood 32 s, left 08:00:32 · 305·0001 left then (live 8 s) · 306·0002 not then (live 218 s)")
     }
 
     func test_clue_timetableOnlySaysNothing() {

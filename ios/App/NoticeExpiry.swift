@@ -32,6 +32,8 @@ enum NoticeExpiry {
         ("works-", 900),           // (0.36) the evening before works or a disruption on your route: gone the next afternoon
         ("lasthome-", 45),         // (0.36) "Last way home in 30 min": it has left 15 min after
         ("ready-", 10),            // (0.39) the quiet "Get ready" one stop before yours: you're there by then
+        ("wrongbus-", 20),         // (0.39.1) "You're on the 154 to Schijndel, not your 306": off or on by then
+        ("otherbus-", 10),         // (0.39.1) "That's the 154 to Schijndel — not yours": it has left by then
     ].sorted { $0.0.count > $1.0.count }
 
     /// The delivered notifications to take off now: `delivered` is (identifier, when it arrived).
