@@ -28,6 +28,9 @@ struct GoToCard: View {
     /// 0.24.5: the time its GPS says it can be at the stop at the soonest, when that's clearly later than the ride's own
     /// (the map's `onLater`): the later of the two is shown, and its delay.
     var later: Date? = nil
+    /// (0.40) Your own walk to it (`WalkPlan`): "6 min walk · leave in 4 min (2 min spare)". `leaveBy` is then its time
+    /// to leave. Nil: the planner's walk, as before.
+    var walkShown: WalkPlan.Shown? = nil
     var walk: (() -> Void)? = nil
     var onMap: (() -> Void)? = nil
     var route: (() -> Void)? = nil
@@ -96,7 +99,7 @@ struct GoToCard: View {
     @ViewBuilder private func summary(here: Bool) -> some View {
         let w = place
         let spoken = StopLabel.spoken(w, here: here, ride: rideText, time: time, delay: delay?.spoken,
-                                      walk: StopLabel.walkSpoken(minutes: ride.walkBefore, leaveBy: leaveText))
+                                      walk: StopLabel.walkSpoken(minutes: walkShown?.walk ?? ride.walkBefore, leaveBy: leaveText))
         if let onMap {
             Button(action: onMap) { words(w, here: here).contentShape(Rectangle()) }
                 .buttonStyle(.plain)
@@ -173,14 +176,24 @@ struct GoToCard: View {
                             .padding(.leading, 38)
                     }
                 }
-            } else if let line = StopLabel.walk(minutes: ride.walkBefore, metres: walkMetres ?? found, leaveBy: leaveText) {
-                HStack(spacing: 10) {
-                    Image(systemName: "figure.walk").font(.title3.weight(.semibold)).foregroundStyle(DS.accentText).frame(width: 28)
-                    Text(line).font(DS.calloutStrong).monospacedDigit().foregroundStyle(DS.text).fixedSize(horizontal: false, vertical: true)
+            } else if let ws = walkShown, ws.learned, ride.walkBefore > 0, let lb = leaveBy {
+                // (0.40) your own walk, with its spare
+                TimelineView(.periodic(from: .now, by: 15)) { tl in
+                    let m: Int = Int((lb.timeIntervalSince(tl.date) / 60).rounded(.down))
+                    walkRow(WalkPlan.words(ws, leaveIn: saved ? nil : m, leaveBy: Fmt.hhmm(lb)))
                 }
+            } else if let line = StopLabel.walk(minutes: ride.walkBefore, metres: walkMetres ?? found, leaveBy: leaveText) {
+                walkRow(line)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func walkRow(_ line: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "figure.walk").font(.title3.weight(.semibold)).foregroundStyle(DS.accentText).frame(width: 28)
+            Text(line).font(DS.calloutStrong).monospacedDigit().foregroundStyle(DS.text).fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     // MARK: Walk there, On the map

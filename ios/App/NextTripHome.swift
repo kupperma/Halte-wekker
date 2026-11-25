@@ -44,6 +44,12 @@ struct NextTripCard: View {
         let destName: String        // "Home", "BUas"
         let asOf: Date?             // a saved answer: "as of 08:12"
         var startTitle: String? = nil   // nil: "Start · wake me before <stop>"
+        /// (0.40) Your own walk to the first stop (`WalkPlan`), when it's learned: "6 min walk · leave by 08:06 (2 min spare)".
+        var walk: WalkPlan.Shown? = nil
+        /// (0.40) Its first ride has no live data close to leaving, on a line that has it (`GhostDepartures`).
+        var mayNotRun = false
+        /// (0.40) The lines that get you there from its first stop (for "From <stop>").
+        var lines: Set<String> = []
     }
     /// On the bus or train the home found you on (0.20.5): where you get off it, when you're there, and Wake me.
     struct Aboard {
@@ -77,6 +83,8 @@ struct NextTripCard: View {
     let plan: () -> Void
     /// "Not now" on going on with a trip you ended (0.26.2).
     var notNow: () -> Void = {}
+    /// (0.40) A departure picked in "From <stop>" (with the trip it's from): Fastest trip on that one. Nil: not offered.
+    var fromStop: ((FromStop.Row, DoorTrip) -> Void)? = nil
     @ScaledMetric(relativeTo: .largeTitle) private var big: CGFloat = 52
 
     var body: some View {
@@ -219,10 +227,24 @@ struct NextTripCard: View {
             }
             .accessibilityElement(children: .combine)
             .accessibilityLabel("\(first.isTrain ? "Train" : "Bus") \(first.line) at \(Fmt.hhmm(first.departure)) from \(Fmt.place(first.fromStop)), at \(s.destName) at \(Fmt.hhmm(s.trip.end))")
+            if let w = s.walk, w.learned, first.walkBefore > 0 {
+                Label(WalkPlan.words(w, leaveIn: nil, leaveBy: Fmt.hhmm(s.leave)), systemImage: "figure.walk")
+                    .font(DS.footnote).monospacedDigit().foregroundStyle(DS.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if s.mayNotRun {
+                Label(GhostDepartures.unsureText, systemImage: "antenna.radiowaves.left.and.right.slash")
+                    .font(DS.footnoteStrong).foregroundStyle(DS.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if let a = s.asOf {
                 Text(Snapshots.asOf(a)).font(DS.footnote).monospacedDigit().foregroundStyle(DS.secondary)
             }
             DSLegBar(legs: NextTrip.legs(of: s.trip))
+            if let fs = fromStop, first.fromId != "onboard", !first.fromId.isEmpty {
+                let trip: DoorTrip = s.trip
+                FromStopDisclosure(ride: first, usefulLines: s.lines.union([first.line])) { row in fs(row, trip) }
+            }
             RainAdviceLine(trip: s.trip)                  // (0.37) rain on the walk, before the trip
             DSPrimaryButton(title: s.startTitle ?? "Start · wake me before \(Fmt.place(s.trip.last.toStop))", icon: "play.fill", lines: 2, action: start)
                 .accessibilityHint("Opens the hands-free trip")

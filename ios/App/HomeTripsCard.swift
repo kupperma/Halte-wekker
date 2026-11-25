@@ -75,6 +75,8 @@ struct HomeTripsCard: View {
             parts.append("\(r.id != t.first.id ? "train from " : "")platform \(p)")
         }
         if t.first.cancelled { parts.append("cancelled") }
+        // (0.40) no live data close to leaving, on a line that has it
+        else if LiveStore.mayNotRun(t, among: trips) { parts.append(GhostDepartures.unsureShort) }
         return parts.joined(separator: " · ")
     }
 

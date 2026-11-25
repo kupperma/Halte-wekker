@@ -437,6 +437,8 @@ struct TripPlacement {
     let w: (metres: Double, next: Int, atStop: Bool, started: Bool, done: Bool)
     let fix: GPSFix?
     let timeMetres: Double
+    /// (0.40) Where its fix itself is on its road (not moved on), when it's drawn by its GPS.
+    let raw: Double?
 
     @MainActor
     init(_ t: LiveTrip, tripId: String, now: Date, hold: GPSHold, mine: Int? = nil) {
@@ -447,10 +449,10 @@ struct TripPlacement {
            let p = t.gpsPlace(f, previous: RealPositionsStore.shared.previousFix(for: tripId), now: now) {
             let m = mine.flatMap { t.stops.indices.contains($0) ? Approach.drawn(advanced: p.metres, raw: p.raw, mine: t.metres(ofStop: $0)) : nil } ?? p.metres
             let held = hold.steady(tripId, m, now: now)
-            w = t.position(metres: held); fix = f
+            w = t.position(metres: held); fix = f; raw = p.raw
         } else {
             hold.forget(tripId)
-            w = byTime; fix = nil
+            w = byTime; fix = nil; raw = nil
         }
     }
 }

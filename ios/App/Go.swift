@@ -24,6 +24,8 @@ final class GoStore: ObservableObject {
     /// your choice is gone: cancelled, left, or missing from the answers).
     @Published private(set) var chosen: DoorTrip?
     private var chosenMisses = 0                             // whole answers in a row it was missing from
+    /// (0.40) The ride was taken from "From <stop>" (`chooseDeparture`): missing from answers doesn't count against it.
+    private var chosenByHand = false
     private var toldBeats: Set<String> = []                  // "Faster:" noted for these rides (once each)
     @Published private(set) var error: String?
     @Published private(set) var updated: Date?
@@ -80,6 +82,7 @@ final class GoStore: ObservableObject {
         fallback = loc
         self.seed = dl == nil || c != nil ? seed : []
         chosen = c
+        chosenByHand = false
         deadline = dl; deadlineLabel = label; self.planKey = planKey
         isOpen = true
         begin(d)
@@ -134,7 +137,7 @@ final class GoStore: ObservableObject {
     /// Somewhere else to go (from the menu at the top).
     func retarget(_ d: Place) {
         guard isOpen, d != dest || !watching else { return }
-        if d != dest { deadline = nil; deadlineLabel = nil; chosen = nil }      // somewhere else: not the planned trip any more
+        if d != dest { deadline = nil; deadlineLabel = nil; chosen = nil; chosenByHand = false }      // somewhere else: not the planned trip any more
         begin(d)
     }
 
@@ -142,7 +145,7 @@ final class GoStore: ObservableObject {
     func close() {
         stopWatching()
         if let k = planKey { UserDefaults.standard.set(k, forKey: "go.closedPlan") }
-        planKey = nil; deadline = nil; deadlineLabel = nil; chosen = nil
+        planKey = nil; deadline = nil; deadlineLabel = nil; chosen = nil; chosenByHand = false
         isOpen = false
         clearPosted()
         demoTask?.cancel(); demoTask = nil
@@ -489,7 +492,8 @@ final class GoStore: ObservableObject {
         if let c = chosen {
             if let i = ChosenRide.match(c.rides.map(\.tripId), in: list.map { $0.rides.map(\.tripId) }) {
                 chosen = list[i]; chosenMisses = 0
-            } else if !quiet, ChosenRide.countsAsMiss(departure: c.first.departure, answer: found.map(\.first.departure), whole: !firstOnly) {
+            } else if !quiet, !chosenByHand, ChosenRide.countsAsMiss(departure: c.first.departure, answer: found.map(\.first.departure), whole: !firstOnly) {
+                // ((0.40) one you took from the stop's departures stays until it has left or is cancelled)
                 chosenMisses += 1
             }
             if let k = chosen, k.rides.contains(where: \.cancelled) {
@@ -747,12 +751,65 @@ final class GoStore: ObservableObject {
         }
     }
 
-    /// When it's time to walk to the stop.
+    /// When it's time to walk to the stop. (0.40) At your own walking speed once it's learned, with 2 minutes spare
+    /// (`WalkPlan`: never later than the planner's walk allows less that spare).
     private func timeToGo(_ p: DoorTrip) {
         let f = p.first, now = Date()
-        guard f.walkBefore >= 2, !toldGo.contains(f.tripId), p.start <= now.addingTimeInterval(60) else { return }
+        let w: WalkPlan.Shown = WalkPlan.mine(f)
+        let leave: Date = WalkPlan.leave(p.start, w)
+        guard f.walkBefore >= 2, !toldGo.contains(f.tripId), leave <= now.addingTimeInterval(60) else { return }
         toldGo.insert(f.tripId)
-        tell("Time to go", "\(f.walkBefore) min walk to \(Fmt.place(f.fromStop)) · \(Self.what(f)) leaves \(Fmt.hhmm(f.departure))", kind: "go")
+        let spare: String = w.learned && w.spare > 0 ? " (\(w.spare) min spare)" : ""
+        tell("Time to go", "\(w.walk) min walk to \(Fmt.place(f.fromStop))\(spare) · \(Self.what(f)) leaves \(Fmt.hhmm(f.departure))", kind: "go")
+    }
+
+    // MARK: another departure from the stop (0.40)
+
+    /// "From <stop>": take this departure instead of the one it watches. One of the ways it has: that one. Else the rest
+    /// is planned from that stop with that bus or train (the planner as always), with your walk to the stop. It's your
+    /// trip then as a ride you chose in Plan is, until it has left or is cancelled. False: not found.
+    @discardableResult func chooseDeparture(tripId: String, departure: Date, stopId: String, walk given: Int? = nil) async -> Bool {
+        guard isOpen, watching, !tripId.isEmpty else { return false }
+        let pool: [DoorTrip] = [best].compactMap { $0 } + others
+        if let t = pool.first(where: { $0.first.tripId == tripId }) {
+            choose(t)
+            return true
+        }
+        let d = dest
+        let ids: [String] = PlanMemo.unique(d.ids)
+        let at: Date = departure.addingTimeInterval(-60)
+        let found: [DoorTrip] = await Transit.$urgent.withValue(true) { () async -> [DoorTrip] in
+            var all: [DoorTrip] = []
+            for b in ids {
+                all += await Transit.plan(from: stopId, to: b, modes: nil, at: at, count: 4, maxTransfers: 4)
+            }
+            return all
+        }
+        guard isOpen, watching, dest == d else { return false }
+        guard let t = found.filter({ $0.first.tripId == tripId }).min(by: { $0.end < $1.end }) else {
+            remark("Couldn’t plan the rest of the way from that one just now")
+            return false
+        }
+        let walk: Int = given ?? best.map { Fmt.place($0.first.fromStop) == Fmt.place(t.first.fromStop) ? $0.first.walkBefore : 0 } ?? 0
+        let f: Ride = t.first.walking(walk)
+        let rest: [Ride] = Array(t.rides.dropFirst())
+        choose(DoorTrip(rides: [f] + rest, start: f.departure.addingTimeInterval(-Double(walk) * 60), end: t.end))
+        return true
+    }
+
+    /// This one is your trip now (you picked it): watched, nothing told about the switch.
+    private func choose(_ t: DoorTrip) {
+        chosen = t; chosenMisses = 0; chosenByHand = true; toldBeats = []
+        var rest: [DoorTrip] = others
+        if let p = best, p.id != t.id { rest.insert(p, at: 0) }
+        others = Array(rest.filter { $0.first.tripId != t.first.tripId }.sorted(by: Self.sooner).prefix(5))
+        best = t
+        overdue = false; hurry = nil; missed = nil; error = nil
+        told[t.first.tripId] = t.first.live ? t.first.delay : 0
+        toldEnd = t.end
+        watchedFirst = t.first.departure
+        if t.start <= Date().addingTimeInterval(60) { toldGo.insert(t.first.tripId) }
+        remark("You chose \(Self.what(t.first)) at \(Fmt.hhmm(t.first.departure)) · \(dest.short) \(Fmt.hhmm(t.end)) · it watches that one now")
     }
 
     private static func isCancelled(_ r: Ride) async -> Bool {
@@ -1032,7 +1089,7 @@ final class GoStore: ObservableObject {
     /// is told as it always is.)
     private func dropChosen(_ why: ChosenRide.Gone) {
         guard chosen != nil else { return }
-        chosen = nil; chosenMisses = 0
+        chosen = nil; chosenMisses = 0; chosenByHand = false
         remark(ChosenRide.goneNote(why))
     }
 
@@ -1712,31 +1769,39 @@ struct GoMap: View {
             MapPolyline(walk.polyline).stroke(newLook ? DS.accent : Paper.ink, style: StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round, dash: [0.5, 10]))
         }
         if let t = trip, let m = mine, let r = ride {
-            let w = TripPlacement(t, tripId: r.tripId, now: now, hold: hold, mine: m).w      // by its GPS, else its times
+            // by its GPS, else its times; not past your stop before it has left there (two minutes after its time: a
+            // late one may still be coming); (0.40) and not at your stop while its time there is still a while off
+            let mk = marker(t, mine: m, ride: r, now: now)
             let me = t.metres(ofStop: m)
-            // not past your stop before it has left there (two minutes after its time): a late one may still be coming
-            let at = LiveTimes.shown(w.metres, mine: me, left: LiveTimes.hasLeft(t.stops[m].times, now: now))
             // the road it still has to take to you, and on from there (fainter)
             let rest = t.road(from: me, to: t.metres(ofStop: t.stops.count - 1))
             if rest.count > 1 {
                 MapPolyline(coordinates: rest)
                     .stroke(lineColor(r).opacity(0.35), style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
             }
-            if at < me - 5 {
+            if let at = mk.shown.metres, at < me - 5 {
                 MapPolyline(coordinates: t.road(from: at, to: me))
                     .stroke(lineColor(r), style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
             }
-            if !w.done && at <= me + 30 {
+            if let at = mk.shown.metres, !mk.done && at <= me + 30 {
                 Annotation("", coordinate: t.coordinate(atMetres: at), anchor: .center) {
-                    HStack(spacing: 4) {
-                        Image(systemName: r.isTrain ? "tram.fill" : "bus.fill").font(.system(size: 12, weight: .bold))
-                        Text(r.line).font(newLook ? DS.footnoteStrong : BoardInk.sans(13))
+                    VStack(spacing: 3) {
+                        HStack(spacing: 4) {
+                            Image(systemName: r.isTrain ? "tram.fill" : "bus.fill").font(.system(size: 12, weight: .bold))
+                            Text(r.line).font(newLook ? DS.footnoteStrong : BoardInk.sans(13))
+                        }
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 8).padding(.vertical, 5)
+                        .background(lineColor(r), in: RoundedRectangle(cornerRadius: 7))
+                        .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.white, lineWidth: 2))
+                        .shadow(color: .black.opacity(0.45), radius: 4, y: 2)
+                        if let w = WaitMarker.text(mk.shown.label, clock: Fmt.hhmm) {
+                            Text(w).font(newLook ? DS.footnoteStrong : BoardInk.sans(11)).monospacedDigit()
+                                .foregroundStyle(newLook ? DS.text : Paper.ink)
+                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(newLook ? DS.surface : Color.white, in: Capsule())
+                        }
                     }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 8).padding(.vertical, 5)
-                    .background(lineColor(r), in: RoundedRectangle(cornerRadius: 7))
-                    .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.white, lineWidth: 2))
-                    .shadow(color: .black.opacity(0.45), radius: 4, y: 2)
                 }
             }
         }
@@ -1755,6 +1820,22 @@ struct GoMap: View {
                 .shadow(color: .black.opacity(0.4), radius: 4, y: 2)
             }
         }
+    }
+
+    /// (0.40) Where to draw the one you're waiting for, so the map agrees with its time at your stop (`WaitMarker`):
+    /// not at your stop while that's more than two minutes off (unless it really stands there, then "Waiting · leaves").
+    private func marker(_ t: LiveTrip, mine m: Int, ride r: Ride, now: Date) -> (shown: WaitMarker.Shown, done: Bool) {
+        let p = TripPlacement(t, tripId: r.tripId, now: now, hold: hold, mine: m)
+        let me: Double = t.metres(ofStop: m)
+        let left: Bool = LiveTimes.hasLeft(t.stops[m].times, now: now)
+        let drawn: Double = LiveTimes.shown(p.w.metres, mine: me, left: left)
+        if left { return (WaitMarker.Shown(metres: drawn, label: .none), p.w.done) }
+        let byTime = t.position(now)
+        let waiting: Bool = byTime.atStop && byTime.started && byTime.next == m
+        let eta: Date = later.shown.map { max($0, r.departure) } ?? r.departure
+        let s: WaitMarker.Shown = WaitMarker.place(drawn: drawn, byTime: min(byTime.metres, me), mine: me, mineIsFirst: m == 0,
+                                                    started: byTime.started, gpsRaw: p.raw, waitingByTimes: waiting, eta: eta, now: now)
+        return (s, p.w.done)
     }
 
     /// Its live times every 30 seconds; the walk again every minute (or when you've moved).
@@ -1835,11 +1916,12 @@ struct GoMap: View {
         if let s = stop {
             pts.append(s)
             if !toStop, let t = trip, let m = mine, let r = ride {
-                let w = TripPlacement(t, tripId: r.tripId, now: now, hold: hold, mine: m).w
-                let at = LiveTimes.shown(w.metres, mine: t.metres(ofStop: m), left: LiveTimes.hasLeft(t.stops[m].times, now: now))
-                let bus = t.coordinate(atMetres: at)
-                let far = CLLocation(latitude: bus.latitude, longitude: bus.longitude).distance(from: CLLocation(latitude: s.latitude, longitude: s.longitude))
-                if !w.done && at <= t.metres(ofStop: m) + 30 && far < 6000 { pts.append(bus) }
+                let mk = marker(t, mine: m, ride: r, now: now)
+                if let at = mk.shown.metres {
+                    let bus = t.coordinate(atMetres: at)
+                    let far = CLLocation(latitude: bus.latitude, longitude: bus.longitude).distance(from: CLLocation(latitude: s.latitude, longitude: s.longitude))
+                    if !mk.done && at <= t.metres(ofStop: m) + 30 && far < 6000 { pts.append(bus) }
+                }
             }
         }
         guard let p0 = pts.first else { return }

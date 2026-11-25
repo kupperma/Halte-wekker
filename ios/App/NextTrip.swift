@@ -34,6 +34,16 @@ enum NextTrip {
         return pick(schoolDue: false, plannedDue: false, liveLeaves: liveLeaves, now: now)
     }
 
+    /// (0.40) The same, with the live trip already picked (`liveIndex`, `StickyTrips.pick`: the trip you're heading for
+    /// stays the card's until it has left, also past its time to leave).
+    static func pick(dest: String, dueDest: String?, schoolDue: Bool, plannedDue: Bool, liveDest: String, liveIndex: Int?,
+                     now: Date) -> (source: Source, index: Int?) {
+        let dueHere = dueDest == dest
+        if dueHere && (schoolDue || plannedDue) { return pick(schoolDue: schoolDue, plannedDue: plannedDue, liveLeaves: [], now: now) }
+        guard liveDest == dest, let i = liveIndex else { return (.none, nil) }
+        return (.live, i)
+    }
+
     /// The card's destination chip: "To BUas", "To Home".
     static func destTitle(_ name: String) -> String { "To \(name)" }
 

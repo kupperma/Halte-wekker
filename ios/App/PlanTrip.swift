@@ -89,7 +89,9 @@ final class PlanTripModel: ObservableObject {
         let opts = kept.map(Self.option)
         let useful = PlanCompare.useful(opts).prefix(6).map(\.id)
         let byId = Dictionary(kept.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-        options = useful.compactMap { byId[$0] }
+        // (0.40) one whose first ride may not run (no live data close to leaving, on a line that has it) after the others
+        let found: [DoorTrip] = useful.compactMap { byId[$0] }
+        options = when == .now ? LiveStore.ghostOrdered(found, now: Date()) : found
         var deadline: Date?
         if case .arrive(let d) = when { deadline = d }
         labels = PlanCompare.labels(options.map(Self.option), deadline: deadline)
@@ -298,7 +300,8 @@ struct PlanTripOverlay: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 10) {
                     ForEach(model.options) { t in
-                        OptionCard(trip: t, label: model.labels[t.id], selected: t.id == model.focused, legBar: legBars)
+                        OptionCard(trip: t, label: model.labels[t.id], selected: t.id == model.focused, legBar: legBars,
+                                   mayNotRun: LiveStore.mayNotRun(t, among: model.options))
                             .contentShape(Rectangle())
                             .onTapGesture { withAnimation(DS.quick) { model.focused = t.id } }      // tap one to choose it
                             .accessibilityAddTraits(t.id == model.focused ? [.isButton, .isSelected] : .isButton)
@@ -465,6 +468,8 @@ struct OptionCard: View {
     let label: PlanCompare.Label?
     let selected: Bool
     var legBar = false
+    /// (0.40) Its first ride has no live data close to leaving, on a line that has it (`GhostDepartures`).
+    var mayNotRun = false
     var body: some View {
         let changes = Array(trip.rides.indices.dropFirst())
         let tight = changes.first { k in
@@ -484,6 +489,10 @@ struct OptionCard: View {
                     .lineLimit(1)
             }
             if legBar { DSLegBar(legs: NextTrip.legs(of: trip)) }
+            if mayNotRun {
+                Label(GhostDepartures.unsureText, systemImage: "antenna.radiowaves.left.and.right.slash")
+                    .font(DS.footnoteStrong).foregroundStyle(DS.warning).lineLimit(2)
+            }
             Group {
                 if let k = tight {
                     let ch = Fmt.mins(trip.rides[k].departure.timeIntervalSince(trip.rides[k - 1].arrival))

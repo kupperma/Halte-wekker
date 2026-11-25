@@ -204,6 +204,14 @@ struct DepartureRow: View {
                     }
                     if d.cancelled {
                         Text("Cancelled").font(DS.footnoteStrong).foregroundStyle(DS.warning)
+                    } else if d.unsure {
+                        // (0.40) no live data close to leaving, on a line that has it
+                        VStack(alignment: .trailing, spacing: 0) {
+                            Text(DepartureGroups.countdown(d, now: tl.date, clock: Fmt.hhmm)).font(DS.calloutStrong).monospacedDigit()
+                                .foregroundStyle(DS.secondary)
+                            Text(GhostDepartures.unsureShort).font(DS.caption).foregroundStyle(DS.warning)
+                        }
+                        .frame(minWidth: 58, alignment: .trailing)
                     } else {
                         HStack(spacing: 3) {
                             Text(DepartureGroups.countdown(d, now: tl.date, clock: Fmt.hhmm)).font(DS.calloutStrong).monospacedDigit()
@@ -233,6 +241,7 @@ struct DepartureRow: View {
     private func spoken(_ d: DepartureGroups.Departure, now: Date) -> String {
         let what = "\(d.train ? "Train" : "Line") \(d.line) to \(Fmt.place(d.headsign))"
         if d.cancelled { return "\(what), cancelled" }
+        if d.unsure { return "\(what), \(DepartureGroups.countdown(d, now: now, clock: Fmt.hhmm)), no live info, may not run" }
         let late = DepartureGroups.lateText(d).map { ", \($0.dropFirst()) minutes late" } ?? ""
         let platform = d.train ? d.platform.map { ", platform \($0)" } ?? "" : ""
         return "\(what), \(DepartureGroups.countdown(d, now: now, clock: Fmt.hhmm))\(late)\(platform)"
