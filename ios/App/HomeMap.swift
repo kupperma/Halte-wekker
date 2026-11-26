@@ -297,7 +297,8 @@ struct NewHome: View {
     private var nextFirst: Bool { HomeStyle.of(homeStyleRaw) == .nextTrip }
     private var mapStyle: HomeMapStyle { HomeMapStyle(rawValue: styleRaw) ?? .standard }
 
-    var body: some View {
+    /// The map and what's over it (the body is split in parts, so the type checker gets each in reasonable time).
+    private var layers: some View {
         ZStack(alignment: .top) {
             map.ignoresSafeArea()
                 .background(GeometryReader { g in
@@ -336,6 +337,11 @@ struct NewHome: View {
             }
             if let t = trip.toast { toast(t) }
         }
+    }
+
+    /// Your day, Your week, and Friends over this map.
+    private var homeSheets: some View {
+        layers
         .sheet(isPresented: $dayOpen) {
             DaySheet(close: { dayOpen = false })
                 .presentationDetents([.large])
@@ -353,6 +359,11 @@ struct NewHome: View {
         // (0.40.2) Friends over this map: frame the faces (back where it was when it closes)
         .onChange(of: friends.showing) { _, on in if on { friendsOpened() } else { friendsClosed() } }
         .onChange(of: friendsFrameKey) { _, _ in if friends.showing { fitFriends() } }
+    }
+
+    /// The loops, search, and what a friend's trip or a style change asks of the home.
+    private var homeLoops: some View {
+        homeSheets
         .modifier(HomeLoops())
         // the lists per leg only while they're shown: here your home board under the map (0.20.7)
         .onAppear { live.panelsNeed = panelsShown }
@@ -396,6 +407,10 @@ struct NewHome: View {
             openPlan(to: .place(r.to, name: r.name), when: when)
         }
         .onChange(of: homeStyleRaw) { _, _ in weekOpen = false; dayOpen = false }
+    }
+
+    var body: some View {
+        homeLoops
         .sheet(item: $tapped) { DepartureDetailSheet(tap: $0).presentationDetents([.medium, .large]) }
         .sheet(item: $stopTap) { s in
             MapStopSheet(stop: s) { from in planFrom(stop: s, from: from) }
