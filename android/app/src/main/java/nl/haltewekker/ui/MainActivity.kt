@@ -111,6 +111,10 @@ private fun Root() {
     val asked by MainActivity.asked.collectAsState()
     var screen by rememberSaveable { mutableStateOf(Screen.HOME) }
     var planDir by rememberSaveable { mutableStateOf<Direction?>(null) }
+    // (A8.1) a place picked in the home's search, planned in full ("Another time or more options")
+    var planPlace by remember { mutableStateOf<nl.haltewekker.profile.SavedPlace?>(null) }
+    // (A8.1, iOS 0.40.2) Friends opened from Settings: its sheet full height
+    var friendsFull by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(ride == null) { if (ride == null && screen == Screen.RIDE) screen = Screen.HOME }
     // made smaller holds while it doesn't ring: the alarm opens the ride full again (iOS RideBar.keepsSmall)
@@ -142,22 +146,23 @@ private fun Root() {
         screen = if (screen == Screen.CALENDARS || screen == Screen.WEEK) Screen.SETTINGS else Screen.HOME
     }
     when (screen) {
-        Screen.HOME, Screen.SETUP, Screen.TEST_SETUP -> HomeScreen(r, onPlan = { planDir = it; screen = Screen.PLAN }, onRide = { screen = Screen.RIDE },
+        // (A8.1, iOS 0.40.2) Friends is a sheet over the home map, not a screen of its own
+        Screen.HOME, Screen.SETUP, Screen.TEST_SETUP, Screen.FRIENDS -> HomeScreen(r, onPlan = { planDir = it; planPlace = null; screen = Screen.PLAN }, onRide = { screen = Screen.RIDE },
             onStart = { t, to -> start(t, to) }, onSettings = { screen = Screen.SETTINGS }, onDay = { screen = Screen.DAY },
-            onResume = { o -> ResumeStore.set(context, null); start(o.trip, o.destination, o.leg, o) }, onFriends = { screen = Screen.FRIENDS },
-            onYear = { screen = Screen.YEAR })
-        Screen.PLAN -> PlanScreen(planDir, canStart = r == null, onBack = { screen = Screen.HOME }, onStart = { t, to -> start(t, to) })
+            onResume = { o -> ResumeStore.set(context, null); start(o.trip, o.destination, o.leg, o) }, onFriends = { friendsFull = false; screen = Screen.FRIENDS },
+            onYear = { screen = Screen.YEAR }, friendsOpen = screen == Screen.FRIENDS, friendsFull = friendsFull,
+            onFriendsClose = { screen = Screen.HOME }, onPlanTo = { p -> planDir = null; planPlace = p; screen = Screen.PLAN })
+        Screen.PLAN -> PlanScreen(planDir, canStart = r == null, place = planPlace, onBack = { screen = Screen.HOME }, onStart = { t, to -> start(t, to) })
         Screen.RIDE -> if (r != null) RideScreen(r, onBack = { screen = Screen.HOME }) else screen = Screen.HOME
         Screen.SETTINGS -> SettingsScreen(onBack = { screen = Screen.HOME }, onSetup = { screen = Screen.SETUP },
             onTestSetup = { if (TestSetup.start(context)) screen = Screen.TEST_SETUP }, onDay = { screen = Screen.DAY },
-            onCalendars = { screen = Screen.CALENDARS }, onWeek = { screen = Screen.WEEK }, onFriends = { screen = Screen.FRIENDS },
+            onCalendars = { screen = Screen.CALENDARS }, onWeek = { screen = Screen.WEEK }, onFriends = { friendsFull = true; screen = Screen.FRIENDS },
             onYear = { screen = Screen.YEAR })
         Screen.YEAR -> nl.haltewekker.ui.screens.YearScreen(onBack = { screen = Screen.HOME })
         Screen.DAY -> DayScreen(onBack = { screen = Screen.HOME }, onSettings = { screen = Screen.SETTINGS }, canStart = r == null,
             onStart = { t, to -> start(t, to) })
         Screen.CALENDARS -> CalendarsScreen(onBack = { screen = Screen.SETTINGS })
         Screen.WEEK -> WeekScreen(onBack = { screen = Screen.SETTINGS })
-        Screen.FRIENDS -> nl.haltewekker.ui.friends.FriendsScreen(onBack = { screen = Screen.HOME }, canStart = r == null, onStart = { t, to -> start(t, to) })
     }
     // (A6) the shortcuts and the widget's stop (nothing starts over a running trip: IntentActions)
     val sc by MainActivity.shortcut.collectAsState()

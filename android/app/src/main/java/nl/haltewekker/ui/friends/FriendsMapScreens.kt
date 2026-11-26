@@ -94,7 +94,6 @@ import nl.haltewekker.friends.TravelWords
 import nl.haltewekker.friends.TripCard
 import nl.haltewekker.friends.TripTake
 import nl.haltewekker.map.FriendMapPin
-import nl.haltewekker.map.FriendsLiveMap
 import nl.haltewekker.map.MapStop
 import nl.haltewekker.ui.Card
 import nl.haltewekker.ui.Header
@@ -129,7 +128,7 @@ private fun places(): Pair<GeoPoint?, GeoPoint?> {
 // MARK: the Friends map
 
 @Composable
-fun FriendsMapHome(push: (FriendsRoute) -> Unit, back: () -> Unit) {
+fun FriendsMapHome(push: (FriendsRoute) -> Unit, back: () -> Unit, full: Boolean = false) {
     val book by FriendStore.book.collectAsState()
     val pictures by FriendStore.pictures.collectAsState()
     FriendStore.travel.collectAsState().value
@@ -137,7 +136,7 @@ fun FriendsMapHome(push: (FriendsRoute) -> Unit, back: () -> Unit) {
     val paths by FriendRoutes.paths.collectAsState()
     val (home, school) = places()
     val now = ticking()
-    var up by rememberSaveable { mutableStateOf(false) }
+    var up by rememberSaveable { mutableStateOf(full) }
     var menu by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     val travelling = FriendStore.travelling(now)
@@ -165,13 +164,12 @@ fun FriendsMapHome(push: (FriendsRoute) -> Unit, back: () -> Unit) {
     val frame = pins.map { it.point } + travelling.flatMap { MapFrame.points(it.state) }
     val tripIds = travelling.mapNotNull { it.state.trip }
     LaunchedEffect(tripIds.joinToString(",")) { FriendRoutes.load(tripIds) }
-    val dark = isSystemInDarkTheme()
-    BoxWithConstraints(Modifier.fillMaxSize().background(DS.t.page)) {
+    // (A8.1, iOS 0.40.2) drawn on the home map (not a second map): the faces, their routes, framed above the sheet
+    BoxWithConstraints(Modifier.fillMaxSize()) {
         val peek = 360.dp
         val cover = if (maxHeight.value > 0) minOf(0.8, (peek / maxHeight).toDouble()) else 0.45
-        FriendsLiveMap(Modifier.fillMaxSize(), pins, frame, pictures, cover = cover, fallback = listOfNotNull(home, school), dark = dark,
-            accent = DS.t.accent.toArgb(), onTap = { push(FriendsRoute.Friend(it)) })
-        MapSheet(up, { up = it }, peek) { HubSheet(book, now, push) }
+        FriendsOverMap.Publish(FriendsOverMap.Layer(pins, emptyList(), frame.ifEmpty { listOfNotNull(home, school) }, if (up) 0.92 else cover))
+        MapSheet(up, { up = it }, peek, onClose = back) { HubSheet(book, now, push) }
         Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Box {
                 MapRoundButton(Icons.Filled.MoreVert, "Your friends account") { menu = true }
@@ -215,8 +213,10 @@ private fun HubSheet(b: FriendBook?, now: Double, push: (FriendsRoute) -> Unit) 
         }
     }
     if (b == null) return
-    if (friends.isNotEmpty() && !answered) TripsConsentCard()
-    if (friends.isNotEmpty() && answered && !ttAnswered) TimetableAskCard()
+    // (A8.1, iOS 0.40.2) "Not now" (or back, closing Friends) leaves them unanswered: off, asked again next time
+    var notNow by remember { mutableStateOf(false) }
+    if (friends.isNotEmpty() && !answered && !notNow) TripsConsentCard { notNow = true }
+    if (friends.isNotEmpty() && answered && !ttAnswered && !notNow) TimetableAskCard { notNow = true }
     if (b.incoming.isNotEmpty()) Card {
         Header("Want to be friends", "${b.incoming.size}")
         b.incoming.forEach { r ->
@@ -271,24 +271,24 @@ private fun FriendCardsRow(friends: List<Friend>, now: Double, pictures: Map<Str
 }
 
 @Composable
-private fun TripsConsentCard() = Card {
+private fun TripsConsentCard(notNow: () -> Unit) = Card {
     Header("Show your trips to friends?")
     Text("While you’re on a trip and on board, friends see that you’re travelling, on what (bus 305, IC 3512), where you are and when you arrive. " +
         "Nothing is shared when no trip is running. You can turn it off for everyone or per friend.", color = DS.t.text)
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         QuietButton("Show my trips") { FriendStore.answerTravel(true) }
-        QuietButton("Not now") { FriendStore.answerTravel(false) }
+        QuietButton("Not now", onClick = notNow)
     }
 }
 
 @Composable
-private fun TimetableAskCard() = Card {
+private fun TimetableAskCard(notNow: () -> Unit) = Card {
     Header("Share your timetable?")
     Text("Friends see your classes for the next two weeks (times, titles, rooms) and where your trips start: the stops near home, the station and your school, never your address. " +
         "Then Compare shows the days and rides you can share.", color = DS.t.text)
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         QuietButton("Share it") { FriendTimetables.answer(true) }
-        QuietButton("Not now") { FriendTimetables.answer(false) }
+        QuietButton("Not now", onClick = notNow)
     }
 }
 
@@ -507,12 +507,11 @@ fun FriendMapPage(id: String, push: (FriendsRoute) -> Unit, back: () -> Unit) {
     })
     val stops = listOfNotNull(MapFrame.point(s.from.lat, s.from.lon)?.let { MapStop("from", s.from.name, it) },
         MapFrame.point(s.to.lat, s.to.lon)?.let { MapStop("to", s.to.name, it) })
-    val dark = isSystemInDarkTheme()
-    BoxWithConstraints(Modifier.fillMaxSize().background(DS.t.page)) {
+    BoxWithConstraints(Modifier.fillMaxSize()) {
         val peek = 400.dp
         val cover = if (maxHeight.value > 0) minOf(0.8, (peek / maxHeight).toDouble()) else 0.45
-        FriendsLiveMap(Modifier.fillMaxSize(), pins, MapFrame.points(s), pictures, stops, cover, dark = dark, accent = DS.t.accent.toArgb())
-        MapSheet(up, { up = it }, peek) { FriendPageContent(f, t, now, push, back) }
+        FriendsOverMap.Publish(FriendsOverMap.Layer(pins, stops, MapFrame.points(s), if (up) 0.92 else cover))
+        MapSheet(up, { up = it }, peek, onClose = back) { FriendPageContent(f, t, now, push, back) }
         Box(Modifier.statusBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp)) { MapBackPill("Friends", back) }
     }
 }
@@ -640,3 +639,19 @@ private fun RemoveFriendButton(f: Friend, back: () -> Unit) {
         dismissButton = { TextButton(onClick = { confirm = false }) { Text("Cancel") } })
 }
 
+
+/**
+ * (A8.1, iOS 0.40.2) Friends over the home map: what the open Friends page wants drawn there (faces, routes, where a
+ * friend got on and gets off), the share of the map its sheet covers, and a face tapped on the map.
+ */
+object FriendsOverMap {
+    data class Layer(val pins: List<FriendMapPin>, val stops: List<MapStop>, val frame: List<GeoPoint>, val cover: Double)
+    val layer = kotlinx.coroutines.flow.MutableStateFlow<Layer?>(null)
+    val tapped = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+
+    @Composable
+    fun Publish(l: Layer) {
+        androidx.compose.runtime.SideEffect { if (layer.value != l) layer.value = l }
+        androidx.compose.runtime.DisposableEffect(Unit) { onDispose { layer.value = null } }
+    }
+}

@@ -189,7 +189,7 @@ before it was off the road known and the train was drawn by its times at your st
 `RealFirstTests`); `BusFusion` is kept as the ghost. Log line in [logs-export.md](logs-export.md) › The vehicle you wait
 for or ride on the map (0.40.3).
 
-- [ ] **Real GPS first** for the bus or train you wait for (Fastest trip's map, the live sheet, the home map's next-trip
+- [x] **Real GPS first** for the bus or train you wait for (Fastest trip's map, the live sheet, the home map's next-trip
       vehicle) or ride, in metres along its road:
       - at its **last fix itself**, put on its road when within 60 m of it (else at the fix's own place); fixes up to
         180 s old; label "· GPS 40 s" (its age; "2 min" from 100 s);
@@ -214,18 +214,17 @@ for or ride on the map (0.40.3).
       - the home map's next-trip vehicle by its **whole trip** (`/trip` every 30 s), not only the map's pieces of it;
       - **NS positions** asked for wherever a train you wait for or ride is drawn (Fastest trip, the live sheet, the home
         map while the next trip's first ride or the ride is a train), matched by train number;
-      - **on board**: the vehicle is drawn where your phone is (fix ≤ 30 s old, ±100 m), also in its live sheet.
-- [ ] Fastest trip's stop pin is a stop, not a vehicle: a person-waiting icon, light pill with the line's colour as text
-      and border ("IC · 19:38").
-- [ ] Settings › Map › **Bus position**: Real GPS (default) / Estimated (0.40.1's fused place, no ghost).
-      The on-board matcher keeps its raw GPS (unchanged). Vectors in `ios/Tests/RealFirstTests.swift`.
-
+      - **on board**: the vehicle is drawn where your phone is (fix ≤ 30 s old, ±100 m), also in its live sheet. **Android 0.8.1:** `live/RealFirst.kt` (`RealFirstTest`, every iOS vector) and `live/WaitVehicle.kt` (the glue): the home map's next-trip bus or train by its whole trip (`/v5/trip` every 30 s), OVapi by trip, NS by train number, placed and glided every second, "GPS 40 s" / "by times" (60 %) under it, the ghost a small hollow dot, "Arriving" / "Waiting · leaves …" / "It’s at your stop" on the next-trip card, "No live position" under the stop pin; on board (the ride's vehicle known) drawn where your phone is; `vehicle shown · …` in the log once a minute. Android's Fastest trip has no map of its own and there is no live sheet: the home map is where it's drawn.
+- [x] Fastest trip's stop pin is a stop, not a vehicle: a person-waiting icon, light pill with the line's colour as text
+      and border ("IC · 19:38"). **Android 0.8.1:** the stop pin on the home map (your next trip's stop): a light pill with a person drawn in the line's colour, "IC · 19:38".
+- [x] Settings › Map › **Bus position**: Real GPS (default) / Estimated (0.40.1's fused place, no ghost).
+      The on-board matcher keeps its raw GPS (unchanged). Vectors in `ios/Tests/RealFirstTests.swift`. **Android 0.8.1:** `Settings.busPosition` ("real"/"estimated"), Settings › Map & home › Bus position, searchable.
 ## iOS 0.40.2
 
 From the field report ("The Friends tab pops up a new map, which is annoying, and you can't swipe to leave"; "It's hard
 to get out of the calendar screen, you can't swipe"). UI only, no new rules.
 
-- [ ] **Friends over the home map, not a second map.** iOS 0.31 opened Friends as a full-height sheet holding a map of its
+- [x] **Friends over the home map, not a second map.** iOS 0.31 opened Friends as a full-height sheet holding a map of its
       own with a hand-made pull-up panel (and a friend's page as another map with another panel): a swipe down moved
       that map instead of closing it. Now (as search since 0.40.0) Friends is a sheet over the home map: half the screen
       first, the map above it usable; pulled up, full height; swiped down (or Done), closed. While it's open the home map
@@ -236,13 +235,13 @@ to get out of the calendar screen, you can't swipe"). UI only, no new rules.
       the map does nothing then. Chats and the list's pages open full height; a friend's page stays half. Opened from
       Settings (away from the home map): the same sheet full height, and a friend's page heads with a small map of their
       trip. Android: Friends as a bottom sheet (half, expanded) over the home map with the same pins; system back (and
-      the predictive back gesture) closes it and steps back through its pages.
+      the predictive back gesture) closes it and steps back through its pages. **Android 0.8.1:** Friends is a sheet over the home map (`MapSheet` half / full, swiped down or Done to close): the home map draws the faces, their routes, and on a friend's page that friend with where they got on and get off (`FriendsOverMap`), framed above the sheet and back where it was when it closes; a face tapped on the map opens their page; the home's buttons and cards hide meanwhile; other pages (chats, groups, compare…) open full height over it; from Settings it opens full height. System back steps back through its pages, then closes it.
 - [x] **Your week is a sheet.** It was drawn over the map (both home styles) with only a small map button to leave. Now a
       full-height sheet with the grabber, swiped down or its × to close (like Your day). Android: Your week as a sheet or
       a screen that system back closes. **Android 0.8.0:** a screen system back closes (as all screens over the home).
-- [ ] **The one-time questions** ("Show friends your trips?", "Compare timetables with friends?") can be swiped away or
+- [x] **The one-time questions** ("Show friends your trips?", "Compare timetables with friends?") can be swiped away or
       left with "Not now" (top left) until answered; not answered stays off and is asked again the next time Friends
-      opens (once per opening). Android: system back on them = "Not now".
+      opens (once per opening). Android: system back on them = "Not now". **Android 0.8.1:** "Not now" (and back, which closes Friends) leaves them unanswered: off, asked again the next time Friends opens.
 - [x] Android sweep: every screen that opens over another (Friends and its pages, Your week, Your day, the school
       calendar picker, Your week in Settings, Compare and a day of it, the consent screens) handles system back /
       predictive back and has a visible close or back control; only the first-run setup and the backup code just made
@@ -256,7 +255,7 @@ its times put it while its time there was more than 2 min off, so it jumped with
 fused position (`ios/App/BusFusion.swift`, tests `BusFusionTests` and `WaitMarkerTests`). Log line in
 [logs-export.md](logs-export.md) › The bus you wait for on the map (0.40.1).
 
-- [ ] The bus you wait for (Fastest trip's map, the live sheet, the home map's next-trip bus): in metres along its road,
+- [x] The bus you wait for (Fastest trip's map, the live sheet, the home map's next-trip bus): in metres along its road,
       - **by its GPS**: its last fix on the road (not moved on), moved on by now − fix time (at most 180 s) at the speed
         seen between its last two fixes (no less than half, no more than 1.5× the timetable's speed of the piece it's
         on; the timetable's when not known); a fix within 35 m of a stop, not moving (< 1.5 m/s), before its live
@@ -282,8 +281,7 @@ fused position (`ios/App/BusFusion.swift`, tests `BusFusionTests` and `WaitMarke
         only when a new fix ≤ 60 s old puts it more than 150 m behind what's drawn: a straight glide there over 3 s; no
         step for 20 s: drawn where it is; on the map each step animates linearly over 1 s;
       - GPS and times more than 200 m apart: the road between them drawn faintly (wider, 25–30 % of the line's colour).
-      The on-board matcher keeps the raw GPS. Vectors in `ios/Tests/BusFusionTests.swift` and `WaitMarkerTests.swift`.
-
+      The on-board matcher keeps the raw GPS. Vectors in `ios/Tests/BusFusionTests.swift` and `WaitMarkerTests.swift`. **Android 0.8.1:** `live/BusFusion.kt` (`BusFusionTest`, with the `WaitMarkerTests` vectors): only the ghost and Bus position: Estimated (as iOS 0.40.3).
 ## iOS 0.40.0
 
 - [x] "From <stop>" in a trip's detail (`FromStop`, Fastest trip under the big card; folded away as "Buses from
@@ -296,7 +294,7 @@ fused position (`ios/App/BusFusion.swift`, tests `BusFusionTests` and `WaitMarke
       switches to it (one of the ways already found, else the rest planned from that stop: the planner from the stop to
       the destination at its departure − 1 min, the itinerary whose first ride is that trip, with your walk to the stop
       put in front). It stays your pick like a ride chosen in Plan, but missing from later answers doesn't drop it, only
-      leaving or being cancelled. Vectors in `ios/Tests/FromStopTests.swift`. **Android 0.8.0:** `travel/Departures.kt` (`FromStopTest` in `DeparturesTest`); folded on the home's next-trip card ("Buses from … ▾"), not yet under Fastest trip's big card.
+      leaving or being cancelled. Vectors in `ios/Tests/FromStopTests.swift`. **Android 0.8.0:** `travel/Departures.kt` (`FromStopTest` in `DeparturesTest`); folded on the home's next-trip card ("Buses from … ▾"); **0.8.1:** also under Fastest trip's big card (the first or chosen way).
 - [x] Sticky upcoming trips (`StickyTrips`): a failed or empty answer keeps what's still to come (not left 60 s past its
       live departure, not cancelled); a partial answer adds to the list; a whole answer replaces it but keeps the trip
       you're heading for (the one shown first, by its first ride's trip id) until it has left, unless you're on it; a
@@ -316,11 +314,11 @@ fused position (`ios/App/BusFusion.swift`, tests `BusFusionTests` and `WaitMarke
       metres (the map's walking route, else the planner's minutes × the speed it planned with) / your speed, rounded up,
       never more than the planner's. Shown "6 min walk · leave in 4 min (2 min spare)". The time to leave (and "Time to
       go") moves later by max(0, planner's walk − your walk − 2) minutes only; nothing learned: as before. School and
-      planned-trip alarms unchanged. Vectors in `ios/Tests/WalkPlanTests.swift`. **Android 0.8.0:** the home's next-trip card ("Leave …" and the walk line); the "Time to go" notification not yet.
-- [ ] Search on the home map: a bottom sheet over the same map (half height, the map still usable behind it, the same
+      planned-trip alarms unchanged. Vectors in `ios/Tests/WalkPlanTests.swift`. **Android 0.8.0:** the home's next-trip card ("Leave …" and the walk line). **Android 0.8.1:** "Time to go" (`TimeToGo`, new on Android): while the home or Fastest trip is open, a minute before you have to leave, once per ride, later by `WalkPlan` once 5 walks are learned (2 min spare).
+- [x] Search on the home map: a bottom sheet over the same map (half height, the map still usable behind it, the same
       camera): your places, recent ones, stops found by name (also drawn as pins on the map; tap one), then the ways there
       in the sheet with Go and the route drawn on the map (the map moves only when the route isn't in view, and goes back
-      when the search closes). "Another time or more options" opens the full Plan as before.
+      when the search closes). "Another time or more options" opens the full Plan as before. **Android 0.8.1:** `ui/screens/HomeSearch.kt`: the search button on the map opens a half sheet (pull up for full): your places, recent ones (6, on the phone), places and stops found (the stops as pins on the same map; tap one), then the ways there with Go and the chosen one's route drawn on the map (its legs' shapes from the plan; walks dashed), moved only when it isn't in view, back when the search closes. "Another time or more options" opens Plan to that place.
 - [x] Ghost departures (`GhostDepartures`, the home's departure cards, "From <stop>", the home's trips and Plan's
       options): the same journey from two sources once (same trip at the same stop, or same line + stop + timetable minute
       + headsign equal or one the start of the other; the live copy kept); cancelled ones hidden; for a line that has live

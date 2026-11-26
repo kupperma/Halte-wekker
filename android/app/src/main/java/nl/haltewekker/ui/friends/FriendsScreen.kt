@@ -122,7 +122,7 @@ fun FriendsPage(content: @Composable () -> Unit) {
 
 /** Friends: the whole of it, with its own back stack. `onStart` starts a ride (Take this trip). */
 @Composable
-fun FriendsScreen(onBack: () -> Unit, canStart: Boolean, onStart: (DoorTrip, String) -> Unit) {
+fun FriendsScreen(onBack: () -> Unit, canStart: Boolean, onStart: (DoorTrip, String) -> Unit, full: Boolean = false) {
     val stack = remember { mutableStateListOf<FriendsRoute>(FriendsRoute.Hub) }
     val toOpen by FriendChats.toOpen.collectAsState()
     val opened by FriendStore.opened.collectAsState()
@@ -130,11 +130,14 @@ fun FriendsScreen(onBack: () -> Unit, canStart: Boolean, onStart: (DoorTrip, Str
     fun push(r: FriendsRoute) { stack.add(r) }
     fun pop() { if (stack.size > 1) stack.removeAt(stack.lastIndex) else onBack() }
     BackHandler { pop() }
+    // (A8.1) a face tapped on the home map opens their page in the sheet
+    val tapped by FriendsOverMap.tapped.collectAsState()
+    LaunchedEffect(tapped) { tapped?.let { id -> FriendsOverMap.tapped.value = null; if ((stack.last() as? FriendsRoute.Friend)?.id != id) push(FriendsRoute.Friend(id)) } }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     // every 30 s while Friends is open (a chat: every 8 s, its own loop)
     LaunchedEffect(Unit) { lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) { while (true) { FriendStore.sync(FriendStore.Why.SCREEN); delay(30_000) } } }
     when (val r = stack.last()) {
-        FriendsRoute.Hub -> FriendsHub(::push, ::pop)
+        FriendsRoute.Hub -> FriendsHub(::push, ::pop, full)
         is FriendsRoute.Friend -> FriendMapPage(r.id, ::push, ::pop)
         is FriendsRoute.Chat -> ChatScreen(r.key, ::push, ::pop)
         is FriendsRoute.Group -> GroupPage(r.id, ::push, ::pop)
@@ -177,10 +180,10 @@ private fun OpenedCodeDialog(code: OpenedCode, onDone: () -> Unit) {
 
 /** Friends' first page: with an account (A5) the map and its sheet; without one, making it (or restoring it). */
 @Composable
-private fun FriendsHub(push: (FriendsRoute) -> Unit, back: () -> Unit) {
+private fun FriendsHub(push: (FriendsRoute) -> Unit, back: () -> Unit, full: Boolean = false) {
     val book by FriendStore.book.collectAsState()
     val moved by FriendStore.movedAway.collectAsState()
-    if (book != null) { FriendsMapHome(push, back); return }
+    if (book != null) { FriendsMapHome(push, back, full); return }
     FriendsPage {
         FriendsTop("Friends", back)
         if (moved) Card {

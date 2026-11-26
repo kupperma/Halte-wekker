@@ -68,6 +68,8 @@ data class Settings(
     val ovFiets: Boolean = true,
     /** (A6, iOS 0.37) Rain advice for the walk. */
     val rainAdvice: Boolean = true,
+    /** (A8.1, iOS 0.40.3) Map › Bus position: "real" (its own GPS first, default) or "estimated" (0.40.1's fused place). */
+    val busPosition: String = "real",
 )
 
 /** The profile and settings, in SharedPreferences, as state the screens follow. */

@@ -28,6 +28,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -191,6 +192,13 @@ private fun TopicPage(t: SettingsTopic, onBack: () -> Unit, onSetup: () -> Unit,
             SettingsTopic.MAP -> {
                 Card {
                     Toggle("Real bus and train positions", "From OVapi and NS, while the map is open or a ride looks for your vehicle. Off: by their timetables (less data).", s.realPositions) { v -> set { it.copy(realPositions = v) } }
+                    // (A8.1, iOS 0.40.3) the bus or train you wait for: where its own GPS put it, or 0.40.1's estimate
+                    Text("Bus position", color = DS.t.text, fontWeight = FontWeight.SemiBold)
+                    Text("The bus or train you wait for or ride. Real GPS: where its own GPS put it (a little behind, never guessed ahead), the expected place as a faint dot. Estimated: its GPS and its times together.", color = DS.t.secondary, style = MaterialTheme.typography.bodySmall)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(s.busPosition != "estimated", { set { it.copy(busPosition = "real") } }, label = { Text("Real GPS") })
+                        FilterChip(s.busPosition == "estimated", { set { it.copy(busPosition = "estimated") } }, label = { Text("Estimated") })
+                    }
                     Toggle("Rain advice for the walk", "From 3 hours before a trip: rain on the walk to the first stop or from the last one (Open-Meteo), with a bus instead of a long walk to the train when there is one.", s.rainAdvice) { v -> set { it.copy(rainAdvice = v) } }
                     Toggle("OV-fiets at the station", "How many NS rental bikes are left where your last train gets in, when a bus or a walk follows it.", s.ovFiets) { v -> set { it.copy(ovFiets = v) } }
                 }

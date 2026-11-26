@@ -67,6 +67,7 @@ object SettingsIndex {
         e("friends.test", "Test friend", SettingsTopic.FRIENDS, "bot", "add a test friend", "remove test friend", "try friends"),
         // Map & home
         e("map.real", "Real bus and train positions", SettingsTopic.MAP, "gps", "ovapi", "ns", "where they are", "data"),
+        e("map.busPosition", "Bus position", SettingsTopic.MAP, "real gps", "estimated", "where the bus is", "train position", "expected"),
         e("map.rainAdvice", "Rain advice for the walk", SettingsTopic.MAP, "umbrella", "weather", "wet", "bus instead", "walking", "forecast", "open-meteo"),
         e("map.ovfiets", "OV-fiets at the station", SettingsTopic.MAP, "rental bike", "bikes left", "fiets", "bike", "ns", "station"),
         e("map.widget", "Widget and shortcuts", SettingsTopic.MAP, "home screen widget", "app shortcuts", "long press", "when’s my bus", "departures", "voice"),

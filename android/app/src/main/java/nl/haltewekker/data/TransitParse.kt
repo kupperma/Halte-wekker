@@ -38,6 +38,12 @@ object TransitParse {
 
     // MARK: plan (/v5/plan)
 
+    /** (A8.1) a piece of a planned trip's route: a walk or a ride, its shape. */
+    data class Shape(val points: List<GeoPoint>, val walk: Boolean, val line: String, val mode: String)
+
+    /** The planned trips' routes by `DoorTrip.id` (bounded; filled by `parseItinerary`). */
+    val routes = java.util.concurrent.ConcurrentHashMap<String, List<Shape>>()
+
     fun parseItinerary(it: JsonObject): DoorTrip? {
         val legs = it.a("legs").mapNotNull { it.obj }
         val rides = ArrayList<Ride>()
@@ -76,7 +82,14 @@ object TransitParse {
         if (rides.isEmpty()) return null
         val s = it.t("startTime") ?: return null
         val e = it.t("endTime") ?: return null
-        return DoorTrip(rides, s, e)
+        val trip = DoorTrip(rides, s, e)
+        // (A8.1) the route as drawn on the home map (walks and rides), kept beside the trip
+        val shapes = legs.mapNotNull { l ->
+            val pts = l.o("legGeometry")?.let { g -> g.s("points")?.let { Polyline.decode(it, g.d("precision")?.toInt() ?: 5) } } ?: return@mapNotNull null
+            if (pts.size < 2) null else Shape(pts, l.s("mode") == "WALK", l.s("routeShortName") ?: "", l.s("mode") ?: "")
+        }
+        if (shapes.isNotEmpty()) { if (routes.size > 300) routes.clear(); routes[trip.id] = shapes }
+        return trip
     }
 
     fun parsePlan(body: String): List<DoorTrip> =
@@ -222,7 +235,8 @@ object TransitParse {
             o ?: return null
             val la = o.d("lat") ?: return null
             val lo = o.d("lon") ?: return null
-            return TripStop(o.s("name") ?: "", GeoPoint(la, lo), o.t("arrival"), o.t("departure"), o.t("scheduledDeparture"), o.b("cancelled") ?: false)
+            return TripStop(o.s("name") ?: "", GeoPoint(la, lo), o.t("arrival"), o.t("departure"), o.t("scheduledDeparture"), o.b("cancelled") ?: false,
+                o.t("scheduledArrival"))
         }
         var tripCancelled = false
         for (l in legs) {

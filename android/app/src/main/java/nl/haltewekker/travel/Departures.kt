@@ -208,3 +208,32 @@ object WalkWords {
         return nl.haltewekker.ride.WalkPlan.words(shown(t, b), if (m < 60) m else null, nl.haltewekker.ui.Fmt.time(leave(t, b)))
     }
 }
+
+/**
+ * (A8.1, iOS 0.40 `Go.timeToGo`) "Time to go" when it's time to walk to the stop, once per ride, a minute before you
+ * have to leave: at your own walking speed once 5 walks are learned, with 2 minutes spare (`WalkPlan`), else the
+ * planner's walk. While the home or Fastest trip is open (the planner runs only then).
+ */
+object TimeToGo {
+    private val told = HashSet<String>()
+
+    /** The words, or null when it isn't time (or was told). Pure but for the memory of what was told. */
+    fun due(t: nl.haltewekker.data.DoorTrip, b: HabitBook, now: Double): Pair<String, String>? {
+        val f = t.first
+        if (f.walkBefore < 2 || f.cancelled || f.tripId in told) return null
+        val w = WalkWords.shown(t, b)
+        val leave = nl.haltewekker.ride.WalkPlan.leave(t.start, w)
+        if (leave > now + 60 || leave < now - 180 || f.departure < now) return null
+        told.add(f.tripId)
+        if (told.size > 50) told.clear()
+        val spare = if (w.learned && w.spare > 0) " (${w.spare} min spare)" else ""
+        val what = if (f.isTrain) nl.haltewekker.data.TransitParse.trainLabel(f.name.ifEmpty { f.line }) else "bus ${f.line}"
+        return "Time to go" to "${w.walk} min walk to ${f.fromStop}$spare · $what leaves ${nl.haltewekker.ui.Fmt.time(f.departure)}"
+    }
+
+    fun check(context: android.content.Context, t: nl.haltewekker.data.DoorTrip?, now: Double) {
+        if (t == null || nl.haltewekker.ride.RideStore.state.value != null) return
+        val (title, text) = due(t, HabitStore.book.value, now) ?: return
+        nl.haltewekker.ride.Notifications.news(context, "go-${t.first.tripId}", title, text)
+    }
+}

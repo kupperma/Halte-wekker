@@ -178,7 +178,11 @@ class HomeModel(app: Application) : AndroidViewModel(app) {
     private fun place(buses: Map<String, nl.haltewekker.live.GPSFix>, trains: Map<Int, nl.haltewekker.live.GPSFix>, sw: GeoPoint, ne: GeoPoint) {
         val now = Iso.now()
         val out = ArrayList<MapDot>()
+        // (A8.1) the one you wait for or ride is drawn on its own (`focus`), once
+        val own = _focus.value?.ride
+        val ownTrain = own?.takeIf { it.isTrain }?.let { RealPositions.trainNumber(it.num) }
         for ((_, segs) in segments.groupBy { it.tripId }) {
+            if (own != null && segs.first().tripId == own.tripId) continue
             val s = segs.firstOrNull { it.position(now) != null } ?: segs.first()
             if (s.isTrain && RealPositions.isRail(s.mode)) continue      // trains: NS's own positions below
             val fix = RealPositions.usable(buses, s.tripId, now)
@@ -189,20 +193,75 @@ class HomeModel(app: Application) : AndroidViewModel(app) {
         val distinct = out.distinctBy { it.id }.toMutableList()
         if (trains.isNotEmpty()) {
             for ((n, f) in trains) {
-                if (now - f.at > RealPositions.FRESH) continue
+                if (now - f.at > RealPositions.FRESH || n == ownTrain) continue
                 if (f.lat < sw.lat || f.lat > ne.lat || f.lon < sw.lon || f.lon > ne.lon) continue
                 val kind = VehicleKind.of("RAIL", f.type ?: "", true)
                 distinct.add(MapDot("ns$n", f.point, Tokens.light.kind(kind).toArgb(), f.type?.take(3) ?: "NS"))
             }
         } else {
             // no NS positions: trains by their times
-            for (s in segments) if (s.isTrain && RealPositions.isRail(s.mode)) {
+            for (s in segments) if (s.isTrain && RealPositions.isRail(s.mode) && s.tripId != own?.tripId) {
                 val p = s.position(now) ?: continue
                 if (p.lat < sw.lat || p.lat > ne.lat || p.lon < sw.lon || p.lon > ne.lon) continue
                 if (distinct.none { it.id == s.tripId }) distinct.add(MapDot(s.tripId, p, Tokens.light.kind(s.kind).toArgb(), TransitParse.trainLabel(s.line)))
             }
         }
         _dots.value = stopDots() + distinct.take(300)
+    }
+
+    // MARK: (A8.1, iOS 0.40.3 `RealFirst`) the bus or train you wait for or ride, where it really is
+
+    /** The vehicle you wait for (the next trip's first ride) or ride, placed; its stop for the pin. */
+    data class Focus(val ride: nl.haltewekker.data.Ride, val placed: nl.haltewekker.live.WaitVehicle.Placed, val color: Int,
+                     val label: String, val stop: GeoPoint?, val onBoard: Boolean)
+    private val _focus = MutableStateFlow<Focus?>(null)
+    val focus: StateFlow<Focus?> = _focus
+    private val placer = nl.haltewekker.live.WaitVehicle()
+    private var focusTrip: TransitParse.LiveTrip? = null
+    private var focusTripId: String? = null
+    private var focusTripAt = 0.0
+    /** Your phone's last fix, for drawing the vehicle you're on where you are. */
+    @Volatile var meFix: nl.haltewekker.live.WaitVehicle.Me? = null
+
+    /** The ride it follows: the vehicle of the ride running (on board), else the next trip's first ride (leaving within an hour). */
+    private fun focusRide(now: Double): Pair<nl.haltewekker.data.Ride, Boolean>? {
+        val r = nl.haltewekker.ride.RideStore.state.value
+        if (r != null) {
+            val leg = r.leg ?: return null
+            val id = r.vehicleTripId ?: return null
+            return leg.copy(tripId = id, line = r.vehicleLine ?: leg.line) to (r.vehicleSource != nl.haltewekker.ride.VehicleSource.NONE)
+        }
+        val f = _next.value.firstOrNull()?.first ?: return null
+        if (f.cancelled || f.departure < now - 60 || f.departure > now + 3600) return null
+        return f to false
+    }
+
+    /** Its whole trip (`/v5/trip`) every 30 s while it's shown, not only the map's pieces of it. */
+    suspend fun refreshFocus() {
+        val now = Iso.now()
+        val (ride, _) = focusRide(now) ?: run { focusTrip = null; focusTripId = null; _focus.value = null; return }
+        if (ride.tripId == focusTripId && now - focusTripAt < 30) return
+        val t = Transit.trip(ride.tripId, maxAge = 25.0)
+        if (t != null || ride.tripId != focusTripId) { focusTrip = t; focusTripId = ride.tripId; focusTripAt = now }
+    }
+
+    /** Placed again (every second or two, no network): its own fix from the last feeds, gliding. */
+    fun stepFocus(realPositions: Boolean, estimated: Boolean) {
+        val now = Iso.now()
+        val (ride, onBoard) = focusRide(now) ?: run { _focus.value = null; return }
+        val t = focusTrip?.takeIf { focusTripId == ride.tripId } ?: run { _focus.value = null; return }
+        val train = ride.isTrain || RealPositions.isRail(t.mode)
+        var feed = "ovapi"
+        val gps = if (!realPositions) null else if (train) {
+            feed = "ns"
+            val n = RealPositions.trainNumber(ride.num.ifEmpty { t.num })
+            n?.let { LiveFeeds.trains[it] }?.takeIf { now - it.at <= RealPositions.FRESH }
+        } else RealPositions.usable(LiveFeeds.buses.fixes, ride.tripId, now)
+        val mine = if (onBoard) null else nl.haltewekker.live.WaitVehicle.mine(t, ride.from, ride.fromStop)
+        val placed = placer.place(t, ride.tripId, ride.line, train, mine, if (onBoard) null else ride.departure, focusTripAt, now, gps, feed,
+            if (onBoard) meFix else null, estimated)
+        val label = if (train) TransitParse.trainLabel(ride.name.ifEmpty { ride.line }) else ride.line
+        _focus.value = Focus(ride, placed, Tokens.light.kind(ride.kind).toArgb(), label, if (onBoard) null else (ride.from ?: mine?.let { t.stops[it].point }), onBoard)
     }
 
     private fun stopDots(): List<MapDot> = _stops.value.map { MapDot("stop:${it.id}", GeoPoint(it.lat, it.lon), 0xFF5B636B.toInt(), "", "stop") }

@@ -81,7 +81,7 @@ fun ringColour(s: TravelState): Color = Tokens.light.kind(VehicleKind.of(if (s.i
  * scrolling inside. `peek` is how high it stands when down; up, it takes 92 % of the screen.
  */
 @Composable
-fun MapSheet(up: Boolean, onUp: (Boolean) -> Unit, peek: Dp, content: @Composable ColumnScope.() -> Unit) {
+fun MapSheet(up: Boolean, onUp: (Boolean) -> Unit, peek: Dp, onClose: (() -> Unit)? = null, content: @Composable ColumnScope.() -> Unit) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val full = maxHeight
         val low = minOf(peek, full * 0.8f)
@@ -97,7 +97,7 @@ fun MapSheet(up: Boolean, onUp: (Boolean) -> Unit, peek: Dp, content: @Composabl
             Box(Modifier.fillMaxWidth().heightIn(min = 28.dp)
                 .pointerInput(up) {
                     detectVerticalDragGestures(onDragEnd = {
-                        if (drag > 60 * density.density) onUp(false) else if (drag < -60 * density.density) onUp(true)
+                        if (drag > 60 * density.density) { if (up || onClose == null) onUp(false) else onClose() } else if (drag < -60 * density.density) onUp(true)
                         drag = 0f
                     }, onDragCancel = { drag = 0f }) { _, dy -> drag += dy }
                 }

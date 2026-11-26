@@ -69,14 +69,14 @@ import nl.haltewekker.ui.theme.DS
  * every 40 s (20 s within 12 minutes of leaving, as iOS `GoPace`); nothing runs when it's closed.
  */
 @Composable
-fun PlanScreen(start: Direction?, canStart: Boolean, onBack: () -> Unit, onStart: (DoorTrip, String) -> Unit) {
+fun PlanScreen(start: Direction?, canStart: Boolean, onBack: () -> Unit, onStart: (DoorTrip, String) -> Unit, place: SavedPlace? = null) {
     val context = LocalContext.current
     val app = context.applicationContext as App
     val profile by app.store.profile.collectAsState()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     BackHandler(onBack = onBack)
 
-    var dest by remember { mutableStateOf(start?.let { if (it == Direction.TO_SCHOOL) profile.school else profile.home } ?: profile.school ?: profile.home) }
+    var dest by remember { mutableStateOf(place ?: start?.let { if (it == Direction.TO_SCHOOL) profile.school else profile.home } ?: profile.school ?: profile.home) }
     var searching by rememberSaveable { mutableStateOf(false) }
     var q by rememberSaveable { mutableStateOf("") }
     var hits by remember { mutableStateOf<List<PlaceHit>>(emptyList()) }
@@ -101,6 +101,8 @@ fun PlanScreen(start: Direction?, canStart: Boolean, onBack: () -> Unit, onStart
                 val got = TransitParse.keepUseful(Transit.plan("${from.lat},${from.lon}", d.planId, n - 120, count = 6), n, 6)
                 loading = false; asked = true; now = Iso.now()
                 if (got.isNotEmpty() || trips.isEmpty()) trips = got
+                // (A8.1, iOS 0.40) "Time to go", later by your own walking speed once learned (2 min spare)
+                nl.haltewekker.travel.TimeToGo.check(context, trips.firstOrNull(), now)
                 val leaveIn = got.firstOrNull()?.let { it.first.departure - now }
                 delay(if (leaveIn != null && leaveIn < 12 * 60) 20_000 else 40_000)
             }
@@ -140,8 +142,13 @@ fun PlanScreen(start: Direction?, canStart: Boolean, onBack: () -> Unit, onStart
             // (A8, iOS 0.40 `GhostDepartures.order`) a first ride with no live data close to leaving on a live line: after the others
             val ordered = GhostDepartures.order(trips.map { GhostDepartures.Option(it.id, it.first.line, it.first.departure, it.first.scheduledDeparture, it.first.live, it.first.cancelled) }, now)
                 .mapNotNull { id -> trips.firstOrNull { it.id == id } }
+            val big = ordered.firstOrNull { it.id == selected } ?: ordered.firstOrNull()
             ordered.forEach { t ->
                 TripRow(t, now, selected = selected == t.id) { selected = if (selected == t.id) null else t.id }
+                // (A8.1, iOS 0.40) "From <stop>" under the big card: the next departures where you get on
+                if (big?.id == t.id) FromStopFold(t, trips.filter { it.id != t.id }, d.planId) { sw ->
+                    trips = listOf(sw) + trips.filter { it.id != sw.id }; selected = sw.id
+                }
                 if (selected == t.id) Card {
                     t.rides.forEach { LegRow(it) }
                     TripNotes(t, trips, now)

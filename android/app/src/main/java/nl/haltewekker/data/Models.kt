@@ -114,7 +114,9 @@ data class VehicleSegment(
 /** One stop of a trip with its live times (iOS `TripStop` / `LiveTrip.Stop`). */
 data class TripStop(val name: String, val point: GeoPoint, val arrival: Double?, val departure: Double?,
                     /** (A4) The planned departure and whether the live data says it's cancelled there (the delay alarm). */
-                    val scheduledDeparture: Double? = null, val cancelled: Boolean = false)
+                    val scheduledDeparture: Double? = null, val cancelled: Boolean = false,
+                    /** (A8.1, iOS 0.40.1) the planned arrival there (`BusFusion`'s timetable speed, timing points). */
+                    val scheduledArrival: Double? = null)
 
 /** The kind of vehicle, for its colour (iOS `VehicleKind`). */
 enum class VehicleKind {

@@ -3,7 +3,7 @@
 The Android version of Haltewekker, built from the iOS app (`ios/`, SwiftUI) as the reference. It lives in
 `android/` (one Gradle project), with this plan in `docs/android/`. The iOS app and the relay are not changed by it.
 
-Status: **A1 (0.1.0, version code 1), A2 (0.2.0, version code 2), A3 (0.3.0, version code 3: Friends), A4 (0.4.0, version code 4: Friends extras and shared ride logs) A5 (0.5.0, version code 5: Friends map first, the seat picker, the test friend) and A5.1 (0.5.1, version code 6: 1st class in the seat picker) A6 (0.6.0, version code 7: iOS 0.32–0.37) A7 (0.7.0, version code 8: the A6 leftovers, iOS 0.37.1, 0.38, 0.39.1) and A8 (0.8.0, version code 9: iOS 0.39, most of 0.40, 0.42.1) built.**
+Status: **A1 (0.1.0, version code 1), A2 (0.2.0, version code 2), A3 (0.3.0, version code 3: Friends), A4 (0.4.0, version code 4: Friends extras and shared ride logs) A5 (0.5.0, version code 5: Friends map first, the seat picker, the test friend) and A5.1 (0.5.1, version code 6: 1st class in the seat picker) A6 (0.6.0, version code 7: iOS 0.32–0.37) A7 (0.7.0, version code 8: the A6 leftovers, iOS 0.37.1, 0.38, 0.39.1) A8 (0.8.0, version code 9: iOS 0.39, most of 0.40, 0.42.1) and A8.1 (0.8.1, version code 10: the rest of iOS 0.40) built.**
 
 ## Architecture
 
@@ -231,6 +231,58 @@ byte for byte, and its test vectors as JUnit tests before any screen:
 - The change guide, the adaptive wake-up, get ready and the richer ride notification, the rides saved for no signal;
   From <stop>, sticky next trips, the walk at your speed, ghost departures; Stop alarm from the lock screen; system
   back everywhere. Not yet: RealFirst / BusFusion markers, the search and Friends sheets over the home map.
+
+### A8.1 — the rest of iOS 0.40 (0.8.1, code 10) — built ("As built A8.1" says how)
+
+- 0.40.1/0.40.3 real GPS first (`RealFirst`, `BusFusion` as the ghost), the Bus position setting, the stop pin; 0.40.0
+  the search sheet over the home map, From <stop> under Fastest trip's card, "Time to go" by `WalkPlan`; 0.40.2 Friends
+  as a sheet over the home map, "Not now" on the one-time questions.
+
+## As built A8.1 (0.8.1, version code 10): the rest of iOS 0.40
+
+**Pure rules, with the iOS vectors.** `live/BusFusion.kt` (`StopTimes`, `BusFusion` with its `Glide`; `BusFusionTest`
+holds the iOS `BusFusionTests` and `WaitMarkerTests`), `live/RealFirst.kt` (`RealFirst` with its `Glide`;
+`RealFirstTest`), `travel/Departures.kt` `TimeToGo`. `TripStop` gained `scheduledArrival` (timing points, the timetable's
+speed).
+
+**The vehicle you wait for or ride (`live/WaitVehicle.kt`, `HomeModel.refreshFocus`/`stepFocus`).** The home map's
+next-trip first ride (leaving within an hour), or during a ride the vehicle it knows: its whole trip (`/v5/trip`, every
+30 s), its stops put on its road (metres along the trip's shape), its fix (OVapi by trip id; NS by train number from the
+ride's `num`) put on that road with the speed between its last two fixes, `RealFirst.show` (or `estimated`), the glide
+every second (no network). Drawn on the map's own `focus` layer: the vehicle with "GPS 40 s" / "by times" (60 %) under
+it, the ghost as a small hollow dot, the stop pin (`PinBitmap`: a light pill, a person, "IC · 19:38" in the line's
+colour, "No live position" under it when it isn't drawn); not again among the map's other vehicles. On board (the ride's
+vehicle known, your fix ≤ 30 s and ≤ 100 m) at your position. The next-trip card says "Bus 306 · GPS 40 s · Arriving".
+`vehicle shown · …` once a minute in the field log. Settings › Map & home › Bus position: Real GPS / Estimated.
+
+**One map for the home (`map/LiveMap.kt`).** The home's map now also draws lines (a planned route, walks dashed), pins,
+friends' faces (`FaceBitmap`) with their routes and stops, and frames a list of points in the part a sheet leaves free
+(`MapFrame.fit` with the sheet's share; for search only when it isn't in view), going back to where it was when the
+frame empties. Taps on faces and pins come back by id.
+
+**Search (`ui/screens/HomeSearch.kt`).** A search button on the map opens a half sheet (`MapSheet`, pulled up full,
+swiped down / × / back closes): School, Home, recent places (6, `search.recent` in the app's prefs), places found by
+name (stops also as pins; tap one), the ways there (planned again every 40 s) with Go and the chosen way's route on the
+map (the plan's leg shapes, kept beside each `DoorTrip` in `TransitParse.routes`); "Another time or more options" opens
+Plan to that place (`PlanScreen(place = …)`).
+
+**Fastest trip.** "From <stop>" (`FromStopFold`) under the big card (the chosen way, else the first); a tap switches the
+way. "Time to go" (new on Android, `TimeToGo`): while the home or Fastest trip is open and no ride runs, once per ride,
+a minute before you have to leave by `WalkPlan` (your speed after 5 walks, 2 min spare): "6 min walk to Bolkenplein
+(2 min spare) · bus 306 leaves 08:12".
+
+**Friends over the home map (0.40.2).** `Screen.FRIENDS` is the home with Friends open: the hub and a friend's page are
+`MapSheet`s over the home map (`FriendsOverMap.Publish` hands the faces, routes, stops and the sheet's share to the home
+map; a face tapped there opens the page); the home's buttons and cards hide; the other pages are full screens over it;
+from Settings the sheet opens full height. The one-time questions' "Not now" no longer answers (off, asked again the
+next time Friends opens); back closes Friends, the same.
+
+### Calls made in A8.1 (the user can correct)
+
+- Android's Fastest trip has no map and there is no live sheet: the vehicle you wait for is drawn on the home map only.
+- The search sheet's ways are planned "leave now"; other times are Plan's.
+- "Time to go" runs only while the home or Fastest trip is in front (no background planning on Android).
+- The friends' map is the home map: `FriendsLiveMap` is no longer used (kept in `map/FriendsMap.kt` with `FaceBitmap`).
 
 ## As built A8 (0.8.0, version code 9): iOS 0.39, 0.40 (most), 0.42.1
 
