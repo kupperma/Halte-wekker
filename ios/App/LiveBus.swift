@@ -120,6 +120,7 @@ struct LiveBusSheet: View {
     @State private var follow = false
     @State private var hold = GPSHold()
     @State private var later = Approach.Steady()    // its GPS's soonest time at your stop, when clearly later (0.24.5)
+    @State private var fuser = BusFuser()           // (0.40.1) its GPS and its live times together, gliding
 
     var body: some View {
         NavigationStack {
@@ -153,6 +154,11 @@ struct LiveBusSheet: View {
         UserAnnotation()
         if let trip {
             MapPolyline(coordinates: trip.path).stroke(lineColor.opacity(0.9), style: StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round))
+            // (0.40.1) its GPS and its times more than 200 m apart: the stretch between, faintly
+            if let h = fused(trip, now).hint, h.to - h.from > 20 {
+                MapPolyline(coordinates: trip.road(from: h.from, to: h.to))
+                    .stroke(lineColor.opacity(0.3), style: StrokeStyle(lineWidth: 12, lineCap: .round, lineJoin: .round))
+            }
             ForEach(Array(trip.stops.enumerated()), id: \.offset) { i, s in
                 Annotation(i == mine ? "Your stop" : "", coordinate: s.coordinate, anchor: .center) {
                     Circle().fill(i == mine ? (newLook ? DS.accent : BoardInk.yellow) : Color.white)
@@ -161,21 +167,30 @@ struct LiveBusSheet: View {
                 }
             }
             Annotation(target.line, coordinate: trip.coordinate(atMetres: shownMetres(trip, now)), anchor: .center) {
-                HStack(spacing: 4) {
-                    Image(systemName: target.rail ? "tram.fill" : "bus.fill").font(.system(size: 12, weight: .bold))
-                    Text(target.line).font(newLook ? DS.footnoteStrong : BoardInk.sans(13))
+                VStack(spacing: 3) {
+                    HStack(spacing: 4) {
+                        Image(systemName: target.rail ? "tram.fill" : "bus.fill").font(.system(size: 12, weight: .bold))
+                        Text(target.line).font(newLook ? DS.footnoteStrong : BoardInk.sans(13))
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 8).padding(.vertical, 5)
+                    .background(lineColor, in: RoundedRectangle(cornerRadius: 6))
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.white, lineWidth: 2))
+                    .shadow(color: .black.opacity(0.4), radius: 4, y: 2)
+                    if let leaves = fused(trip, now).waiting {
+                        Text(BusFusion.waitingText(leaves: leaves, clock: Fmt.hhmm)).font(newLook ? DS.footnoteStrong : BoardInk.sans(11)).monospacedDigit()
+                            .foregroundStyle(newLook ? DS.text : Paper.ink)
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(newLook ? DS.surface : Color.white, in: Capsule())
+                    }
                 }
-                .foregroundStyle(.white)
-                .padding(.horizontal, 8).padding(.vertical, 5)
-                .background(lineColor, in: RoundedRectangle(cornerRadius: 6))
-                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.white, lineWidth: 2))
-                .shadow(color: .black.opacity(0.4), radius: 4, y: 2)
             }
         }
     }
 
     private func map(_ now: Date) -> some View {
         Map(position: $camera) { content(now) }
+            .animation(.linear(duration: 1), value: now)        // (0.40.1) it slides from second to second
             .mapStyle(.standard(pointsOfInterest: .excludingAll))
             .mapControls { MapUserLocationButton(); MapCompass() }
     }
@@ -187,7 +202,7 @@ struct LiveBusSheet: View {
                 Text("to \(Fmt.place(target.headsign))").font(BoardInk.sans(17)).foregroundStyle(Paper.ink).lineLimit(1).minimumScaleFactor(0.7)
             }
             if let trip {
-                let placed = placement(trip, now), w = placed.w, printed = given ?? trip
+                let placed = placement(trip, now), w = whereNow(trip, now), printed = given ?? trip
                 Text(status(trip, w, now)).font(BoardInk.sans(15)).foregroundStyle(Paper.ink).fixedSize(horizontal: false, vertical: true)
                 if let m = mine, m < printed.stops.count, let a = atMine(printed.arrival(m)), shownMetres(trip, now) <= trip.metres(ofStop: m) + 20,
                    !w.done || !LiveTimes.hasLeft(trip.stops[m].times, now: now) {
@@ -241,7 +256,7 @@ struct LiveBusSheet: View {
                 }
             }
             if let trip {
-                let placed = placement(trip, now), w = placed.w, printed = given ?? trip
+                let placed = placement(trip, now), w = whereNow(trip, now), printed = given ?? trip
                 Text(status(trip, w, now)).font(DS.title).monospacedDigit().foregroundStyle(DS.text).fixedSize(horizontal: false, vertical: true)
                 if let m = mine, m < printed.stops.count, let a = atMine(printed.arrival(m)), shownMetres(trip, now) <= trip.metres(ofStop: m) + 20,
                    !w.done || !LiveTimes.hasLeft(trip.stops[m].times, now: now) {
@@ -348,22 +363,29 @@ struct LiveBusSheet: View {
         _ = later.update(given: g, estimate: estimate, fixAge: age)
     }
 
-    /// Where to draw it at `now` (metres along): by its GPS or its times, but not past your stop before it has left there.
-    /// (0.40) And not at your stop while its time there is more than two minutes off (`WaitMarker`).
-    private func shownMetres(_ t: LiveTrip, _ now: Date) -> Double {
-        let p = placement(t, now)
-        let w = p.w
-        guard let m = mine, m < t.stops.count else { return w.metres }
-        let me: Double = t.metres(ofStop: m)
-        let left: Bool = LiveTimes.hasLeft(t.stops[m].times, now: now)
-        let drawn: Double = LiveTimes.shown(w.metres, mine: me, left: left)
+    /// (0.40.1) Where its GPS and its live times together put it (`BusFusion`), gliding there without jumps; not past
+    /// your stop before it has left there; "Waiting · leaves 17:42" when its own fresh fix has it standing at your stop.
+    private func fused(_ t: LiveTrip, _ now: Date) -> BusFuser.Shown {
         let g: LiveTrip = given ?? t
-        guard !left, m < g.stops.count, let eta = atMine(g.departure(m) ?? g.arrival(m)) else { return drawn }
-        let byTime = t.position(now)
-        let waiting: Bool = byTime.atStop && byTime.started && byTime.next == m
-        let s: WaitMarker.Shown = WaitMarker.place(drawn: drawn, byTime: min(byTime.metres, me), mine: me, mineIsFirst: m == 0,
-                                                    started: byTime.started, gpsRaw: p.raw, waitingByTimes: waiting, eta: eta, now: now)
-        return s.metres ?? min(byTime.metres, me)
+        var leaves: Date? = nil
+        if let m = mine, m < g.stops.count { leaves = atMine(g.departure(m) ?? g.arrival(m)) }
+        return fuser.place(t, tripId: target.tripId, line: target.line, isTrain: target.rail, mine: mine, mineLeaves: leaves,
+                           timesAt: updated, now: now)
+    }
+
+    /// Where to draw it at `now` (metres along): `fused`; where it isn't known (before its trip starts at your stop,
+    /// no fix), at its times' place, not past your stop.
+    private func shownMetres(_ t: LiveTrip, _ now: Date) -> Double {
+        if let m = fused(t, now).metres { return m }
+        let byTime: Double = t.position(now).metres
+        guard let m = mine, m < t.stops.count else { return byTime }
+        return min(byTime, t.metres(ofStop: m))
+    }
+
+    /// Where it is for the words ("3 stops away · 1.4 km"): at its drawn place (`shownMetres`).
+    private func whereNow(_ t: LiveTrip, _ now: Date) -> (metres: Double, next: Int, atStop: Bool, started: Bool, done: Bool) {
+        guard let m = fused(t, now).metres else { return t.position(now) }
+        return t.position(metres: m)
     }
 
     /// Where its position comes from: "Live times, updated 12:30. Position from the bus’s GPS, 40 s ago."

@@ -215,6 +215,22 @@ The same switches, words and rules, so the relay and the replay treat both alike
   conditions as the lines (after a trip, else hourly; not during a trip, on a metered/Low Data network or in battery
   saver). Drop the sent points from the queue only after a 200; switching off clears the queue.
 
+### The bus you wait for on the map (0.40.1)
+
+What's new in 0.40.1 (`ios/App/BusFusion.swift`, tests `BusFusionTests`, `WaitMarkerTests`; Android parity in
+[android-todo.md](android-todo.md) › iOS 0.40.1): the bus you wait for is drawn where its GPS and its live times
+together put it, without jumps. New line in the ride log, once a minute per trip while it's drawn (Fastest trip's map,
+the live sheet with your stop, the home map's next-trip bus):
+
+- `bus fused · 305·9449 · gps 48 s old +320 m · eta says +510 m · drawn +440 m`: metres along its road from its last
+  fix itself (rounded to 10, signed): its GPS moved on to now, where its live times put it, and where it's drawn (the
+  drawn place glides, so it can lag the others a little). ` · no live times` instead of `eta says` when it has only the
+  timetable; ` · far apart: gps trusted` when its fresh fix (≤ 90 s) is more than 1 km behind its times, or further on
+  than them; ` · waiting at your stop` while its fresh fix stands at your stop before it leaves ("Waiting · leaves
+  17:42"). Without a usable fix: `bus fused · 305·9449 · no gps · drawn by its times`, or `· gps not this journey ·
+  drawn by its times` (seen past its first stop before it starts, or a kilometre ahead of its times). `train fused · …`
+  for a train.
+
 ### The wrong bus, a miss at the change, the bus at your stop (0.39.1)
 
 What's new in 0.39.1 (`ios/App/WrongBus.swift`, `MissRule` in `ChangeGuide.swift`, `DepartMatch`/`UsualLine` in

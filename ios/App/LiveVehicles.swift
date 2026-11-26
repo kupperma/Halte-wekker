@@ -50,7 +50,9 @@ final class LiveVehiclesModel: ObservableObject {
 
     /// Where each one is at `t` (the piece of its route it's on, or the one it just finished), the nearest
     /// `VehiclePick.maxDrawn` to the middle of the region.
-    func moving(at t: Date, in region: MKCoordinateRegion) -> [Moving] {
+    /// `focus` (0.40.1): the one you wait for, and your stop: where its GPS and its live times together put it
+    /// (`GPSPlacer.fused`), gliding there.
+    func moving(at t: Date, in region: MKCoordinateRegion, focus: (tripId: String, stop: CLLocationCoordinate2D?)? = nil) -> [Moving] {
         var out: [String: Moving] = [:]
         for s in segs.sorted(by: { $0.departure < $1.departure }) {
             guard out[s.tripId] == nil || (s.departure <= t && t <= s.arrival), let p = s.position(at: t) else { continue }
@@ -62,11 +64,16 @@ final class LiveVehiclesModel: ObservableObject {
             out[s.tripId] = Moving(id: s.tripId, line: s.line, isTrain: s.isTrain, mode: s.mode, coordinate: p, bearing: bearing, to: s.toName)
         }
         // where their GPS says, when there's a fresh fix on their road (0.20.2)
-        for id in gps.trips {
+        for id in gps.trips where id != focus?.tripId {
             guard let g = gps.place(id, now: t) else { continue }
             let s = g.piece
             out[id] = Moving(id: id, line: s.line, isTrain: s.isTrain, mode: s.mode, coordinate: g.coordinate, bearing: g.bearing,
                              to: s.toName, gpsAt: g.fix.at)
+        }
+        if let f = focus, let g = gps.fused(f.tripId, now: t, stop: f.stop) {
+            let s: VehicleSegment = g.piece
+            out[f.tripId] = Moving(id: f.tripId, line: s.line, isTrain: s.isTrain, mode: s.mode, coordinate: g.coordinate,
+                                   bearing: g.bearing, to: s.toName, gpsAt: g.fixAt)
         }
         let c = GeoPoint(lat: region.center.latitude, lon: region.center.longitude)
         let box = VehiclePick.Box(minLat: region.center.latitude - region.span.latitudeDelta * 0.6,

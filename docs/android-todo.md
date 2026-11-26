@@ -3,6 +3,42 @@
 The rules and numbers for each are in [logs-export.md](logs-export.md) › For Android (parity), with the iOS files and
 their tests.
 
+## iOS 0.40.1
+
+From the field report of 26 November ("Where the bus was on the map wasn't matching the actual position until about the
+end. It teleported when the time changed"): 0.40.0's `WaitMarker` moved a bus drawn within 150 m of your stop to where
+its times put it while its time there was more than 2 min off, so it jumped with every new live time. Replaced by one
+fused position (`ios/App/BusFusion.swift`, tests `BusFusionTests` and `WaitMarkerTests`). Log line in
+[logs-export.md](logs-export.md) › The bus you wait for on the map (0.40.1).
+
+- [ ] The bus you wait for (Fastest trip's map, the live sheet, the home map's next-trip bus): in metres along its road,
+      - **by its GPS**: its last fix on the road (not moved on), moved on by now − fix time (at most 180 s) at the speed
+        seen between its last two fixes (no less than half, no more than 1.5× the timetable's speed of the piece it's
+        on; the timetable's when not known); a fix within 35 m of a stop, not moving (< 1.5 m/s), before its live
+        departure there: it stays until then; reaching a timing point (its first stop, or the timetable has it stand
+        there ≥ 30 s) before its departure: it waits there;
+      - **by its times**: standing at a stop until its live departure; else on the piece to the next stop, the seconds
+        left to its live arrival there × the timetable's speed of that piece (≥ 30 s a piece, 2–30 m/s), clamped to that
+        piece;
+      - **weights**: GPS 1 up to 20 s old, down to 0.15 at 120 s, 0.05 at 180 s; times 0.6 × (1, down to 0.5 for live
+        times 4 min old) × (1 up to 2 min from your stop, down to 0.5 at 15 min); weighted mean;
+      - **kept between** its fix and its times' place when its fix is behind; its fix more than 50 m further on than its
+        times: its fresh (≤ 90 s) GPS (old: the mean, not behind its fix); GPS more than 1 km behind its times and fresh:
+        its GPS; no GPS: its times; no live times: its GPS;
+      - **not this journey's fix** (not used): before its trip starts (by its live departure at its first stop, a
+        minute's slack), more than 150 m past its first stop; or more than max(1 km, 120 s × the timetable's speed there)
+        further on than its live times have it;
+      - not drawn before its trip starts when your stop is its first and no fix; not at your stop by moving it on (its
+        fix more than 35 m short of your stop: at most 35 m short); not past your stop until 2 min after it left there;
+      - **"Waiting · leaves 17:42"**: its own fix ≤ 90 s old within 35 m of your stop, leaving there (the card's time)
+        more than 60 s from now: drawn at the stop with the label;
+      - **drawn without jumps**: forward only, each step (1 s; the home map 2 s) closing 1 − e^(−dt/2) of the gap but at
+        least the timetable's speed × dt, at most max(25 m/s, 1.5 × that speed) × dt (a step counts 5 s at most); back
+        only when a new fix ≤ 60 s old puts it more than 150 m behind what's drawn: a straight glide there over 3 s; no
+        step for 20 s: drawn where it is; on the map each step animates linearly over 1 s;
+      - GPS and times more than 200 m apart: the road between them drawn faintly (wider, 25–30 % of the line's colour).
+      The on-board matcher keeps the raw GPS. Vectors in `ios/Tests/BusFusionTests.swift` and `WaitMarkerTests.swift`.
+
 ## iOS 0.40.0
 
 - [ ] "From <stop>" in a trip's detail (`FromStop`, Fastest trip under the big card; folded away as "Buses from
@@ -24,7 +60,7 @@ their tests.
       known until 2 min past its time to leave (as before); else the first you can still leave for. Also across a
       planning-key change that only changes the start (walking away from home). Vectors in
       `ios/Tests/StickyTripsTests.swift`.
-- [ ] The bus you wait for on the map agrees with its time (`WaitMarker`, Fastest trip's map and the live sheet): drawn
+- [ ] (Replaced by 0.40.1's fused position: skip it.) The bus you wait for on the map agrees with its time (`WaitMarker`, Fastest trip's map and the live sheet): drawn
       within 150 m of your stop (or past it) while its time there is more than 2 min off doesn't add up. Then: its own GPS
       fix within 35 m of your stop and your stop is where its trip starts (or its times have it standing there): at the
       stop, labelled "Waiting · leaves 17:42"; else where its times put it when that's more than 150 m before your stop;
