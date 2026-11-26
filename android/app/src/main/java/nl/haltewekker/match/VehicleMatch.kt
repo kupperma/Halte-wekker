@@ -339,7 +339,7 @@ object VehicleMatch {
 
     private fun beyondAnEnd(crossTrack: Double, accuracy: Double) = crossTrack > max(PASS_SLACK, accuracy)
 
-    private fun lastWindow(fixes: List<Fix>): List<Fix> {
+    internal fun lastWindow(fixes: List<Fix>): List<Fix> {
         val good = fixes.filter(::usable)
         val newest = good.maxOfOrNull { it.t } ?: return emptyList()
         return good.filter { newest - it.t <= WINDOW }

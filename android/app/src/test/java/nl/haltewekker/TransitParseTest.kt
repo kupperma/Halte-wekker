@@ -28,6 +28,7 @@ class TransitParseTest {
         assertEquals("12", ic.platform)
         assertEquals(6, ic.walkBefore)                      // the walk to the platform, 15:27 to 15:33
         assertEquals("2854", ic.num)
+        assertEquals("NS", ic.agency)                       // (A7) the train company, for check-out at a change
         assertEquals("nl-OpenOV_2993990", ic.fromId)
         assertTrue(ic.live)
         assertEquals(Iso.parse("2026-11-19T15:33:00Z")!!, ic.departure, 0.0)

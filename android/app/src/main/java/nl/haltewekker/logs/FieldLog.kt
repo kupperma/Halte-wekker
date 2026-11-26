@@ -89,6 +89,9 @@ object FieldFormat {
         return "${(min(max(0.0, m), 1e7) / 10).roundToInt() * 10} m"
     }
 
+    /** "305·7821" (iOS `FieldFormat.label`). */
+    fun label(id: String, lines: Map<String, String>) = "${lines[id] ?: "?"}·${id.takeLast(4)}"
+
     fun vehicle(line: String, tripId: String, isTrain: Boolean) = "${if (isTrain) "train" else "bus"} $line·${tripId.takeLast(4)}"
 
     fun rideStart(how: String, vehicle: String?, stopMetres: Double?, leg: Int, of: Int) =

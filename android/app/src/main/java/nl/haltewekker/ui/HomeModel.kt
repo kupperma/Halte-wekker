@@ -45,6 +45,16 @@ class HomeModel(app: Application) : AndroidViewModel(app) {
     private val _dots = MutableStateFlow<List<MapDot>>(emptyList())
     val dots: StateFlow<List<MapDot>> = _dots
     val direction = MutableStateFlow(autoDirection())
+    /** (A8) the departures that may not run (no live data close to leaving on a line that has it), by `ghost` id. */
+    private val _unsure = MutableStateFlow<Set<String>>(emptySet())
+    val unsure: StateFlow<Set<String>> = _unsure
+    /** Lines seen live today (normalized), for the ghost rule. */
+    val liveToday = HashSet<String>()
+
+    fun ghostId(d: BoardDeparture) = d.tripId + "|" + d.stopId + "|" + d.time
+
+    fun ghost(d: BoardDeparture) = nl.haltewekker.travel.GhostDepartures.Dep(ghostId(d), d.tripId, d.line, d.headsign, d.stopName.ifEmpty { d.stopId },
+        d.time, d.scheduled, d.live, d.cancelled)
     private var pickedAt = 0.0
 
     private var boardAt: GeoPoint? = null
@@ -87,7 +97,12 @@ class HomeModel(app: Application) : AndroidViewModel(app) {
         val stops = if (atHome) prof.homeStops else (Transit.nearStops(p) ?: return).take(3)
         _stops.value = stops
         val list = Transit.board(stops.map { it.id }, n = 10)
-        _departures.value = list.filter { it.time >= now - 60 }.distinctBy { it.tripId + it.line }.take(12)
+        // (A8, iOS 0.40 `GhostDepartures`) each journey once, no cancelled ones, "may not run" ranked lower, gone ones gone
+        list.filter { it.live && !it.cancelled }.forEach { liveToday.add(nl.haltewekker.travel.GhostDepartures.normalized(it.line)) }
+        val rows = nl.haltewekker.travel.GhostDepartures.clean(list.map { ghost(it) }, now, liveToday)
+        val byId = list.associateBy { it.tripId + "|" + it.stopId + "|" + it.time }
+        _unsure.value = rows.filter { it.status == nl.haltewekker.travel.GhostDepartures.Status.UNSURE }.map { it.dep.id }.toSet()
+        _departures.value = rows.mapNotNull { byId[it.dep.id] }.filter { it.time >= now - 60 }.take(12)
     }
 
     /** The next trip to school or home, from where you are (or the other place), every 2 minutes or after 400 m. */
@@ -103,12 +118,36 @@ class HomeModel(app: Application) : AndroidViewModel(app) {
             _next.value = emptyList(); return
         }
         if (!force && nextDir == d && nextFrom?.let { Geo.metres(it, from) < 400 } == true && now - nextTime < 120) return
+        val sameWay = nextDir == d
         nextFrom = from; nextTime = now; nextDir = d
         _nextLoading.value = true
         val trips = Transit.tripsFrom(from, to.planId, keep = 4)
         _nextLoading.value = false
-        if (trips.isNotEmpty() || force) _next.value = trips
+        _next.value = sticky(if (sameWay) _next.value else emptyList(), trips, now)
     }
+
+    /**
+     * (A8, iOS 0.40 `StickyTrips`) a failed or empty answer keeps what's still to come; a whole one replaces the list but
+     * keeps the trip you're heading for (the one shown first) until it has left.
+     */
+    private fun sticky(kept: List<DoorTrip>, answer: List<DoorTrip>, now: Double): List<DoorTrip> {
+        fun item(t: DoorTrip) = nl.haltewekker.travel.StickyTrips.Item(t.id, t.first.tripId, t.first.departure, t.start, t.first.cancelled)
+        val held = nl.haltewekker.travel.StickyTrips.held(kept.firstOrNull()?.let(::item), now)
+        val kind = if (answer.isEmpty()) nl.haltewekker.travel.StickyTrips.Answer.FAILED else nl.haltewekker.travel.StickyTrips.Answer.WHOLE
+        val onIt = held != null && nl.haltewekker.ride.RideStore.state.value?.vehicleTripId == held
+        val ids = nl.haltewekker.travel.StickyTrips.merge(kept.map(::item), answer.map(::item), kind, held, onIt, now)
+        val all = (answer + kept).associateBy { it.id }
+        val list = ids.mapNotNull { all[it] }
+        // the card holds the one you're heading for while you can still reach its stop
+        val here = here.value
+        val hi = held?.let { h -> list.indexOfFirst { it.first.tripId == h } }?.takeIf { it >= 0 }
+        val reach = if (hi != null) nl.haltewekker.travel.StickyTrips.reachable(here?.let { p -> list[hi].first.from?.let { Geo.metres(p, it) } }, list[hi].first.departure, now) else null
+        val pick = nl.haltewekker.travel.StickyTrips.pick(list.map(::item), hi, reach, now) ?: return list
+        return if (pick == 0) list else listOf(list[pick]) + list.filterIndexed { i, _ -> i != pick }
+    }
+
+    /** (A8) A trip put first ("From <stop>": switched to that departure). */
+    fun putFirst(t: DoorTrip) { _next.value = listOf(t) + _next.value.filter { it.id != t.id } }
 
     /** The live map: buses and trains in view (Transitous's map; OVapi and NS positions where fresh). */
     suspend fun refreshVehicles(realPositions: Boolean) {

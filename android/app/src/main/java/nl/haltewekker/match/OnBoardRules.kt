@@ -25,17 +25,21 @@ object OnBoardRules {
      * timetable-only best counts only while you move like a vehicle. `planned` (the ride's own trip, Android): ranked
      * 45 s better, as the iOS ride's matcher does.
      */
-    fun best(judged: List<Judgement>, yourSpeed: Double, planned: String? = null): String? {
+    fun best(judged: List<Judgement>, yourSpeed: Double, planned: String? = null, nudge: Map<String, Double> = emptyMap()): String? =
+        ranked(judged, yourSpeed, planned, nudge).firstOrNull()?.id
+
+    /** (A7) `best`'s ranking: the ones it may take, best first (`nudge`: iOS 0.38's `DepartMatch.bonuses`). */
+    fun ranked(judged: List<Judgement>, yourSpeed: Double, planned: String? = null, nudge: Map<String, Double> = emptyMap()): List<Ranked> {
         val byId = judged.associateBy { it.id }
-        var ranked = rank(judged, planned)
+        var ranked = ChooseGPS.nudged(rank(judged, planned), nudge)
         if (judged.any { ChooseGPS.passedByGPS(it) }) ranked = ranked.filter { r -> byId[r.id]?.let { !timetableOnly(it) } ?: false }
-        val first = ranked.firstOrNull() ?: return null
-        val j = byId[first.id] ?: return null
+        val first = ranked.firstOrNull() ?: return emptyList()
+        val j = byId[first.id] ?: return emptyList()
         if (timetableOnly(j)) {
             val along = j.evidence?.let { if (it.fixes > 1) it.yourSpeed else maxOf(it.yourSpeed, yourSpeed) } ?: yourSpeed
-            if (!along.isFinite() || along < VEHICLE_SPEED) return null
+            if (!along.isFinite() || along < VEHICLE_SPEED) return emptyList()
         }
-        return first.id
+        return ranked
     }
 
     fun mayAutoStart(tripId: String, idle: Boolean, running: String?, blocked: Set<String>): Boolean =

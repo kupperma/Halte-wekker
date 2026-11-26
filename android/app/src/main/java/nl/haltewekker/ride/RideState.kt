@@ -59,6 +59,28 @@ data class RideState(
     /** (A6, iOS 0.34) when you got off at a change (for the change time you need), and the vehicle you got off. */
     val changeArrived: Double? = null,
     val changeFromVehicle: String? = null,
+    /** (A7) choosing between these ("Bus 305", "IC to Breda"): the ride screen says it's checking. */
+    val choosing: List<String> = emptyList(),
+    /** (A7, iOS 0.34 / 0.38) the one-time "305 or 306?" card: its two ids and buttons. */
+    val ask: AskCard? = null,
+    /** (A7, iOS 0.39.1) "You’re on the 154 to Schijndel, not your 306", once a ride; and "That’s the 154 — not yours". */
+    val wrongBus: RideAlert? = null,
+    val wrongBusTold: Boolean = false,
+    val otherAtStop: RideAlert? = null,
+    /** (A7) when it rang (the one repeat 30 s later), and whether that went. */
+    val rangAt: Double? = null,
+    val againSent: Boolean = false,
+    /** (A8) this leg's ring was noted for the adaptive wake-up. */
+    val wakeNoted: Boolean = false,
+    /** (A8, iOS 0.39) the quiet "Get ready" went for this leg; no network: going by the saved stops and times. */
+    val readyTold: Boolean = false,
+    val offline: Boolean = false,
+    /** (A8, iOS 0.39) the next stop (not yours), the delay at your stop and the change line, for the lock screen. */
+    val nextStop: String? = null,
+    val delayMin: Int? = null,
+    val changeLine: String? = null,
+    val changeMiss: String? = null,
+    val changeSwitch: String? = null,
 ) {
     val leg: Ride? get() = trip.rides.getOrNull(index)
     val wakeMetres: Double get() = (wakeKm.getOrNull(index) ?: WakeRules.BUS_KM) * 1000
@@ -66,6 +88,12 @@ data class RideState(
     /** When this leg gets you to your stop: live once it's known, else the plan's. */
     val legArrival: Double? get() = eta ?: leg?.arrival
 }
+
+@Serializable
+data class AskCard(val title: String, val body: String, val ids: List<String>, val answers: List<String>, val lines: List<String>, val train: Boolean)
+
+@Serializable
+data class RideAlert(val title: String, val body: String, val tripId: String)
 
 /** The ride as state the screens and the notification follow (one per process). */
 object RideStore {

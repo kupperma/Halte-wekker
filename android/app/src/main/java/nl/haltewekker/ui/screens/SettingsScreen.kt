@@ -156,6 +156,9 @@ private fun TopicPage(t: SettingsTopic, onBack: () -> Unit, onSetup: () -> Unit,
                     Toggle("Station announcement", "\"Attention please. We are now approaching …\" before the alarm.", s.announce) { v -> set { it.copy(announce = v) } }
                     Toggle("Chime at the stop", "After the alarm, a chime and a notification at the stop itself.", s.ringAtStop) { v -> set { it.copy(ringAtStop = v) } }
                     Toggle("Backup alarm", "Also rings shortly before the planned arrival when GPS never got you close (a tunnel, a dead GPS).", s.backupAlarm) { v -> set { it.copy(backupAlarm = v) } }
+                    // (A7, iOS 0.37.1) Wear OS mirrors the phone's notifications with their actions
+                    Text("On a Wear OS watch: the wake-up taps your wrist; tap Stop alarm there. On the lock screen, Stop alarm works without unlocking.",
+                        color = DS.t.secondary, style = MaterialTheme.typography.bodySmall)
                 }
                 AutoStartCard()
                 Card {
@@ -236,7 +239,7 @@ private fun TopicPage(t: SettingsTopic, onBack: () -> Unit, onSetup: () -> Unit,
 }
 
 @Composable
-private fun Toggle(title: String, sub: String, on: Boolean, set: (Boolean) -> Unit) {
+internal fun Toggle(title: String, sub: String, on: Boolean, set: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f).padding(end = 12.dp)) {
             Text(title, color = DS.t.text, fontWeight = FontWeight.SemiBold)

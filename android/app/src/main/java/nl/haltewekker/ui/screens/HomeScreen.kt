@@ -88,6 +88,7 @@ fun HomeScreen(ride: RideState?, onPlan: (Direction?) -> Unit, onRide: () -> Uni
     val dots by model.dots.collectAsState()
     val deps by model.departures.collectAsState()
     val next by model.next.collectAsState()
+    val unsure by model.unsure.collectAsState()
     val loading by model.nextLoading.collectAsState()
     val dir by model.direction.collectAsState()
     val scope = rememberCoroutineScope()
@@ -171,8 +172,12 @@ fun HomeScreen(ride: RideState?, onPlan: (Direction?) -> Unit, onRide: () -> Uni
                     target == null -> Text(if (dir == Direction.TO_SCHOOL) "Set your school in Settings." else "Set your home in Settings.", color = DS.t.secondary)
                     first == null && !loading -> Text("No trip found right now.", color = DS.t.secondary)
                     first != null -> {
-                        Text("Leave ${Fmt.inMinutes(first.start, now)}", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = DS.t.text)
+                        val habits by nl.haltewekker.travel.HabitStore.book.collectAsState()
+                        Text("Leave ${Fmt.inMinutes(nl.haltewekker.travel.WalkWords.leave(first, habits), now)}", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = DS.t.text)
+                        WalkLine(first, now)
                         TripRow(first, now) { onPlan(dir) }
+                        // (A8, iOS 0.40) "Buses from <stop> ▾": the next departures from where you get on
+                        FromStopFold(first, next.drop(1), target.planId) { t -> model.putFirst(t) }
                         // (A6, iOS 0.36–0.37) student OV, a change's record, rain on the walk, OV-fiets
                         TripNotes(first, next, now)
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -200,6 +205,7 @@ fun HomeScreen(ride: RideState?, onPlan: (Direction?) -> Unit, onRide: () -> Uni
                         }
                         Column(horizontalAlignment = Alignment.End) {
                             Text(if (d.cancelled) "cancelled" else Fmt.time(d.time), color = if (d.cancelled || d.delay > 2) DS.t.warning else DS.t.text, fontWeight = FontWeight.SemiBold)
+                            if (model.ghostId(d) in unsure) Text(nl.haltewekker.travel.GhostDepartures.UNSURE_SHORT, color = DS.t.warning, style = MaterialTheme.typography.bodySmall)
                             if (d.delay != 0 && !d.cancelled) Text("${if (d.delay > 0) "+" else ""}${d.delay} min", color = DS.t.warning, style = MaterialTheme.typography.bodySmall)
                         }
                     }

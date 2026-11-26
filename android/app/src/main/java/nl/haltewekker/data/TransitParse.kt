@@ -69,7 +69,7 @@ object TransitParse {
                     num = l["tripShortName"].text, headsign = l.s("headsign") ?: "",
                     plannedPlatform = from.s("scheduledTrack") ?: from.s("track"),
                     fromLat = from.d("lat"), fromLon = from.d("lon"), toLat = to.d("lat"), toLon = to.d("lon"),
-                    mode = mode,
+                    mode = mode, agency = l.s("agencyName"),
                 ),
             )
         }
