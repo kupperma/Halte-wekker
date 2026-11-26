@@ -521,9 +521,11 @@ struct NearbyTimelineRow: View {
                 .frame(width: pw, height: 14)
                 .offset(x: x)
         case .walk:
-            Capsule()
-                .stroke(DS.legQuiet, style: StrokeStyle(lineWidth: 2, lineCap: .round, dash: [2, 4]))
-                .frame(width: pw, height: 2)
+            // one dotted line through the middle (0.42.4: a stroked Capsule traced its top and bottom edge, so every
+            // dot showed twice)
+            Path { d in d.move(to: CGPoint(x: 1, y: 9)); d.addLine(to: CGPoint(x: max(1, pw - 1), y: 9)) }
+                .stroke(DS.legQuiet, style: StrokeStyle(lineWidth: 2.5, lineCap: .round, dash: [0.1, 5]))
+                .frame(width: pw, height: 18)
                 .offset(x: x)
         case .wait:
             Capsule()
