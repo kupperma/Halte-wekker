@@ -3,7 +3,7 @@
 The Android version of Haltewekker, built from the iOS app (`ios/`, SwiftUI) as the reference. It lives in
 `android/` (one Gradle project), with this plan in `docs/android/`. The iOS app and the relay are not changed by it.
 
-Status: **A1 (0.1.0, version code 1), A2 (0.2.0, version code 2), A3 (0.3.0, version code 3: Friends), A4 (0.4.0, version code 4: Friends extras and shared ride logs) A5 (0.5.0, version code 5: Friends map first, the seat picker, the test friend) and A5.1 (0.5.1, version code 6: 1st class in the seat picker) A6 (0.6.0, version code 7: iOS 0.32–0.37) A7 (0.7.0, version code 8: the A6 leftovers, iOS 0.37.1, 0.38, 0.39.1) A8 (0.8.0, version code 9: iOS 0.39, most of 0.40, 0.42.1) and A8.1 (0.8.1, version code 10: the rest of iOS 0.40) built.**
+Status: **A1 (0.1.0, version code 1), A2 (0.2.0, version code 2), A3 (0.3.0, version code 3: Friends), A4 (0.4.0, version code 4: Friends extras and shared ride logs) A5 (0.5.0, version code 5: Friends map first, the seat picker, the test friend) and A5.1 (0.5.1, version code 6: 1st class in the seat picker) A6 (0.6.0, version code 7: iOS 0.32–0.37) A7 (0.7.0, version code 8: the A6 leftovers, iOS 0.37.1, 0.38, 0.39.1) A8 (0.8.0, version code 9: iOS 0.39, most of 0.40, 0.42.1) A8.1 (0.8.1, version code 10: the rest of iOS 0.40) and A9 (0.9.0, version code 11: the rules of iOS 0.41–0.42.3, 0.42.3 at changes) built.**
 
 ## Architecture
 
@@ -237,6 +237,29 @@ byte for byte, and its test vectors as JUnit tests before any screen:
 - 0.40.1/0.40.3 real GPS first (`RealFirst`, `BusFusion` as the ghost), the Bus position setting, the stop pin; 0.40.0
   the search sheet over the home map, From <stop> under Fastest trip's card, "Time to go" by `WalkPlan`; 0.40.2 Friends
   as a sheet over the home map, "Not now" on the one-time questions.
+
+### A9 — iOS 0.41, 0.42.0, 0.42.2, 0.42.3 (0.9.0, code 11) — partly built ("As built A9" says what)
+
+## As built A9 (0.9.0, version code 11): the rules of iOS 0.41–0.42.3
+
+**Pure rules, with every iOS vector.** `travel/WalkGuide.kt` (`WalkGuideTest`; Android adds `Turn.of(type, modifier)`
+for OSRM's maneuvers, the shape rule as the fallback), `travel/Nearby.kt` (`NearbyTest`: `NearbyRankTests` and
+`NearbySearchTests`), `travel/TripTimeline.kt` (`TripTimelineTest`), `ride/ChangeGuide.kt` `MissCall`, `ShortLeg`,
+`NextLegGuard` (`MissCallTest`: `MissCallTests`, `ShortLegTests`), `RealPositions.noMatchReason`/`startTime`/`dataset`.
+`ChangeGuide.guide` now takes the call (`MissCall`), the next ride's seen state, the feeding ride's freshness, the
+feeding ride and the change places, and gives `call` and `note`; `ChangeGuideTest`/`WrongBusTest` follow iOS 0.42.3.
+
+**Wired.** The ride's change guide (`RideService.updateChangeGuide`): the next ride's live flag from its stop's board,
+your distance to its stop, freshness (the ride's vehicle known, or a fix and a live arrival ≤ 2 min old), the feeding
+ride, the change places (`MissCall.sane`), the one-minute hold (`MissCall.step`, take-backs logged); the change line
+says "Should be leaving now · Look out for it", "May have left · Look out for it", "Tight — run".
+
+**Not built yet (left for the next builder).** The walk-with-arrows screen (OSRM foot route
+`https://routing.openstreetmap.de/routed-foot/route/v1/foot/{lon},{lat};{lon},{lat}?steps=true&geometries=geojson&overview=full`,
+throttled ≤ 1 per 20 s, cached, `Net.userAgent`; buzzes, spoken turns with headphones, "You're here · Platform 4");
+the nearby-stops view with its 0.42.2 fetch design and Whole-trip rows; `ShortLeg` and `NextLegGuard` in the ride's
+alarm path; the next ride's own GPS for `MissCall.seen`; the `no gps: no ovapi match …` log line. A Transitous
+cool-down after a 429 (the nearby view's `cooling`) is also still to add in `data/Transit.kt`.
 
 ## As built A8.1 (0.8.1, version code 10): the rest of iOS 0.40
 

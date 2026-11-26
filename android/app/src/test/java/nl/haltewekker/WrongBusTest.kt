@@ -45,7 +45,9 @@ class WrongBusTest {
         val next = ChangeGuide.Ride("ic-0103", "IC", true, at(31.0), "4", 3)
         val g = ChangeGuide.guide(at(-600.0), null, false, null, next, emptyList(), 4.0, at(0.0), hhmm, atChange = true)
         assertFalse(g.missed); assertNull(g.missText)
-        assertTrue(ChangeGuide.guide(at(-600.0), null, false, null, next, emptyList(), 4.0, at(0.0), hhmm).missed)
+        // (iOS 0.42.3) on the way without a ride instead from the change: tight, run
+        val old = ChangeGuide.guide(at(-600.0), null, false, null, next, emptyList(), 4.0, at(0.0), hhmm)
+        assertFalse(old.missed); assertEquals(nl.haltewekker.ride.MissCall.Call.TIGHT, old.call)
     }
 
     @Test fun a_theLateBusAtItsLiveTime_isStillComing() {
@@ -58,10 +60,13 @@ class WrongBusTest {
     @Test fun a_goneWithoutYou_isMissed_unlessItsGPSHasItBeforeTheStop() {
         val next = bus("306-0600", "306", 0.0)
         val later = listOf(bus("305-0553", "305", 14 * 60.0))
-        val gone = ChangeGuide.guide(at(-480.0), null, true, null, next, later, null, at(87.0), hhmm, atChange = true)
+        // (iOS 0.42.3) only "may have left" for 3 minutes
+        val maybe = ChangeGuide.guide(at(-480.0), null, true, null, next, later, null, at(87.0), hhmm, atChange = true)
+        assertFalse(maybe.missed); assertEquals(nl.haltewekker.ride.MissCall.Call.MAYBE, maybe.call); assertNull(maybe.missText)
+        val gone = ChangeGuide.guide(at(-480.0), null, true, null, next, later, null, at(190.0), hhmm, atChange = true)
         assertTrue(gone.missed)
         assertEquals("You’ll miss the +0 — take bus 305 at +14", gone.missText)
-        assertFalse(ChangeGuide.guide(at(-480.0), null, true, null, next, later, null, at(87.0), hhmm, atChange = true, notLeft = true).missed)
+        assertFalse(ChangeGuide.guide(at(-480.0), null, true, null, next, later, null, at(190.0), hhmm, atChange = true, notLeft = true).missed)
         assertFalse(MissRule.missed(at(-480.0), at(0.0), 2.0, at(50.0), true, false))
     }
 

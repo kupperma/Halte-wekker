@@ -9,39 +9,40 @@ From a field log of 27 November. Rules in `ios/App/MissCall.swift` (with `Change
 `ios/App/ShortLeg.swift` (tests `MissCallTests`, `ShortLegTests`), `RideGuards.plannedNextAmong`,
 `RealPositions.noMatchReason`; the log lines in [logs-export.md](logs-export.md) › 0.42.3.
 
-- [ ] **At a change, a next ride without a live time and without its own GPS is never called missed** before its time
+- [x] **At a change, a next ride without a live time and without its own GPS is never called missed** before its time
       + 3 min, and never while you're within 150 m of its stop: from its time on the change guide says "Should be
       leaving now · Look out for it", quietly. With a live time but no GPS: a minute's grace, then "May have left ·
       Look out for it" (near its stop: look out) until 3 min, then missed. Its own fresh GPS (≤ 90 s) decides first:
       at or before the stop (40 m slack) not missed; 150 m or more past it, within a minute of its time or later,
-      missed.
-- [ ] **A miss is told only once it held for a minute** (looks in between say "May have left"); a told miss that a
-      later look takes back is logged, never told again for that look.
-- [ ] **On the way (still on the ride into the change)**: missed only when your arrival (live or GPS) plus the change
+      missed. **Android 0.9.0:** `ride/ChangeGuide.kt` `MissCall` (`MissCallTest`, every iOS vector); the ride's change guide passes the next ride's live flag (its stop's board) and your distance to its stop. Its own GPS (`Seen.gone`/`notLeft`) is not looked up yet on Android: `Seen.NONE`.
+- [x] **A miss is told only once it held for a minute** (looks in between say "May have left"); a told miss that a
+      later look takes back is logged, never told again for that look. **Android 0.9.0:** `MissCall.step` in `RideService.updateChangeGuide`; a take-back is logged (`change · miss taken back · …`).
+- [x] **On the way (still on the ride into the change)**: missed only when your arrival (live or GPS) plus the change
       time you need is more than 1 min after the next ride's live departure, and the ride you're on has fresh data
       (its own GPS ≤ 90 s or live times asked ≤ 2 min ago); else "Tight — run" (or nothing). The slow-bus notification
-      says "You'll likely miss" under the same rule, else "Tight change".
-- [ ] **The ride offered instead continues from the change**: never the ride you're on or got off (by trip), never its
+      says "You'll likely miss" under the same rule, else "Tight change". **Android 0.9.0:** `MissCall.onTheWay` through `ChangeGuide.call`; fresh = the ride's vehicle known, or a fix and a live arrival ≤ 2 min old. The slow-bus notification's wording not changed (Android has none of its own).
+- [x] **The ride offered instead continues from the change**: never the ride you're on or got off (by trip), never its
       line again (unless the next leg is on that line), and when its boarding place is known, within 500 m of the next
       leg's stop or where you get off. None left: on the way "Tight — run" (no "You'll miss"); at the change "You'll
-      likely miss the 08:12".
+      likely miss the 08:12". **Android 0.9.0:** `MissCall.sane` (feeding = the ride you're on, change places = the next leg's stop and where you get off).
 - [ ] **A leg shorter than the wake distance (or 800 m) doesn't ring** when the wake rule fires: awake without the
       alarm; a quiet "Get off at the next stop" notification once, not in its first minute, when the stop before yours
       is reached by its times, or 90 s before it's in, or (no times) halfway from where it started; the announcement at
       the stop only after the first minute and within half the way it started from (200–450 m). Dead reckoning the
-      same.
+      same. **Android 0.9.0:** the rules only (`ShortLeg`, `ShortLegTest` vectors in `MissCallTest`); not wired into the ride's alarm yet (left for the next builder: it touches the ring path).
 - [ ] **Nothing rings in a leg's first minute**: within 20 s a firing wake rule wakes it silently (as before), from
-      20 to 60 s it waits; a normal leg rings at the next fix after that (the alarm always rings for a normal leg).
+      20 to 60 s it waits; a normal leg rings at the next fix after that (the alarm always rings for a normal leg). **Android 0.9.0:** rule ported (`ShortLeg.onFire`), not wired yet.
 - [ ] **On the planned next ride without the leg ending** (going away from this leg's stop, the "wrong way" look finds
       among the vehicles on your road, or the one you're on board, the ride the next leg was planned with): end this leg
       and start the next one on it ("next leg"), plan kept, alarm armed, no choice to pick from. Before, it planned the
-      rest again from it ("wrong way") and asked to pick between it and another train on the same track.
+      rest again from it ("wrong way") and asked to pick between it and another train on the same track. **Android 0.9.0:** `NextLegGuard.plannedNextAmong` ported and tested; not wired (Android's ride has no "wrong way" replan to replace).
 - [ ] **OVapi positions**: the match is by OVapi's own trip_id (after `nl-OpenOV_` in the Transitous id), checked
       against the live feed: no id-format problem; trips missing at night simply aren't in the feed (not started yet,
       or their bus sends nothing) and go by their times. Log which key found nothing and whether its journey had
-      begun (start time from the Transitous id, 24:00+ the next day).
-
+      begun (start time from the Transitous id, 24:00+ the next day). **Android 0.9.0:** `RealPositions.noMatchReason`/`startTime`/`dataset` ported and tested (the key was already OVapi's own trip_id); the log line isn't written yet.
 ## iOS 0.42.2
+
+**Android 0.9.0:** the rules of 0.42.0 and 0.42.2 are ported with every iOS vector (`travel/Nearby.kt`: `NearbyTest` holds `NearbyRankTests` and `NearbySearchTests`; `travel/TripTimeline.kt`: `TripTimelineTest`). The nearby-stops view itself (the fetch design, the map's circles, the stop sheet, the Whole-trip rows) is not built yet; the items below stay open.
 
 From the field report at 23:10 in Veghel ("No bus or train from the stops within 1.6 km in this time" with buses every
 half hour and the classic Fastest trip showing a way: "That's not possible") and the requests "Could you add how many
@@ -189,7 +190,7 @@ platform. Rules in `ios/App/WalkGuide.swift` (tests `WalkGuideTests`); the map, 
       or north up with a toggle), the route drawn with the walked part dimmed, and a big card on top: the arrow and
       "In 40 m · turn right onto Hoogstraat", the turn after it small. Below: "4 min · 320 m to go" and, with a ride to
       catch, "Your bus leaves in 6 min · you’ll make it" / "walk a bit faster" / "hurry, it’s tight" (your own walking
-      speed once learned, else 1.2 m/s; fine with a minute spare, faster when 25 % quicker makes it).
+      speed once learned, else 1.2 m/s; fine with a minute spare, faster when 25 % quicker makes it). **Android 0.9.0:** `travel/WalkGuide.kt` ported with every iOS vector (`WalkGuideTest`), plus OSRM's maneuver type/modifier as the arrow (`Turn.of`, the shape rule as the fallback). The screen, the OSRM foot route fetch, buzzes and voice are not built yet.
 - [ ] **The route and its arrows.** Apple's walking directions (MapKit `MKDirections`, free) give steps with words (in
       the phone's language), a length and a shape, but no turn type. The arrow comes from the shape: the direction over
       the 12 m into a step's start against the 12 m out of it: under 20° straight, under 45° slight, under 120° a turn,

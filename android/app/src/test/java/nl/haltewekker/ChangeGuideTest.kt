@@ -55,18 +55,25 @@ class ChangeGuideTest {
     }
 
     @Test fun yourOwnChangeTimeDecidesAMiss() {
-        val next = train("p", 3.0, "7", 2)
-        assertFalse(ChangeGuide.guide(at(0.0), null, true, null, next, emptyList(), null, at(-3.0), hhmm).missed)
-        assertTrue(ChangeGuide.guide(at(0.0), null, true, null, next, emptyList(), 4.0, at(-3.0), hhmm).missed)
+        // (iOS 0.42.3 vectors)
+        val next = train("p", 3.0, "7", 3)
+        val later = listOf(train("q", 20.0, "6", 3))
+        assertFalse(ChangeGuide.guide(at(0.0), null, true, null, next, later, null, at(-3.0), hhmm).missed)
+        assertTrue(ChangeGuide.guide(at(0.0), null, true, null, next, later, 5.0, at(-3.0), hhmm).missed)
+        val close = ChangeGuide.guide(at(0.0), null, true, null, train("p", 3.0, "7", 2), later, 4.0, at(-3.0), hhmm)
+        assertFalse(close.missed); assertEquals(nl.haltewekker.ride.MissCall.Call.TIGHT, close.call); assertTrue(close.tight); assertNull(close.missText)
     }
 
     @Test fun noLaterOneFound() {
         val g = ChangeGuide.guide(at(10.0), null, true, null, train("p", 8.0, "7"), emptyList(), null, at(0.0), hhmm)
-        assertTrue(g.missed)
+        // (iOS 0.42.3) on the way with no ride instead from the change: tight, run; at the change, gone: "likely miss"
+        assertFalse(g.missed); assertEquals(nl.haltewekker.ride.MissCall.Call.TIGHT, g.call)
         assertEquals("p", g.target.tripId)
         assertEquals(-2, g.minutes)
-        assertEquals("It leaves before you’re there", g.countdown)
-        assertEquals("You’ll likely miss the +8", g.missText)
+        assertEquals("Tight — run", g.countdown)
+        assertNull(g.missText)
+        val gone = ChangeGuide.guide(at(0.0), null, true, null, train("p", 8.0, "7"), emptyList(), null, at(12.0), hhmm, atChange = true)
+        assertTrue(gone.missed); assertEquals("You’ll likely miss the +8", gone.missText)
     }
 
     @Test fun atTheChangeItCountsFromNow() {

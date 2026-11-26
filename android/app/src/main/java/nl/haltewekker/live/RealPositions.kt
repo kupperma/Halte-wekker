@@ -201,6 +201,34 @@ object RealPositions {
         return transitousTripId.substring(i + "nl-OpenOV_".length).ifEmpty { null }
     }
 
+    /** (A9, iOS 0.42.3) the log's words when OVapi's feed has nothing for a trip: which key, and whether it had begun. */
+    fun noMatchReason(transitousTripId: String, key: String, now: Double): String {
+        val base = "no ovapi match for trip_id $key"
+        val st = startTime(transitousTripId) ?: return base
+        return if (now < st.first) "$base: not started yet, starts ${st.second}" else "$base (started ${st.second})"
+    }
+
+    /** When the trip starts by its Transitous id ("20261201_24:10_…": 00:10 the next day, Dutch time), and the text. */
+    fun startTime(transitousTripId: String): Pair<Double, String>? {
+        val parts = transitousTripId.split("_", limit = 3)
+        val d = serviceDate(transitousTripId) ?: return null
+        if (parts.size < 2) return null
+        val hm = parts[1].split(":")
+        if (hm.size != 2) return null
+        val h = hm[0].toIntOrNull() ?: return null
+        val m = hm[1].toIntOrNull() ?: return null
+        if (h !in 0..47 || m !in 0..59) return null
+        val midnight = java.time.LocalDate.of(d.take(4).toInt(), d.substring(4, 6).toInt(), d.takeLast(2).toInt())
+            .atStartOfDay(ZoneId.of("Europe/Amsterdam")).toEpochSecond().toDouble()
+        return midnight + h * 3600 + m * 60 to parts[1]
+    }
+
+    fun dataset(transitousTripId: String): String? {
+        val parts = transitousTripId.split("_", limit = 4)
+        if (parts.size < 4 || serviceDate(transitousTripId) == null || parts[2].isEmpty()) return null
+        return parts[2]
+    }
+
     /** "20261117" from "20261117_11:57_nl-OpenOV_374105578". */
     fun serviceDate(transitousTripId: String): String? {
         val d = transitousTripId.takeWhile { it != '_' }

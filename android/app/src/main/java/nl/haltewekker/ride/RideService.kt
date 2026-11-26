@@ -803,10 +803,22 @@ class RideService : Service() {
             .map { ChangeGuide.Ride(it.tripId, it.line, it.train, it.time, it.platform, next.walkBefore) }
         val learned = nl.haltewekker.travel.Habits.changeMinutes(nl.haltewekker.travel.HabitStore.book.value)
         val arrive = if (atChange) (s.changeArrived ?: now) else (s.legArrival ?: prev.arrival)
-        val g = ChangeGuide.guide(arrive, null, prev.isTrain, null,
-            ChangeGuide.Ride(next.tripId, next.line, next.isTrain, liveNext, next.platform, next.walkBefore), later, learned, now,
-            { Notifications.time(it) }, atChange = atChange)
-        val line = listOfNotNull(g.lockLine.takeIf { it.isNotEmpty() }, g.countdown).joinToString(" · ")
+        // (A9, iOS 0.42.3 `MissCall`) no false "You'll miss": its live time, where you are, the feeding ride's data, the
+        // ride instead from the change, and a miss told only once it held a minute
+        val nextBoard = board.firstOrNull { it.tripId == next.tripId }
+        val you = if (s.lastLat != null && s.lastLon != null) nl.haltewekker.core.GeoPoint(s.lastLat, s.lastLon) else null
+        val seen = MissCall.Next(nextBoard?.live ?: next.live, MissCall.Seen.NONE, you?.let { y -> next.from?.let { nl.haltewekker.core.Geo.metres(y, it) } })
+        val fresh = s.vehicleSource != VehicleSource.NONE || (s.lastFixAt?.let { now - it <= MissCall.LIVE_FRESH } ?: false) && s.legArrival != null
+        val feeding = MissCall.Feeding(s.vehicleTripId ?: prev.tripId, prev.line, prev.isTrain)
+        val nextRide = ChangeGuide.Ride(next.tripId, next.line, next.isTrain, liveNext, next.platform, next.walkBefore, next.from)
+        val first = ChangeGuide.call(arrive, nextRide, learned, now, atChange, seen = seen, fresh = fresh)
+        val held = MissCall.step(missHold, first, "$k|${next.tripId}", now)
+        if (held.retract) FieldLog.ride("change · miss taken back · ${next.line} ${Notifications.time(liveNext)}")
+        missHold = held.hold
+        val g = ChangeGuide.guide(arrive, null, prev.isTrain, null, nextRide, later.map { it.copy(from = next.from) }, learned, now,
+            { Notifications.time(it) }, atChange = atChange, seen = seen, fresh = fresh, call = held.call, feeding = feeding,
+            changeAt = listOfNotNull(next.from, prev.to))
+        val line = listOfNotNull(g.lockLine.takeIf { it.isNotEmpty() }, g.countdown, g.note).joinToString(" · ")
         val sw = if (g.missed && g.target.tripId != next.tripId) g.target.tripId else null
         if (g.missed && s.changeMiss == null) FieldLog.ride("change · ${g.missText}")
         RideStore.update(this) { it.copy(changeLine = line, changeMiss = g.missText, changeSwitch = sw) }
@@ -814,6 +826,7 @@ class RideService : Service() {
     }
 
     private var pendingSwitch: ChangeGuide.Ride? = null
+    private var missHold = MissCall.Hold()
 
     /** "Switch to the 08:27": the rest planned again from the change, spliced after the current leg. */
     private suspend fun switchChange() {
