@@ -8,6 +8,11 @@ import SwiftUI
 // Chats · Groups · Compare, what's going on now (waits, campus, delays, free time, the live link), and More (your
 // name and picture, your trips, your timetable, extras, the leaderboard, requests you sent). Nothing of 0.30 went:
 // it moved into the sheet, its tiles and More's pages.
+//
+// (0.40.2) No second map: Friends is a sheet over the home map, as search is (0.40). Half up, the home map shows the
+// faces (`FriendsOnMap`) and stays usable; pulled up, the whole list; swiped down, gone. Pages push in the sheet's own
+// NavigationStack (the back swipe as everywhere). Opened away from the home map (Settings, the station home), the
+// same sheet, full height.
 
 /// (0.31) A page of the Friends screen's More list (or its "+ Add").
 enum FriendsPage: String, Hashable {
@@ -15,6 +20,8 @@ enum FriendsPage: String, Hashable {
 }
 
 struct FriendsScreen: View {
+    /// Over the home map (its faces drawn there): half-height first, the map usable above it. Else full height.
+    let overMap: Bool
     @ObservedObject private var store = FriendStore.shared
     @ObservedObject private var chats = FriendChats.shared
     @ObservedObject private var extras = FriendExtrasStore.shared
@@ -25,8 +32,28 @@ struct FriendsScreen: View {
     @State private var confirmDelete = false
     @State private var pasteWrong = false
     @State private var path: [FriendsRoute] = []
-    @State private var up = false
-    @ScaledMetric(relativeTo: .body) private var peek: CGFloat = 360
+    @State private var detent: PresentationDetent = .large
+    /// The one-time questions (trips, timetable) are asked once per opening: "Not now" or a swipe leaves them for next time.
+    @State private var askedTrips = false
+    @State private var askedTimetable = false
+    @ObservedObject private var onMap = FriendsOnMap.shared
+
+    /// Half the screen over the home map, as search (0.40).
+    private static let half: PresentationDetent = .fraction(0.5)
+
+    private var detents: Set<PresentationDetent> {
+        overMap ? [Self.half, PresentationDetent.large] : [PresentationDetent.large]
+    }
+
+    /// Over the home map, half up: the map stays usable above the sheet (a face tapped opens their page).
+    private var backgroundInteraction: PresentationBackgroundInteraction {
+        overMap ? PresentationBackgroundInteraction.enabled(upThrough: Self.half) : PresentationBackgroundInteraction.disabled
+    }
+
+    init(overMap: Bool = false) {
+        self.overMap = overMap
+        _detent = State(initialValue: overMap ? Self.half : .large)
+    }
 
     enum Sheet: String, Identifiable {
         case myCode, scan, create, restore, backup, profile, travel, newGroup, timetable
@@ -38,6 +65,23 @@ struct FriendsScreen: View {
             root
                 .navigationDestination(for: FriendsRoute.self) { r in destination(r) }
         }
+        .environment(\.friendsOverMap, overMap)
+        // (0.40.2) a sheet with detents over the home map, as search: swipe down to close, Done at the top
+        .presentationDetents(detents, selection: $detent)
+        .presentationBackgroundInteraction(backgroundInteraction)
+        .presentationDragIndicator(.visible)
+        .presentationBackground(DS.page)
+        // a chat or a page of the list wants the room; a friend's page stays half, their trip on the map above it
+        .onChange(of: path) { _, p in if let last = p.last, !Self.staysHalf(last) { detent = .large } }
+        // a face tapped on the home map: their page
+        .onChange(of: onMap.tapped) { _, id in
+            guard let id else { return }
+            onMap.tapped = nil
+            path = [.friend(id)]
+        }
+        .onDisappear { onMap.focus = nil; onMap.tapped = nil }
+        // the shapes of friends' rides, for the home map
+        .task(id: tripIds.joined(separator: ",")) { await routes.load(tripIds) }
         // (0.27) a chat to open (a notification tapped, a friend's "Message")
         .onChange(of: chats.toOpen, initial: true) { _, k in openChat(k) }
         .tint(DS.accentText)
@@ -67,22 +111,38 @@ struct FriendsScreen: View {
         }
     }
 
-    @ViewBuilder private var root: some View {
-        if store.hasAccount {
-            mapHome
-        } else {
-            ScrollView {
-                VStack(alignment: .leading, spacing: DS.s12) {
+    private var root: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: DS.s12) {
+                if store.hasAccount {
+                    sheetContent
+                } else {
                     if store.movedAway { movedNote }
                     FriendsIntroCard(make: { sheet = .create }, restore: { sheet = .restore })
                 }
-                .padding(.horizontal, DS.s16).padding(.top, DS.s8).padding(.bottom, DS.s24)
             }
-            .background(DS.page.ignoresSafeArea())
-            .navigationTitle("Friends")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .padding(.horizontal, DS.s16).padding(.top, DS.s8).padding(.bottom, DS.s24)
         }
+        .refreshable { await store.sync(.now) }
+        .background(DS.page.ignoresSafeArea())
+        .navigationTitle("Friends")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if store.hasAccount {
+                ToolbarItem(placement: .topBarLeading) { accountMenu }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { path.append(.page(.add)) } label: { Image(systemName: "person.badge.plus") }
+                        .accessibilityLabel("Add a friend")
+                }
+            }
+            ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+        }
+    }
+
+    /// A friend's page keeps the sheet half up (their trip on the home map); anything else goes full height.
+    private static func staysHalf(_ r: FriendsRoute) -> Bool {
+        if case .friend = r { return true }
+        return false
     }
 
     @ViewBuilder private func sheetView(_ s: Sheet) -> some View {
@@ -138,16 +198,19 @@ struct FriendsScreen: View {
     }
 
     private func askAboutTripsOnce() async {
-        guard store.hasFriends, !store.travelAnswered else { return }
+        guard store.hasFriends, !store.travelAnswered, !askedTrips else { return }
         try? await Task.sleep(nanoseconds: 700_000_000)
-        guard store.hasFriends, !store.travelAnswered, sheet == nil, store.opened == nil else { return }
+        guard store.hasFriends, !store.travelAnswered, !askedTrips, sheet == nil, store.opened == nil else { return }
+        askedTrips = true
         sheet = .travel
     }
 
+    /// (0.40.2: the question can be swiped away or left with "Not now"; it comes back the next time Friends opens.)
     private func askAboutTimetableOnce() async {
-        guard store.hasFriends, store.travelAnswered, !FriendTimetables.shared.answered, sheet == nil else { return }
+        guard store.hasFriends, store.travelAnswered, !FriendTimetables.shared.answered, !askedTimetable, sheet == nil else { return }
         try? await Task.sleep(nanoseconds: 900_000_000)
-        guard store.hasFriends, store.travelAnswered, !FriendTimetables.shared.answered, sheet == nil, store.opened == nil else { return }
+        guard store.hasFriends, store.travelAnswered, !FriendTimetables.shared.answered, !askedTimetable, sheet == nil, store.opened == nil else { return }
+        askedTimetable = true
         sheet = .timetable
     }
 
@@ -166,81 +229,19 @@ struct FriendsScreen: View {
         }
     }
 
-    // MARK: the map (0.31)
-
-    /// Travelling friends where they are, and friends on campus at your school (when it's theirs).
-    private var pins: [FriendMapPin] {
-        let now = Date()
-        var out: [FriendMapPin] = []
-        var seen: Set<String> = []
-        for t in store.travelling(now: now) {
-            let s: TravelState = t.state
-            guard let p = s.pos, let g = MapFrame.point(lat: p.lat, lon: p.lon) else { continue }
-            let name: String = store.name(t.from)
-            let ring: Color = DS.mode(train: s.isTrain, mode: s.mode, line: s.line ?? "")
-            out.append(FriendMapPin(id: t.from, name: name, point: g, ring: ring, label: "\(name), \(TravelWords.summary(s))",
-                                    stale: TravelAge.freshness(t, now: now) == .stale, route: routes.route(s)))
-            seen.insert(t.from)
-        }
-        let school: GeoPoint = Place.school.point
-        let mine: String = RoleWords.current.school
-        if MapFrame.valid(school) {
-            let campus: [FriendExtrasStore.OnCampus] = extras.onCampus(now: now).filter { !seen.contains($0.id) }
-            for (i, c) in campus.enumerated() where c.state.school == nil || c.state.school == mine {
-                // side by side, a little apart, so each face can be tapped
-                let g = GeoPoint(lat: school.lat, lon: school.lon + Double(i) * 0.0012)
-                let name: String = store.name(c.id)
-                out.append(FriendMapPin(id: c.id, name: name, point: g, ring: DS.accent, label: "\(name), \(CampusWords.since(c.state))",
-                                        stale: false, route: []))
-            }
-        }
-        return out
-    }
-
-    /// What the map frames: each face, and where travelling friends got on and get off.
-    private var framePoints: [GeoPoint] {
-        var out: [GeoPoint] = pins.map(\.point)
-        for t in store.travelling() { out += MapFrame.points(t.state) }
-        return out
-    }
+    // MARK: the account
 
     private var tripIds: [String] { store.travelling().compactMap(\.state.trip) }
 
-    private var mapHome: some View {
-        GeometryReader { g in
-            let cover: CGFloat = g.size.height > 0 ? min(0.8, peek / g.size.height) : 0.45
-            ZStack(alignment: .top) {
-                FriendsLiveMap(pins: pins, frame: framePoints, cover: cover, tap: { id in path.append(.friend(id)) })
-                    .ignoresSafeArea()
-                MapSheet(up: $up, peek: peek) { sheetContent }
-                    .ignoresSafeArea(edges: .bottom)
-                    .refreshable { await store.sync(.now) }
-                topButtons
-            }
+    private var accountMenu: some View {
+        Menu {
+            Button { sheet = .profile } label: { Label("Name and picture", systemImage: "person.crop.circle") }
+            Button { sheet = .backup } label: { Label("Backup code", systemImage: "key") }
+            Button(role: .destructive) { confirmDelete = true } label: { Label("Delete my friends account", systemImage: "trash") }
+        } label: {
+            Image(systemName: "ellipsis.circle").font(.body.weight(.semibold))
         }
-        .background(DS.page.ignoresSafeArea())
-        .navigationTitle("Friends")
-        .toolbar(.hidden, for: .navigationBar)
-        .task(id: tripIds.joined(separator: ",")) { await routes.load(tripIds) }
-    }
-
-    private var topButtons: some View {
-        HStack {
-            Menu {
-                Button { sheet = .profile } label: { Label("Name and picture", systemImage: "person.crop.circle") }
-                Button { sheet = .backup } label: { Label("Backup code", systemImage: "key") }
-                Button(role: .destructive) { confirmDelete = true } label: { Label("Delete my friends account", systemImage: "trash") }
-            } label: {
-                Image(systemName: "ellipsis").font(.body.weight(.bold)).foregroundStyle(DS.text)
-                    .frame(width: DS.hit, height: DS.hit)
-                    .background(DS.surface, in: Circle())
-                    .dsFloat()
-            }
-            .accessibilityLabel("Your friends account")
-            Spacer()
-            DSRoundButton(icon: "xmark", label: "Done") { dismiss() }
-        }
-        .padding(.horizontal, DS.s16).padding(.top, DS.s8)
+        .accessibilityLabel("Your friends account")
     }
 
     // MARK: the sheet
@@ -250,16 +251,6 @@ struct FriendsScreen: View {
         let friends: [Friend] = b?.sortedFriends ?? []
         VStack(alignment: .leading, spacing: DS.s12) {
             if store.movedAway { movedNote }
-            HStack(alignment: .firstTextBaseline) {
-                Text("Friends").font(DS.largeTitle).foregroundStyle(DS.text).accessibilityAddTraits(.isHeader)
-                Spacer()
-                NavigationLink(value: FriendsRoute.page(.add)) {
-                    Label("Add", systemImage: "plus").font(DS.bodyStrong).foregroundStyle(DS.accentText)
-                        .frame(minHeight: DS.hit).contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Add a friend")
-            }
             if let b, !b.incoming.isEmpty { requestsCard(b.incoming) }
             if friends.isEmpty { emptyCard } else { cardsRow(friends) }
             if !friends.isEmpty { tiles }
@@ -278,7 +269,6 @@ struct FriendsScreen: View {
             LiveLinkCard(idleNote: true)
             statusLine
         }
-        .padding(.top, DS.s4)
     }
 
     private func cardsRow(_ friends: [Friend]) -> some View {

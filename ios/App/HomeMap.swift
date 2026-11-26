@@ -230,6 +230,12 @@ struct NewHome: View {
     @ObservedObject private var nearDeps = NearDeparturesModel.shared
     @ObservedObject private var school = SchoolAlarm.shared
     @ObservedObject private var friends = FriendStore.shared
+    /// (0.40.2) Friends is a sheet over this map (as search): the faces drawn here, a face tapped opens their page.
+    @ObservedObject private var friendsMap = FriendsOnMap.shared
+    @ObservedObject private var friendRoutes = FriendRoutes.shared
+    @State private var friendsReturn: PlanReturn?          // where the map was before Friends framed the faces
+    @State private var friendsMoved = false
+    @State private var mapSize: CGSize = .zero
     @ObservedObject private var travelLog = TravelLogStore.shared      // (0.35) the December card
     @ObservedObject private var actions = AppActions.shared             // (0.37) the widget's tap, Siri's Wake me at a stop
     @EnvironmentObject var stopsStore: StopsStore
@@ -244,7 +250,7 @@ struct NewHome: View {
     @State private var searchHits: [Transit.StopHit] = []
     @State private var warmedUp = false                    // the first seconds after appearing: no vehicles yet
     @State private var idsChangedAt = Date.distantPast     // when the cards last changed (not a swipe: the map stays)
-    @State private var weekOpen = false                    // Next trip first: Your week over the map
+    @State private var weekOpen = false                    // Your week: a sheet over the map (0.40.2; was a cover)
     // follow me (0.20.1): our own state, not MapKit's; kept while the home is away (Fastest trip, the ride)
     @State private var following: Bool
     @State private var followSince = Date()
@@ -294,8 +300,16 @@ struct NewHome: View {
     var body: some View {
         ZStack(alignment: .top) {
             map.ignoresSafeArea()
-                .accessibilityHidden(weekOpen)
-            if planOpen {
+                .background(GeometryReader { g in
+                    Color.clear
+                        .onAppear { mapSize = g.size }
+                        .onChange(of: g.size) { _, n in mapSize = n }
+                })
+            if friends.showing {
+                // (0.40.2) Friends half up over the map: only the map and its faces above it (the home's buttons
+                // come back when it closes)
+                Color.clear.allowsHitTesting(false)
+            } else if planOpen {
                 PlanTripOverlay(model: plan, pickOnOpen: planFromSearch, legBars: nextFirst, close: closePlan)
                     .dynamicTypeSize(...DynamicTypeSize.accessibility2)
                     .transition(.opacity)
@@ -303,11 +317,6 @@ struct NewHome: View {
                 // (capped where its big card and the bar still fit on the screen together)
                 nextTripLayout
                     .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
-                    .transition(.opacity)
-            } else if weekOpen {
-                // Live around you: the same Your week as Next trip first, over the map (0.20.1)
-                DaySheet(close: { closeWeek() }, week: true)
-                    .dynamicTypeSize(...DynamicTypeSize.accessibility2)
                     .transition(.opacity)
             } else {
                 VStack(spacing: 0) {
@@ -332,6 +341,18 @@ struct NewHome: View {
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
+        // Your week (both home styles): a sheet like Your day (0.40.2), swiped down or its close button to leave; it
+        // was drawn over the map, which no swipe could leave
+        .sheet(isPresented: $weekOpen) {
+            DaySheet(close: { weekOpen = false }, week: true)
+                .dynamicTypeSize(...DynamicTypeSize.accessibility2)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+                .presentationBackground(DS.page)
+        }
+        // (0.40.2) Friends over this map: frame the faces (back where it was when it closes)
+        .onChange(of: friends.showing) { _, on in if on { friendsOpened() } else { friendsClosed() } }
+        .onChange(of: friendsFrameKey) { _, _ in if friends.showing { fitFriends() } }
         .modifier(HomeLoops())
         // the lists per leg only while they're shown: here your home board under the map (0.20.7)
         .onAppear { live.panelsNeed = panelsShown }
@@ -474,6 +495,7 @@ struct NewHome: View {
         let route = planOpen || (searchOpen && plan.to != nil) ? plan.route(plan.focused) : []
         let hits: [Transit.StopHit] = searchOpen && plan.to == nil ? searchHits : []
         let focus: (tripId: String, stop: CLLocationCoordinate2D?)? = waitingFor
+        let fl: FriendsOnMap.Layer = friendsLayer
         // (the vehicles slide along their road every 2 s while there are any; else the map is redrawn only when it changes)
         return TimelineView(.periodic(from: .now, by: showV && !vehicles.segs.isEmpty ? 2 : 3600)) { tl in
             let moving: [LiveVehiclesModel.Moving] = showV ? region.map { vehicles.moving(at: tl.date, in: $0, focus: focus) } ?? [] : []
@@ -500,6 +522,23 @@ struct NewHome: View {
                 ForEach(moving) { v in
                     Annotation(v.line, coordinate: shownAt(v), anchor: .center) {
                         VehicleMark(v: v, tap: { tapVehicle(v) }, onIt: markOnIt(v))
+                    }
+                    .annotationTitles(.hidden)
+                }
+                // (0.40.2) Friends open over this map: their routes, where one friend got on and gets off, their faces
+                ForEach(fl.pins) { p in
+                    if p.route.count >= 2 {
+                        MapPolyline(coordinates: p.route.map(FriendsLiveMap.coord))
+                            .stroke(p.ring.opacity(p.stale ? 0.5 : 0.9), lineWidth: 5)
+                    }
+                }
+                ForEach(fl.stops) { st in
+                    Marker(st.name, systemImage: st.id == "to" ? "flag.fill" : "circle.fill", coordinate: FriendsLiveMap.coord(st.point))
+                        .tint(st.id == "to" ? DS.accent : DS.legQuiet)
+                }
+                ForEach(fl.pins) { p in
+                    Annotation(p.name, coordinate: FriendsLiveMap.coord(p.point), anchor: .center) {
+                        FriendFace(pin: p, tap: { friendsMap.tapped = p.id })
                     }
                     .annotationTitles(.hidden)
                 }
@@ -642,7 +681,7 @@ struct NewHome: View {
 
     /// Friends (0.25): the list, requests and adding someone; a badge with the requests waiting.
     private var friendsButton: some View {
-        Button { friends.showing = true } label: {
+        Button { openFriends() } label: {
             Image(systemName: friends.badge > 0 ? "person.2.fill" : "person.2")
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(friends.badge > 0 ? DS.accentText : DS.secondary)
@@ -774,12 +813,14 @@ struct NewHome: View {
 
     /// A stop or station tapped: its departures (or, from VoiceOver's action, Wake me there).
     private func tapStop(_ s: Transit.NearStop, wake: Bool = false) {
+        guard !friends.showing else { return }             // (Friends' sheet is up: its own sheet can't open over it)
         centre(on: CLLocationCoordinate2D(latitude: s.lat, longitude: s.lon))
         if wake { wakeAt = WakeTarget(place: MapStopSheet.place(s), rail: s.rail) } else { stopTap = s }
     }
 
     /// A bus or train tapped: its live sheet, with "I'm on this one" when it could be yours.
     private func tapVehicle(_ v: LiveVehiclesModel.Moving) {
+        guard !friends.showing else { return }
         centre(on: v.coordinate)
         let t = couldBeOn(v)
         vehicleTap = VehicleTap(target: LiveTrackTarget(tripId: v.id, line: v.line, headsign: "", stopName: "", time: Date(), rail: v.isTrain),
@@ -835,6 +876,7 @@ struct NewHome: View {
 
     /// Plan from or to a stop you tapped (once its sheet has gone).
     private func planFrom(stop s: Transit.NearStop, from: Bool) {
+        guard !friends.showing else { return }
         let wasOpen = stopTap != nil
         stopTap = nil
         let e = PlanTripModel.End.place(MapStopSheet.place(s), name: s.rail ? Fmt.place(s.name) : Fmt.stop(s.name))
@@ -996,42 +1038,32 @@ struct NewHome: View {
     // MARK: Next trip first (concept B)
 
     /// The map on top with search and follow-me, the big card with your next trip, and the bar with Home, School,
-    /// Plan and Your week (which then covers the map, the bar staying).
+    /// Plan and Your week (a sheet since 0.40.2).
     private var nextTripLayout: some View {
         VStack(spacing: 0) {
-            ZStack {
-                if weekOpen {
-                    DaySheet(close: { closeWeek() }, week: true)
-                        .transition(.opacity)
-                } else {
-                    VStack(spacing: 10) {
-                        nextSearchRow
-                        yearBanner
-                        Spacer(minLength: 0)
-                        HStack { Spacer(); followButton }
-                        if trip.phase == .idle {
-                            // the trip picked again with the countdown's clock, so a trip that has gone makes way
-                            TimelineView(.periodic(from: .now, by: 15)) { tl in
-                                NextTripCard(content: heroContent(now: tl.date), now: tl.date, chip: AnyView(destinationChip), start: startHero, otherTimes: heroOtherTimes,
-                                             plan: { openPlan(to: nil, when: .now) }, notNow: { trip.forgetResumable() }, fromStop: fromStopPick)
-                            }
-                        }
+            VStack(spacing: 10) {
+                nextSearchRow
+                yearBanner
+                Spacer(minLength: 0)
+                HStack { Spacer(); followButton }
+                if trip.phase == .idle {
+                    // the trip picked again with the countdown's clock, so a trip that has gone makes way
+                    TimelineView(.periodic(from: .now, by: 15)) { tl in
+                        NextTripCard(content: heroContent(now: tl.date), now: tl.date, chip: AnyView(destinationChip), start: startHero, otherTimes: heroOtherTimes,
+                                     plan: { openPlan(to: nil, when: .now) }, notNow: { trip.forgetResumable() }, fromStop: fromStopPick)
                     }
-                    .padding(.horizontal, DS.edge).padding(.top, 6).padding(.bottom, 10)
-                    .transition(.opacity)
                 }
             }
+            .padding(.horizontal, DS.edge).padding(.top, 6).padding(.bottom, 10)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             // (not while a trip runs: at a change the bar to your trip takes its place)
             if trip.phase == .idle {
-                NextTripBar(weekOpen: weekOpen, friendsWaiting: friends.badge, friends: { friends.showing = true },
+                NextTripBar(weekOpen: weekOpen, friendsWaiting: friends.badge, friends: { openFriends() },
                             week: { withAnimation(DS.quick) { weekOpen.toggle() } },
                             settings: { weekOpen = false; sheet = .settings })
             }
         }
     }
-
-    private func closeWeek() { withAnimation(DS.quick) { weekOpen = false } }
 
     /// The search field, with the weather and Settings inside it.
     private var nextSearchRow: some View {
@@ -1323,6 +1355,59 @@ struct NewHome: View {
             setFollowing(true)
             withAnimation(DS.move) { camera = .userLocation(followsHeading: false, fallback: camera) }
         } else if let c = back?.camera {
+            withAnimation(DS.move) { camera = .camera(c) }
+        }
+    }
+
+    // MARK: Friends over the map (0.40.2)
+
+    /// What Friends draws on this map while its sheet is up (nothing otherwise).
+    private var friendsLayer: FriendsOnMap.Layer {
+        friends.showing ? friendsMap.layer() : FriendsOnMap.Layer()
+    }
+
+    private var friendsFrameKey: String { friends.showing ? friendsLayer.key : "" }
+
+    /// The Friends button: its sheet over this map (the search's sheet closed first: one sheet at a time).
+    private func openFriends() {
+        guard searchOpen else { friends.showing = true; return }
+        searchOpen = false
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 450_000_000)
+            friends.showing = true
+        }
+    }
+
+    /// Friends opened: the map remembered (to go back to), then framed on the faces, when there are any.
+    private func friendsOpened() {
+        friendsReturn = PlanReturn(following: following, camera: lastCamera)
+        friendsMoved = false
+        fitFriends()
+    }
+
+    /// The faces (or one friend's trip) in the half of the map the sheet leaves free.
+    private func fitFriends() {
+        let pts: [GeoPoint] = friendsLayer.frame
+        guard !pts.isEmpty, mapSize.width > 1, mapSize.height > 1 else { return }
+        let aspect: Double = Double(mapSize.height / mapSize.width)
+        guard let r = MapFrame.fit(pts, aspect: aspect, cover: 0.5) else { return }
+        setFollowing(false)
+        friendsMoved = true
+        let centre = CLLocationCoordinate2D(latitude: r.lat, longitude: r.lon)
+        let span = MKCoordinateSpan(latitudeDelta: r.latDelta, longitudeDelta: r.lonDelta)
+        withAnimation(DS.move) { camera = .region(MKCoordinateRegion(center: centre, span: span)) }
+    }
+
+    /// Friends closed: the map back as it was (following you only if it was), when Friends moved it.
+    private func friendsClosed() {
+        guard let back = friendsReturn else { return }
+        friendsReturn = nil
+        guard friendsMoved else { return }                       // (never moved: nothing to put back)
+        friendsMoved = false
+        if back.following {
+            setFollowing(true)
+            withAnimation(DS.move) { camera = .userLocation(followsHeading: false, fallback: camera) }
+        } else if let c = back.camera {
             withAnimation(DS.move) { camera = .camera(c) }
         }
     }

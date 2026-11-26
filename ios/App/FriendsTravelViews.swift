@@ -143,11 +143,14 @@ struct TravelConsentSheet: View {
             .background(DS.page.ignoresSafeArea())
             .navigationTitle("Your trips")
             .navigationBarTitleDisplayMode(.inline)
+            // (0.40.2) not answered yet: "Not now" (or a swipe down) leaves it off and asks again another time
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { if !store.travelAnswered { Button("Not now") { dismiss() } } }
+            }
         }
         .tint(DS.accentText)
         .dynamicTypeSize(...DynamicTypeSize.accessibility2)
         .followsSystemScheme()
-        .interactiveDismissDisabled(!store.travelAnswered)
         .onAppear { show = store.travelAnswered ? !store.travelPaused : true }
     }
 
