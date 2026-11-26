@@ -15,6 +15,7 @@ struct GoViewNew: View {
     @State private var mapFocus = 0                 // the Go to card's On the map: the map shows the stop and the walk
     @State private var walkMetres: Double?          // the walk to the stop on foot, from the map
     @State private var gpsLater: (trip: String, at: Date)?      // the later time its GPS allows at your stop, from the map (0.24.5)
+    @State private var overview = true             // (0.42) the stops around you first (`NearbyOverview`)
     @ScaledMetric(relativeTo: .largeTitle) private var big: CGFloat = 52
 
     var body: some View {
@@ -48,8 +49,14 @@ struct GoViewNew: View {
                     Spacer(minLength: 0)
                     bottom
                 }
+                // (0.42) Fastest trip, zoomed out: every stop around you first; "Your trip" shows the cards below
+                if overview && NearbyOverview.canOpen(go) {
+                    NearbyOverview { withAnimation(.easeInOut(duration: 0.3)) { overview = false } }
+                        .transition(.opacity)
+                }
             }
         }
+        .onAppear { if !NearbyOverview.opensOn(go) { overview = false } }
         .background(DS.page.ignoresSafeArea())
         .dynamicTypeSize(...DynamicTypeSize.accessibility2)
         .sheet(item: $walkTo) { WalkMapSheetNew(target: $0).presentationDetents([.large]) }
@@ -130,6 +137,7 @@ struct GoViewNew: View {
         } else if let t = go.best {
             if t.first.fromId != "onboard" { goToCard(t) }
             heroCard(t)
+            if NearbyOverview.canOpen(go) { NearbyOpenButton { withAnimation(.easeInOut(duration: 0.3)) { overview = true } } }
             if t.first.fromId != "onboard" && !t.first.fromId.isEmpty { fromStopCard(t) }
             watchingCard(t)
             if !go.others.isEmpty { compareCard(t) }

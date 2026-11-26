@@ -3,6 +3,49 @@
 The rules and numbers for each are in [logs-export.md](logs-export.md) › For Android (parity), with the iOS files and
 their tests.
 
+## iOS 0.42.0
+
+From the field report ("At a friend's place going home to Centrum it showed one bus, unclear what other routes would come
+out at about the same time"). Fastest trip, zoomed out (concept N5, with N4's whole-trip timelines). Rules in
+`ios/App/NearbyRank.swift` (tests `NearbyRankTests`) and `ios/App/TripTimeline.swift` (tests `TripTimelineTests`).
+
+- [ ] **Fastest trip opens on the stops around you.** Not on board, not a planned (Be there by / class) trip, not the demo:
+      a map of every bus stop and train station you could walk to, each planned to the destination. Candidate stops from
+      Transitous `/v1/map/stops` in a square of 1 km (then 1.6, 2.2, 3 km while fewer than 3 stops have a way); one entry
+      per station (`parentId`); same-name stops within 300 m are one stop (both sides of the road, up to 2 ids); at most 8
+      stops and 12 plans per step, 12 stops and 20 plans in all; the 2 nearest stations always among them. Each stop
+      planned (`/v5/plan`, from its id, to the destination's stop, or its spot when it has several; 5 itineraries, at
+      most 3 transfers) from when you can be there; drawn as each answer comes in; Fastest trip's own trips are put
+      with their stops too. Every request through the normal Transitous limiter (a few at a time, pause on 429). The
+      whole answer is kept 1 minute per place (~200 m), destination and leave time; asked again after 3 minutes on screen.
+- [ ] **Walk**: straight line × 1.3 at 1.2 m/s, whole minutes up (`Nearby.plannedWalk`), shown at your learned speed
+      with 2 min spare (`WalkPlan`, as 0.40). A departure counts when you make it setting off at the window start
+      (30 s grace) and it leaves within 35 minutes after that (plus the walk).
+- [ ] **Leave now / In 10 min / In 20 min** switch (the window's start), re-planned.
+- [ ] **Circles**: colour by the stop's earliest arrival you make: green `#3DD598` → `#C9D45A` → `#E8A33D` → red `#E86F5A`,
+      between the earliest and latest (at least 8 min apart), minutes inside; legend "arrive 18:44 … 18:58". **Ring** =
+      how sure: solid at ≥ 85 % on time, dashed under, thin grey when it only goes by the time of day. Map framed on
+      you and the stops with a way (×1.4, at least 600 m).
+- [ ] **How sure** (`Nearby.sure`): on time = less than 3 min late at the destination. Your own rides on the trip's last
+      line to its last stop (the app's delay book from your rides; ≥ 4 rides, the last 20): the share on time, "usually
+      +N min" (median, when ≥ 1); else the model's chance (time of day, the line's live delays now and what was seen):
+      "on time about NN% (by live times)" or "(by the time of day)"; either times the chance of making each change.
+      Clamped to 1–99 %.
+- [ ] **Tags**: Fastest = earliest arrival (tie: shorter walk, then later departure); Surest = highest on-time % (tie:
+      earlier arrival), the fastest itself when it's as sure; Slower = 5 min or more after the fastest. List order:
+      fastest, surest, then by arrival. Row: stop, walk, line chips, leaves, big arrival, on time NN%.
+- [ ] **A stop tapped**: a half sheet (the map above still usable): walk, tag, "Arrive X: on time NN% of your last N
+      rides · usually +1 min" (only what's backed; else "by live times"); Times (next 6 departures you make: line, time,
+      live / +N / timetable / cancelled, arrive) or **Whole trip**: each departure as a timeline on one shared axis
+      (start rounded down, end up to 5 min, at least 20 min; ticks every 10 / 15 / 30 min): walk (dotted), wait (thin),
+      rides in their line colour (bright live, faint timetable), change stations under it (left out when closer than
+      0.16 of the axis to the one before or to the trip's end times), leave and arrive times at its ends; gold border =
+      fastest, green = surest; tap selects. **On the line now**: the next 3 vehicles of those departures with their own
+      GPS age ("GPS 20 s"), "in 9 min · 4 stops" (stops to go by the fix on its road; dropped once past your stop),
+      drawn on the map with the first one's road. **Go · leave in N min** makes it your trip (as From <stop>).
+- [ ] "Your trip" (top right) or "Your trip and other times" shows Fastest trip's cards as before; "All stops around
+      you" on them goes back.
+
 ## iOS 0.41.0
 
 From the user ("When you're walking towards the station, like in Google Maps, have the arrow: turn right here, turn left
