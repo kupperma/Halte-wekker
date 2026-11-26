@@ -418,7 +418,7 @@ struct NewHome: View {
                 .presentationDragIndicator(.visible)
         }
         .sheet(item: $vehicleTap) { v in
-            LiveBusSheet(target: v.target, newLook: true, onIt: onIt(v))
+            LiveBusSheet(target: v.target, newLook: true, onIt: onIt(v), me: riding(v.target.tripId))
                 .presentationDetents([.large])
         }
         .sheet(item: $wakeAt) { WakeAtStopNew(preset: $0) }
@@ -534,6 +534,15 @@ struct NewHome: View {
                     }
                     .annotationTitles(.hidden)
                 }
+                // (0.40.3) the one you wait for: its estimate, faintly, when well ahead of where it really is
+                ForEach(moving) { v in
+                    if let g = v.ghost {
+                        Annotation("", coordinate: g, anchor: .center) {
+                            GhostDot(color: DS.mode(train: v.isTrain, mode: v.mode, line: v.line))
+                        }
+                        .annotationTitles(.hidden)
+                    }
+                }
                 ForEach(moving) { v in
                     Annotation(v.line, coordinate: shownAt(v), anchor: .center) {
                         VehicleMark(v: v, tap: { tapVehicle(v) }, onIt: markOnIt(v))
@@ -562,8 +571,10 @@ struct NewHome: View {
             .mapControls { MapCompass() }
             .onMapCameraChange(frequency: .onEnd) { ctx in cameraEnded(ctx) }
         }
-        // their GPS positions while they're drawn (0.20.2)
-        .realPositions(showV)
+        // their GPS positions while they're drawn (0.20.2); NS's too while the one you wait for or ride is a train (0.40.3)
+        .realPositions(showV, trains: showV && trainDrawn)
+        // (0.40.3) the one you wait for, by its whole trip
+        .task(id: showV ? focus?.tripId : nil) { await vehicles.follow(showV ? focus?.tripId : nil) }
     }
 
     /// The bus you're waiting for (0.40.1): your next trip's first ride while no trip runs, and its stop (when known),
@@ -573,6 +584,18 @@ struct NewHome: View {
         var stop: CLLocationCoordinate2D? = nil
         if let a = r.fromLat, let o = r.fromLon { stop = CLLocationCoordinate2D(latitude: a, longitude: o) }
         return (tripId: r.tripId, stop: stop)
+    }
+
+    /// (0.40.3) The one you wait for, or the one you ride, is a train: NS's positions are fetched for it.
+    private var trainDrawn: Bool {
+        if trip.phase != .idle { return trip.vehicle?.isTrain ?? false }
+        return live.next.first?.first.isTrain ?? false
+    }
+
+    /// (0.40.3) Your phone's fix while you ride the one tapped: its live sheet draws it where you are.
+    private func riding(_ tripId: String) -> (@MainActor () -> CLLocation?)? {
+        guard trip.phase != .idle, trip.vehicle?.tripId == tripId else { return nil }
+        return { trip.lastFix ?? near.position }
     }
 
     /// May the live vehicles be asked for and drawn now (`VehiclePick`).

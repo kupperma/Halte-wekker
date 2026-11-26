@@ -114,6 +114,7 @@ enum SettingsIndex {
         SettingsEntry(id: "map.style", title: "Map style", topic: .map, keywords: ["standard", "muted", "satellite", "hybrid"]),
         SettingsEntry(id: "map.vehicles", title: "Live buses and trains", topic: .map, keywords: ["moving", "vehicles on the map"]),
         SettingsEntry(id: "map.real", title: "Real bus and train positions", topic: .map, keywords: ["gps", "ovapi", "ns", "where they are", "data"]),
+        SettingsEntry(id: "map.busPosition", title: "Bus position", topic: .map, keywords: ["real gps", "estimated", "where the bus is", "train position", "expected"]),
         SettingsEntry(id: "map.movingStation", title: "Moving station", topic: .map, keywords: ["animation", "train behind", "still picture", "backdrop"]),
         SettingsEntry(id: "map.newLook", title: "New look", topic: .map, keywords: ["old look", "station look", "0.18"], corridorOnly: true),
         SettingsEntry(id: "map.rainAdvice", title: "Rain advice for the walk", topic: .map, keywords: ["umbrella", "weather", "wet", "bus instead", "walking", "forecast", "open-meteo"]),

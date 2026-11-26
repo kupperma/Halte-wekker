@@ -19,6 +19,8 @@ import Foundation
 ///   place over a few seconds; back only when a new fresh fix shows it more than 150 m behind, over 3 s.
 /// Standing at your stop by a fresh fix before it leaves: there, "Waiting · leaves 17:42". Plain values, so the rules
 /// are tested. Foundation only.
+/// 0.40.3: this is only the faint "expected" ghost now; the bus or train itself is drawn where its own GPS put it
+/// (`RealFirst`), or by Settings › Map › Bus position: Estimated, here (`RealFirst.estimated`).
 enum BusFusion {
     /// s: a fix is moved on for at most this long (the oldest one drawn, `RealPositions.fresh`).
     static let maxAge: TimeInterval = 180

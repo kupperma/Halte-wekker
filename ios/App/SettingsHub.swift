@@ -664,6 +664,7 @@ private struct MapSettingsRows: View {
     @AppStorage(HomeMapStyle.key) private var styleRaw = HomeMapStyle.standard.rawValue
     @AppStorage(NewLook.vehiclesKey) private var vehicles = true
     @AppStorage(RealPositions.settingKey) private var realPositions = true
+    @AppStorage("map.busPosition") private var busPosition = "real"         // (0.40.3) `RealDraw.modeKey`
     @AppStorage(HomeStyle.key) private var homeStyle = HomeStyle.live.rawValue
 
     var body: some View {
@@ -690,8 +691,14 @@ private struct MapSettingsRows: View {
         Section {
             SettingsSwitch(title: "Real bus and train positions", isOn: $realPositions)
                 .settingsAnchor("map.real")
+            Picker("Bus position", selection: $busPosition) {
+                Text("Real GPS").tag("real")
+                Text("Estimated").tag("estimated")
+            }
+            .disabled(!realPositions)
+            .settingsAnchor("map.busPosition")
         } footer: {
-            Text("Shows buses and trains where their GPS says they are (open data from OVapi and NS), and uses it to tell which one you’re on. Uses about 10 MB an hour while a map is open or it checks which one you’re on during a ride; off in Low Data Mode and Low Power Mode.")
+            Text("Shows buses and trains where their GPS says they are (open data from OVapi and NS), and uses it to tell which one you’re on. Uses about 10 MB an hour while a map is open or it checks which one you’re on during a ride; off in Low Data Mode and Low Power Mode. Bus position: Real GPS draws the one you wait for where it last said it was, with how old that is, and a faint dot where it’s expected; Estimated mixes its GPS with its times.")
         }
         Section {
             SettingsSwitch(title: "Moving station", detail: "The station and train behind the home and ride screens. It pauses when the screen is off. Off shows a still picture.", isOn: $trip.movingStation)
