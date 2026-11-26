@@ -26,6 +26,17 @@ struct RootView: View {
     /// the change and the arrival): they follow the phone's light or dark, as Live around you; Next trip first is dark
     /// (as its design). The old look stays dark.
     private var followsPhone: Bool { newLook && HomeStyle.of(homeStyle) == .live }
+    /// The new home's map is what's on screen (not the ride, the alarm, the arrival, Fastest trip or the station home):
+    /// Friends opens over it half up, its faces on that map (0.40.2).
+    private var mapHomeShown: Bool {
+        guard newLook else { return false }
+        switch trip.phase {
+        case .idle: return !firstRun && !go.isOpen
+        case .transfer: return browsing
+        case .alarm, .finished: return false
+        default: return rideSmall
+        }
+    }
     /// The stop alarm is ringing: nothing goes over it.
     private var alarming: Bool { if case .alarm = trip.phase { return true }; return false }
 
@@ -103,8 +114,9 @@ struct RootView: View {
             SetupFlow(mode: m, draft: setup.draft(for: m))
         }
         .sheet(isPresented: $setup.demoAfter) { DemoSheetNew().presentationDetents([.large]) }
-        // Friends (0.25): from the home's Friends button, or a friend's link
-        .sheet(isPresented: $friends.showing) { FriendsScreen() }
+        // Friends (0.25): from the home's Friends button, or a friend's link. (0.40.2) Over the home map, a sheet half up
+        // with the faces drawn on that map, as search; no second map of its own.
+        .sheet(isPresented: $friends.showing) { FriendsScreen(overMap: mapHomeShown) }
         .overlay {
             if let a = watch.alert, !alarming {          // (not over the alarm: after it)
                 if newLook {

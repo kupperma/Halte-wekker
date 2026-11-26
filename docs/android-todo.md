@@ -3,6 +3,34 @@
 The rules and numbers for each are in [logs-export.md](logs-export.md) › For Android (parity), with the iOS files and
 their tests.
 
+## iOS 0.40.2
+
+From the field report ("The Friends tab pops up a new map, which is annoying, and you can't swipe to leave"; "It's hard
+to get out of the calendar screen, you can't swipe"). UI only, no new rules.
+
+- [ ] **Friends over the home map, not a second map.** iOS 0.31 opened Friends as a full-height sheet holding a map of its
+      own with a hand-made pull-up panel (and a friend's page as another map with another panel): a swipe down moved
+      that map instead of closing it. Now (as search since 0.40.0) Friends is a sheet over the home map: half the screen
+      first, the map above it usable; pulled up, full height; swiped down (or Done), closed. While it's open the home map
+      draws the friends' faces (ringed in their vehicle's colour, faded when stale), their routes, and with a friend's
+      page open just that friend with where they got on (dot) and get off (flag); it's framed on them in the half the
+      sheet leaves free and goes back where it was when Friends closes. A face tapped on the map opens their page in
+      the sheet. The home's own buttons and cards hide while it's open (one sheet at a time); a stop or vehicle tap on
+      the map does nothing then. Chats and the list's pages open full height; a friend's page stays half. Opened from
+      Settings (away from the home map): the same sheet full height, and a friend's page heads with a small map of their
+      trip. Android: Friends as a bottom sheet (half, expanded) over the home map with the same pins; system back (and
+      the predictive back gesture) closes it and steps back through its pages.
+- [ ] **Your week is a sheet.** It was drawn over the map (both home styles) with only a small map button to leave. Now a
+      full-height sheet with the grabber, swiped down or its × to close (like Your day). Android: Your week as a sheet or
+      a screen that system back closes.
+- [ ] **The one-time questions** ("Show friends your trips?", "Compare timetables with friends?") can be swiped away or
+      left with "Not now" (top left) until answered; not answered stays off and is asked again the next time Friends
+      opens (once per opening). Android: system back on them = "Not now".
+- [ ] Android sweep: every screen that opens over another (Friends and its pages, Your week, Your day, the school
+      calendar picker, Your week in Settings, Compare and a day of it, the consent screens) handles system back /
+      predictive back and has a visible close or back control; only the first-run setup and the backup code just made
+      hold back.
+
 ## iOS 0.40.1
 
 From the field report of 26 November ("Where the bus was on the map wasn't matching the actual position until about the

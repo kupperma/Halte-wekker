@@ -39,8 +39,9 @@ final class DayModel: ObservableObject {
 /// Your day (artboard C3): pulled up from the departure cards. One day at a time: the wake-up alarm (on or off for that
 /// day), when to leave and the rides, the first class and until when, and the way home; then Coming up and what's watched.
 ///
-/// `week` (Next trip first, artboard B3): "Your week" over the map, with a strip of the next seven days instead of the
-/// day switcher; the same day, alarms, Coming up and watching below it.
+/// `week` (Next trip first, artboard B3): "Your week", with a strip of the next seven days instead of the day switcher;
+/// the same day, alarms, Coming up and watching below it. (0.40.2) A sheet over the map, as Your day, swiped down to
+/// leave (it was drawn over the map, which no swipe could leave).
 struct DaySheet: View {
     let close: () -> Void
     var week = false
@@ -140,12 +141,13 @@ struct DaySheet: View {
         HStack {
             Text("Your week").font(DS.largeTitle).foregroundStyle(DS.text).accessibilityAddTraits(.isHeader)
             Spacer()
+            // (0.40.2) a sheet now: this, or a swipe down, closes it
             Button(action: close) {
-                Image(systemName: "map").font(.body.weight(.semibold)).foregroundStyle(DS.text)
+                Image(systemName: "xmark").font(.body.weight(.bold)).foregroundStyle(DS.text)
                     .frame(width: 44, height: 44).background(DS.surface3, in: Circle())
             }
             .buttonStyle(DSPressStyle())
-            .accessibilityLabel("Back to the map")
+            .accessibilityLabel("Close Your week")
         }
         .padding(.top, 8)
     }

@@ -1,10 +1,14 @@
 import SwiftUI
 
-// Friends (0.31, "Map first"): a friend's page. While they travel: the map on top, framed on their trip (where they
-// are, where they got on, where they get off; `MapFrame`), "‹ Friends", and a sheet: their face and name, the line,
+// Friends (0.31, "Map first"): a friend's page. While they travel: their trip framed on the map (where they are,
+// where they got on, where they get off; `MapFrame`), and on the page: their face and name, the line,
 // where to and when, a chat button; the seat picker with their face in their window; their seat in words and where to
 // wait; Compare, Ride along, Wait for me. Then everything the page had before (on campus, the test friend's controls,
-// rides together, what they see, removing them). Not travelling: the same, as a page without the map.
+// rides together, what they see, removing them). Not travelling: the same, without the map.
+//
+// (0.40.2) No map of its own any more (that was a second map with its own sheet, which a swipe couldn't leave): a page
+// pushed in the Friends sheet, the back swipe as any page. Over the home map their trip is drawn there
+// (`FriendsOnMap.focus`); opened from Settings, a small map of it heads the page.
 
 struct FriendDetailView: View {
     let id: String
@@ -14,9 +18,8 @@ struct FriendDetailView: View {
     @ObservedObject private var bot = TestFriendBot.shared
     @ObservedObject private var routes = FriendRoutes.shared
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.friendsOverMap) private var overMap
     @State private var asking = false
-    @State private var up = false
-    @ScaledMetric(relativeTo: .body) private var peek: CGFloat = 400
 
     private var unread: Int { chats.unread(ChatKey.friend(id)) }
 
@@ -30,16 +33,17 @@ struct FriendDetailView: View {
         TimelineView(.periodic(from: .now, by: 30)) { tl in
             page(now: tl.date)
         }
+        // over the home map: their trip drawn there while this page is open
+        .onAppear { FriendsOnMap.shared.focus = id }
+        .onDisappear { if FriendsOnMap.shared.focus == id { FriendsOnMap.shared.focus = nil } }
+        .task(id: store.travel[id]?.state.trip ?? "") {
+            if let trip = store.travel[id]?.state.trip { await routes.load([trip]) }
+        }
     }
 
     @ViewBuilder private func page(now: Date) -> some View {
         if let f = store.book?.friend(id) {
-            let t: FriendTravelSeen? = travel(now: now)
-            if let t, !MapFrame.points(t.state).isEmpty {
-                mapPage(f, t, now: now)
-            } else {
-                plainPage(f, t, now: now)
-            }
+            plainPage(f, travel(now: now), now: now)
         } else {
             Text("Not a friend any more.").font(DS.sub).foregroundStyle(DS.secondary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -47,36 +51,36 @@ struct FriendDetailView: View {
         }
     }
 
-    // MARK: the two layouts
+    // MARK: the page
 
-    private func mapPage(_ f: Friend, _ t: FriendTravelSeen, now: Date) -> some View {
+    /// Their trip on a small map (Friends opened away from the home map): looked at, not moved (the page scrolls).
+    @ViewBuilder private func tripMap(_ f: Friend, _ t: FriendTravelSeen, now: Date) -> some View {
         let s: TravelState = t.state
+        let pts: [GeoPoint] = MapFrame.points(s)
+        if !overMap && !pts.isEmpty {
+            let pin: [FriendMapPin] = tripPin(f, t, now: now)
+            let stops: [MapStop] = tripStops(s)
+            FriendsLiveMap(pins: pin, frame: pts, stops: stops)
+                .frame(height: 220)
+                .clipShape(RoundedRectangle(cornerRadius: DS.cardRadiusSmall, style: .continuous))
+                .allowsHitTesting(false)
+        }
+    }
+
+    private func tripPin(_ f: Friend, _ t: FriendTravelSeen, now: Date) -> [FriendMapPin] {
+        let s: TravelState = t.state
+        guard let p = s.pos, let g = MapFrame.point(lat: p.lat, lon: p.lon) else { return [] }
         let stale: Bool = TravelAge.freshness(t, now: now) == .stale
         let ring: Color = DS.mode(train: s.isTrain, mode: s.mode, line: s.line ?? "")
-        var pin: [FriendMapPin] = []
-        if let p = s.pos, let g = MapFrame.point(lat: p.lat, lon: p.lon) {
-            pin.append(FriendMapPin(id: f.id, name: f.name, point: g, ring: ring, label: "\(f.name), \(TravelWords.summary(s))",
-                                    stale: stale, route: routes.route(s)))
-        }
+        let label: String = "\(f.name), \(TravelWords.summary(s))"
+        return [FriendMapPin(id: f.id, name: f.name, point: g, ring: ring, label: label, stale: stale, route: routes.route(s))]
+    }
+
+    private func tripStops(_ s: TravelState) -> [MapStop] {
         var stops: [MapStop] = []
         if let g = MapFrame.point(lat: s.from.lat, lon: s.from.lon) { stops.append(MapStop(id: "from", name: s.from.name, point: g)) }
         if let g = MapFrame.point(lat: s.to.lat, lon: s.to.lon) { stops.append(MapStop(id: "to", name: s.to.name, point: g)) }
-        return GeometryReader { g in
-            let cover: CGFloat = g.size.height > 0 ? min(0.8, peek / g.size.height) : 0.45
-            ZStack(alignment: .topLeading) {
-                FriendsLiveMap(pins: pin, frame: MapFrame.points(s), stops: stops, cover: cover)
-                    .ignoresSafeArea()
-                MapSheet(up: $up, peek: peek) {
-                    content(f, t, now: now)
-                }
-                .ignoresSafeArea(edges: .bottom)
-                MapBackPill(title: "Friends") { dismiss() }
-                    .padding(.leading, DS.s16).padding(.top, DS.s8)
-            }
-        }
-        .background(DS.page.ignoresSafeArea())
-        .toolbar(.hidden, for: .navigationBar)
-        .task(id: s.trip ?? "") { if let id = s.trip { await routes.load([id]) } }
+        return stops
     }
 
     private func plainPage(_ f: Friend, _ t: FriendTravelSeen?, now: Date) -> some View {
@@ -93,6 +97,7 @@ struct FriendDetailView: View {
 
     private func content(_ f: Friend, _ t: FriendTravelSeen?, now: Date) -> some View {
         VStack(alignment: .leading, spacing: DS.s16) {
+            if let t { tripMap(f, t, now: now) }
             header(f, t?.state)
             if let t { tripPart(f, t, now: now) }
             actions(f, t?.state)

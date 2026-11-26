@@ -1,9 +1,10 @@
 import MapKit
 import SwiftUI
 
-// Friends (0.31, "Map first"): the map behind Friends and a friend's page (friends' faces where they are, ringed in
-// their vehicle's colour, their routes drawn) and the sheet over it (a handle to pull it up or down). The framing is
-// worked out in MapFrame.swift (tested).
+// Friends (0.31, "Map first"): friends' faces where they are, ringed in their vehicle's colour, their routes drawn.
+// (0.40.2) Drawn on the home map, with Friends a sheet over it (as search); `FriendsLiveMap` is left only for the small
+// trip map on a friend's page when Friends was opened away from the home map (Settings). The framing is worked out in
+// MapFrame.swift (tested).
 
 // MARK: the routes
 
@@ -62,7 +63,6 @@ struct FriendsLiveMap: View {
     /// The share of the map's height the sheet covers at the bottom.
     var cover: CGFloat = 0
     var tap: ((String) -> Void)? = nil
-    @ObservedObject private var store = FriendStore.shared
     @State private var camera: MapCameraPosition = .automatic
 
     private var key: String {
@@ -116,91 +116,147 @@ struct FriendsLiveMap: View {
         withAnimation(DS.quick) { camera = .region(region) }
     }
 
-    private func picture(_ p: FriendMapPin) -> some View {
-        FriendAvatar(name: p.name, id: p.id, picture: store.pictures[p.id], size: 42)
-            .padding(3)
-            .background(Circle().fill(DS.surface))
-            .overlay(Circle().stroke(p.ring, lineWidth: 3))
-            .opacity(p.stale ? 0.6 : 1)
-            .dsFloat()
-    }
-
     @ViewBuilder private func face(_ p: FriendMapPin) -> some View {
         if let tap {
-            Button { tap(p.id) } label: { picture(p) }
-                .buttonStyle(DSPressStyle())
-                .accessibilityLabel(p.label)
-                .accessibilityHint("Shows \(p.name)’s page")
+            FriendFace(pin: p, tap: { tap(p.id) })
         } else {
-            picture(p)
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(p.label)
+            FriendFace(pin: p, tap: nil)
         }
     }
 }
 
-// MARK: the sheet
-
-/// A sheet over the map: a handle to pull it up (or tap: "Show more"), its content scrolling inside. `peek` is how
-/// high it stands when down.
-struct MapSheet<Content: View>: View {
-    @Binding var up: Bool
-    let peek: CGFloat
-    @ViewBuilder let content: () -> Content
-    @GestureState private var drag: CGFloat = 0
+/// A friend's face on a map (the home map while Friends is open, or a friend's small trip map): ringed in their
+/// vehicle's colour, faded when their update is old; a button when it can be tapped.
+struct FriendFace: View {
+    let pin: FriendMapPin
+    let tap: (() -> Void)?
+    @ObservedObject private var store = FriendStore.shared
 
     var body: some View {
-        GeometryReader { g in
-            let full: CGFloat = g.size.height
-            let low: CGFloat = min(peek, full * 0.8)
-            let high: CGFloat = full * 0.92
-            let base: CGFloat = up ? high : low
-            let h: CGFloat = min(full, max(low * 0.6, base - drag))
-            sheet(height: h)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+        if let tap {
+            Button(action: tap) { picture }
+                .buttonStyle(DSPressStyle())
+                .accessibilityLabel(pin.label)
+                .accessibilityHint("Shows \(pin.name)’s page")
+        } else {
+            picture
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(pin.label)
         }
     }
 
-    private func sheet(height: CGFloat) -> some View {
-        VStack(spacing: 0) {
-            handle
-            ScrollView {
-                content()
-                    .padding(.horizontal, DS.s16)
-                    .padding(.bottom, DS.s24)
+    private var picture: some View {
+        FriendAvatar(name: pin.name, id: pin.id, picture: store.pictures[pin.id], size: 42)
+            .padding(3)
+            .background(Circle().fill(DS.surface))
+            .overlay(Circle().stroke(pin.ring, lineWidth: 3))
+            .opacity(pin.stale ? 0.6 : 1)
+            .dsFloat()
+    }
+}
+
+// MARK: friends on the home map (0.40.2)
+
+/// (0.40.2) Friends is a sheet over the home map, as search is (0.40): no second map of its own. The sheet says which
+/// friend's page is open (their trip framed on the home map); the home map says which face was tapped (the sheet opens
+/// their page).
+@MainActor
+final class FriendsOnMap: ObservableObject {
+    static let shared = FriendsOnMap()
+    /// The friend whose page is open in the Friends sheet.
+    @Published var focus: String?
+    /// A face tapped on the home map, for the sheet to open.
+    @Published var tapped: String?
+
+    private init() {}
+
+    /// What the home map draws for Friends: every travelling friend (and friends on campus), or with a friend's page
+    /// open and them travelling, just them with where they got on and get off.
+    struct Layer {
+        var pins: [FriendMapPin] = []
+        var stops: [MapStop] = []
+        /// What the map frames.
+        var frame: [GeoPoint] = []
+
+        /// Changes when what is framed changes (a face moving a little doesn't move the map).
+        var key: String {
+            let pts: [String] = frame.map { String(format: "%.3f,%.3f", $0.lat, $0.lon) }
+            return pts.joined(separator: ";")
+        }
+    }
+
+    func layer(now: Date = Date()) -> Layer {
+        if let id = focus, let one = Self.one(id, now: now) { return one }
+        return Self.all(now: now)
+    }
+
+    /// One friend's trip: their face, their route, where they got on and get off.
+    private static func one(_ id: String, now: Date) -> Layer? {
+        let store = FriendStore.shared
+        guard let f = store.book?.friend(id), let t = store.travel[id], TravelAge.freshness(t, now: now) != .gone else { return nil }
+        let s: TravelState = t.state
+        let pts: [GeoPoint] = MapFrame.points(s)
+        guard !pts.isEmpty else { return nil }
+        var out = Layer()
+        if let p = s.pos, let g = MapFrame.point(lat: p.lat, lon: p.lon) {
+            let ring: Color = DS.mode(train: s.isTrain, mode: s.mode, line: s.line ?? "")
+            let stale: Bool = TravelAge.freshness(t, now: now) == .stale
+            out.pins.append(FriendMapPin(id: f.id, name: f.name, point: g, ring: ring, label: "\(f.name), \(TravelWords.summary(s))",
+                                         stale: stale, route: FriendRoutes.shared.route(s)))
+        }
+        if let g = MapFrame.point(lat: s.from.lat, lon: s.from.lon) { out.stops.append(MapStop(id: "from", name: s.from.name, point: g)) }
+        if let g = MapFrame.point(lat: s.to.lat, lon: s.to.lon) { out.stops.append(MapStop(id: "to", name: s.to.name, point: g)) }
+        out.frame = pts
+        return out
+    }
+
+    /// Travelling friends where they are, and friends on campus at your school (when it's theirs).
+    static func all(now: Date) -> Layer {
+        let store = FriendStore.shared
+        let extras = FriendExtrasStore.shared
+        let routes = FriendRoutes.shared
+        var out = Layer()
+        var seen: Set<String> = []
+        let moving: [FriendTravelSeen] = store.travelling(now: now)
+        for t in moving {
+            let s: TravelState = t.state
+            guard let p = s.pos, let g = MapFrame.point(lat: p.lat, lon: p.lon) else { continue }
+            let name: String = store.name(t.from)
+            let ring: Color = DS.mode(train: s.isTrain, mode: s.mode, line: s.line ?? "")
+            let stale: Bool = TravelAge.freshness(t, now: now) == .stale
+            out.pins.append(FriendMapPin(id: t.from, name: name, point: g, ring: ring, label: "\(name), \(TravelWords.summary(s))",
+                                         stale: stale, route: routes.route(s)))
+            seen.insert(t.from)
+        }
+        let school: GeoPoint = Place.school.point
+        let mine: String = RoleWords.current.school
+        if MapFrame.valid(school) {
+            let campus: [FriendExtrasStore.OnCampus] = extras.onCampus(now: now).filter { !seen.contains($0.id) }
+            for (i, c) in campus.enumerated() where c.state.school == nil || c.state.school == mine {
+                // side by side, a little apart, so each face can be tapped
+                let g = GeoPoint(lat: school.lat, lon: school.lon + Double(i) * 0.0012)
+                let name: String = store.name(c.id)
+                out.pins.append(FriendMapPin(id: c.id, name: name, point: g, ring: DS.accent, label: "\(name), \(CampusWords.since(c.state))",
+                                             stale: false, route: []))
             }
-            .scrollBounceBehavior(.basedOnSize)
         }
-        .frame(height: height)
-        .frame(maxWidth: .infinity)
-        .background(
-            UnevenRoundedRectangle(topLeadingRadius: 28, bottomLeadingRadius: 0, bottomTrailingRadius: 0, topTrailingRadius: 28, style: .continuous)
-                .fill(DS.page)
-                .shadow(color: .black.opacity(0.18), radius: 12, y: -2)
-                .ignoresSafeArea(edges: .bottom)
-        )
-        .animation(DS.move, value: up)
+        var frame: [GeoPoint] = out.pins.map(\.point)
+        for t in moving { frame += MapFrame.points(t.state) }
+        out.frame = frame
+        return out
     }
+}
 
-    private var handle: some View {
-        Button {
-            up.toggle()
-        } label: {
-            Capsule().fill(DS.legQuiet).frame(width: 40, height: 5)
-                .frame(maxWidth: .infinity, minHeight: 24)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .gesture(
-            DragGesture(minimumDistance: 4)
-                .updating($drag) { v, s, _ in s = v.translation.height }
-                .onEnded { v in
-                    let d: CGFloat = v.predictedEndTranslation.height
-                    if d < -60 { up = true } else if d > 60 { up = false }
-                }
-        )
-        .accessibilityLabel(up ? "Show less" : "Show more")
-        .accessibilityHint("Pulls the sheet over the map up or down")
+/// (0.40.2) The Friends sheet is over the home map (its faces drawn there): a friend's page then shows their trip on
+/// that map, not a map of its own. Off (Friends opened from Settings): a small map of their trip on the page.
+private struct FriendsOverMapKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var friendsOverMap: Bool {
+        get { self[FriendsOverMapKey.self] }
+        set { self[FriendsOverMapKey.self] = newValue }
     }
 }
 
@@ -259,27 +315,5 @@ struct FriendsTile: View {
         .frame(maxWidth: .infinity, minHeight: 60)
         .background(DS.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .contentShape(Rectangle())
-    }
-}
-
-/// "‹ Friends": back to the list, floating over the map.
-struct MapBackPill: View {
-    let title: String
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 4) {
-                Image(systemName: "chevron.left").font(.subheadline.weight(.bold))
-                Text(title).font(DS.subStrong)
-            }
-            .foregroundStyle(DS.text)
-            .padding(.horizontal, 14)
-            .frame(minHeight: DS.hit)
-            .background(DS.surface, in: Capsule())
-            .dsFloat()
-        }
-        .buttonStyle(DSPressStyle())
-        .accessibilityLabel("Back to \(title)")
     }
 }
