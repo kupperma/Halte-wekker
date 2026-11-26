@@ -6,7 +6,8 @@ import SwiftUI
 struct NearbyPick: Identifiable, Hashable { let id: String }
 
 /// "Fastest trip, zoomed out" (0.42, concept N5): Fastest trip's overview. The map zooms out to the stops you could
-/// walk to (1 km, wider while fewer than 3 have a way, framed on the useful ones); each stop a circle coloured by when
+/// walk to (one plan from where you are, walking up to 1.6 km, 3 km while fewer than 3 have a way, framed on the
+/// useful ones; 0.42.2: circles that would overlap as one, grey dots for stops to tap and check); each stop a circle coloured by when
 /// you'd be there (green the earliest … red the latest, its minutes inside), its ring how sure (solid: almost always
 /// on time, dashed: often late, thin: no live times to go by). Leave now / in 10 / in 20 min. Under it the stops,
 /// tagged Fastest, Surest and Slower. Tap one: its times, the whole trip, what's on the line now, and Go.
@@ -18,6 +19,8 @@ struct NearbyOverview: View {
     @StateObject private var line = NearbyLineModel()
     @State private var camera: MapCameraPosition = .automatic
     @State private var picked: NearbyPick?
+    /// The map's metres per point (for circles that would overlap: `Nearby.merge`).
+    @State private var metresPerPoint: Double = 3
     /// Show Fastest trip's own cards.
     let onClose: () -> Void
 
@@ -39,7 +42,7 @@ struct NearbyOverview: View {
         GeometryReader { g in
             let mapH: CGFloat = max(240, g.size.height * 0.46)
             VStack(spacing: 0) {
-                mapView
+                mapView(height: mapH + 24)
                     .frame(height: mapH + 24)               // (the last 24 under the list's round corners)
                 panel
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -95,28 +98,54 @@ struct NearbyOverview: View {
         let minutes: String
         let ring: Nearby.Ring
         let spoken: String
+        var more = 0                    // other stops drawn under this one (too close to tell apart)
     }
 
+    /// The stops' circles: coloured by when you'd be there, the ones that would overlap at this zoom as one (the
+    /// earliest there, `Nearby.merge`), and grey dots for the stops not planned from (tap one to check it), left out
+    /// under a circle.
     private func marks() -> [Mark] {
         let span: (earliest: Date, latest: Date)? = store.arrivals
-        var out: [Mark] = []
+        var ready: [String: Mark] = [:]
+        var pins: [Nearby.Pin] = []
+        var dots: [Mark] = []
         for w in store.ways {
             let g: Nearby.Group = w.group
             let c = CLLocationCoordinate2D(latitude: g.lat, longitude: g.lon)
             let name: String = Fmt.stop(g.name)
             if let o = store.option(w.id), let s = span {
                 let f: Double = Nearby.fraction(o.arrival, earliest: s.earliest, latest: s.latest)
+                let fill: Color = o.ranked ? Color(hex: Nearby.color(f)) : DS.legQuiet
                 let mins: String = String(Fmt.hhmm(o.arrival).suffix(2))
                 let spoken: String = "\(name): there at \(Fmt.hhmm(o.arrival))" + (o.sure.map { ", on time \($0.percent)%" } ?? "")
-                out.append(Mark(id: w.id, name: name, coordinate: c, state: .ready, fill: Color(hex: Nearby.color(f)),
-                                minutes: mins, ring: Nearby.ring(o.sure), spoken: spoken))
+                ready[w.id] = Mark(id: w.id, name: name, coordinate: c, state: .ready, fill: fill, minutes: mins,
+                                   ring: o.ranked ? Nearby.ring(o.sure) : .neutral, spoken: spoken)
+                pins.append(Nearby.Pin(id: w.id, lat: g.lat, lon: g.lon, arrival: o.arrival))
             } else {
-                let st: NearbyStopMark.Look = w.asked ? .none : .pending
-                out.append(Mark(id: w.id, name: name, coordinate: c, state: st, fill: DS.legQuiet, minutes: "", ring: .neutral,
-                                spoken: w.asked ? "\(name): no way from here in this time" : "\(name): asking"))
+                let st: NearbyStopMark.Look
+                let spoken: String
+                switch w.check {
+                case .asking: st = .pending; spoken = "\(name): asking"
+                case .done: st = .none; spoken = "\(name): no way from here in this time"
+                case .unasked: st = .unasked; spoken = "\(name): not checked. Tap to check it"
+                case .failed: st = .unasked; spoken = "\(name): couldn’t check it. Tap to try again"
+                }
+                dots.append(Mark(id: w.id, name: name, coordinate: c, state: st, fill: DS.legQuiet, minutes: "", ring: .neutral, spoken: spoken))
             }
         }
-        return out
+        let within: Double = Nearby.pinPoints * max(0.1, metresPerPoint)
+        var out: [Mark] = []
+        for cl in Nearby.merge(pins, within: within) {
+            guard var m = ready[cl.id] else { continue }
+            m.more = cl.members.count - 1
+            out.append(m)
+        }
+        let circles: [GeoPoint] = out.map { GeoPoint(lat: $0.coordinate.latitude, lon: $0.coordinate.longitude) }
+        let free: [Mark] = dots.filter { d in
+            let p = GeoPoint(lat: d.coordinate.latitude, lon: d.coordinate.longitude)
+            return !circles.contains { Geo.metres($0, p) < within * 0.6 }
+        }
+        return free + out
     }
 
     private var lineColor: Color { DS.mode(train: line.routeTrain, line: line.routeLine) }
@@ -134,7 +163,7 @@ struct NearbyOverview: View {
         line.coming.compactMap { c in c.spot.map { Spot(coming: c, coordinate: $0.coordinate) } }
     }
 
-    private var mapView: some View {
+    private func mapView(height: CGFloat) -> some View {
         let ms: [Mark] = marks()
         let following: Bool = picked != nil
         return Map(position: $camera) {
@@ -148,11 +177,11 @@ struct NearbyOverview: View {
             ForEach(ms) { m in
                 Annotation(m.name, coordinate: m.coordinate, anchor: .center) {
                     Button { picked = NearbyPick(id: m.id) } label: {
-                        NearbyStopMark(state: m.state, fill: m.fill, text: m.minutes, ring: m.ring, selected: picked?.id == m.id)
+                        NearbyStopMark(state: m.state, fill: m.fill, text: m.minutes, ring: m.ring, selected: picked?.id == m.id, more: m.more)
                     }
                     .buttonStyle(.plain)
-                    .disabled(m.state != .ready)
-                    .accessibilityLabel(m.spoken)
+                    .disabled(m.state == .pending)
+                    .accessibilityLabel(m.more > 0 ? m.spoken + ", and \(m.more) more stop\(m.more == 1 ? "" : "s") close by" : m.spoken)
                 }
                 .annotationTitles(.hidden)
             }
@@ -164,6 +193,11 @@ struct NearbyOverview: View {
             }
         }
         .mapStyle(.standard(pointsOfInterest: .excludingAll))
+        .onMapCameraChange(frequency: .onEnd) { ctx in
+            let h: Double = max(1, Double(height))
+            let m: Double = ctx.region.span.latitudeDelta * 111_320 / h
+            if m.isFinite && m > 0 { metresPerPoint = m }
+        }
     }
 
     private var youDot: some View {
@@ -304,16 +338,17 @@ struct NearbyOverview: View {
         return km == km.rounded() ? "\(Int(km)) km" : String(format: "%.1f km", km)
     }
 
+    /// What the line over the list says (`Nearby.statusLine`): never "No bus or train" while the planner didn't
+    /// answer, or while your trip has a way.
+    private var statusText: (text: String, asking: Bool)? {
+        var sit: Nearby.Situation = store.situation
+        sit.located = here != nil
+        return Nearby.statusLine(sit, range: rangeWord)
+    }
+
     @ViewBuilder private var status: some View {
-        if here == nil {
-            statusLine(spinner: true, "Finding where you are…")
-        } else if store.failed {
-            statusLine(spinner: false, "Couldn’t get the stops around you just now. Your trip has the fastest way.")
-        } else if store.busy {
-            let waiting: Int = store.ways.filter { !$0.asked }.count
-            statusLine(spinner: true, waiting > 0 ? "Asking \(waiting) stop\(waiting == 1 ? "" : "s") within \(rangeWord)…" : "Looking for stops within \(rangeWord)…")
-        } else if store.options.isEmpty {
-            statusLine(spinner: false, "No bus or train from the stops within \(rangeWord) in this time. Try later, or see your trip.")
+        if let line = statusText {
+            statusLine(spinner: line.asking, line.text)
         }
     }
 
@@ -331,12 +366,20 @@ struct NearbyOverview: View {
         var seen = Set<String>()
         let lines: [Ride] = deps.map(\.first).filter { seen.insert($0.line).inserted }
         let sureText: String = o.sure.map { s in s.source == .estimate ? "about \(s.percent)%" : "on time \(s.percent)%" } ?? ""
-        let spoken: String = "\(name), \(tg.map(\.rawValue).joined(separator: ", ")), \(o.walk) minutes walk, leaves \(Fmt.hhmm(o.departure)), there \(Fmt.hhmm(o.arrival)), \(sureText)"
+        // (0.42.2) a way overnight or much later: with its day, no tags
+        let day: String? = Nearby.dayWord(o.arrival, now: Date(), calendar: Calendar.current)
+        let arriveText: String = (day.map { $0 + " " } ?? "") + Fmt.hhmm(o.arrival)
+        let spoken: String = "\(name), \(tg.map(\.rawValue).joined(separator: ", ")), \(o.walk) minutes walk, leaves \(Fmt.hhmm(o.departure)), there \(arriveText), \(sureText)"
         return HStack(alignment: .center, spacing: DS.s12) {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
                     Text(name).font(DS.bodyStrong).foregroundStyle(DS.text).lineLimit(1).minimumScaleFactor(0.8)
                     ForEach(tg, id: \.self) { NearbyTagChip(tag: $0) }
+                    if !o.ranked {
+                        Text("later").font(DS.caption).foregroundStyle(DS.secondary)
+                            .padding(.horizontal, 7).padding(.vertical, 2)
+                            .background(DS.surface3, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    }
                 }
                 HStack(spacing: 4) {
                     Image(systemName: "figure.walk").font(.caption.weight(.semibold)).foregroundStyle(DS.secondary)
@@ -350,7 +393,10 @@ struct NearbyOverview: View {
             }
             Spacer(minLength: 4)
             VStack(alignment: .trailing, spacing: 2) {
-                Text(Fmt.hhmm(o.arrival)).font(DS.bigNumber).monospacedDigit().foregroundStyle(DS.text)
+                if let d = day {
+                    Text(d).font(DS.footnoteStrong).foregroundStyle(DS.secondary)
+                }
+                Text(Fmt.hhmm(o.arrival)).font(DS.bigNumber).monospacedDigit().foregroundStyle(o.ranked ? DS.text : DS.secondary)
                 if !sureText.isEmpty {
                     Text(sureText).font(DS.footnote).monospacedDigit().foregroundStyle(DS.secondary)
                 }
@@ -366,15 +412,17 @@ struct NearbyOverview: View {
     }
 }
 
-/// A stop on the map: its circle in its arrival colour with the minutes, and the ring for how sure; a small grey dot
-/// while it's asked, a smaller one when there's no way from it.
+/// A stop on the map: its circle in its arrival colour with the minutes, and the ring for how sure (a small "+1" when
+/// another stop close by is drawn under it); a small grey dot while it's asked, a grey dot for a stop not planned from
+/// yet (tap it to check), a smaller one when there's no way from it.
 struct NearbyStopMark: View {
-    enum Look: Equatable { case ready, pending, none }
+    enum Look: Equatable { case ready, pending, unasked, none }
     let state: Look
     let fill: Color
     let text: String
     let ring: Nearby.Ring
     var selected = false
+    var more = 0
 
     var body: some View {
         ZStack {
@@ -384,9 +432,19 @@ struct NearbyStopMark: View {
                 Text(text).font(.system(size: 13, weight: .heavy, design: .rounded)).monospacedDigit()
                     .foregroundStyle(Color(hex: 0x0B0C0E))
                 ringView
+                if more > 0 {
+                    Text("+\(more)").font(.system(size: 10, weight: .bold, design: .rounded))
+                        .foregroundStyle(DS.text)
+                        .padding(.horizontal, 4).padding(.vertical, 1)
+                        .background(DS.surface, in: Capsule())
+                        .offset(x: 17, y: -17)
+                }
             case .pending:
                 Circle().fill(DS.surface3).frame(width: 18, height: 18)
                 Circle().stroke(DS.legQuiet, lineWidth: 2).frame(width: 18, height: 18)
+            case .unasked:
+                Circle().fill(DS.legQuiet.opacity(0.7)).frame(width: 14, height: 14)
+                    .overlay(Circle().stroke(DS.surface, lineWidth: 1.5))
             case .none:
                 Circle().fill(DS.legQuiet.opacity(0.7)).frame(width: 10, height: 10)
             }

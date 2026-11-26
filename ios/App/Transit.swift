@@ -379,6 +379,52 @@ enum Transit {
         return trips.isEmpty ? nil : trips
     }
 
+    /// (0.42.2) One page of the planner's ways, as "Fastest trip, zoomed out" asks: from `from` (where you are, with a
+    /// first walk of up to `preTransit` seconds: the planner itself walks to every stop around; or a stop) to `to`,
+    /// at least `count` ways over `window` seconds of departures from `at`, or the page after (`cursor`, the answer's
+    /// `nextPageCursor`). Not kept (the screen keeps its own answers); with its size, for the field log. A failure says
+    /// so (`failed`), apart from an answer with no ways.
+    struct PlanPage: Sendable {
+        let trips: [DoorTrip]
+        let next: String?
+        let bytes: Int
+    }
+
+    enum PlanOutcome: Sendable {
+        case page(PlanPage)
+        case failed(String)
+    }
+
+    static func planPage(from: String, to: String, at: Date, count: Int, maxTransfers: Int, preTransit: Int?,
+                         window: Int?, cursor: String?) async -> PlanOutcome {
+        var q: [URLQueryItem] = [.init(name: "fromPlace", value: from), .init(name: "toPlace", value: to),
+                                 .init(name: "numItineraries", value: String(count)), .init(name: "maxTransfers", value: String(maxTransfers)),
+                                 .init(name: "time", value: iso.string(from: PlanMemo.minute(at))),
+                                 .init(name: "detailedTransfers", value: "false")]
+        if let p = preTransit { q.append(.init(name: "maxPreTransitTime", value: String(p))) }
+        if let w = window { q.append(.init(name: "searchWindow", value: String(w))) }
+        if let c = cursor, !c.isEmpty { q.append(.init(name: "pageCursor", value: c)) }
+        if let v = HabitStore.pedestrianSpeed() { q.append(.init(name: "pedestrianSpeed", value: String(format: "%.1f", v))) }
+        let data: Data
+        do {
+            data = try await raw("/v5/plan", q)
+        } catch let e as URLError {
+            switch e.code {
+            case .timedOut: return .failed("timed out")
+            case .cancelled: return .failed("cancelled")
+            case .badServerResponse: return .failed("busy")
+            default: return .failed("no answer")
+            }
+        } catch {
+            return .failed(error is CancellationError ? "cancelled" : "no answer")
+        }
+        guard let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let its = json["itineraries"] as? [[String: Any]] else { return .failed("no answer") }
+        let trips: [DoorTrip] = its.compactMap(parseItinerary)
+        Task { @MainActor in LiveDelays.shared.note(trips) }          // how late each line is running now
+        return .page(PlanPage(trips: trips, next: json["nextPageCursor"] as? String, bytes: data.count))
+    }
+
     static func plan(from: Place, to: Place, modes: String?, at: Date, count: Int, maxTransfers: Int, arriveBy: Bool = false) async -> [DoorTrip] {
         await withTaskGroup(of: [DoorTrip].self) { g in
             for a in PlanMemo.unique(from.ids) { for b in PlanMemo.unique(to.ids) {

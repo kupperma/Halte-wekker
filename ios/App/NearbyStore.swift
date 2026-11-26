@@ -1,11 +1,8 @@
 import CoreLocation
 import Foundation
 
-/// The stops around you (0.42, "Fastest trip, zoomed out"), each planned to where you're going: what the map stops
-/// answer has within 1 km, wider in steps (1.6, 2.2, 3 km) while fewer than 3 stops have a way; at most 8 stops and 12
-/// plans a step (`Nearby.groups`), every plan through the planner as always (`Transit.plan`: kept 45 s, and the
-/// requests to Transitous go a few at a time and pause on a 429, `Net`). Each stop is drawn as soon as its answer is
-/// in. The whole answer is kept a minute per place, destination and time to leave.
+/// The stops around you drawn on the map (0.42, "Fastest trip, zoomed out"): what the map stops answer has within 1 km
+/// (`Nearby.dotsRadius`), kept ten minutes per spot.
 enum NearbyFetch {
     /// The stops within `radius` of `c` (a square around it), one entry per station; nil when the request failed.
     static func stops(around c: CLLocationCoordinate2D, radius: Double) async -> [Nearby.Stop]? {
@@ -44,17 +41,29 @@ enum NearbyFetch {
     }
 }
 
+/// The ways to the destination from the stops around you (0.42.2). A search is one plan from where you are: the
+/// planner walks to every stop around itself (up to 1.6 km), and its ways are put with the stop each gets on at; a
+/// second plan (the next page, walking up to 3 km) only while fewer than 3 stops have a way, or when the first got no
+/// answer (`Nearby.nextPlan`). The time to leave (now, in 10, in 20) only filters what's in; it asks for the next page
+/// only when that time needs it, a second after the switch. A stop tapped is planned from on its own, one at a time,
+/// with its next departures (`/v6/stoptimes`). At most two requests at once from here, none more while Transitous asks
+/// to slow down. Fastest trip's own ways are always put with their stops. Each search writes one line in the field log.
 @MainActor
 final class NearbyStore: ObservableObject {
+    /// Whether a stop was planned from.
+    enum Check: Equatable { case unasked, asking, done, failed }
+
     /// A stop and its ways to the destination (each first ride with your walk to the stop).
     struct Way: Identifiable {
         let group: Nearby.Group
         var trips: [DoorTrip] = []
-        var asked = false               // its answer is in
+        var check: Check = .unasked
+        var walked: Int? = nil          // the planner's walk from your spot (minutes), from its own ways
+        var seeded = false              // Fastest trip's own way gets on here
         var id: String { group.id }
     }
 
-    /// Your walk to a stop: the planner's minutes, at your own speed (`WalkPlan`), and its length.
+    /// Your walk to a stop: the planner's minutes (or about how long, by the map), at your own speed (`WalkPlan`).
     struct Walk {
         let planned: Int
         let shown: WalkPlan.Shown
@@ -66,91 +75,103 @@ final class NearbyStore: ObservableObject {
     @Published private(set) var ways: [Way] = []
     @Published private(set) var options: [Nearby.Option] = []
     @Published private(set) var tags: [String: [Nearby.Tag]] = [:]
-    @Published private(set) var radius: Double = Nearby.radii[0]
+    @Published private(set) var radius: Double = Nearby.searchRadii[0]
     @Published private(set) var busy = false
-    @Published private(set) var failed = false
+    @Published private(set) var stopsFailed = false
+    @Published private(set) var planFailed = false
+    @Published private(set) var fallback = false
     @Published private(set) var leave: Nearby.Leave = .now
     @Published private(set) var window: Nearby.Window = Nearby.window(.now, now: Date())
     @Published private(set) var here: CLLocation?
+    /// A stop's next departures (`/v6/stoptimes`) of the lines its ways take, for the stop's sheet.
+    @Published private(set) var boards: [String: [BoardDeparture]] = [:]
     private(set) var dest: Place?
+    private var seed: [DoorTrip] = []
     private var best: [String: DoorTrip] = [:]
     private var sures: [String: Nearby.Sure] = [:]
     private var task: Task<Void, Never>?
+    private var switchTask: Task<Void, Never>?
     private var startedAt: Date?
+    // the search's plans: how many went, the next page, whether the last got an answer
+    private var plansDone = 0
+    private var cursor: String?
+    private var lastFailed = false
+    // the stops tapped are planned one at a time
+    private var lazyChain: Task<Void, Never>?
+    private var boardAt: [String: Date] = [:]
+    // at most `Nearby.maxConcurrent` requests from here at once
+    private var inFlight = 0
+    private var waiting: [CheckedContinuation<Void, Never>] = []
 
-    private struct Kept { let at: Date; let ways: [Way]; let radius: Double }
-    private static var kept: [String: Kept] = [:]
-
-    /// At most this many stops and plans in all, over the wider looks too.
-    static let groupsMax = 12
-    static let plansMax = 20
+    /// Asked again after this long on screen.
+    static let refreshAfter: TimeInterval = 300
 
     // MARK: asking
 
     /// Look around `here` for ways to `dest` (again only when you've moved 250 m, it's another destination, or it's a
-    /// minute and a half old). `seed`: the trips Fastest trip has, put with their stops.
-    func open(here h: CLLocation, dest d: Place, seed: [DoorTrip]) {
-        let same: Bool = dest?.key == d.key && here.map { $0.distance(from: h) < 250 } == true
-            && (startedAt.map { Date().timeIntervalSince($0) < 90 } ?? false)
-        if same {
-            absorb(seed)
-            return
-        }
+    /// few minutes old). `seed`: the trips Fastest trip has, put with their stops.
+    func open(here h: CLLocation, dest d: Place, seed s: [DoorTrip]) {
+        let near: Bool = here.map { $0.distance(from: h) < 250 } ?? false
+        let same: Bool = dest?.key == d.key && near && (startedAt.map { Date().timeIntervalSince($0) < Self.refreshAfter } ?? false)
+        absorb(s)
+        if same { return }
+        let fresh: Bool = dest?.key != d.key || !near
         here = h; dest = d
-        start(seed: seed)
+        start(fresh: fresh)
     }
 
-    /// The switch: leave now, in 10 or in 20 minutes.
+    /// The switch: leave now, in 10 or in 20 minutes. What's in is filtered at once; a second later (the last switch
+    /// counts) the next page is asked for when that time needs it. Nothing on its way is stopped.
     func choose(_ l: Nearby.Leave) {
         guard l != leave else { return }
         leave = l
-        start(seed: [])
+        window = Nearby.window(l, now: Date())
+        recompute()
+        switchTask?.cancel()
+        switchTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            guard !Task.isCancelled else { return }
+            await self?.morePagesIfNeeded()
+        }
     }
 
     func stop() {
         task?.cancel(); task = nil
+        switchTask?.cancel(); switchTask = nil
         busy = false
     }
 
-    /// Once a minute on screen: the window moves on with the clock ("Leave now" is now), and after three minutes
-    /// it asks again.
+    /// Once a minute on screen: the window moves on with the clock ("Leave now" is now), and after a few minutes it
+    /// asks again (what's in stays meanwhile).
     func tick() {
         guard here != nil, dest != nil, !busy else { return }
-        if let s = startedAt, Date().timeIntervalSince(s) > 180 {
-            if let k = cacheKey() { Self.kept[k] = nil }
-            start(seed: [], keep: true)
-            return
-        }
         window = Nearby.window(leave, now: Date())
         recompute()
+        if let s = startedAt, Date().timeIntervalSince(s) > Self.refreshAfter { start(fresh: false) }
     }
 
-    private func cacheKey() -> String? {
-        guard let h = here, let d = dest else { return nil }
-        let c = h.coordinate
-        return "\(d.key)|\(leave.rawValue)|\(Int((c.latitude * 500).rounded())),\(Int((c.longitude * 300).rounded()))"
-    }
-
-    /// `keep`: what's on screen stays while it asks again (the same place, destination and time to leave).
-    private func start(seed: [DoorTrip], keep: Bool = false) {
-        task?.cancel()
+    /// `fresh`: another place or destination (what's shown goes); else the same, asked again (what's shown stays).
+    private func start(fresh: Bool) {
         guard let h = here, let d = dest else { return }
+        task?.cancel()
         window = Nearby.window(leave, now: Date())
         startedAt = Date()
-        failed = false
+        stopsFailed = false
+        planFailed = false
+        plansDone = 0
+        cursor = nil
+        lastFailed = false
         sures = [:]
-        if let k = cacheKey(), let hit = Self.kept[k], Date().timeIntervalSince(hit.at) < 60 {
-            ways = hit.ways; radius = hit.radius
-            absorb(leave == .now ? seed : [])
-            busy = false
-            return
+        if fresh {
+            ways = []
+            boards = [:]
+            boardAt = [:]
+            radius = Nearby.searchRadii[0]
         }
-        if !keep { ways = []; radius = Nearby.radii[0] }
         busy = true
+        absorb(seed)
         recompute()
-        let w: Nearby.Window = window
-        let seeded: [DoorTrip] = leave == .now ? seed : []
-        task = Task { [weak self] in await self?.look(from: h, to: d, window: w, seed: seeded) }
+        task = Task { [weak self] in await self?.search(from: h, to: d) }
     }
 
     /// Where the planner is asked to go: the destination's stop, or its spot when it has several.
@@ -160,157 +181,284 @@ final class NearbyStore: ObservableObject {
         return "\(d.coordinate.latitude),\(d.coordinate.longitude)"
     }
 
-    private func look(from h: CLLocation, to d: Place, window w: Nearby.Window, seed: [DoorTrip]) async {
-        var r: Double = Nearby.radii[0]
-        var asked = Set<String>()
-        var plans = 0
-        var first = true
-        while !Task.isCancelled {
-            guard let stops = await NearbyFetch.stops(around: h.coordinate, radius: r) else {
-                if ways.isEmpty { failed = true }
-                break
+    private static func spot(_ h: CLLocation) -> String { "\(h.coordinate.latitude),\(h.coordinate.longitude)" }
+
+    private var cooling: Bool { Net.Polite.transitous.coolingLeft != nil }
+
+    /// The stops with a way in what's in (for the second page).
+    private var usefulStops: Int { ways.filter { !$0.trips.isEmpty }.count }
+
+    private func search(from h: CLLocation, to d: Place) async {
+        let began = Date()
+        var bytes = 0, plans = 0, pages = 0, failed = 0
+        await enter()
+        let stops: [Nearby.Stop]? = await NearbyFetch.stops(around: h.coordinate, radius: Nearby.dotsRadius)
+        exit()
+        guard !Task.isCancelled else { return }
+        if let stops {
+            for g in Nearby.groups(stops, within: Nearby.dotsRadius) where !ways.contains(where: { $0.id == g.id }) {
+                ways.append(Way(group: g))
             }
-            guard !Task.isCancelled else { return }
-            var gs: [Nearby.Group] = Nearby.groups(stops, within: r, skip: asked)
-            gs = Array(gs.prefix(max(0, Self.groupsMax - asked.count)))
-            var room: Int = Self.plansMax - plans
-            gs = gs.compactMap { g -> Nearby.Group? in
-                guard room > 0 else { return nil }
-                var g2 = g
-                g2.ids = Array(g.ids.prefix(room))
-                room -= g2.ids.count
-                return g2
-            }
-            radius = max(radius, r)
-            for g in gs {
-                if let i = ways.firstIndex(where: { $0.id == g.id }) {
-                    ways[i] = Way(group: g, trips: ways[i].trips, asked: ways[i].asked)
-                } else {
-                    ways.append(Way(group: g))
-                }
-            }
-            if first { absorb(seed); first = false }
-            recompute()
-            await plan(gs, to: d, window: w)
-            guard !Task.isCancelled else { return }
-            asked.formUnion(gs.map(\.id))
-            plans += gs.reduce(0) { $0 + $1.ids.count }
-            guard plans < Self.plansMax, asked.count < Self.groupsMax,
-                  let next = Nearby.nextRadius(after: r, useful: options.count) else { break }
-            r = next
+            absorb(seed)
+        } else {
+            stopsFailed = true
         }
+        recompute()
+        let from: String = Self.spot(h)
+        let to: String = Self.target(d)
+        let at: Date = window.leave.addingTimeInterval(-60)
+        while !Task.isCancelled,
+              let r = Nearby.nextPlan(done: plansDone, useful: usefulStops, hasCursor: cursor != nil, lastFailed: lastFailed, cooling: cooling) {
+            let page: String? = lastFailed ? nil : cursor
+            let outcome: Transit.PlanOutcome = await askPage(from: from, to: to, at: at, radius: r, cursor: page)
+            guard !Task.isCancelled else { return }
+            if page != nil { pages += 1 } else { plans += 1 }
+            if case .page(let p) = outcome { bytes += p.bytes } else { failed += 1 }
+        }
+        guard !Task.isCancelled else { return }
         busy = false
-        if let k = cacheKey(), !ways.isEmpty {
-            Self.kept[k] = Kept(at: Date(), ways: ways, radius: radius)
-            if Self.kept.count > 12 { Self.kept = Self.kept.filter { Date().timeIntervalSince($0.value.at) < 120 } }
-        }
+        planFailed = failed > 0
+        recompute()
+        var note: [String] = []
+        if cooling { note.append("cooling") }
+        if stopsFailed { note.append("no stops") }
+        if !seed.isEmpty { note.append("seed \(seed.count)") }
+        let line: String = Nearby.logLine(radius: radius, stops: ways.count, plans: plans, pages: pages, ways: options.count, failed: failed,
+                                          seconds: Date().timeIntervalSince(began), bytes: bytes, note: note.joined(separator: " · "))
+        FieldLog.shared.add(.net, line)
     }
 
-    /// Every stop's plans at once; each stop drawn as its answers come in.
-    private func plan(_ gs: [Nearby.Group], to d: Place, window w: Nearby.Window) async {
-        let to: String = Self.target(d)
-        var jobs: [(group: String, id: String, at: Date)] = []
-        var left: [String: Int] = [:]
-        for g in gs {
-            let walk: Walk = self.walk(g)
-            let at: Date = max(Date().addingTimeInterval(-60), w.leave.addingTimeInterval(Double(walk.counted) * 60 - 60))
-            for id in g.ids { jobs.append((g.id, id, at)); left[g.id, default: 0] += 1 }
+    /// One plan of the search (within the two at once); its ways put with their stops.
+    private func askPage(from: String, to: String, at: Date, radius r: Double, cursor page: String?) async -> Transit.PlanOutcome {
+        plansDone += 1
+        await enter()
+        let pre: Int = Nearby.preTransit(radius: r)
+        let outcome: Transit.PlanOutcome = await Transit.$urgent.withValue(true) { () async -> Transit.PlanOutcome in
+            await Transit.planPage(from: from, to: to, at: at, count: Nearby.itineraries, maxTransfers: 3,
+                                   preTransit: pre, window: Nearby.searchWindow, cursor: page)
         }
-        let all: [(group: String, id: String, at: Date)] = jobs
-        await Transit.$urgent.withValue(true) {
-            await withTaskGroup(of: (String, [DoorTrip]).self) { tg in
-                for j in all {
-                    tg.addTask {
-                        let found: [DoorTrip] = await Transit.plan(from: j.id, to: to, modes: nil, at: j.at, count: 5, maxTransfers: 3)
-                        return (j.group, found)
-                    }
+        exit()
+        guard !Task.isCancelled else { return outcome }
+        switch outcome {
+        case .page(let p):
+            lastFailed = false
+            cursor = p.next
+            radius = max(radius, r)
+            for t in p.trips { put(t, planned: nil) }
+        case .failed:
+            lastFailed = true
+        }
+        recompute()
+        return outcome
+    }
+
+    /// After a switch: the next page, when fewer than 3 stops have a way for that time and the search has a plan left.
+    private func morePagesIfNeeded() async {
+        guard !busy, let h = here, let d = dest else { return }
+        let useful: Int = options.filter(\.ranked).count
+        guard let r = Nearby.nextPlan(done: plansDone, useful: useful, hasCursor: cursor != nil, lastFailed: lastFailed, cooling: cooling) else { return }
+        let began = Date()
+        let page: String? = lastFailed ? nil : cursor
+        busy = true
+        let outcome: Transit.PlanOutcome = await askPage(from: Self.spot(h), to: Self.target(d), at: window.leave.addingTimeInterval(-60),
+                                                         radius: r, cursor: page)
+        busy = false
+        var bytes = 0, failed = 0
+        if case .page(let p) = outcome { bytes = p.bytes } else { failed = 1 }
+        planFailed = planFailed || failed > 0
+        recompute()
+        let line: String = Nearby.logLine(radius: radius, stops: ways.count, plans: page == nil ? 1 : 0, pages: page == nil ? 0 : 1,
+                                          ways: options.count, failed: failed, seconds: Date().timeIntervalSince(began), bytes: bytes,
+                                          note: "after the switch to \(leave.title.lowercased())")
+        FieldLog.shared.add(.net, line)
+    }
+
+    private func enter() async {
+        if inFlight < Nearby.maxConcurrent { inFlight += 1; return }
+        await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in waiting.append(c) }
+    }
+
+    private func exit() {
+        if waiting.isEmpty { inFlight = max(0, inFlight - 1); return }
+        waiting.removeFirst().resume()          // the place goes on to the next
+    }
+
+    // MARK: a stop tapped
+
+    /// The stop's sheet: its own plan when the search had no way from it (one stop at a time, not while Transitous
+    /// asks to slow down), and its next departures of the lines its ways take (`/v6/stoptimes`, kept a minute).
+    func more(_ id: String) async {
+        guard let i = ways.firstIndex(where: { $0.id == id }), dest != nil else { return }
+        let needsPlan: Bool = ways[i].trips.isEmpty && (ways[i].check == .unasked || ways[i].check == .failed)
+        if needsPlan { ways[i].check = .asking }
+        let before: Task<Void, Never>? = lazyChain
+        let job = Task { [weak self] in
+            await before?.value
+            await self?.check(id, plan: needsPlan)
+        }
+        lazyChain = job
+        await job.value
+    }
+
+    private func check(_ id: String, plan: Bool) async {
+        guard let d = dest, let i0 = ways.firstIndex(where: { $0.id == id }), let first = ways[i0].group.ids.first else { return }
+        let began = Date()
+        var bytes = 0
+        var failed = false
+        if plan {
+            if cooling {
+                failed = true
+            } else {
+                let walk: Walk = self.walk(ways[i0].group)
+                let at: Date = Nearby.planAt(window, walk: walk.planned, now: Date())
+                let to: String = Self.target(d)
+                await enter()
+                let outcome: Transit.PlanOutcome = await Transit.$urgent.withValue(true) { () async -> Transit.PlanOutcome in
+                    await Transit.planPage(from: first, to: to, at: at, count: 5, maxTransfers: 3,
+                                           preTransit: nil, window: nil, cursor: nil)
                 }
-                for await (gid, found) in tg {
-                    guard !Task.isCancelled else { return }
-                    left[gid, default: 1] -= 1
-                    let done: Bool = (left[gid] ?? 0) <= 0
-                    await self.take(found, from: gid, done: done)
+                exit()
+                switch outcome {
+                case .page(let p):
+                    bytes += p.bytes
+                    for t in p.trips { put(t, planned: id) }
+                case .failed:
+                    failed = true
                 }
             }
+            if let i = ways.firstIndex(where: { $0.id == id }), ways[i].check == .asking { ways[i].check = failed ? .failed : .done }
+            recompute()
+        }
+        var boardCount: Int? = nil
+        if !cooling, let i = ways.firstIndex(where: { $0.id == id }), !ways[i].trips.isEmpty,
+           boardAt[id].map({ Date().timeIntervalSince($0) > 60 }) ?? true {
+            let walk: Walk = self.walk(ways[i].group)
+            let from: Date = Nearby.planAt(window, walk: walk.counted, now: Date())
+            await enter()
+            let all: [BoardDeparture] = await Transit.$urgent.withValue(true) { () async -> [BoardDeparture] in
+                await Transit.board(stopIds: [first], from: from, n: 16)
+            }
+            exit()
+            boardAt[id] = Date()
+            let trips: [DoorTrip] = ways.first { $0.id == id }?.trips ?? []
+            boards[id] = Self.sameWay(all, as: trips)
+            boardCount = boards[id]?.count
+        }
+        let n: Int = departures(id).count
+        FieldLog.shared.add(.net, Nearby.stopLogLine(planned: plan, failed: failed, ways: n, board: boardCount,
+                                                      seconds: Date().timeIntervalSince(began), bytes: bytes))
+    }
+
+    /// The departures of a board that go the way the stop's ways go: their lines and directions, not one of them.
+    private static func sameWay(_ all: [BoardDeparture], as trips: [DoorTrip]) -> [BoardDeparture] {
+        let firsts: [Ride] = trips.map(\.first)
+        let taken: Set<String> = Set(firsts.map(\.tripId))
+        let lines: Set<String> = Set(firsts.map { "\($0.name)|\($0.headsign)" })
+        let bare: Set<String> = Set(firsts.filter { $0.headsign.isEmpty }.map(\.name))
+        return all.filter { (b: BoardDeparture) -> Bool in
+            guard !b.cancelled, !taken.contains(b.tripId) else { return false }
+            return lines.contains("\(b.line)|\(b.headsign)") || bare.contains(b.line)
         }
     }
 
-    /// The detail sheet: more of a stop's departures (six from when you can be there).
-    func more(_ id: String) async {
-        guard let way = ways.first(where: { $0.id == id }), let d = dest else { return }
-        let walk: Walk = self.walk(way.group)
-        let at: Date = max(Date().addingTimeInterval(-60), window.leave.addingTimeInterval(Double(walk.counted) * 60 - 60))
-        let to: String = Self.target(d)
-        let ids: [String] = way.group.ids
-        let found: [DoorTrip] = await Transit.$urgent.withValue(true) { () async -> [DoorTrip] in
-            var out: [DoorTrip] = []
-            for s in ids { out += await Transit.plan(from: s, to: to, modes: nil, at: at, count: 7, maxTransfers: 3) }
-            return out
-        }
-        take(found, from: id, done: true)
-    }
+    // MARK: putting ways with their stops
 
-    /// Answers from a stop: each trip to the stop it really leaves from (one of the stops around, by name or within
-    /// 120 m; else, without a walk first, this one), with your walk to that stop.
-    private func take(_ found: [DoorTrip], from gid: String, done: Bool) {
-        for t in found { put(t, fallback: gid) }
-        if done, let i = ways.firstIndex(where: { $0.id == gid }) { ways[i].asked = true }
-        recompute()
-    }
-
-    /// Fastest trip's own trips (from your spot), with the stops they leave from.
-    func absorb(_ seed: [DoorTrip]) {
-        let usable: [DoorTrip] = seed.filter { $0.first.fromId != "onboard" && !$0.first.fromId.isEmpty }
+    /// Fastest trip's own trips (from your spot), with the stops they leave from (a stop of its own when it's none of
+    /// those around).
+    func absorb(_ s: [DoorTrip]) {
+        let usable: [DoorTrip] = s.filter { !$0.rides.isEmpty && $0.first.fromId != "onboard" && !$0.first.fromId.isEmpty }
         guard !usable.isEmpty else { return }
-        for t in usable { put(t, fallback: nil) }
+        seed = usable
+        for t in usable {
+            if let i = put(t, planned: nil) { ways[i].seeded = true }
+        }
         recompute()
     }
 
-    private func put(_ t: DoorTrip, fallback gid: String?) {
-        guard !t.rides.isEmpty else { return }
+    /// A way, with the stop it gets on at (`Nearby.groupIndex`; a stop of its own when it's none of these). From your
+    /// spot (`planned` nil) its walk is the planner's; planned from a stop (`planned`: that stop), the walk to the stop
+    /// it gets on at is put first. One per departure: the newest answer.
+    @discardableResult
+    private func put(_ t: DoorTrip, planned gid: String?) -> Int? {
+        guard !t.rides.isEmpty, let h = here else { return nil }
         let f: Ride = t.first
-        let k: String = Nearby.key(f.fromStop)
-        let spot: GeoPoint? = f.fromLat.flatMap { a in f.fromLon.map { GeoPoint(lat: a, lon: $0) } }
-        var at: Int? = ways.firstIndex { (w: Way) -> Bool in
-            if !w.group.rail && w.group.id == k { return true }
-            guard let s = spot else { return false }
-            return Geo.metres(s, w.group.point) <= (w.group.rail ? 400 : 120)
-        }
+        guard f.fromId != "onboard" else { return nil }
+        let b = Nearby.Boarding(id: f.fromId, name: f.fromStop, lat: f.fromLat, lon: f.fromLon, rail: f.isTrain)
+        let groups: [Nearby.Group] = ways.map(\.group)
+        var at: Int? = Nearby.groupIndex(b, in: groups)
         if at == nil, f.walkBefore == 0, let g = gid { at = ways.firstIndex { $0.id == g } }
-        guard let i = at else { return }
-        let walk: Walk = self.walk(ways[i].group)
-        let ride: Ride = f.walking(walk.planned)
-        let start: Date = ride.departure.addingTimeInterval(-Double(walk.planned) * 60)
-        let mine = DoorTrip(rides: [ride] + Array(t.rides.dropFirst()), start: start, end: t.end)
-        // one per departure: the one there first
+        if at == nil, let g = Nearby.newGroup(b, here: GeoPoint(h.coordinate), taken: Set(groups.map(\.id))) {
+            ways.append(Way(group: g, check: .done))
+            at = ways.count - 1
+        }
+        guard let i = at else { return nil }
+        var mine: DoorTrip = t
+        if gid != nil {
+            let planned: Int = Nearby.plannedWalk(straight: ways[i].group.metres)
+            let ride: Ride = f.walking(planned)
+            mine = DoorTrip(rides: [ride] + Array(t.rides.dropFirst()), start: ride.departure.addingTimeInterval(-Double(planned) * 60), end: t.end)
+        } else if f.walkBefore > 0 {
+            ways[i].walked = min(ways[i].walked ?? Int.max, f.walkBefore)
+        }
         if let j = ways[i].trips.firstIndex(where: { $0.first.tripId == f.tripId }) {
-            if mine.end < ways[i].trips[j].end { ways[i].trips[j] = mine }
+            ways[i].trips[j] = mine
         } else {
             ways[i].trips.append(mine)
         }
+        if ways[i].check == .unasked || ways[i].check == .failed { ways[i].check = .done }
+        return i
     }
 
     // MARK: what's shown
 
-    /// Your walk to a stop.
+    /// Your walk to a stop: the planner's from your spot once a way of it is in, else about how long by the map.
     func walk(_ g: Nearby.Group) -> Walk {
-        let planned: Int = Nearby.plannedWalk(straight: g.metres)
-        let metres: Double = Nearby.walkMetres(straight: g.metres)
         let b: HabitBook = HabitStore.shared.book
+        let metres: Double = Nearby.walkMetres(straight: g.metres)
+        if let p = ways.first(where: { $0.id == g.id })?.walked {
+            // (the planner walked at your speed once it's learned)
+            let used: Double = HabitStore.pedestrianSpeed() ?? Habits.plannerWalk
+            let shown: WalkPlan.Shown = WalkPlan.shown(planned: p, metres: nil, speed: Habits.walkSpeed(b), walks: b.walks.count,
+                                                       plannerSpeed: used)
+            return Walk(planned: p, shown: shown, metres: metres)
+        }
+        let planned: Int = Nearby.plannedWalk(straight: g.metres)
         let shown: WalkPlan.Shown = WalkPlan.shown(planned: planned, metres: metres, speed: Habits.walkSpeed(b), walks: b.walks.count,
                                                    plannerSpeed: Habits.plannerWalk)
         return Walk(planned: planned, shown: shown, metres: metres)
     }
 
-    /// A stop's departures you make in the window, one per trip, by when they leave.
+    /// A way as the window looks at it: when you leave your door (your walk counted once), and its longest change.
+    private func dep(_ t: DoorTrip, later: Int) -> Nearby.Dep {
+        var longest: TimeInterval = 0
+        for k in t.rides.indices.dropFirst() {
+            let wait: TimeInterval = t.rides[k].departure.timeIntervalSince(t.rides[k - 1].arrival)
+            longest = max(longest, wait)
+        }
+        let door: Date = t.start.addingTimeInterval(Double(later) * 60)
+        return Nearby.Dep(door: door, departure: t.first.departure, arrival: t.end, cancelled: t.first.cancelled, longestWait: longest)
+    }
+
+    private func deps(_ w: Way) -> [Nearby.Dep] {
+        let later: Int = walk(w.group).shown.later
+        return w.trips.map { dep($0, later: later) }
+    }
+
+    /// A stop's departures you make (`Nearby.shown`: those in the window and at least the next two), by when they leave.
     func departures(_ id: String) -> [DoorTrip] {
         guard let w = ways.first(where: { $0.id == id }) else { return [] }
-        let counted: Int = walk(w.group).counted
-        let win: Nearby.Window = window
-        let ok: [DoorTrip] = w.trips.filter { t in
-            !t.first.cancelled && Nearby.catchable(departure: t.first.departure, walk: counted, win)
+        let ds: [Nearby.Dep] = deps(w)
+        let idx: [Int] = Nearby.shown(ds, window)
+        if idx.isEmpty, fallback, w.seeded {
+            return Nearby.shown(ds, Nearby.window(.now, now: Date())).map { w.trips[$0] }
         }
-        return ok.sorted { $0.first.departure < $1.first.departure }
+        return idx.map { w.trips[$0] }
+    }
+
+    /// Overnight or much later (`Nearby.late`): shown apart, never ranked.
+    func isLate(_ t: DoorTrip, at id: String) -> Bool {
+        guard let w = ways.first(where: { $0.id == id }) else { return false }
+        return Nearby.late(dep(t, later: walk(w.group).shown.later), window)
     }
 
     func way(_ id: String) -> Way? { ways.first { $0.id == id } }
@@ -334,24 +482,58 @@ final class NearbyStore: ObservableObject {
         return s
     }
 
+    private func option(for w: Way, _ t: DoorTrip, ranked: Bool) -> Nearby.Option {
+        let walk: Walk = self.walk(w.group)
+        return Nearby.Option(id: w.id, arrival: t.end, departure: t.first.departure, walk: walk.shown.walk, sure: sure(t), ranked: ranked)
+    }
+
     private func recompute() {
         var opts: [Nearby.Option] = []
         var b: [String: DoorTrip] = [:]
         for w in ways {
-            let deps: [DoorTrip] = departures(w.id)
-            guard let first = deps.min(by: { $0.end < $1.end }) else { continue }
-            b[w.id] = first
-            let walk: Walk = self.walk(w.group)
-            opts.append(Nearby.Option(id: w.id, arrival: first.end, departure: first.first.departure, walk: walk.shown.walk, sure: sure(first)))
+            guard let pick = Nearby.best(deps(w), window) else { continue }
+            let t: DoorTrip = w.trips[pick.index]
+            b[w.id] = t
+            opts.append(option(for: w, t, ranked: pick.ranked))
         }
+        // at worst Fastest trip's own way, from its stop (nothing found for that time yet)
+        var fb = false
+        if opts.isEmpty {
+            let nowWindow: Nearby.Window = Nearby.window(.now, now: Date())
+            for w in ways where w.seeded {
+                guard let pick = Nearby.best(deps(w), nowWindow) else { continue }
+                let t: DoorTrip = w.trips[pick.index]
+                b[w.id] = t
+                opts.append(option(for: w, t, ranked: false))
+                fb = true
+            }
+        }
+        fallback = fb
         best = b
         options = opts
         tags = Nearby.tags(opts)
     }
 
-    /// The earliest and latest arrival of the stops with a way (for the colours and the legend).
+    /// The earliest and latest arrival of the ranked stops (for the colours and the legend); of them all when none is.
     var arrivals: (earliest: Date, latest: Date)? {
-        guard let a = options.map(\.arrival).min(), let z = options.map(\.arrival).max() else { return nil }
+        let ranked: [Nearby.Option] = options.filter(\.ranked)
+        let use: [Nearby.Option] = ranked.isEmpty ? options : ranked
+        guard let a = use.map(\.arrival).min(), let z = use.map(\.arrival).max() else { return nil }
         return (a, z)
+    }
+
+    /// What the screen says about the search (`Nearby.statusLine`).
+    var situation: Nearby.Situation {
+        var s = Nearby.Situation()
+        s.located = here != nil
+        s.stopsFailed = stopsFailed
+        s.busy = busy
+        s.options = options.count
+        s.planFailed = planFailed
+        s.unchecked = ways.filter { $0.check == .failed }.count
+        s.seed = !seed.isEmpty
+        s.fallback = fallback
+        s.cooling = cooling
+        return s
     }
 }

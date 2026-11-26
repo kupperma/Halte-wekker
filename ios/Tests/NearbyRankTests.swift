@@ -47,13 +47,6 @@ final class NearbyRankTests: XCTestCase {
         XCTAssertEqual(g.map(\.id), ["b"])
     }
 
-    func test_widening_untilThreeUseful_atMostThreeKm() {
-        XCTAssertEqual(Nearby.nextRadius(after: 1000, useful: 1), 1600)
-        XCTAssertEqual(Nearby.nextRadius(after: 2200, useful: 0), 3000)
-        XCTAssertNil(Nearby.nextRadius(after: 3000, useful: 0))
-        XCTAssertNil(Nearby.nextRadius(after: 1000, useful: 3))
-    }
-
     func test_walk_isTheStreetsAtThePlannersSpeed() {
         // 400 m straight: 520 m on foot, 7.2 min at 1.2 m/s → 8
         XCTAssertEqual(Nearby.plannedWalk(straight: 400), 8)
@@ -67,9 +60,9 @@ final class NearbyRankTests: XCTestCase {
         let w: Nearby.Window = Nearby.window(.in10, now: now)
         XCTAssertEqual(w.leave, at(10))
         XCTAssertEqual(w.until, at(45))
-        XCTAssertTrue(Nearby.catchable(departure: at(16), walk: 6, w))
-        XCTAssertFalse(Nearby.catchable(departure: at(15), walk: 6, w), "you can't be there yet")
-        XCTAssertFalse(Nearby.catchable(departure: at(52), walk: 6, w), "past the window")
+        XCTAssertTrue(Nearby.catchable(door: at(10), w))
+        XCTAssertFalse(Nearby.catchable(door: at(9), w), "you'd have to leave before you set off")
+        XCTAssertTrue(Nearby.catchable(door: at(52), w), "no upper bound: a later one is still a way")
         XCTAssertEqual(Nearby.Leave.allCases.map(\.title), ["Leave now", "In 10 min", "In 20 min"])
     }
 

@@ -3,6 +3,64 @@
 The rules and numbers for each are in [logs-export.md](logs-export.md) › For Android (parity), with the iOS files and
 their tests.
 
+## iOS 0.42.2
+
+From the field report at 23:10 in Veghel ("No bus or train from the stops within 1.6 km in this time" with buses every
+half hour and the classic Fastest trip showing a way: "That's not possible") and the requests "Could you add how many
+minutes are between my gaps" and "What's up with all the numbers". The field log showed why: 0.42.0 planned every stop
+on its own, about 70 `/v5/plan` requests in 3 minutes (12 at once, again on every switch of the time to leave), most
+of them timed out in the Transitous queue, two 429s, 150–210 KB each. Rules in `ios/App/NearbyRank.swift` (tests
+`NearbyRankTests`, `NearbySearchTests`) and `ios/App/TripTimeline.swift` (tests `TripTimelineTests`); the iOS wiring in
+`ios/App/NearbyStore.swift`, `NearbyViews.swift`, `NearbyDetail.swift`, `Transit.planPage`.
+
+- [ ] **One plan per search, from where you are.** `/v5/plan` from your coordinate to the destination (its stop, or its
+      spot when it has several), `numItineraries` 8, `searchWindow` 3600, `maxTransfers` 3, `maxPreTransitTime` = the
+      walk to 1.6 km (straight × 1.3 at 1.2 m/s, minutes up: 1740 s; at most 2700 s), `detailedTransfers=false`, your
+      walking speed once learned. The planner walks to every stop around by itself. Each itinerary goes with the stop its
+      first ride leaves from (`Nearby.groupIndex`: one of the stops around with its id, else a bus stop of its name
+      within 300 m, else the nearest within 120 m, a station 400 m); a stop that's none of them is added with its own
+      circle (`Nearby.newGroup`; a name already taken gets `@<id>`). Its walk is the planner's own walk from your spot.
+- [ ] **A second plan only when needed** (`Nearby.nextPlan`, two per search at most): fewer than 3 stops have a way and
+      there's a `nextPageCursor` (the next page, `maxPreTransitTime` for 3 km, so 2700 s), or the first got no answer
+      (asked once more, the same wider walk, no cursor). Never while Transitous asks to slow down (after a 429).
+- [ ] **The stops around** (`/v1/map/stops`, 1 km, kept 10 min) are only drawn (8 at most, as 0.42.0); the ones with no
+      way from the plan are grey dots. **Tap one**: its own plan (from its first id, at when you can be there, 5
+      itineraries; one stop at a time), and its next departures (`/v6/stoptimes`, 16, from when you can be there; kept a
+      minute) of the same lines and headsigns as its ways, under "Also from here". A failed one: "Couldn’t check this stop
+      just now (the planner is busy or didn’t answer)." with Try again.
+- [ ] **At most 2 requests at once from this screen**; nothing re-fired or cancelled by the time switch.
+- [ ] **Leave now / In 10 / In 20 filter what's in** (no new plan); one second after the last switch, the next page only
+      when fewer than 3 stops have a ranked way for that time and the search has a plan left. Asked again after 5
+      minutes on screen (what's shown stays), or when you moved 250 m or the destination changed.
+- [ ] **The window** (`Nearby.shown`): a way counts when you leave your door at or after the time you set off (its
+      departure less your walk, counted once; 30 s grace), with no upper bound: every way leaving your door within 35
+      minutes, and at least the next 2 of a stop however late (tonight's last, or tomorrow's first). **Ranked** (tags,
+      colours, the legend) only when it leaves your door within those 35 minutes, waits at most 90 minutes anywhere (before
+      the first ride or at a change) and is there within 3 hours of setting off (`Nearby.ranked`); the others are drawn
+      grey, tagged "later", with their day ("tomorrow", a weekday; nil today and the night after until 04:00).
+- [ ] **Fastest trip's own ways are always in**, with their stop, in every window; nothing for that time: its stop is
+      shown with its way from now ("Nothing found yet for that time: this is your trip’s way…").
+- [ ] **What the screen says** (`Nearby.statusLine`): "No bus or train from the stops within 1.6 km in this time…" only
+      when the planner answered and your trip has no way either; no answer: "Couldn’t check the stops around you just now
+      (no answer in time / the planner is busy). Your trip has the fastest way."; some in: "Couldn’t check every stop
+      just now (…): these are the ones in."; stops tapped that failed: "Couldn’t check N stops just now (…). Tap one to try
+      again."
+- [ ] **Surest only at 70 % on time or more** (`Nearby.surestAt`), on the list and in a stop's sheet; else no Surest.
+- [ ] **Overnight ways apart.** In a stop's sheet the late ones (as above) get their own group, "Tomorrow morning" (there
+      tomorrow before noon) or "Later · Sat", on their own time axis; never Fastest or Surest.
+- [ ] **Circles that would overlap are one** (`Nearby.merge`): closer than 40 pt at the map's zoom, the earliest there
+      is drawn (at its own place) with "+N"; grey dots under a circle are left out.
+- [ ] **Whole trip rows** (`TripTimeline`): the time axis ticks every 10/15/30 min, 1/2/3/6 h, the smallest step with
+      labels 56 pt apart, the start and end always, none closer (`tickStep`, `ticks(width:)`). Each row's leave and arrive
+      times always, moved apart around the row's middle when the row is short (`ends`, 40 pt a time, 6 pt between). Every
+      gap labelled with its minutes (`gapLabels`): the walk to the first stop "🚶 2" (with a wait: "🚶2 + 1 wait"), each
+      change "6 min" or "🚶3 + 5 wait", the last walk "🚶 4"; centred on the gap when it fits (6 + 6.5 pt a character,
+      14 the walker, 4 pt spare), else under the bar with a tick, in the first of two rows where it overlaps nothing (left
+      out when neither has room). A change under 3 min red, under your learned change time yellow. Each ride's own
+      minutes inside its bar ("41 min") when they fit (8 pt spare).
+- [ ] **Field log** (`.net`): one line per search, see [logs-export.md](logs-export.md) › Fastest trip, zoomed out
+      (0.42.2).
+
 ## iOS 0.42.1
 
 From the request "Make it so you can stop the alarm without unlocking my phone". Rules in `ios/App/AlarmStop.swift`
