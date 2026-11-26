@@ -92,6 +92,9 @@ object Notifications {
             else -> "$what to ${leg.toStop}"
         }
         val parts = ArrayList<String>()
+        // (A8, iOS 0.39) the next stop (not yours), how late at your stop
+        s.nextStop?.takeIf { s.phase == Phase.SLEEPING }?.let { parts.add("Next: $it") }
+        s.delayMin?.let { parts.add(if (it >= 1) "$it min late" else if (it <= -1) "${-it} min early" else "on time") }
         s.distance?.let { parts.add("${WakeRules.distanceText(it)} to go") }
         s.legArrival?.let { parts.add("there ${time(it)}") }
         if (s.reckoning) parts.add("no GPS here: following its route")
@@ -100,7 +103,13 @@ object Notifications {
             parts.add("rings ${WakeRule.says(w, leg.isTrain, s.wakeMetres).removeSuffix(" before your stop").replace(" before your stop", "")} before")
         }
         if (s.trip.rides.size > 1) parts.add("leg ${s.index + 1} of ${s.trip.rides.size}")
-        b.setContentTitle(title).setContentText(parts.joinToString(" · "))
+        if (s.offline) parts.add("no network: going by the saved stops and times")
+        val text = parts.joinToString(" · ")
+        // (A8) the change line (the miss first) under it
+        val change = listOfNotNull(s.changeMiss, s.changeLine).firstOrNull()
+        b.setContentTitle(title).setContentText(text)
+        if (change != null) b.setStyle(NotificationCompat.BigTextStyle().bigText("$text\n$change"))
+        if (s.changeSwitch != null) b.addAction(0, "Switch", action(context, RideService.ACTION_SWITCH_CHANGE, 17))
         val total = (leg.arrival - leg.departure).coerceAtLeast(60.0)
         val done = ((nl.haltewekker.core.Iso.now() - leg.departure) / total).coerceIn(0.0, 1.0)
         b.setProgress(100, (done * 100).toInt(), false)
@@ -231,6 +240,21 @@ object Notifications {
     }
 
     const val ASK_TAG = "which"
+
+    /** (A8, iOS 0.39 `GetReady`) a quiet note (no sound, no buzz), gone by its kind's time. */
+    fun quiet(context: Context, tag: String, title: String, text: String, s: RideState?) {
+        val b = NotificationCompat.Builder(context, NEWS)
+            .setSmallIcon(R.drawable.ic_stat_ride)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setSilent(true)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setGroup(group(s))
+            .setContentIntent(openApp(context))
+            .setAutoCancel(true)
+        post(context, NEWS_ID + 5, b, tag)
+    }
 
     /** (A7) A time-sensitive note of the ride ("You’re on the 154…", "That’s the 154 — not yours"), timed out by its kind. */
     fun rideNote(context: Context, tag: String, title: String, text: String) {

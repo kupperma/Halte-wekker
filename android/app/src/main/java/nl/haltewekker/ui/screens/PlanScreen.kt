@@ -1,5 +1,7 @@
 package nl.haltewekker.ui.screens
 
+import nl.haltewekker.travel.GhostDepartures
+
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -135,7 +137,10 @@ fun PlanScreen(start: Direction?, canStart: Boolean, onBack: () -> Unit, onStart
         if (d != null && !searching) {
             Text("$fromLabel to ${d.name}", color = DS.t.secondary)
             if (trips.isEmpty() && asked && !loading) Note(Transit.lastTrouble ?: "No trips found. Try again in a minute.")
-            trips.forEach { t ->
+            // (A8, iOS 0.40 `GhostDepartures.order`) a first ride with no live data close to leaving on a live line: after the others
+            val ordered = GhostDepartures.order(trips.map { GhostDepartures.Option(it.id, it.first.line, it.first.departure, it.first.scheduledDeparture, it.first.live, it.first.cancelled) }, now)
+                .mapNotNull { id -> trips.firstOrNull { it.id == id } }
+            ordered.forEach { t ->
                 TripRow(t, now, selected = selected == t.id) { selected = if (selected == t.id) null else t.id }
                 if (selected == t.id) Card {
                     t.rides.forEach { LegRow(it) }

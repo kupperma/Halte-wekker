@@ -70,6 +70,17 @@ data class RideState(
     /** (A7) when it rang (the one repeat 30 s later), and whether that went. */
     val rangAt: Double? = null,
     val againSent: Boolean = false,
+    /** (A8) this leg's ring was noted for the adaptive wake-up. */
+    val wakeNoted: Boolean = false,
+    /** (A8, iOS 0.39) the quiet "Get ready" went for this leg; no network: going by the saved stops and times. */
+    val readyTold: Boolean = false,
+    val offline: Boolean = false,
+    /** (A8, iOS 0.39) the next stop (not yours), the delay at your stop and the change line, for the lock screen. */
+    val nextStop: String? = null,
+    val delayMin: Int? = null,
+    val changeLine: String? = null,
+    val changeMiss: String? = null,
+    val changeSwitch: String? = null,
 ) {
     val leg: Ride? get() = trip.rides.getOrNull(index)
     val wakeMetres: Double get() = (wakeKm.getOrNull(index) ?: WakeRules.BUS_KM) * 1000

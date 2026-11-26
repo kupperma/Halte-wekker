@@ -127,18 +127,36 @@ class OnBoardLook {
         return s.departure ?: s.arrival
     }
 
-    /** (A6, iOS 0.33 `noteWakeTrip`) the vehicle's road from where you got on to your stop, and your stop's arrival. */
-    data class WakeTrip(val route: List<GeoPoint>, val arrival: Double?, val live: Boolean)
+    /**
+     * (A6, iOS 0.33 `noteWakeTrip`) the vehicle's road from where you got on to your stop, and your stop's arrival.
+     * (A8, iOS 0.39) also the next stop (not yours), the stop before yours with its time, how late it is at your stop,
+     * and whether it came from the copy saved on the phone (`RideCache`: no network).
+     */
+    data class WakeTrip(val route: List<GeoPoint>, val arrival: Double?, val live: Boolean,
+                        val nextStop: String? = null, val before: String? = null, val beforeAt: Double? = null,
+                        val delayMin: Int? = null, val saved: Boolean = false, val trip: nl.haltewekker.data.TransitParse.LiveTrip? = null)
 
-    suspend fun wakeTrip(tripId: String, from: GeoPoint?, stop: GeoPoint): WakeTrip? {
-        val t = Transit.trip(tripId, maxAge = 60.0) ?: return null
+    suspend fun wakeTrip(tripId: String, from: GeoPoint?, stop: GeoPoint, here: GeoPoint? = null, now: Double = nl.haltewekker.core.Iso.now(),
+                         saved: ((String) -> nl.haltewekker.data.TransitParse.LiveTrip?)? = null): WakeTrip? {
+        val fresh = try { Transit.trip(tripId, maxAge = 60.0) } catch (_: Exception) { null }
+        val t = fresh ?: saved?.invoke(tripId) ?: return null
         if (t.stops.size < 2) return null
         val mine = t.stops.indices.minByOrNull { Geo.metres(t.stops[it].point, stop) } ?: return null
         if (Geo.metres(t.stops[mine].point, stop) > 1500) return null
         val board = from?.let { f -> (0 until mine).minByOrNull { Geo.metres(t.stops[it].point, f) }?.takeIf { Geo.metres(t.stops[it].point, f) < 1500 } } ?: 0
         val s = t.stops[mine]
         val arrival = if (Geo.metres(s.point, stop) <= 500) (s.arrival ?: s.departure) else null
-        return WakeTrip(WakeRoad.cut(t.path, t.stops[board].point, s.point) ?: t.stops.subList(board, mine + 1).map { it.point }, arrival, t.live)
+        fun time(i: Int) = t.stops[i].arrival ?: t.stops[i].departure
+        // the next stop: the first after where you are (else by time) and before yours
+        val at = here?.let { h -> (board..mine).minByOrNull { Geo.metres(t.stops[it].point, h) } }
+        val nextI = ((at?.let { it + 1 } ?: board + 1)..mine).firstOrNull { i -> (time(i) ?: Double.MAX_VALUE) > now - 30 }
+        val next = nextI?.takeIf { it < mine }?.let { t.stops[it].name }
+        val count = mine - board + 1
+        val beforeI = nl.haltewekker.ride.GetReady.before(count)?.let { board + it }
+        val sched = s.scheduledDeparture
+        val delay = if (t.live && sched != null && arrival != null) Math.round((arrival - sched) / 60).toInt() else null
+        return WakeTrip(WakeRoad.cut(t.path, t.stops[board].point, s.point) ?: t.stops.subList(board, mine + 1).map { it.point }, arrival, t.live,
+            next, beforeI?.let { t.stops[it].name }, beforeI?.let { time(it) }, delay, fresh == null, t)
     }
 }
 

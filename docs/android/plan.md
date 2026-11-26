@@ -3,7 +3,7 @@
 The Android version of Haltewekker, built from the iOS app (`ios/`, SwiftUI) as the reference. It lives in
 `android/` (one Gradle project), with this plan in `docs/android/`. The iOS app and the relay are not changed by it.
 
-Status: **A1 (0.1.0, version code 1), A2 (0.2.0, version code 2), A3 (0.3.0, version code 3: Friends), A4 (0.4.0, version code 4: Friends extras and shared ride logs) A5 (0.5.0, version code 5: Friends map first, the seat picker, the test friend) and A5.1 (0.5.1, version code 6: 1st class in the seat picker) A6 (0.6.0, version code 7: iOS 0.32–0.37) and A7 (0.7.0, version code 8: the A6 leftovers, iOS 0.37.1, 0.38, 0.39.1) built.**
+Status: **A1 (0.1.0, version code 1), A2 (0.2.0, version code 2), A3 (0.3.0, version code 3: Friends), A4 (0.4.0, version code 4: Friends extras and shared ride logs) A5 (0.5.0, version code 5: Friends map first, the seat picker, the test friend) and A5.1 (0.5.1, version code 6: 1st class in the seat picker) A6 (0.6.0, version code 7: iOS 0.32–0.37) A7 (0.7.0, version code 8: the A6 leftovers, iOS 0.37.1, 0.38, 0.39.1) and A8 (0.8.0, version code 9: iOS 0.39, most of 0.40, 0.42.1) built.**
 
 ## Architecture
 
@@ -225,6 +225,50 @@ byte for byte, and its test vectors as JUnit tests before any screen:
   "leave N min earlier", the trip's notes on the ride; 0.37.1 watch-friendly alarm notifications; 0.38 picking the one
   you're on (departure moment, usual line, bus stops, ask sooner); 0.39.1 the wrong bus, a miss at the change, the
   timetable start, another line at your stop.
+
+### A8 — iOS 0.39, 0.40 (most), 0.42.1 (0.8.0, code 9) — built ("As built A8" says how)
+
+- The change guide, the adaptive wake-up, get ready and the richer ride notification, the rides saved for no signal;
+  From <stop>, sticky next trips, the walk at your speed, ghost departures; Stop alarm from the lock screen; system
+  back everywhere. Not yet: RealFirst / BusFusion markers, the search and Friends sheets over the home map.
+
+## As built A8 (0.8.0, version code 9): iOS 0.39, 0.40 (most), 0.42.1
+
+**Pure rules, with the iOS vectors.** `ride/AdaptiveWake.kt` (`AdaptiveWake`, `WakeBook`, `GetReady`;
+`AdaptiveWakeTest`), `ride/RideCache.kt` (`RideCache`, `SavedRide`, `WalkPlan`; `RideCacheTest`), `travel/Departures.kt`
+(`GhostDepartures`, `FromStop`, `StickyTrips`; `DeparturesTest`); `ChangeGuide`/`MissRule` came in A7.
+
+**On the ride (`RideService`).** The wake rules go by `WakeBookStore.effective` (your minutes plus what it learned, never
+fewer); each leg's ring is noted once (Stop alarm: seconds to the stop by its live arrival; still ringing within 450 m of
+the stop: no reaction), `wake learned · …` in the log; Settings › Trips & alarm › "Learn when I get up" with the summary
+and a reset. The vehicle's trip answer (every minute) now also gives the next stop, the delay at your stop and the stop
+before yours: the ongoing notification says "Next: Vught · 3 min late · …", and a silent "Get ready: Breda is next"
+(`ready-<start>-<leg>`) goes once the vehicle is at the stop before yours, before the alarm rang. Each planned ride's
+trip answer is saved (`RideCacheStore`, at most every 2 min a ride, 4 rides, bounded, for this trip only, cleared when
+it ends); no answer: the saved copy ("No network: going by the stops and times saved on your phone", `offline ·` /
+`online ·` in the log). The change ahead (`ChangeGuide`): the next ride's live time from its stop's board, the later
+ones of the same line, your learned change time; "Your change" on the ride screen and the notification's second line
+(the miss first, "You’ll miss the 08:12 — take bus 306 at 08:27") with "Switch": the rest planned again from the change
+(`ChangeGuide.pickPlan`) and spliced after the current leg.
+
+**The home and Plan.** The departures near you go through `GhostDepartures.clean` (lines seen live today count) with
+"may not run"; Plan's options in `GhostDepartures.order`; the next trips are sticky (`HomeModel.sticky`: a failed or
+empty answer keeps what's to come, a whole one keeps the trip you're heading for while you can still reach its stop);
+the next-trip card's "Leave …" and walk line by `WalkPlan` at your learned speed; "Buses from <stop> ▾" folds out
+`FromStop`'s board (every 30 s while open; a tap on a line that gets you there makes it the shown trip, planned from
+that stop when it isn't one of the listed ones).
+
+**Back (0.40.2).** A root `BackHandler` on every screen over the home (Your week and the calendar picker go back to
+Settings), the screens' own first (Friends' stack, sub pages); `android:enableOnBackInvokedCallback="true"`.
+
+### Calls made in A8 (the user can correct)
+
+- The adaptive wake-up's "lead" after a Stop is counted to the leg's live arrival (Android doesn't follow the leg to
+  the stop when "Chime at the stop" is off).
+- The change guide's platforms come from the planner and the stop's board (no NS live track on Android yet).
+- Not in A8, left for the next builder: iOS 0.40.1/0.40.3 (`BusFusion`, `RealFirst`, the Bus position setting, the
+  stop pin), 0.40.0's search sheet over the home map, 0.40.2's Friends as a sheet over the home map and the one-time
+  questions' "Not now" on back, From <stop> under Fastest trip's card, the "Time to go" notification by `WalkPlan`.
 
 ## As built A7 (0.7.0, version code 8): the A6 leftovers, iOS 0.37.1, 0.38, 0.39.1
 

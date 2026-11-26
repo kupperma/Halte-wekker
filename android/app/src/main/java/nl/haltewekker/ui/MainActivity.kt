@@ -136,6 +136,11 @@ private fun Root() {
         return
     }
     val r = ride
+    // (A8, iOS 0.40.2) system back (and the predictive back gesture) leaves every screen over the home; the screens'
+    // own handlers (a friend's page, a sub page) come first, the first-run setup holds back
+    androidx.activity.compose.BackHandler(enabled = screen != Screen.HOME && screen != Screen.SETUP && screen != Screen.TEST_SETUP) {
+        screen = if (screen == Screen.CALENDARS || screen == Screen.WEEK) Screen.SETTINGS else Screen.HOME
+    }
     when (screen) {
         Screen.HOME, Screen.SETUP, Screen.TEST_SETUP -> HomeScreen(r, onPlan = { planDir = it; screen = Screen.PLAN }, onRide = { screen = Screen.RIDE },
             onStart = { t, to -> start(t, to) }, onSettings = { screen = Screen.SETTINGS }, onDay = { screen = Screen.DAY },

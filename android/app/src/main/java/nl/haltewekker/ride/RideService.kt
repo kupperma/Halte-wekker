@@ -70,6 +70,7 @@ class RideService : Service() {
         const val ACTION_ANSWER = "nl.haltewekker.ride.ANSWER"
         const val ACTION_DISMISS = "nl.haltewekker.ride.DISMISS"
         const val ACTION_PICK_AGAIN = "nl.haltewekker.ride.PICK_AGAIN"
+        const val ACTION_SWITCH_CHANGE = "nl.haltewekker.ride.SWITCH_CHANGE"
         const val EXTRA_TRIP = "trip"
         const val EXTRA_WHAT = "what"
 
@@ -164,6 +165,8 @@ class RideService : Service() {
         RideStore.load(this)
         FieldLog.init(this)
         AlarmPlayer.warmUp(this)
+        WakeBookStore.load(this)
+        RideCacheStore.load(this, RideStore.state.value?.startedAt)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -192,6 +195,7 @@ class RideService : Service() {
             ACTION_ANSWER -> intent.getStringExtra(EXTRA_TRIP)?.let(::answer)
             ACTION_DISMISS -> RideStore.update(this) { if (intent.getStringExtra(EXTRA_WHAT) == "other") { it.otherAtStop?.let { a -> otherClosed.add(a.tripId) }; it.copy(otherAtStop = null) } else it.copy(wrongBus = null) }
             ACTION_PICK_AGAIN -> pickAgain()
+            ACTION_SWITCH_CHANGE -> scope.launch { switchChange() }
         }
         begin()
         return START_STICKY
@@ -304,6 +308,8 @@ class RideService : Service() {
                 } else ring(WakeRule.log(fire), fire)
             }
         } else if (WakeRules.onFix(s.phase, d, fix.accuracy, now - s.legStart, s.wakeMetres) == WakeRules.Action.ARRIVE) arrive()
+        // (A8, iOS 0.39) still ringing within 450 m of the stop: it got there before you reacted
+        if (s.phase == Phase.ALARM && good && d <= 450) noteWakeOutcome(s, stopped = false)
         // (A6, iOS 0.32) Share GPS points during rides (when on): the trip's own fixes, nothing asked for
         nl.haltewekker.logs.LogShareStore.heard(fix.t, fix.p.lat, fix.p.lon, fix.accuracy, fix.speed, fix.course,
             nl.haltewekker.logs.GPSShareRules.leg(s.index, s.trip.rides.size), vehicleText(s))
@@ -315,7 +321,7 @@ class RideService : Service() {
             confirmed = cur.vehicleSource == VehicleSource.BY_GPS || cur.vehicleSource == VehicleSource.BY_HAND,
             metresToStop = d, accuracy = fix.accuracy, fixAge = now - fix.t,
             // (A6) by time, the far tier keeps clear of the time rule's reach
-            wakeMetres = WakeRule.gpsWakeMetres(cur.wakeMetres, app.store.settings.value.wake, leg.isTrain), isTrain = leg.isTrain,
+            wakeMetres = WakeRule.gpsWakeMetres(cur.wakeMetres, WakeBookStore.effective(app.store.settings.value.wake), leg.isTrain), isTrain = leg.isTrain,
             speed = fix.speed.takeIf { it >= 0 }, secondsToStop = cur.legArrival?.let { it - now }, wasFar = cur.roughGPS))
         if (far != cur.roughGPS) RideStore.update(this) { it.copy(roughGPS = far) }
         requestLocation(RideGPS.intervalMs(far))
@@ -370,12 +376,23 @@ class RideService : Service() {
                 val v = RideStore.state.value?.vehicleTripId ?: leg.tripId
                 if (now - etaAt >= 60 && leg.to != null) {
                     etaAt = now
-                    val w = look.wakeTrip(v, leg.from, leg.to!!)
+                    val cur0 = RideStore.state.value
+                    // (A8, iOS 0.39 `RideCache`) no answer: the stops and times saved on the phone when the trip started
+                    val w = look.wakeTrip(v, leg.from, leg.to!!, fixes.lastOrNull()?.p, now) { id -> RideCacheStore.live(id, cur0?.startedAt, now) }
+                    val offline = w == null || w.saved
+                    if (cur0 != null && cur0.offline != offline) {
+                        FieldLog.ride(if (offline) "offline · going by the stops and times saved on the phone" else "online · asking again")
+                        RideStore.update(this) { it.copy(offline = offline) }
+                    }
                     if (w != null) {
                         wakeRoute = w.route
-                        wakeLive = w.arrival?.takeIf { w.live }?.let { it to Iso.now() }
-                        w.arrival?.let { eta -> RideStore.update(this) { it.copy(eta = eta) } }
+                        wakeLive = w.arrival?.takeIf { w.live && !w.saved }?.let { it to Iso.now() }
+                        RideStore.update(this) { it.copy(eta = w.arrival ?: it.eta, nextStop = w.nextStop, delayMin = w.delayMin) }
+                        checkGetReady(w, now)
+                        if (!w.saved && w.trip != null) RideStore.state.value?.let { st -> if (RideCacheStore.due(v, now)) RideCacheStore.put(this, v, w.trip, st.startedAt, now) }
                     }
+                    saveRidesAhead(now)
+                    updateChangeGuide(now)
                     scheduleBackup()
                 }
                 notifyRide(force = false)
@@ -394,7 +411,7 @@ class RideService : Service() {
         val leg = s.leg
         FieldLog.ride(FieldFormat.rideRing(why, s.distance, Iso.now() - s.legStart, startMetres(s)))
         val minutes = (fire as? WakeRule.Fire.Time)?.minutes
-        RideStore.update(this) { it.copy(phase = Phase.ALARM, quiet = quiet, note = null, roughGPS = false, ringMinutes = minutes, rangAt = Iso.now(), againSent = false) }
+        RideStore.update(this) { it.copy(phase = Phase.ALARM, quiet = quiet, note = null, roughGPS = false, ringMinutes = minutes, rangAt = Iso.now(), againSent = false, wakeNoted = false) }
         stopReckon()
         cancelBackup()
         requestLocation(RideGPS.intervalMs(false))
@@ -420,6 +437,7 @@ class RideService : Service() {
         Notifications.cancelTag(this, WristNotice.AGAIN_ID, Notifications.ALARM_ID)
         val s = RideStore.state.value ?: return
         if (s.phase != Phase.ALARM) return
+        noteWakeOutcome(s, stopped = true)
         if (app.store.settings.value.ringAtStop) RideStore.update(this) { it.copy(phase = Phase.AWAKE) } else legDone()
         notifyRide(force = true)
     }
@@ -462,7 +480,7 @@ class RideService : Service() {
         choice.clear(); chooseJob?.cancel(); chooseJob = null
         Notifications.cancelTag(this, Notifications.ASK_TAG, Notifications.NEWS_ID + 3)
         gpsRuns = emptyMap(); rivalAt = 0.0; departure = null
-        RideStore.update(this) { it.copy(choosing = emptyList(), ask = null, otherAtStop = null, wrongBus = null) }
+        RideStore.update(this) { it.copy(choosing = emptyList(), ask = null, otherAtStop = null, wrongBus = null, readyTold = false, nextStop = null, delayMin = null) }
         val s = RideStore.state.value ?: return
         look.reset()
         etaAt = 0.0
@@ -525,6 +543,7 @@ class RideService : Service() {
         Notifications.cancelTag(this, WristNotice.AGAIN_ID, Notifications.ALARM_ID)
         Notifications.cancelTag(this, Notifications.ASK_TAG, Notifications.NEWS_ID + 3)
         choice.clear(); chooseJob?.cancel()
+        RideCacheStore.clear(this)
         RideStore.set(this, null)
         stopRide()
     }
@@ -640,7 +659,8 @@ class RideService : Service() {
 
     private fun wakeInput(s: RideState, metres: Double, route: Double?, speed: Double?, now: Double): WakeRule.Input? {
         val leg = s.leg ?: return null
-        val w = app.store.settings.value.wake
+        // (A8, iOS 0.39) your setting with what the adaptive wake-up learned on top (never later than you set it)
+        val w = WakeBookStore.effective(app.store.settings.value.wake)
         val here = lastGood?.p ?: fixes.lastOrNull()?.p
         return WakeRule.Input(by = w.by, minutes = w.minutes(leg.isTrain), isTrain = leg.isTrain, metres = metres, routeMetres = route,
             wakeMetres = s.wakeMetres, liveArrival = wakeLive?.first, liveAge = wakeLive?.let { now - it.second }, speed = speed,
@@ -720,6 +740,106 @@ class RideService : Service() {
             }
         }
         notifyRide(force = false)
+    }
+
+    /** (A8, iOS 0.39 `AdaptiveWake`) one ring before the stop, as it went: ring → Stop alarm, ring → at the stop. Once a leg. */
+    private fun noteWakeOutcome(s: RideState, stopped: Boolean) {
+        val at = s.rangAt ?: return
+        if (s.wakeNoted) return
+        val leg = s.leg ?: return
+        val now = Iso.now()
+        val lead = if (stopped) maxOf(now, s.legArrival ?: now) - at else now - at
+        RideStore.update(this) { it.copy(wakeNoted = true) }
+        if (!WakeBookStore.book.value.on) return
+        val moved = WakeBookStore.add(WakeSample(leg.isTrain, if (stopped) now - at else null, lead, now))
+        FieldLog.ride("wake learned · ${if (stopped) "stopped after ${Math.round(now - at)} s" else "still ringing at the stop"} · lead ${Math.round(lead)} s" +
+            if (moved) " · now ${WakeBookStore.book.value.extra(leg.isTrain)} min earlier" else "")
+    }
+
+    // MARK: (A8, iOS 0.39) get ready, the saved rides, the change guide
+
+    /** The quiet "Get ready" once the vehicle is at the stop before yours, before the alarm rang (`GetReady`). */
+    private fun checkGetReady(w: OnBoardLook.WakeTrip, now: Double) {
+        val s = RideStore.state.value ?: return
+        val leg = s.leg ?: return
+        val wake = WakeBookStore.effective(app.store.settings.value.wake)
+        val within = if (wake.by == WakeBy.TIME) wake.minutes(leg.isTrain) * 60.0 else 0.0
+        if (!GetReady.due(w.beforeAt, w.arrival, now, within, s.phase == Phase.SLEEPING, s.readyTold)) return
+        RideStore.update(this) { it.copy(readyTold = true) }
+        val (t, b) = GetReady.words(leg.toStop, w.arrival?.let { it - now })
+        FieldLog.ride("get ready · at ${w.before ?: "the stop before yours"} · ${leg.toStop} next")
+        Notifications.quiet(this, GetReady.id(s.startedAt, s.index), t, b, s)
+    }
+
+    /** Each planned ride's trip answer saved on the phone (at most every 2 minutes a ride, 4 rides). */
+    private suspend fun saveRidesAhead(now: Double) {
+        val s = RideStore.state.value ?: return
+        for (r in s.trip.rides.drop(s.index).take(RideCache.MAX_RIDES)) {
+            if (!RideCacheStore.due(r.tripId, now)) continue
+            val t = try { Transit.trip(r.tripId, maxAge = 60.0) } catch (_: Exception) { null } ?: continue
+            RideCacheStore.put(this, r.tripId, t, s.startedAt, now)
+        }
+    }
+
+    private var changeBoard: Triple<String, Double, List<nl.haltewekker.data.BoardDeparture>>? = null
+
+    /**
+     * The change ahead (`ChangeGuide`, 0.39.1 `MissRule`): "Platform 5 → 7 · 3 min walk", "4 min to change", and when the
+     * live times make it too late: "You’ll miss the 08:12 — take the 08:27 from platform 4" with one tap to switch.
+     */
+    private suspend fun updateChangeGuide(now: Double) {
+        val s = RideStore.state.value ?: return
+        val atChange = s.index > 0 && s.vehicleTripId == null && s.changeArrived != null && s.phase == Phase.SLEEPING
+        val k = if (atChange) s.index else s.index + 1
+        val next = s.trip.rides.getOrNull(k) ?: run {
+            if (s.changeLine != null || s.changeMiss != null) RideStore.update(this) { it.copy(changeLine = null, changeMiss = null, changeSwitch = null) }
+            return
+        }
+        val prev = s.trip.rides[k - 1]
+        val board = changeBoard?.takeIf { it.first == next.fromId && now - it.second < 120 }?.third
+            ?: (try { Transit.board(listOf(next.fromId), n = 20) } catch (_: Exception) { emptyList() }).also { if (it.isNotEmpty()) changeBoard = Triple(next.fromId, now, it) }
+        val liveNext = board.firstOrNull { it.tripId == next.tripId }?.time ?: next.departure
+        val later = board.filter { !it.cancelled && WrongBus.norm(it.line) == WrongBus.norm(next.line) && it.tripId != next.tripId }
+            .map { ChangeGuide.Ride(it.tripId, it.line, it.train, it.time, it.platform, next.walkBefore) }
+        val learned = nl.haltewekker.travel.Habits.changeMinutes(nl.haltewekker.travel.HabitStore.book.value)
+        val arrive = if (atChange) (s.changeArrived ?: now) else (s.legArrival ?: prev.arrival)
+        val g = ChangeGuide.guide(arrive, null, prev.isTrain, null,
+            ChangeGuide.Ride(next.tripId, next.line, next.isTrain, liveNext, next.platform, next.walkBefore), later, learned, now,
+            { Notifications.time(it) }, atChange = atChange)
+        val line = listOfNotNull(g.lockLine.takeIf { it.isNotEmpty() }, g.countdown).joinToString(" · ")
+        val sw = if (g.missed && g.target.tripId != next.tripId) g.target.tripId else null
+        if (g.missed && s.changeMiss == null) FieldLog.ride("change · ${g.missText}")
+        RideStore.update(this) { it.copy(changeLine = line, changeMiss = g.missText, changeSwitch = sw) }
+        pendingSwitch = if (sw != null) g.target else null
+    }
+
+    private var pendingSwitch: ChangeGuide.Ride? = null
+
+    /** "Switch to the 08:27": the rest planned again from the change, spliced after the current leg. */
+    private suspend fun switchChange() {
+        val s = RideStore.state.value ?: return
+        val instead = pendingSwitch ?: return
+        val atChange = s.index > 0 && s.vehicleTripId == null && s.changeArrived != null
+        val k = if (atChange) s.index else s.index + 1
+        val next = s.trip.rides.getOrNull(k) ?: return
+        val from = next.from ?: return
+        val end = s.trip.last.to ?: return
+        val plans = try { Transit.plan("${from.lat},${from.lon}", "${end.lat},${end.lon}", instead.departure - 60, count = 5) } catch (_: Exception) { emptyList() }
+        val firsts = plans.map { p -> (p.rides.firstOrNull()?.tripId ?: "") to (p.rides.firstOrNull()?.departure ?: 0.0) }
+        val i = ChangeGuide.pickPlan(firsts, instead) ?: run { Notifications.news(this, "switch-none", "No new plan yet", "Couldn't plan again from ${next.fromStop}: try again in a moment."); return }
+        val p = plans[i]
+        val cur = RideStore.state.value ?: return
+        if (cur.index != s.index) return
+        val st = app.store.settings.value
+        val rides = cur.trip.rides.take(k) + p.rides
+        val kms = cur.wakeKm.take(k) + p.rides.map { WakeRules.wakeKm(it.isTrain, st.busKm, st.trainKm) }
+        RideStore.update(this) { it.copy(trip = it.trip.copy(rides = rides, end = p.end), wakeKm = kms, changeMiss = null, changeSwitch = null) }
+        FieldLog.ride("change · switched to ${FieldFormat.vehicle(instead.line, instead.tripId, instead.isTrain)} at ${Notifications.time(instead.departure)}")
+        pendingSwitch = null
+        changeBoard = null
+        etaAt = 0.0
+        scheduleBackup()
+        notifyRide(force = true)
     }
 
     // MARK: (A7) choosing between buses or trains (iOS 0.26.1 – 0.39.1)

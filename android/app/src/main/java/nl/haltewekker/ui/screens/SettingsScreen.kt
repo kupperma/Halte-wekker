@@ -239,7 +239,7 @@ private fun TopicPage(t: SettingsTopic, onBack: () -> Unit, onSetup: () -> Unit,
 }
 
 @Composable
-private fun Toggle(title: String, sub: String, on: Boolean, set: (Boolean) -> Unit) {
+internal fun Toggle(title: String, sub: String, on: Boolean, set: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f).padding(end = 12.dp)) {
             Text(title, color = DS.t.text, fontWeight = FontWeight.SemiBold)

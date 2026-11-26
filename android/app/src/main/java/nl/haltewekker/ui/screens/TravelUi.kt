@@ -84,6 +84,17 @@ fun WakeCard() {
             Text("By the stop's live arrival while it's fresh, else your speed along the route. The distance below still rings if it comes first.",
                 color = DS.t.secondary, style = MaterialTheme.typography.bodySmall)
         }
+        if (s.wake.by == WakeBy.TIME) {
+            // (A8, iOS 0.39) the adaptive wake-up
+            val ctx = LocalContext.current
+            LaunchedEffect(Unit) { nl.haltewekker.ride.WakeBookStore.load(ctx) }
+            val book by nl.haltewekker.ride.WakeBookStore.book.collectAsState()
+            Toggle("Learn when I get up", nl.haltewekker.ride.AdaptiveWake.summary(book, s.wake.by) +
+                ". Rings up to 3 min (train) or 2 min (bus) earlier when you keep having too little time; never later than you set it.", book.on) { v ->
+                nl.haltewekker.ride.WakeBookStore.set(book.copy(on = v))
+            }
+            if (!book.isEmpty) QuietButton("Reset what it learned") { nl.haltewekker.ride.WakeBookStore.reset() }
+        }
         Text("Bus: ${WakeRule.distanceWords(s.busKm * 1000)} before your stop", color = DS.t.text)
         Slider(s.busKm.toFloat(), { v -> app.store.updateSettings { it.copy(busKm = (v * 2).roundToInt() / 2.0) } }, valueRange = 0.5f..10f, steps = 18)
         Text("Train: ${WakeRule.distanceWords(s.trainKm * 1000)} before your stop", color = DS.t.text)

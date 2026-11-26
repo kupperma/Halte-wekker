@@ -71,30 +71,30 @@ repeat, arriving, the ongoing ride notification while it rings and the school wa
 no unlocking, no app), and the alarm and wake-up titles public on the lock screen. The rest (heads-up, a stop with no
 trip engine handing its answers on, the adaptive wake-up's "answered") comes with 0.8.0.
 
-- [ ] **Stop alarm works on the lock screen, never asks to unlock and never opens the app.** For the trip alarm, its
+- [x] **Stop alarm works on the lock screen, never asks to unlock and never opens the app.** For the trip alarm, its
       repeat, the heads-up, arriving and the backup notification, and the school wake-up's notification fallback.
       Android: the ringing alarm as a full-screen-intent notification (`USE_FULL_SCREEN_INTENT`, `setFullScreenIntent`,
       `CATEGORY_ALARM`, shown over the lock screen with `setShowWhenLocked`/`setTurnScreenOn` on its activity) with a
       **Stop alarm** action whose `PendingIntent` goes to a `BroadcastReceiver` (not an activity, so the keyguard isn't
       asked for: no `requestDismissKeyguard`), and the same action on the ongoing ride notification while it rings
-      (iOS: the Live Activity's big Stop alarm button; the Dynamic Island shows a bell while it rings).
-- [ ] **A stop from the lock screen is the same as Stop in the app**: the sound, the buzz, the out-loud-after-60-s of
+      (iOS: the Live Activity's big Stop alarm button; the Dynamic Island shows a bell while it rings). **Android 0.7.0–0.8.0:** the alarm (full-screen intent, `CATEGORY_ALARM`, `AlarmActivity` with `setShowWhenLocked`/`setTurnScreenOn`), its repeat, arriving, the ongoing ride notification while it rings and the school wake-up: Stop alarm is a broadcast to `StopReceiver`. Android has no heads-up variant of the alarm.
+- [x] **A stop from the lock screen is the same as Stop in the app**: the sound, the buzz, the out-loud-after-60-s of
       "Sound only with headphones", the 30 s repeat; the ring counts as answered for the adaptive wake-up (when you
       stopped it); with "Ring at the stop" the leg goes to awake (and rings again at the stop), else the leg is done;
-      the backup was already off since the ring. Still on? and the backup behave as after an in-app stop.
-- [ ] **What each answer stops** (`AlarmStop.plan`): a school wake-up notification (`wake-<day>-<n>`) takes that day's
+      the backup was already off since the ring. Still on? and the backup behave as after an in-app stop. **Android 0.8.0:** the receiver hands it to the ride (`ACTION_STOP_ALARM`), so the adaptive wake-up counts it too.
+- [x] **What each answer stops** (`AlarmStop.plan`): a school wake-up notification (`wake-<day>-<n>`) takes that day's
       three away (pending and shown) whatever you did with it; its Stop alarm also stops a real alarm still ringing.
       Stop alarm on any trip notification stops the trip alarm; tapping or swiping away the ringing alarm's own
       notification (or its repeat) does too. Anything else (Still on?, which train, a friend's message) goes to the trip
-      engine as before.
-- [ ] **Works when the app wasn't running**: the receiver must not need the trip engine. With no trip engine nothing
+      engine as before. **Android 0.7.0:** `AlarmStop.plan` (tests in `WristNoticeTest`).
+- [x] **Works when the app wasn't running**: the receiver must not need the trip engine. With no trip engine nothing
       rings (it plays the sound), so it only takes the alarm's notifications off the lock screen (`alarm`,
       `alarm-again`, `backup`, `heads-up-true/false` shown; the backup still to come stays) and makes the ride
-      notification stop saying it rings; answers meant for the trip engine are kept and handed to it when it starts.
-- [ ] The alarm and wake-up notifications show their title on the lock screen even with previews hidden
-      (Android: `VISIBILITY_PUBLIC` for these, or a public version with the title).
-- [ ] Not done on purpose: stopping with a volume or power button (iOS has no public way; on Android it's possible but
-      keep it the same: Stop alarm only).
+      notification stop saying it rings; answers meant for the trip engine are kept and handed to it when it starts. **Android 0.7.0:** with no ride running the receiver only takes the alarm's notifications off.
+- [x] The alarm and wake-up notifications show their title on the lock screen even with previews hidden
+      (Android: `VISIBILITY_PUBLIC` for these, or a public version with the title). **Android 0.7.0:** `VISIBILITY_PUBLIC` and a public version with the title.
+- [x] Not done on purpose: stopping with a volume or power button (iOS has no public way; on Android it's possible but
+      keep it the same: Stop alarm only). (Android keeps A1's volume key on the full-screen alarm screen itself.)
 
 ## iOS 0.42.0
 
@@ -237,16 +237,16 @@ to get out of the calendar screen, you can't swipe"). UI only, no new rules.
       Settings (away from the home map): the same sheet full height, and a friend's page heads with a small map of their
       trip. Android: Friends as a bottom sheet (half, expanded) over the home map with the same pins; system back (and
       the predictive back gesture) closes it and steps back through its pages.
-- [ ] **Your week is a sheet.** It was drawn over the map (both home styles) with only a small map button to leave. Now a
+- [x] **Your week is a sheet.** It was drawn over the map (both home styles) with only a small map button to leave. Now a
       full-height sheet with the grabber, swiped down or its × to close (like Your day). Android: Your week as a sheet or
-      a screen that system back closes.
+      a screen that system back closes. **Android 0.8.0:** a screen system back closes (as all screens over the home).
 - [ ] **The one-time questions** ("Show friends your trips?", "Compare timetables with friends?") can be swiped away or
       left with "Not now" (top left) until answered; not answered stays off and is asked again the next time Friends
       opens (once per opening). Android: system back on them = "Not now".
-- [ ] Android sweep: every screen that opens over another (Friends and its pages, Your week, Your day, the school
+- [x] Android sweep: every screen that opens over another (Friends and its pages, Your week, Your day, the school
       calendar picker, Your week in Settings, Compare and a day of it, the consent screens) handles system back /
       predictive back and has a visible close or back control; only the first-run setup and the backup code just made
-      hold back.
+      hold back. **Android 0.8.0:** a root back handler on every screen over the home (the screens' own first), `enableOnBackInvokedCallback` for the predictive gesture.
 
 ## iOS 0.40.1
 
@@ -286,7 +286,7 @@ fused position (`ios/App/BusFusion.swift`, tests `BusFusionTests` and `WaitMarke
 
 ## iOS 0.40.0
 
-- [ ] "From <stop>" in a trip's detail (`FromStop`, Fastest trip under the big card; folded away as "Buses from
+- [x] "From <stop>" in a trip's detail (`FromStop`, Fastest trip under the big card; folded away as "Buses from
       Bolkenplein ▾" in the home's next-trip card): the next departures from the stop you get on at (Transitous
       `/v6/stoptimes` for that stop, n 20, every 30 s while shown; a failed answer keeps the last list). Up to 6 of the
       lines that get you there (your trip's first line and the other ways' first lines from the same stop; your own
@@ -296,15 +296,15 @@ fused position (`ios/App/BusFusion.swift`, tests `BusFusionTests` and `WaitMarke
       switches to it (one of the ways already found, else the rest planned from that stop: the planner from the stop to
       the destination at its departure − 1 min, the itinerary whose first ride is that trip, with your walk to the stop
       put in front). It stays your pick like a ride chosen in Plan, but missing from later answers doesn't drop it, only
-      leaving or being cancelled. Vectors in `ios/Tests/FromStopTests.swift`.
-- [ ] Sticky upcoming trips (`StickyTrips`): a failed or empty answer keeps what's still to come (not left 60 s past its
+      leaving or being cancelled. Vectors in `ios/Tests/FromStopTests.swift`. **Android 0.8.0:** `travel/Departures.kt` (`FromStopTest` in `DeparturesTest`); folded on the home's next-trip card ("Buses from … ▾"), not yet under Fastest trip's big card.
+- [x] Sticky upcoming trips (`StickyTrips`): a failed or empty answer keeps what's still to come (not left 60 s past its
       live departure, not cancelled); a partial answer adds to the list; a whole answer replaces it but keeps the trip
       you're heading for (the one shown first, by its first ride's trip id) until it has left, unless you're on it; a
       trip in both is the new answer's. The card holds that trip once its time to leave is within 5 min: while you can
       still reach its stop (straight-line metres × 1.3 at 1.7 m/s, before its departure + 30 s), or with no position
       known until 2 min past its time to leave (as before); else the first you can still leave for. Also across a
       planning-key change that only changes the start (walking away from home). Vectors in
-      `ios/Tests/StickyTripsTests.swift`.
+      `ios/Tests/StickyTripsTests.swift`. **Android 0.8.0:** the home's next trips (`HomeModel.sticky`).
 - [ ] (Replaced by 0.40.1's fused position: skip it.) The bus you wait for on the map agrees with its time (`WaitMarker`, Fastest trip's map and the live sheet): drawn
       within 150 m of your stop (or past it) while its time there is more than 2 min off doesn't add up. Then: its own GPS
       fix within 35 m of your stop and your stop is where its trip starts (or its times have it standing there): at the
@@ -312,21 +312,21 @@ fused position (`ios/App/BusFusion.swift`, tests `BusFusionTests` and `WaitMarke
       its trip not started and nothing says where it is: not drawn (the stop's pin has the time); else 150 m short of
       the stop. Causes seen: a layover at the terminus that is your stop, GPS of the vehicle's previous journey, and a
       fix moved on too far at its pace. Vectors in `ios/Tests/WaitMarkerTests.swift`.
-- [ ] The walk at your own speed (`WalkPlan`): once 5 walks are learned (`Habits.walkSpeed`), your walk = the walk's
+- [x] The walk at your own speed (`WalkPlan`): once 5 walks are learned (`Habits.walkSpeed`), your walk = the walk's
       metres (the map's walking route, else the planner's minutes × the speed it planned with) / your speed, rounded up,
       never more than the planner's. Shown "6 min walk · leave in 4 min (2 min spare)". The time to leave (and "Time to
       go") moves later by max(0, planner's walk − your walk − 2) minutes only; nothing learned: as before. School and
-      planned-trip alarms unchanged. Vectors in `ios/Tests/WalkPlanTests.swift`.
+      planned-trip alarms unchanged. Vectors in `ios/Tests/WalkPlanTests.swift`. **Android 0.8.0:** the home's next-trip card ("Leave …" and the walk line); the "Time to go" notification not yet.
 - [ ] Search on the home map: a bottom sheet over the same map (half height, the map still usable behind it, the same
       camera): your places, recent ones, stops found by name (also drawn as pins on the map; tap one), then the ways there
       in the sheet with Go and the route drawn on the map (the map moves only when the route isn't in view, and goes back
       when the search closes). "Another time or more options" opens the full Plan as before.
-- [ ] Ghost departures (`GhostDepartures`, the home's departure cards, "From <stop>", the home's trips and Plan's
+- [x] Ghost departures (`GhostDepartures`, the home's departure cards, "From <stop>", the home's trips and Plan's
       options): the same journey from two sources once (same trip at the same stop, or same line + stop + timetable minute
       + headsign equal or one the start of the other; the live copy kept); cancelled ones hidden; for a line that has live
       data (live elsewhere in the list, or seen live today), one with no live data and no vehicle seen within 15 min of
       leaving is "No live info · may not run" and sorts as if 10 min later (trip options: after the others); past its
-      time + 60 s with no sign of it: gone. Vectors in `ios/Tests/GhostDeparturesTests.swift`.
+      time + 60 s with no sign of it: gone. Vectors in `ios/Tests/GhostDeparturesTests.swift`. **Android 0.8.0:** the home's departures and Plan's options ("may not run").
 
 ## iOS 0.39.1
 
@@ -366,7 +366,7 @@ From the field report of 25 November (the 154 to Schijndel taken for the 306 at 
 
 ## iOS 0.39.0
 
-- [ ] Change guidance (`ChangeGuide`): at a change (bus → train, train → train), on the ride screen, at the change and on
+- [x] Change guidance (`ChangeGuide`): at a change (bus → train, train → train), on the ride screen, at the change and on
       the lock screen (Android: the ongoing trip notification): "Platform 5 → 7" (same platform "Same platform (5)", onto
       a bus "Platform 5 → bus 306", from a bus "To platform 7"), "3 min walk", "4 min to change" (from your live arrival;
       at the change from now). Missed when the room is under what the change needs: the planner's walk, or your own
@@ -376,26 +376,26 @@ From the field report of 25 November (the 154 to Schijndel taken for the 306 at 
       on a planned trip: the rest planned again from the change (the planner from the change's stop to the trip's end,
       the itinerary whose first ride is that one, else one leaving within 60 s of it) and spliced after the current leg.
       Platforms from NS's live track, else Transitous `track`/`scheduledTrack`; the arrival platform from the ride's own
-      trip answer at your stop. Vectors in `ios/Tests/ChangeGuideTests.swift`.
-- [ ] Adaptive wake-up (`AdaptiveWake`, Settings › Trips & alarm › "Learn when I get up", on by default, with a reset):
+      trip answer at your stop. Vectors in `ios/Tests/ChangeGuideTests.swift`. **Android 0.8.0:** the ride screen's "Your change" card and the ongoing notification's second line with a Switch action; platforms from the planner and the stop's board (NS's live track not yet).
+- [x] Adaptive wake-up (`AdaptiveWake`, Settings › Trips & alarm › "Learn when I get up", on by default, with a reset):
       per ring before the stop: seconds ring → Stop alarm (none: still ringing when you got within 450 m of the stop),
       seconds ring → at the stop; spare = lead − reaction. Valid: lead 30 s … 20 min, reaction ≤ lead + 5 min. Per mode
       the newest 10 kept; from 3 rides, the median spare of the newest 5: under 75 s → 1 min earlier, over 225 s → 1 min
       back; bounds 0…3 (train), 0…2 (bus), never later than the setting (it only adds minutes to the time rule; the
       distance rule unchanged). Shows "Learned: wakes you 1 min earlier" (or "… on trains", "Learning: 2 more rides",
-      "Learned: as you set it"). Vectors in `ios/Tests/AdaptiveWakeTests.swift`.
-- [ ] Richer lock screen: the trip notification shows the next stop (not yours), the delay at your stop ("3 min
+      "Learned: as you set it"). Vectors in `ios/Tests/AdaptiveWakeTests.swift`. **Android 0.8.0:** `ride/AdaptiveWake.kt` (`AdaptiveWakeTest`), Settings › Trips & alarm › Learn when I get up.
+- [x] Richer lock screen: the trip notification shows the next stop (not yours), the delay at your stop ("3 min
       late", "on time", "2 min early") and the platform you get in at ("Next: Vught · 3 min late · platform 5"), and the
       change line (the miss first). Plus a quiet "Get ready" (`GetReady`, id `ready-<trip start>-<leg>`, no sound, gone
       after 10 min) once the vehicle is at the stop before yours (30 s early counts), only before the alarm rang, when
       your stop is more than the wake minutes + 1 min away and within 15 min. Vectors in `ios/Tests/GetReadyTests.swift`,
-      `ios/Tests/LockWordsTests.swift`, `ios/Tests/NoticeExpiryTests.swift`.
-- [ ] Without signal (`RideCache`): when a trip starts, each planned ride's trip answer (stops with times, scheduled
+      `ios/Tests/LockWordsTests.swift`, `ios/Tests/NoticeExpiryTests.swift`. **Android 0.8.0:** next stop and delay in the ongoing notification, the change line under it, `GetReady` (silent, `ready-…`); not yet the platform you get in at.
+- [x] Without signal (`RideCache`): when a trip starts, each planned ride's trip answer (stops with times, scheduled
       times, platforms, the road shape, the line) saved on the phone; again when the vehicle is found and at most every
       2 min after; at most 4 rides, 120 stops and 400 road points each (thinned evenly, ends kept), 160 kB, for that trip
       only, cleared when it ends (and on app start). No answer: the ride's stops, your stop's time, the road for the
       wake time and dead reckoning come from the copy ("No network: going by the stops and times saved on your phone");
-      the network back: ask again at once. Vectors in `ios/Tests/RideCacheTests.swift`.
+      the network back: ask again at once. Vectors in `ios/Tests/RideCacheTests.swift`. **Android 0.8.0:** `ride/RideCache.kt` (`RideCacheTest`), `no_backup/ridecache.json`.
 
 ## iOS 0.38.0
 

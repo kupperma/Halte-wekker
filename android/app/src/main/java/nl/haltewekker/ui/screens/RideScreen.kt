@@ -140,6 +140,16 @@ fun RideScreen(s: RideState, onBack: () -> Unit) {
             // (A7) student OV, rain on the walk and OV-fiets where the last train gets in, for what's left of the trip
             TripNotes(nl.haltewekker.data.DoorTrip(s.trip.rides.drop(s.index), leg.departure, s.trip.end), emptyList(), now)
         }
+        // (A8, iOS 0.39) the change ahead: platforms, walk, minutes; a miss with the one you make instead
+        if (s.changeLine != null || s.changeMiss != null) Card {
+            Header("Your change")
+            s.changeMiss?.let { Text(it, color = DS.t.warning, fontWeight = FontWeight.SemiBold) }
+            s.changeLine?.let { Text(it, color = DS.t.text) }
+            if (s.changeSwitch != null) QuietButton("Switch to that one") { RideService.send(context, RideService.ACTION_SWITCH_CHANGE) }
+        }
+        if (s.offline) Note("No network: going by the stops and times saved on your phone.")
+        s.nextStop?.let { n -> if (s.phase == Phase.SLEEPING) Text("Next: $n" + (s.delayMin?.let { d -> " · " + if (d >= 1) "$d min late" else if (d <= -1) "${-d} min early" else "on time" } ?: ""),
+            color = DS.t.secondary, style = MaterialTheme.typography.bodySmall) }
         if (s.roughGPS) Text("Long way to go: GPS every 25 s to save battery, the best again well before your stop.",
             color = DS.t.secondary, style = MaterialTheme.typography.bodySmall)
         if (s.index + 1 < s.trip.rides.size) Card {
