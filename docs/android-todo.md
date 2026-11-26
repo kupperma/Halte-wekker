@@ -41,6 +41,64 @@ From a field log of 27 November. Rules in `ios/App/MissCall.swift` (with `Change
       or their bus sends nothing) and go by their times. Log which key found nothing and whether its journey had
       begun (start time from the Transitous id, 24:00+ the next day).
 
+## iOS 0.42.2
+
+From the field report at 23:10 in Veghel ("No bus or train from the stops within 1.6 km in this time" with buses every
+half hour and the classic Fastest trip showing a way: "That's not possible") and the requests "Could you add how many
+minutes are between my gaps" and "What's up with all the numbers". The field log showed why: 0.42.0 planned every stop
+on its own, about 70 `/v5/plan` requests in 3 minutes (12 at once, again on every switch of the time to leave), most
+of them timed out in the Transitous queue, two 429s, 150–210 KB each. Rules in `ios/App/NearbyRank.swift` (tests
+`NearbyRankTests`, `NearbySearchTests`) and `ios/App/TripTimeline.swift` (tests `TripTimelineTests`); the iOS wiring in
+`ios/App/NearbyStore.swift`, `NearbyViews.swift`, `NearbyDetail.swift`, `Transit.planPage`.
+
+- [ ] **One plan per search, from where you are.** `/v5/plan` from your coordinate to the destination (its stop, or its
+      spot when it has several), `numItineraries` 8, `maxItineraries` 12, `searchWindow` 3600, `maxTransfers` 3, `maxPreTransitTime` = the
+      walk to 1.6 km (straight × 1.3 at 1.2 m/s, minutes up: 1740 s; at most 2700 s), `detailedTransfers=false`, your
+      walking speed once learned. The planner walks to every stop around by itself. Each itinerary goes with the stop its
+      first ride leaves from (`Nearby.groupIndex`: one of the stops around with its id, else a bus stop of its name
+      within 300 m, else the nearest within 120 m, a station 400 m); a stop that's none of them is added with its own
+      circle (`Nearby.newGroup`; a name already taken gets `@<id>`). Its walk is the planner's own walk from your spot.
+- [ ] **A second plan only when needed** (`Nearby.nextPlan`, two per search at most): fewer than 3 stops have a way and
+      there's a `nextPageCursor` (the next page, `maxPreTransitTime` for 3 km, so 2700 s), or the first got no answer
+      (asked once more, the same wider walk, no cursor). Never while Transitous asks to slow down (after a 429).
+- [ ] **The stops around** (`/v1/map/stops`, 1 km, kept 10 min) are only drawn (8 at most, as 0.42.0); the ones with no
+      way from the plan are grey dots. **Tap one**: its own plan (from its first id, at when you can be there, 5
+      itineraries; one stop at a time), and its next departures (`/v6/stoptimes`, 16, from when you can be there; kept a
+      minute) of the same lines and headsigns as its ways, under "Also from here". A failed one: "Couldn’t check this stop
+      just now (the planner is busy or didn’t answer)." with Try again.
+- [ ] **At most 2 requests at once from this screen**; nothing re-fired or cancelled by the time switch.
+- [ ] **Leave now / In 10 / In 20 filter what's in** (no new plan); one second after the last switch, the next page only
+      when fewer than 3 stops have a ranked way for that time and the search has a plan left. Asked again after 5
+      minutes on screen (what's shown stays), or when you moved 250 m or the destination changed.
+- [ ] **The window** (`Nearby.shown`): a way counts when you leave your door at or after the time you set off (its
+      departure less your walk, counted once; 30 s grace), with no upper bound: every way leaving your door within 35
+      minutes, and at least the next 2 of a stop however late (tonight's last, or tomorrow's first). **Ranked** (tags,
+      colours, the legend) only when it leaves your door within those 35 minutes, waits at most 90 minutes anywhere (before
+      the first ride or at a change) and is there within 3 hours of setting off (`Nearby.ranked`); the others are drawn
+      grey, tagged "later", with their day ("tomorrow", a weekday; nil today and the night after until 04:00).
+- [ ] **Fastest trip's own ways are always in**, with their stop, in every window; nothing for that time: its stop is
+      shown with its way from now ("Nothing found yet for that time: this is your trip’s way…").
+- [ ] **What the screen says** (`Nearby.statusLine`): "No bus or train from the stops within 1.6 km in this time…" only
+      when the planner answered and your trip has no way either; no answer: "Couldn’t check the stops around you just now
+      (no answer in time / the planner is busy). Your trip has the fastest way."; some in: "Couldn’t check every stop
+      just now (…): these are the ones in."; stops tapped that failed: "Couldn’t check N stops just now (…). Tap one to try
+      again."
+- [ ] **Surest only at 70 % on time or more** (`Nearby.surestAt`), on the list and in a stop's sheet; else no Surest.
+- [ ] **Overnight ways apart.** In a stop's sheet the late ones (as above) get their own group, "Tomorrow morning" (there
+      tomorrow before noon) or "Later · Sat", on their own time axis; never Fastest or Surest.
+- [ ] **Circles that would overlap are one** (`Nearby.merge`): closer than 40 pt at the map's zoom, the earliest there
+      is drawn (at its own place) with "+N"; grey dots under a circle are left out.
+- [ ] **Whole trip rows** (`TripTimeline`): the time axis ticks every 10/15/30 min, 1/2/3/6 h, the smallest step with
+      labels 56 pt apart, the start and end always, none closer (`tickStep`, `ticks(width:)`). Each row's leave and arrive
+      times always, moved apart around the row's middle when the row is short (`ends`, 40 pt a time, 6 pt between). Every
+      gap labelled with its minutes (`gapLabels`): the walk to the first stop "🚶 2" (with a wait: "🚶2 + 1 wait"), each
+      change "6 min" or "🚶3 + 5 wait", the last walk "🚶 4"; centred on the gap when it fits (6 + 6.5 pt a character,
+      14 the walker, 4 pt spare), else under the bar with a tick, in the first of two rows where it overlaps nothing (left
+      out when neither has room). A change under 3 min red, under your learned change time yellow. Each ride's own
+      minutes inside its bar ("41 min") when they fit (8 pt spare).
+- [ ] **Field log** (`.net`): one line per search, see [logs-export.md](logs-export.md) › Fastest trip, zoomed out
+      (0.42.2).
+
 ## iOS 0.42.1
 
 From the request "Make it so you can stop the alarm without unlocking my phone". Rules in `ios/App/AlarmStop.swift`
@@ -425,14 +483,38 @@ From the field report of 25 November (the 154 to Schijndel taken for the 306 at 
       the wake-up taps your wrist; tap Stop alarm there." (Android: "On a Wear OS watch: …"). Vectors in
       `ios/Tests/WristNoticeTests.swift`.
 
-## iOS 0.37
+## Left after Android 0.6.0 (A6)
 
-- [ ] OV-fiets at the station (`OVFiets`, Settings › Map & home, on by default): the relay's `/ns/ovfiets?station=BD`
+Android 0.6.0 (version code 7) ported iOS 0.32–0.37 (see [android/plan.md](android/plan.md) › As built A6): every pure
+rule below with its tests, and most of it wired in. What's still open:
+
+- [ ] Trains on the same track in the ride: `TrainRules` is ported and tested, but Android's ride has A1's simpler
+      matcher (no `choose` state machine, no candidates): the rivals look every 2 minutes, the roads-parted look at
+      once, the stopping pattern while choosing, the one-time "IC to … or IC to …?" ask (ride screen and a notification
+      with two buttons) and the trip following the through train (`stayOn`) need that first.
+- [ ] Dead reckoning by the vehicle's own fresh GPS (moved on at its pace): Android reckons at its pace only.
+- [ ] The home map's vehicles moved on at their seen pace (`Advance.place`): only the matcher uses it so far.
+- [ ] Habits in the ranking: your change time as the least room in `Risk.miss` and the preferred-stop bonus in
+      `Risk.score` (Android has no `Risk` ranking of options yet); the change odds' `missChance` likewise.
+- [ ] Check-out between train companies: Transitous's `agencyName` isn't parsed on Android, so two trains count as one.
+- [ ] Works: the "Leave 10 min earlier" (a replan for that school day against the usual door-to-door) and the
+      stations of planned trips (only the NS stations nearest Home and School are matched).
+- [ ] OV-fiets on the ride screen's last train leg and in a station's sheet (shown on the trip's notes only).
+- [ ] Student OV and rain on the ride's Go card equivalent (shown on Fastest trip and the home's next-trip card).
+- [ ] Motion: Android has no Play-Services-free Activity Recognition. The step detector gives "walking" only, so
+      "automotive" (sooner looks, the far tier's earlier start) and "stationary" (rough GPS while waiting) stay out.
+- [ ] Your year in travel shared as a picture (it's shared as text without places).
+- [ ] Settings' search scrolling to the row on its page (it opens the page).
+- [ ] The widget's lock-screen sizes (none on Android) and a Glance look.
+
+## iOS 0.37 (done in Android 0.6.0 unless listed above)
+
+- [x] OV-fiets at the station (`OVFiets`, Settings › Map & home, on by default): the relay's `/ns/ovfiets?station=BD`
       (NS Places API, slimmed to `{"station","locations":[{"name","code","bikes","lat","lon","open"}]}`), kept 5 min per
       station; "Breda · OV-fiets: 12 left" (warm at ≤ 5, "· closed now" when every staffed point says `open: "No"`) on
       the Go card for the station where the trip's last train gets in (when a bus or a walk of ≥ 5 min follows it), on
       the ride screen's last train leg and in a station's sheet. Vectors in `ios/Tests/OVFietsTests.swift`.
-- [ ] Rain advice for the walk (`RainAdvice`, Settings › Map & home, on by default): from 3 h before a trip until 5 min
+- [x] Rain advice for the walk (`RainAdvice`, Settings › Map & home, on by default): from 3 h before a trip until 5 min
       after it starts, Open-Meteo's hourly `precipitation` (the hour *before* its time) ≥ 0.5 mm during the walk to the
       first stop (from the trip's start, `walkBefore` min) or from the last one (last arrival → end) at the start or end
       point: "Rain at 08:00 — take bus 305 at 07:41 to the station instead of walking" when the first ride is a train
@@ -440,64 +522,64 @@ From the field report of 25 November (the 154 to Schijndel taken for the 306 at 
       leaving after now + its walk, there by the trip's end + 10 min; else a Transitous bus-only plan to the station
       arriving by the train − 2 min), else "Rain at 08:00 — bring an umbrella"; on the home's next-trip card and the
       Go card. Vectors in `ios/Tests/RainAdviceTests.swift`.
-- [ ] Home-screen widget (Android: an app widget with its own stop setting, no shared storage needed): small / medium
+- [x] Home-screen widget (Android: an app widget with its own stop setting, no shared storage needed): small / medium
       (+ lock-screen rectangular / inline on iOS) "next departures from a stop", Transitous `/v6/stoptimes` asked by the
       widget itself; entries just after each departure leaves, refresh every 12 min (sooner when the list runs short,
       at least 5 min apart; 30 min with nothing leaving); "07:41 (+2)", "07:41 cancelled"; tap opens the app on that
       stop (`haltewekker://stop?id=…&name=…&lat=…&lon=…&rail=1`); "Pick a stop" when none is set. Rules in
       `ios/Shared/StopBoardCore.swift`, vectors in `ios/Tests/StopBoardCoreTests.swift`.
-- [ ] Voice / shortcuts (Android: App Actions or shortcuts): "When's my bus?" (home stop within 600 m of home or with no
+- [x] Voice / shortcuts (Android: App Actions or shortcuts): "When's my bus?" (home stop within 600 m of home or with no
       fix, else the nearest stop; spoken "Bus 305 to Uden leaves Veghel at 07:41, 2 minutes late — in 6 minutes. Then
       the 306 at 07:52."), "Wake me at a stop" (opens Wake me at a stop with it, to confirm), "Plan to school / home"
       (Fastest trip), "Start my trip" (I'm on it when the planned ride leaves within 3 min or left in the last 15, else
       Fastest trip for it). Nothing over a running trip. Rules in `ios/App/IntentActions.swift`.
 
-## iOS 0.36
+## iOS 0.36 (done in Android 0.6.0 unless listed above)
 
-- [ ] Check-out reminder (`CheckOut`, Settings › Trips & alarm, on by default): "Did you check out?" a minute after you
+- [x] Check-out reminder (`CheckOut`, Settings › Trips & alarm, on by default): "Did you check out?" a minute after you
       get off at the end of a trip, off a bus, between bus and train, and between train companies (Transitous's
       `agencyName`); not between two NS trains. Taken back when the next leg finds the vehicle you got off, or (at the
       end) two fixes at ≥ 7 m/s in that minute. No NFC.
-- [ ] Student travel product (`StudentOV`, Settings › Trips & alarm: none / weekday free / weekend free): DUO's windows
+- [x] Student travel product (`StudentOV`, Settings › Trips & alarm: none / weekday free / weekend free): DUO's windows
       (days 04:00–04:00; week product free Mon 04:00 – Sat 04:00; weekend product free Fri 12:00 – Mon 04:00, Tue–Fri
       04:00–09:00 full fare; summer 16 Jul – 16 Aug discount for the week product; holidays), 40% off trains, 34% off
       buses; "Free with your student OV" / "Costs money now (weekday) — ~€3.60 with 40% off" on plan options and the Go
       card, the price from the relay's `/ns/price`. Windows in `ios/Tests/StudentOVTests.swift`.
-- [ ] Money back for a late train (`DelayClaim`, on by default): once per trip, after it, when its trains got you there
+- [x] Money back for a late train (`DelayClaim`, on by default): once per trip, after it, when its trains got you there
       ≥ 30 min late (the planned arrival counts once a train was ≥ 3 min late), with a tap to NS's claim page.
-- [ ] Works and disruptions on your routes (`RailWorks`, Settings › Notifications): the relay's
+- [x] Works and disruptions on your routes (`RailWorks`, Settings › Notifications): the relay's
       `/ns/disruptions?stations=…` at most every 4 hours, matched to your usual train rides (home ⇄ school, planned
       trips; stations on the way by the straight line ± 2.5 km), today and the next 7 days; the home's card for today or
       tomorrow and a notification at 19:30 the evening before ("Thursday: no trains Tilburg–Breda (works). Leave 10 min
       earlier — buses replace trains"; the minutes from a replan for that school day against the usual door-to-door).
-- [ ] Last way home (`LastTrip`, Settings › Notifications): after 20:00 and > 3 km from Home, the latest way home (asked
+- [x] Last way home (`LastTrip`, Settings › Notifications): after 20:00 and > 3 km from Home, the latest way home (asked
       "arrive by" 04:00, 02:00, 01:00, midnight), refreshed at most hourly or after 1 km, on the home's card and a
       notification 30 min before it leaves.
 
-## iOS 0.35
+## iOS 0.35 (done in Android 0.6.0 unless listed above)
 
-- [ ] The leaderboard's rule (`ScoreRules.board`): a planned trip between Home and School is scored on the corridor too
+- [x] The leaderboard's rule (`ScoreRules.board`): a planned trip between Home and School is scored on the corridor too
       (until iOS 0.34 only fixed routes were, so the board stopped getting trips); a stale start fix falls back to the
       first stop; going on with a trip ended by hand keeps its start; read the saved board entry by entry.
-- [ ] Today's best and worst trip (`DailyRank`): the `scores` box's optional `today` list, sent within 5 minutes of a new
+- [x] Today's best and worst trip (`DailyRank`): the `scores` box's optional `today` list, sent within 5 minutes of a new
       trip, and the words; on the Leaderboard and a small card on Friends. Rules and test vectors:
       [friends design › As built (0.35)](superpowers/specs/2026-11-18-friends-design.md).
-- [ ] Your year in travel (`TravelYear`, Settings › Advanced, and the home's card in December or in the two weeks after
+- [x] Your year in travel (`TravelYear`, Settings › Advanced, and the home's card in December or in the two weeks after
       a year of rides, with ≥ 5 trips, put away per year): keep each ride on the phone (line, stops, km = straight line ×
       1.3 by bus, × 1.15 by train, delay, coach); the last 365 days ("Your travel so far" with less than a year of
       data); trips = kept trips + leaderboard trips from before the first kept ride; CO₂ saved = bus km × (0.19 − 0.05)
       + train km × (0.19 − 0.02) kg; favourite line / stop / coach (≥ 2), earliest start by time of day, longest delay,
       rides with friends; cards and share a card as a picture without stops. Numbers in `ios/Tests/TravelYearTests.swift`.
 
-## iOS 0.34
+## iOS 0.34 (done in Android 0.6.0 unless listed above)
 
-- [ ] Trains on the same track: the rivals look on a confirmed train (NS positions, every 2 minutes), the roads-parted
+- [x] Trains on the same track: the rivals look on a confirmed train (NS positions, every 2 minutes), the roads-parted
       look at once, the stopping pattern while choosing, the one-time "IC to … or IC to …?" ask (ride screen and a
       notification with two buttons), and the trip following the through train (stay on to the last leg's end).
-- [ ] Old bus GPS moved on at its seen pace (up to 2 minutes), late as it is, with more room for an older fix.
-- [ ] Following in tunnels and dead zones (dead reckoning every 5 s after 15 s without a good fix; only the time rule
+- [x] Old bus GPS moved on at its seen pace (up to 2 minutes), late as it is, with more room for an older fix.
+- [x] Following in tunnels and dead zones (dead reckoning every 5 s after 15 s without a good fix; only the time rule
       rings on it).
-- [ ] Learned from your rides (walking speed to the planner as `pedestrianSpeed`, change time in the ranking, stops you
+- [x] Learned from your rides (walking speed to the planner as `pedestrianSpeed`, change time in the ranking, stops you
       prefer), with its settings row and reset.
-- [ ] How reliable a change is ("this change worked on 9 of 10 days"), on plan options and the Go card, and in the
+- [x] How reliable a change is ("this change worked on 9 of 10 days"), on plan options and the Go card, and in the
       ranking.

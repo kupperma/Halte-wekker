@@ -1,0 +1,72 @@
+{
+ "payload": {
+  "treinen": [
+   {
+    "treinNummer": 8649,
+    "ritId": "8649",
+    "lat": 52.124134,
+    "lng": 4.6577387,
+    "snelheid": 4.707,
+    "richting": 325.592,
+    "horizontaleNauwkeurigheid": 233.33334,
+    "type": "SPR",
+    "bron": "OBIS"
+   },
+   {
+    "treinNummer": 6558,
+    "ritId": "6558",
+    "lat": 51.45888,
+    "lng": 5.771683,
+    "snelheid": 101.791,
+    "richting": 285.13,
+    "horizontaleNauwkeurigheid": 233.33334,
+    "type": "SPR",
+    "bron": "OBIS"
+   },
+   {
+    "treinNummer": 6648,
+    "ritId": "6648",
+    "lat": 51.985676,
+    "lng": 5.8958354,
+    "snelheid": 39.814,
+    "richting": 100.1,
+    "horizontaleNauwkeurigheid": 427.77777,
+    "type": "SPR",
+    "bron": "OBIS"
+   },
+   {
+    "treinNummer": 7656,
+    "ritId": "7656",
+    "lat": 51.985004,
+    "lng": 5.900349,
+    "snelheid": 0.0,
+    "richting": 283.32,
+    "horizontaleNauwkeurigheid": 233.33334,
+    "type": "SPR",
+    "bron": "OBIS"
+   },
+   {
+    "treinNummer": 6555,
+    "ritId": "6555",
+    "lat": 51.584568,
+    "lng": 5.31935,
+    "snelheid": 6.765,
+    "richting": 136.31,
+    "horizontaleNauwkeurigheid": 350.0,
+    "type": "SPR",
+    "bron": "OBIS"
+   },
+   {
+    "treinNummer": 6458,
+    "ritId": "6458",
+    "lat": 51.585747,
+    "lng": 5.316894,
+    "snelheid": 55.262,
+    "richting": 316.15,
+    "horizontaleNauwkeurigheid": 505.55557,
+    "type": "SPR",
+    "bron": "OBIS"
+   }
+  ]
+ }
+}

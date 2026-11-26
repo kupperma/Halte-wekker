@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- (A6) Next departures from a stop: small (2×1) to medium (4×2); its own updates (WorkManager / AlarmManager), so no
+     updatePeriodMillis. The stop is picked when it's added (StopWidgetConfig), and again from the widget's settings. -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="110dp"
+    android:minHeight="40dp"
+    android:targetCellWidth="3"
+    android:targetCellHeight="2"
+    android:minResizeWidth="110dp"
+    android:minResizeHeight="40dp"
+    android:resizeMode="horizontal|vertical"
+    android:updatePeriodMillis="0"
+    android:initialLayout="@layout/widget_stop"
+    android:configure="nl.haltewekker.widget.StopWidgetConfig"
+    android:widgetFeatures="reconfigurable"
+    android:description="@string/widget_description"
+    android:widgetCategory="home_screen" />

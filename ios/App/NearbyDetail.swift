@@ -19,25 +19,35 @@ struct NearbyDetailSheet: View {
     @State private var going = false
     @State private var failed = false
 
-    private var deps: [DoorTrip] { Array(store.departures(stopId).prefix(6)) }
+    private var deps: [DoorTrip] { Array(store.departures(stopId).prefix(8)) }
+
+    /// (0.42.2) The ways overnight or much later (a six-hour wait at a change, there tomorrow morning) apart from the
+    /// others: their own group and axis, with their day, never Fastest or Surest.
+    private var soon: [DoorTrip] { deps.filter { !store.isLate($0, at: stopId) } }
+    private var later: [DoorTrip] { deps.filter { store.isLate($0, at: stopId) } }
 
     private var chosen: DoorTrip? {
         let d: [DoorTrip] = deps
         if let p = pick, let t = d.first(where: { $0.first.tripId == p }) { return t }
-        return d.min { $0.end < $1.end }
+        let s: [DoorTrip] = soon
+        return (s.isEmpty ? d : s).min { $0.end < $1.end }
     }
 
-    /// Of these departures: the one there first, and the surest (when it's surer than that one).
+    /// Of the departures that aren't late: the one there first, and the surest (`Nearby.surestOf`: 70% at least, and
+    /// surer than that one).
     private var marks: (fastest: String?, surest: String?) {
-        let d: [DoorTrip] = deps
-        guard let f = d.min(by: { $0.end < $1.end }) else { return (nil, nil) }
-        let fp: Int = store.sure(f).percent
-        let top: DoorTrip? = d.max { a, b in
-            let pa: Int = store.sure(a).percent, pb: Int = store.sure(b).percent
-            return pa != pb ? pa < pb : a.end > b.end
-        }
-        let s: String? = top.flatMap { store.sure($0).percent > fp ? $0.first.tripId : nil }
-        return (f.first.tripId, s)
+        let d: [DoorTrip] = soon
+        guard let fi = d.indices.min(by: { d[$0].end < d[$1].end }) else { return (nil, nil) }
+        let pcts: [Int] = d.map { store.sure($0).percent }
+        let si: Int? = Nearby.surestOf(pcts, fastest: fi)
+        return (d[fi].first.tripId, si.map { d[$0].first.tripId })
+    }
+
+    /// The stop's other departures of the same lines and directions (`/v6/stoptimes`), after the ones listed.
+    private var boardRows: [BoardDeparture] {
+        let all: [BoardDeparture] = store.boards[stopId] ?? []
+        let last: Date = deps.map(\.first.departure).max() ?? .distantPast
+        return Array(all.filter { $0.time > last }.prefix(5))
     }
 
     var body: some View {
@@ -51,11 +61,7 @@ struct NearbyDetailSheet: View {
                 }
                 .pickerStyle(.segmented)
                 if deps.isEmpty {
-                    HStack(spacing: DS.s8) {
-                        if store.busy { ProgressView().controlSize(.small) }
-                        Text(store.busy ? "Getting its times…" : "Nothing from here in this time.")
-                            .font(DS.footnote).foregroundStyle(DS.secondary)
-                    }
+                    emptyLine
                 } else if wholeTrip {
                     timelines
                 } else {
@@ -107,16 +113,75 @@ struct NearbyDetailSheet: View {
         }
     }
 
+    /// No departure from here (yet): it's being checked, it couldn't be (try again), or there's none in this time.
+    @ViewBuilder private var emptyLine: some View {
+        let check: NearbyStore.Check = store.way(stopId)?.check ?? .unasked
+        HStack(spacing: DS.s8) {
+            switch check {
+            case .asking, .unasked:
+                ProgressView().controlSize(.small)
+                Text("Checking this stop…").font(DS.footnote).foregroundStyle(DS.secondary)
+            case .failed:
+                Text("Couldn’t check this stop just now (the planner is busy or didn’t answer).")
+                    .font(DS.footnote).foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 4)
+                Button("Try again") { Task { await store.more(stopId) } }
+                    .font(DS.footnoteStrong)
+            case .done:
+                Text("Nothing from here in this time.").font(DS.footnote).foregroundStyle(DS.secondary)
+            }
+        }
+    }
+
     // MARK: its times
 
     private var times: some View {
         let m = marks
-        return VStack(spacing: 0) {
-            ForEach(deps) { t in
+        let late: [DoorTrip] = later
+        return VStack(alignment: .leading, spacing: 0) {
+            ForEach(soon) { t in
                 Button { pick = t.first.tripId } label: { timeRow(t, fastest: m.fastest == t.first.tripId, surest: m.surest == t.first.tripId) }
                     .buttonStyle(.plain)
             }
+            if let first = late.first {
+                groupTitle(first)
+                ForEach(late) { t in
+                    Button { pick = t.first.tripId } label: { timeRow(t, fastest: false, surest: false) }
+                        .buttonStyle(.plain)
+                }
+            }
+            let more: [BoardDeparture] = boardRows
+            if !more.isEmpty {
+                Text("ALSO FROM HERE").font(DS.caption).tracking(0.8).foregroundStyle(DS.secondary)
+                    .padding(.top, DS.s12).padding(.bottom, 4).padding(.horizontal, 8)
+                    .accessibilityAddTraits(.isHeader)
+                ForEach(more) { b in boardRow(b) }
+            }
         }
+    }
+
+    /// "Tomorrow morning", "Later · Sat": over the ways shown apart.
+    private func groupTitle(_ first: DoorTrip) -> some View {
+        let t: String = Nearby.laterTitle(firstArrival: first.end, now: Date(), calendar: Calendar.current)
+        return Text(t.uppercased()).font(DS.caption).tracking(0.8).foregroundStyle(DS.secondary)
+            .padding(.top, DS.s12).padding(.bottom, 4).padding(.horizontal, 8)
+            .accessibilityAddTraits(.isHeader)
+    }
+
+    /// One of the stop's other departures of the same line: its time and how it's running (when it gets you there is
+    /// the planner's to say: tap the stop again later).
+    private func boardRow(_ b: BoardDeparture) -> some View {
+        let live: String = b.live ? (b.delay > 0 ? "+\(b.delay)" : "live") : "timetable"
+        return HStack(spacing: DS.s8) {
+            DSLinePill(line: b.train ? Transit.trainLabel(b.line) : b.line, train: b.train)
+            Text(Fmt.hhmm(b.time)).font(DS.bodyStrong).monospacedDigit().foregroundStyle(DS.text)
+            Text(live).font(DS.footnoteStrong).foregroundStyle(b.live && b.delay > 0 ? DS.warning : DS.secondary)
+            Text(b.headsign).font(DS.footnote).foregroundStyle(DS.secondary).lineLimit(1)
+            Spacer(minLength: 4)
+        }
+        .padding(.vertical, 7).padding(.horizontal, 8)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(b.train ? "Train" : "Bus") \(b.line) at \(Fmt.hhmm(b.time)) to \(b.headsign), \(live)")
     }
 
     private func status(_ r: Ride) -> (text: String, color: Color) {
@@ -143,6 +208,9 @@ struct NearbyDetailSheet: View {
             Spacer(minLength: 4)
             if fastest { NearbyTagChip(tag: .fastest) } else if surest { NearbyTagChip(tag: .surest) }
             Text("arrive").font(DS.footnote).foregroundStyle(DS.secondary)
+            if let d = Nearby.dayWord(t.end, now: Date(), calendar: Calendar.current) {
+                Text(d).font(DS.footnote).foregroundStyle(DS.secondary)
+            }
             Text(Fmt.hhmm(t.end)).font(DS.bodyStrong).monospacedDigit().foregroundStyle(DS.text)
         }
         .padding(.vertical, 9).padding(.horizontal, 8)
@@ -163,8 +231,8 @@ struct NearbyDetailSheet: View {
         var id: String { trip.id }
     }
 
-    private func lines() -> [Line] {
-        deps.map { t in
+    private func lines(_ ts: [DoorTrip]) -> [Line] {
+        ts.map { t in
             let legs: [TripTimeline.Leg] = t.rides.map { r in
                 TripTimeline.Leg(line: r.isTrain ? Transit.trainLabel(r.line) : r.line, train: r.isTrain, live: r.live,
                                  departure: r.departure, arrival: r.arrival, from: Fmt.stop(r.fromStop), walkBefore: r.walkBefore)
@@ -174,33 +242,47 @@ struct NearbyDetailSheet: View {
         }
     }
 
+    /// The ways on a shared axis, the late ones (overnight) on their own so they don't stretch it.
     @ViewBuilder private var timelines: some View {
-        let ls: [Line] = lines()
+        let m = marks
+        let late: [DoorTrip] = later
+        VStack(alignment: .leading, spacing: DS.s8) {
+            timelineGroup(lines(soon), marks: m)
+            if let first = late.first {
+                groupTitle(first)
+                timelineGroup(lines(late), marks: (nil, nil))
+            }
+            Text("Walk, wait, ride, change: leaves → arrives \(destWord), with the minutes of each. Bright = live, faint = timetable. Gold = fastest, green = surest.")
+                .font(DS.footnote).foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    @ViewBuilder private func timelineGroup(_ ls: [Line], marks m: (fastest: String?, surest: String?)) -> some View {
         if let axis = TripTimeline.axis(ls.map(\.parts)) {
-            let m = marks
+            let need: Double? = Habits.changeMinutes(HabitStore.shared.book)
             VStack(alignment: .leading, spacing: DS.s8) {
                 ticks(axis)
                 ForEach(ls) { l in
                     let id: String = l.trip.first.tripId
                     Button { pick = id } label: {
                         NearbyTimelineRow(legs: l.legs, placed: TripTimeline.place(l.parts, on: axis), axis: axis,
-                                          leave: l.trip.start, arrive: l.trip.end,
+                                          leave: l.trip.start, arrive: l.trip.end, changeNeeds: need,
                                           fastest: m.fastest == id, surest: m.surest == id, selected: chosen?.id == l.trip.id)
                     }
                     .buttonStyle(.plain)
                 }
-                Text("Walk, wait, ride, change: leaves → arrives \(destWord). Bright = live, faint = timetable. Gold = fastest, green = surest.")
-                    .font(DS.footnote).foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
             }
         }
     }
 
     private func ticks(_ a: TripTimeline.Axis) -> some View {
         GeometryReader { g in
+            let w: CGFloat = g.size.width
+            let ts: [Date] = a.ticks(width: Double(w))
             ZStack(alignment: .topLeading) {
-                ForEach(a.ticks, id: \.self) { d in
+                ForEach(ts, id: \.self) { d in
                     let x: Double = a.at(d)
-                    NearbyAxisText(text: Fmt.hhmm(d), x: x, anchor: TripTimeline.anchor(x), width: g.size.width)
+                    NearbyAxisText(text: Fmt.hhmm(d), x: x, anchor: TripTimeline.anchor(x), width: w)
                 }
             }
         }
@@ -307,23 +389,28 @@ struct NearbyAxisText: View {
     }
 }
 
-/// One departure's whole trip on the shared axis: the times at its ends, the parts (walks and waits thin and quiet,
-/// rides in their line's colour, bright when live), the change stations under it.
+/// One departure's whole trip on the shared axis: the times at its ends (both always: `TripTimeline.ends`), the parts
+/// (walks and waits thin and quiet, rides in their line's colour, bright when live, each with its minutes when they
+/// fit), the minutes of each walk and wait (on the gap, or under the bar with a tick when it's narrow; a tight change
+/// yellow, a risky one red: `TripTimeline.gapLabels`), the change stations under it.
 struct NearbyTimelineRow: View {
     let legs: [TripTimeline.Leg]
     let placed: [TripTimeline.Placed]
     let axis: TripTimeline.Axis
     let leave: Date
     let arrive: Date
+    var changeNeeds: Double? = nil
     let fastest: Bool
     let surest: Bool
     let selected: Bool
 
+    static let tight = Color(hex: 0xE8A33D)
+    static let risky = Color(hex: 0xE5484D)
+
     var body: some View {
         let startX: Double = placed.first?.x ?? 0
         let endX: Double = placed.last.map { $0.x + $0.width } ?? 1
-        let ends = TripTimeline.endLabels(start: startX, end: endX)
-        let changes: [TripTimeline.Label] = TripTimeline.changeLabels(legs, parts: placed, ends: (startX, endX))
+        let changes: [TripTimeline.Label] = TripTimeline.changeLabels(legs, parts: placed, ends: nil)
         let edge: Color = fastest ? NearbyTagChip.gold : surest ? DS.accent : selected ? DS.legQuiet : Color.clear
         return VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 4) {
@@ -333,26 +420,31 @@ struct NearbyTimelineRow: View {
             }
             GeometryReader { g in
                 let w: CGFloat = g.size.width
+                let e: TripTimeline.Ends = TripTimeline.ends(start: startX, end: endX, width: Double(w))
                 ZStack(alignment: .topLeading) {
-                    if ends.leave {
-                        NearbyAxisText(text: Fmt.hhmm(leave), x: startX, anchor: .leading, width: w, font: DS.footnoteStrong, color: DS.text)
-                    }
-                    if ends.arrive {
-                        NearbyAxisText(text: Fmt.hhmm(arrive), x: endX, anchor: .trailing, width: w, font: DS.footnoteStrong, color: DS.text)
-                    }
+                    NearbyAxisText(text: Fmt.hhmm(leave), x: e.leave, anchor: .leading, width: w, font: DS.footnoteStrong, color: DS.text)
+                    NearbyAxisText(text: Fmt.hhmm(arrive), x: e.arrive, anchor: .leading, width: w, font: DS.footnoteStrong, color: DS.text)
                 }
             }
             .frame(height: 16)
             GeometryReader { g in
                 let w: CGFloat = g.size.width
-                ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 6, style: .continuous).fill(DS.surface3.opacity(0.6))
+                let gaps: [TripTimeline.GapLabel] = TripTimeline.gapLabels(placed, width: Double(w), changeNeeds: changeNeeds)
+                let rides: [TripTimeline.RideLabel] = TripTimeline.rideLabels(placed, width: Double(w))
+                ZStack(alignment: .topLeading) {
+                    RoundedRectangle(cornerRadius: 6, style: .continuous).fill(DS.surface3.opacity(0.6)).frame(height: 18)
                     ForEach(Array(placed.enumerated()), id: \.offset) { _, p in
-                        piece(p, width: w)
+                        piece(p, width: w).frame(height: 18)
+                    }
+                    ForEach(Array(rides.enumerated()), id: \.offset) { _, r in
+                        rideText(r, width: w)
+                    }
+                    ForEach(Array(gaps.enumerated()), id: \.offset) { _, l in
+                        gapText(l, width: w)
                     }
                 }
             }
-            .frame(height: 18)
+            .frame(height: barHeight)
             if !changes.isEmpty {
                 GeometryReader { g in
                     let w: CGFloat = g.size.width
@@ -374,10 +466,48 @@ struct NearbyTimelineRow: View {
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
     }
 
+    /// The bar, and room under it for the minutes that don't fit on their gap (two rows at most).
+    private var barHeight: CGFloat { 18 + 2 * Self.underRow + 2 }
+    private static let underRow: CGFloat = 13
+
     private var spoken: String {
         let rides: String = legs.map { "\($0.train ? "train" : "bus") \($0.line) at \(Fmt.hhmm($0.departure))" }.joined(separator: ", then ")
         let tag: String = fastest ? ", fastest" : surest ? ", surest" : ""
         return "Leave \(Fmt.hhmm(leave)), \(rides), there \(Fmt.hhmm(arrive))\(tag)"
+    }
+
+    private func tone(_ t: TripTimeline.Tone) -> Color {
+        switch t {
+        case .plain: return DS.secondary
+        case .tight: return Self.tight
+        case .risky: return Self.risky
+        }
+    }
+
+    /// A gap's minutes: on the gap, or under the bar with a tick up to it.
+    @ViewBuilder private func gapText(_ l: TripTimeline.GapLabel, width w: CGFloat) -> some View {
+        let c: Color = tone(l.tone)
+        let font: Font = .system(size: 10, weight: l.tone == .plain ? .semibold : .bold, design: .rounded)
+        if l.below {
+            let y: CGFloat = 20 + CGFloat(l.lane) * Self.underRow
+            Rectangle().fill(c.opacity(0.7)).frame(width: 1, height: y - 15)
+                .offset(x: CGFloat(l.x) * w, y: 16)
+            NearbyAxisText(text: l.text, x: l.x, anchor: .center, width: w, font: font, color: c)
+                .offset(y: y)
+        } else {
+            NearbyAxisText(text: l.text, x: l.x, anchor: .center, width: w, font: font, color: c)
+                .offset(y: 3)
+        }
+    }
+
+    /// A ride's minutes inside its bar.
+    private func rideText(_ r: TripTimeline.RideLabel, width w: CGFloat) -> some View {
+        let p: TripTimeline.Placed = placed[r.index]
+        let centre: Double = p.x + p.width / 2
+        return NearbyAxisText(text: r.text, x: centre, anchor: .center, width: w,
+                              font: .system(size: 10, weight: .bold, design: .rounded), color: Color.white.opacity(p.part.live ? 0.95 : 0.85))
+            .offset(y: 3)
+            .accessibilityHidden(true)
     }
 
     @ViewBuilder private func piece(_ p: TripTimeline.Placed, width w: CGFloat) -> some View {

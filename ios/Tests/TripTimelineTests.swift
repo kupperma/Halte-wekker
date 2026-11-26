@@ -38,10 +38,10 @@ final class TripTimelineTests: XCTestCase {
         XCTAssertEqual(axis?.start, at(0))
         XCTAssertEqual(axis?.end, at(45))
         XCTAssertEqual(axis?.at(at(15)) ?? -1, 1.0 / 3, accuracy: 1e-9)
-        XCTAssertEqual(axis?.ticks, [at(0), at(15), at(30), at(45)])
+        XCTAssertEqual(axis?.ticks(width: 320), [at(0), at(10), at(20), at(30), at(45)], "40 before the end: too close to it")
         let short: TripTimeline.Axis? = TripTimeline.axis([[TripTimeline.Part(kind: .ride, start: at(1), end: at(6))]])
         XCTAssertEqual(short?.end, at(20))
-        XCTAssertEqual(short?.ticks, [at(0), at(10), at(20)])
+        XCTAssertEqual(short?.ticks(width: 320), [at(0), at(10), at(20)])
         XCTAssertNil(TripTimeline.axis([]))
     }
 
@@ -87,9 +87,92 @@ final class TripTimelineTests: XCTestCase {
         XCTAssertEqual(TripTimeline.anchor(0.95), .trailing)
     }
 
-    func test_endLabels_bothWhenApart_elseOnlyTheArrival() {
-        XCTAssertEqual(TripTimeline.endLabels(start: 0.1, end: 0.8).leave, true)
-        XCTAssertEqual(TripTimeline.endLabels(start: 0.5, end: 0.6).leave, false)
-        XCTAssertEqual(TripTimeline.endLabels(start: 0.5, end: 0.6).arrive, true)
+    // MARK: 0.42.2
+
+    func test_tickStep_fromTheSpanAndTheWidth() {
+        XCTAssertEqual(TripTimeline.tickStep(span: 40 * 60, width: 320), 10)
+        XCTAssertEqual(TripTimeline.tickStep(span: 90 * 60, width: 320), 30, "15 min would be 53 pt apart")
+        XCTAssertEqual(TripTimeline.tickStep(span: 90 * 60, width: 400), 15)
+        XCTAssertEqual(TripTimeline.tickStep(span: 390 * 60, width: 320), 120)
+        XCTAssertEqual(TripTimeline.tickStep(span: 48 * 3600, width: 320), 360, "the widest step at most")
+    }
+
+    func test_ticks_overnightAxis_neverOverlap_firstAndLastAlways() {
+        // the screenshot: 23:30 → 06:00 on a phone-wide row; every 30 min drew "23:3000:0001:30…"
+        let axis = TripTimeline.Axis(start: at(0), end: at(390))
+        let w: Double = 320
+        let t: [Date] = axis.ticks(width: w)
+        XCTAssertEqual(t.first, at(0))
+        XCTAssertEqual(t.last, at(390))
+        for i in 1..<t.count {
+            let pts: Double = (axis.at(t[i]) - axis.at(t[i - 1])) * w
+            XCTAssertGreaterThanOrEqual(pts, TripTimeline.tickSpacing - 1e-9, "ticks \(i - 1) and \(i) overlap")
+        }
+        XCTAssertLessThanOrEqual(t.count, 6)
+    }
+
+    func test_ends_bothAlways_neverOverlapping_onTheRow() {
+        let w: Double = 320, lw: Double = TripTimeline.timeWidth / w
+        let wide: TripTimeline.Ends = TripTimeline.ends(start: 0.1, end: 0.8, width: w)
+        XCTAssertEqual(wide.leave, 0.1, accuracy: 1e-9)
+        XCTAssertEqual(wide.arrive, 0.8 - lw, accuracy: 1e-9)
+        for (a, b) in [(0.5, 0.55), (0.0, 0.04), (0.97, 1.0), (0.3, 0.3)] {
+            let e: TripTimeline.Ends = TripTimeline.ends(start: a, end: b, width: w)
+            XCTAssertGreaterThanOrEqual(e.arrive - e.leave, lw, "\(a)–\(b): overlap")
+            XCTAssertGreaterThanOrEqual(e.leave, 0)
+            XCTAssertLessThanOrEqual(e.arrive + lw, 1 + 1e-9)
+        }
+    }
+
+    func test_gapLabels_walkWaitChange_lastWalk_withTones() {
+        // the screenshot's trip: walk 2, wait 1, bus 158 to 23:40, walk 3 + wait 5, SPR to 00:20, wait 2, bus 1, walk 4
+        let legs: [TripTimeline.Leg] = [leg("158", 3, 23, from: "Bolkenplein", walk: 2),
+                                        leg("SPR", 31, 60, from: "Den Bosch", walk: 3, train: true),
+                                        leg("1", 62, 75, from: "Breda", walk: 0)]
+        let parts: [TripTimeline.Part] = TripTimeline.parts(leave: at(0), legs: legs, end: at(79))
+        let axis = TripTimeline.Axis(start: at(0), end: at(80))
+        let placed: [TripTimeline.Placed] = TripTimeline.place(parts, on: axis)
+        let g: [TripTimeline.GapLabel] = TripTimeline.gapLabels(placed, width: 320, changeNeeds: 6)
+        XCTAssertEqual(g.map(\.text), ["🚶2 + 1 wait", "🚶3 + 5 wait", "2 min", "🚶 4"])
+        XCTAssertEqual(g.map(\.tone), [.plain, .plain, .risky, .plain])
+        XCTAssertEqual(g[1].x, (23.0 + 31) / 2 / 80, accuracy: 1e-9, "centred on the gap")
+        XCTAssertTrue(g[1].below, "8 minutes is 32 pt: too narrow for its words, under the bar")
+        XCTAssertEqual(g.map(\.lane), [0, 1, 0, 0], "the second would touch the first: the row below")
+        // a long wait holds its minutes inside the gap
+        let long: [TripTimeline.Leg] = [leg("158", 0, 20, from: "A", walk: 0), leg("SPR", 50, 70, from: "B", walk: 0, train: true)]
+        let lp: [TripTimeline.Placed] = TripTimeline.place(TripTimeline.parts(leave: at(0), legs: long, end: at(70)), on: axis)
+        let lg: [TripTimeline.GapLabel] = TripTimeline.gapLabels(lp, width: 320)
+        XCTAssertEqual(lg.map(\.text), ["30 min"])
+        XCTAssertFalse(lg[0].below)
+        XCTAssertEqual(lg[0].x, 35.0 / 80, accuracy: 1e-9)
+        // a tight one: 4 minutes when you need 6
+        let tight: [TripTimeline.Leg] = [leg("158", 0, 20, from: "A", walk: 0), leg("SPR", 24, 50, from: "B", walk: 0, train: true)]
+        let tp: [TripTimeline.Placed] = TripTimeline.place(TripTimeline.parts(leave: at(0), legs: tight, end: at(50)), on: axis)
+        XCTAssertEqual(TripTimeline.gapLabels(tp, width: 320, changeNeeds: 6).map(\.tone), [.tight])
+        XCTAssertEqual(TripTimeline.gapLabels(tp, width: 320, changeNeeds: nil).map(\.tone), [.plain])
+    }
+
+    func test_gapLabels_under_neverOnTopOfEachOther() {
+        // three narrow gaps side by side: two rows under the bar, the third left out rather than on top of one
+        let legs: [TripTimeline.Leg] = [leg("1", 0, 20, from: "A", walk: 0), leg("2", 21, 22, from: "B", walk: 0),
+                                        leg("3", 23, 24, from: "C", walk: 0), leg("4", 25, 60, from: "D", walk: 0)]
+        let axis = TripTimeline.Axis(start: at(0), end: at(60))
+        let placed: [TripTimeline.Placed] = TripTimeline.place(TripTimeline.parts(leave: at(0), legs: legs, end: at(60)), on: axis)
+        let g: [TripTimeline.GapLabel] = TripTimeline.gapLabels(placed, width: 320)
+        XCTAssertTrue(g.allSatisfy(\.below))
+        for a in g { for b in g where a != b && a.lane == b.lane {
+            let half: Double = (TripTimeline.textWidth(a.text) + TripTimeline.textWidth(b.text)) / 2 / 320
+            XCTAssertGreaterThanOrEqual(abs(a.x - b.x), half, "\(a.text) and \(b.text) overlap")
+        } }
+        XCTAssertEqual(Set(g.map(\.lane)), [0, 1])
+    }
+
+    func test_rideLabels_onlyWhenTheyFit() {
+        let legs: [TripTimeline.Leg] = [leg("158", 0, 41, from: "A", walk: 0), leg("1", 43, 45, from: "B", walk: 0)]
+        let axis = TripTimeline.Axis(start: at(0), end: at(45))
+        let placed: [TripTimeline.Placed] = TripTimeline.place(TripTimeline.parts(leave: at(0), legs: legs, end: at(45)), on: axis)
+        let r: [TripTimeline.RideLabel] = TripTimeline.rideLabels(placed, width: 320)
+        XCTAssertEqual(r.map(\.text), ["41 min"], "the 2-minute bus is too short for its minutes")
+        XCTAssertEqual(placed[r[0].index].part.line, "158")
     }
 }
