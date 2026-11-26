@@ -17,6 +17,8 @@ enum ChangeGuide {
         var departure: Date
         var platform: String? = nil
         var walk: Int = 0           // minutes the planner walks to it
+        /// (0.42.3) Where it leaves from, when known: a ride instead must leave from the change (`MissCall.sane`).
+        var from: GeoPoint? = nil
     }
 
     struct Guide: Equatable, Sendable {
@@ -33,6 +35,10 @@ enum ChangeGuide {
         /// The planned one, when missed (what `missText` names).
         let planned: Ride?
         let missText: String?       // "You’ll miss the 08:12 — take the 08:27 from platform 4"
+        /// (0.42.3) What it says of the planned one (`MissCall`): fine, tight, look out for it, maybe, missed.
+        var call: MissCall.Call = .fine
+        /// (0.42.3) A quiet word under the countdown: "Look out for it", "Tight — run".
+        var note: String? = nil
 
         /// What the lock screen shows under the ride: "Platform 5 → 7 · 3 min walk".
         var lockLine: String { [platforms, walk].compactMap { $0 }.joined(separator: " · ") }
@@ -74,26 +80,67 @@ enum ChangeGuide {
     /// (nil: not learned yet).
     /// 0.39.1 (`MissRule`): `atChange`, you're at the change already: the planned one is missed only once its live
     /// departure has gone by with you not on it, and never while its own GPS has it at or before the stop (`notLeft`).
+    /// 0.42.3 (`MissCall`): `seen` what is known of it at the change (a live time, its own GPS, how near you are; nil:
+    /// a live time, and `notLeft`); `fresh` the ride you're on has fresh data (on the way); `call` the call as held
+    /// (`MissCall.step`; nil: as this look has it); `feeding`/`changeAt` for the ride instead (`MissCall.sane`).
     static func guide(arrive: Date, arrivePlatform: String?, fromTrain: Bool, grade: String?, next: Ride, later: [Ride],
-                      learned: Double?, now: Date, hhmm: (Date) -> String, atChange: Bool = false, notLeft: Bool = false) -> Guide {
+                      learned: Double?, now: Date, hhmm: (Date) -> String, atChange: Bool = false, notLeft: Bool = false,
+                      seen: MissCall.Next? = nil, fresh: Bool = true, call: MissCall.Call? = nil,
+                      feeding: MissCall.Feeding? = nil, changeAt: [GeoPoint] = []) -> Guide {
         let from: Date = max(arrive, now)
-        let needed: Double = need(walk: next.walk, learned: learned)
-        let missed: Bool = MissRule.missed(arrive: arrive, departure: next.departure, need: needed, now: now,
-                                           atChange: atChange, notLeft: notLeft)
+        var c: MissCall.Call = call ?? self.call(arrive: arrive, next: next, learned: learned, now: now, atChange: atChange,
+                                                 notLeft: notLeft, seen: seen, fresh: fresh)
         var target = next
         var instead: Ride?
-        if missed {
-            instead = nextMade(after: next, later: later, from: from, learned: learned)
-            if let i = instead { target = i }
+        if c == .missed {
+            let ok: [Ride] = MissCall.sane(later, planned: next, feeding: feeding, changeAt: changeAt)
+            instead = nextMade(after: next, later: ok, from: from, learned: learned)
+            // (0.42.3) on the way with no sane one instead: tight, run (at the change it has gone: "likely missed")
+            if let i = instead {
+                target = i
+            } else if !atChange {
+                c = .tight
+            }
         }
+        let missed: Bool = c == .missed
         let m = Int((target.departure.timeIntervalSince(from) / 60).rounded(.down))
         let note = ChangeRoom.changeNote(minutes: m, walk: max(0, target.walk), isTrain: fromTrain, grade: grade)
-        let countdown: String = m < 0 ? "It leaves before you’re there" : "\(m) min to change"
+        let words: (countdown: String, note: String?) = countdownWords(c, minutes: m)
         let walk: String? = target.walk > 0 ? "\(target.walk) min walk" : nil
         var text: String?
         if missed { text = missWords(planned: next, instead: instead, hhmm: hhmm) }
-        return Guide(target: target, minutes: m, platforms: platforms(arrive: arrivePlatform, next: target), walk: walk,
-                     countdown: countdown, tight: missed || note.red, missed: missed, planned: missed ? next : nil, missText: text)
+        let tight: Bool = missed || note.red || c == .tight || c == .maybe
+        var g = Guide(target: target, minutes: m, platforms: platforms(arrive: arrivePlatform, next: target), walk: walk,
+                      countdown: words.countdown, tight: tight, missed: missed, planned: missed ? next : nil, missText: text)
+        g.call = c
+        g.note = words.note
+        return g
+    }
+
+    /// (0.42.3) This look's call on the planned next ride, before the hold (`MissCall.step`): at the change by
+    /// `MissCall.atChange`, on the way by `MissCall.onTheWay`.
+    static func call(arrive: Date, next: Ride, learned: Double?, now: Date, atChange: Bool, notLeft: Bool = false,
+                     seen: MissCall.Next? = nil, fresh: Bool = true) -> MissCall.Call {
+        if atChange {
+            let n: MissCall.Next = seen ?? MissCall.Next(live: true, seen: notLeft ? .notLeft : .none)
+            return MissCall.atChange(departure: next.departure, next: n, now: now)
+        }
+        let needed: Double = need(walk: next.walk, learned: learned)
+        return MissCall.onTheWay(arrive: arrive, departure: next.departure, need: needed, now: now, fresh: fresh)
+    }
+
+    /// The countdown and the quiet word under it for a call.
+    static func countdownWords(_ c: MissCall.Call, minutes m: Int) -> (countdown: String, note: String?) {
+        switch c {
+        case .lookOut:
+            return ("Should be leaving now", "Look out for it")
+        case .maybe:
+            return ("May have left", "Look out for it")
+        case .tight:
+            return m <= 0 ? ("Tight — run", nil) : ("\(m) min to change", "Tight — run")
+        case .fine, .missed:
+            return (m < 0 ? "It leaves before you’re there" : "\(m) min to change", nil)
+        }
     }
 
     /// The first of `later` after `planned` that you make from `from`: room for its own walk (or your change time).

@@ -125,6 +125,40 @@ enum RealPositions {
         return k.isEmpty ? nil : String(k)
     }
 
+    /// 0.42.3: why a trip with a key has no fix in the feed, for the log: "no ovapi match for trip_id 400100123
+    /// (started 22:40)", or before its start ("… : not started yet, starts 23:05": a bus is in the feed only once its
+    /// journey has begun). The key is OVapi's own trip_id, the same one the feed carries (checked against the feed: the
+    /// trips missing at night were simply not in it, so they go by their times).
+    static func noMatchReason(_ transitousTripId: String, key k: String, now: Date) -> String {
+        let base: String = "no ovapi match for trip_id \(k)"
+        guard let st = startTime(transitousTripId) else { return base }
+        if now < st.at { return "\(base): not started yet, starts \(st.text)" }
+        return "\(base) (started \(st.text))"
+    }
+
+    /// When a Transitous trip starts, from its id ("20261201_22:40_nl-OpenOV_…": the service date and its start, which
+    /// may be 24:00 or later for a night bus), in Dutch time, and as written ("22:40"). Nil when the id doesn't say.
+    static func startTime(_ transitousTripId: String) -> (at: Date, text: String)? {
+        let parts = transitousTripId.split(separator: "_", maxSplits: 2, omittingEmptySubsequences: false)
+        guard parts.count >= 2, let d = serviceDate(transitousTripId) else { return nil }
+        let hm = parts[1].split(separator: ":")
+        guard hm.count == 2, let h = Int(hm[0]), let m = Int(hm[1]), h >= 0, h < 48, m >= 0, m < 60 else { return nil }
+        guard let y = Int(d.prefix(4)), let mo = Int(d.dropFirst(4).prefix(2)), let da = Int(d.suffix(2)) else { return nil }
+        var c = DateComponents()
+        c.year = y; c.month = mo; c.day = da; c.hour = 0; c.minute = 0
+        guard let midnight = dutch.date(from: c) else { return nil }
+        let at: Date = midnight.addingTimeInterval(TimeInterval(h * 3600 + m * 60))
+        return (at, String(parts[1]))
+    }
+
+    /// The dataset a Transitous trip id comes from ("nl-OpenOV" in "20261201_22:40_nl-OpenOV_400100123"), for the
+    /// log; nil when it doesn't say.
+    static func dataset(_ transitousTripId: String) -> String? {
+        let parts = transitousTripId.split(separator: "_", maxSplits: 3, omittingEmptySubsequences: false)
+        guard parts.count >= 4, serviceDate(transitousTripId) != nil, !parts[2].isEmpty else { return nil }
+        return String(parts[2])
+    }
+
     /// The service date a Transitous trip id starts with ("20261117"), if it does.
     static func serviceDate(_ transitousTripId: String) -> String? {
         let d = transitousTripId.prefix { $0 != "_" }
