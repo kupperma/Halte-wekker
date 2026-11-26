@@ -215,6 +215,36 @@ The same switches, words and rules, so the relay and the replay treat both alike
   conditions as the lines (after a trip, else hourly; not during a trip, on a metered/Low Data network or in battery
   saver). Drop the sent points from the queue only after a 200; switching off clears the queue.
 
+### False "You'll miss", short legs, the planned train at a change, OVapi keys (0.42.3)
+
+What's new in 0.42.3 (`ios/App/MissCall.swift` with `ChangeGuide.swift`, `ios/App/ShortLeg.swift`,
+`RideGuards.plannedNextAmong`, `RealPositions.noMatchReason`; tests `MissCallTests`, `ShortLegTests`; Android parity in
+[android-todo.md](android-todo.md) › iOS 0.42.3). New lines in the ride log:
+
+- `ride change · the 08:12 should be leaving now: look out for it (no live time, no gps of its own, you 40 m from its
+  stop)` (or `its live time gone by, no gps of its own`): at a change, the next ride isn't called missed yet; the ride
+  screen says "Should be leaving now · Look out for it" ("May have left" once a live time is over a minute gone).
+- `ride change · maybe missing the 17:52: held a minute before it's told`: a miss is told (`ride change · You’ll miss …`)
+  only once looks have said so for a minute; `ride change · the 17:52 not missed after all` when a later look takes a
+  told miss back.
+- `ride change · tight for the 17:52, not missed` (` (the ride you're on has no fresh data)`): on the way, a minute short
+  or less, or the ride you're on has no GPS ≤ 90 s and no live times ≤ 2 min old.
+- `ride change · no ride instead from the change: tight, run for the 17:52`: missed by the numbers, but nothing that
+  leaves from the change (never the line you're on): "Tight — run" instead of "You'll miss … take …".
+- `ride wake · short leg (480 m, wake 1000 m): no alarm, a quiet word before the stop, first fix 30 s in`: a leg whose
+  ends are within the wake distance (or 800 m) doesn't ring; `ride get ready · short leg: get off at the next stop
+  (260 m, leg 75 s old)` is its quiet notice (`ready-…`); `ride arrive · not yet: 380 m from the stop of a short leg`
+  while it's under a minute old or further than half the way it started from (200–450 m).
+- `ride ring · held: leg 30 s old, 480 m (nothing rings in a leg's first minute)`: a normal leg rings at the next fix
+  after its first minute.
+- `ride arrive · already on the next leg's train IC·3561 (on its road): this leg is done`, then `ride arrive · on the
+  next leg's ride · …` and `ride start · next leg (its planned ride, on its road) · …` (or `found on board`): going away
+  from this leg's stop on the ride the next leg was planned with starts that leg, instead of `ride start · wrong way`
+  and a pick.
+- `vehicle shown · … · no gps: no ovapi match for trip_id 400100123 (started 22:40) · by times`, or `…: not started yet,
+  starts 23:05` (replaces `not in ovapi positions`); `no train number, not in ovapi (a trip of nl-…)`. The key is OVapi's
+  own trip_id, the same one its feed carries; a bus whose journey has begun but sends no position simply isn't in it.
+
 ### Fastest trip, zoomed out (0.42.2)
 
 What's new in 0.42.2 (`ios/App/NearbyRank.swift`, `ios/App/NearbyStore.swift`; tests `NearbySearchTests`; Android parity in

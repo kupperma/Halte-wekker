@@ -3,6 +3,44 @@
 The rules and numbers for each are in [logs-export.md](logs-export.md) › For Android (parity), with the iOS files and
 their tests.
 
+## iOS 0.42.3
+
+From a field log of 27 November. Rules in `ios/App/MissCall.swift` (with `ChangeGuide.swift`) and
+`ios/App/ShortLeg.swift` (tests `MissCallTests`, `ShortLegTests`), `RideGuards.plannedNextAmong`,
+`RealPositions.noMatchReason`; the log lines in [logs-export.md](logs-export.md) › 0.42.3.
+
+- [ ] **At a change, a next ride without a live time and without its own GPS is never called missed** before its time
+      + 3 min, and never while you're within 150 m of its stop: from its time on the change guide says "Should be
+      leaving now · Look out for it", quietly. With a live time but no GPS: a minute's grace, then "May have left ·
+      Look out for it" (near its stop: look out) until 3 min, then missed. Its own fresh GPS (≤ 90 s) decides first:
+      at or before the stop (40 m slack) not missed; 150 m or more past it, within a minute of its time or later,
+      missed.
+- [ ] **A miss is told only once it held for a minute** (looks in between say "May have left"); a told miss that a
+      later look takes back is logged, never told again for that look.
+- [ ] **On the way (still on the ride into the change)**: missed only when your arrival (live or GPS) plus the change
+      time you need is more than 1 min after the next ride's live departure, and the ride you're on has fresh data
+      (its own GPS ≤ 90 s or live times asked ≤ 2 min ago); else "Tight — run" (or nothing). The slow-bus notification
+      says "You'll likely miss" under the same rule, else "Tight change".
+- [ ] **The ride offered instead continues from the change**: never the ride you're on or got off (by trip), never its
+      line again (unless the next leg is on that line), and when its boarding place is known, within 500 m of the next
+      leg's stop or where you get off. None left: on the way "Tight — run" (no "You'll miss"); at the change "You'll
+      likely miss the 08:12".
+- [ ] **A leg shorter than the wake distance (or 800 m) doesn't ring** when the wake rule fires: awake without the
+      alarm; a quiet "Get off at the next stop" notification once, not in its first minute, when the stop before yours
+      is reached by its times, or 90 s before it's in, or (no times) halfway from where it started; the announcement at
+      the stop only after the first minute and within half the way it started from (200–450 m). Dead reckoning the
+      same.
+- [ ] **Nothing rings in a leg's first minute**: within 20 s a firing wake rule wakes it silently (as before), from
+      20 to 60 s it waits; a normal leg rings at the next fix after that (the alarm always rings for a normal leg).
+- [ ] **On the planned next ride without the leg ending** (going away from this leg's stop, the "wrong way" look finds
+      among the vehicles on your road, or the one you're on board, the ride the next leg was planned with): end this leg
+      and start the next one on it ("next leg"), plan kept, alarm armed, no choice to pick from. Before, it planned the
+      rest again from it ("wrong way") and asked to pick between it and another train on the same track.
+- [ ] **OVapi positions**: the match is by OVapi's own trip_id (after `nl-OpenOV_` in the Transitous id), checked
+      against the live feed: no id-format problem; trips missing at night simply aren't in the feed (not started yet,
+      or their bus sends nothing) and go by their times. Log which key found nothing and whether its journey had
+      begun (start time from the Transitous id, 24:00+ the next day).
+
 ## iOS 0.42.2
 
 From the field report at 23:10 in Veghel ("No bus or train from the stops within 1.6 km in this time" with buses every

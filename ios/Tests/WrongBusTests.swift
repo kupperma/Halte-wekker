@@ -26,10 +26,12 @@ final class WrongBusTests: XCTestCase {
                                   learned: 4, now: at(0), hhmm: hhmm, atChange: true)
         XCTAssertFalse(g.missed)
         XCTAssertNil(g.missText)
-        // (0.39 said "You’ll miss" here: under the room the walk needs, counted from now)
+        // (0.39 said "You’ll miss" here: under the room the walk needs, counted from now; 0.42.3 on the way without a
+        // ride instead from the change: tight, run)
         let old = ChangeGuide.guide(arrive: at(-600), arrivePlatform: nil, fromTrain: false, grade: nil, next: next, later: [],
                                     learned: 4, now: at(0), hhmm: hhmm)
-        XCTAssertTrue(old.missed)
+        XCTAssertFalse(old.missed)
+        XCTAssertEqual(old.call, .tight)
     }
 
     func test_a_theLateBusAtItsLiveTime_isStillComing() {
@@ -42,16 +44,21 @@ final class WrongBusTests: XCTestCase {
     }
 
     func test_a_goneWithoutYou_isMissed_unlessItsGPSHasItBeforeTheStop() {
-        // its live time 17:21 gone by 87 s, you still at the change
+        // its live time 17:21 gone by 87 s, you still at the change: (0.42.3) only "may have left" for 3 minutes
         let next = bus("306-0600", "306", 0)
         let later = [bus("305-0553", "305", 14 * 60)]
+        let maybe = ChangeGuide.guide(arrive: at(-480), arrivePlatform: nil, fromTrain: true, grade: nil, next: next, later: later,
+                                      learned: nil, now: at(87), hhmm: hhmm, atChange: true)
+        XCTAssertFalse(maybe.missed)
+        XCTAssertEqual(maybe.call, .maybe)
+        XCTAssertNil(maybe.missText)
         let gone = ChangeGuide.guide(arrive: at(-480), arrivePlatform: nil, fromTrain: true, grade: nil, next: next, later: later,
-                                     learned: nil, now: at(87), hhmm: hhmm, atChange: true)
+                                     learned: nil, now: at(190), hhmm: hhmm, atChange: true)
         XCTAssertTrue(gone.missed)
         XCTAssertEqual(gone.missText, "You’ll miss the +0 — take bus 305 at +14")
         // its own GPS still before the stop: late beyond its live time, still coming
         let coming = ChangeGuide.guide(arrive: at(-480), arrivePlatform: nil, fromTrain: true, grade: nil, next: next, later: later,
-                                       learned: nil, now: at(87), hhmm: hhmm, atChange: true, notLeft: true)
+                                       learned: nil, now: at(190), hhmm: hhmm, atChange: true, notLeft: true)
         XCTAssertFalse(coming.missed)
         // within the minute's grace: not yet
         XCTAssertFalse(MissRule.missed(arrive: at(-480), departure: at(0), need: 2, now: at(50), atChange: true, notLeft: false))

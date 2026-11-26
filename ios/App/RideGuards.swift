@@ -107,4 +107,13 @@ enum RideGuards {
         if let i = left.max(by: { departures[$0] < departures[$1] }) { return i }
         return after.min(by: { departures[$0] < departures[$1] })
     }
+
+    /// 0.42.3: going away from this leg's stop on the ride the next leg was planned with (`plannedNext`, among the
+    /// vehicles on your road, `found`): you got off and onto it without this leg ending (a short hop to the station,
+    /// its stop never reached by GPS). That's the next leg, started as at a change, its alarm armed and nothing to
+    /// pick: not "wrong way" and a new plan from it. The id found, or nil.
+    static func plannedNextAmong(_ found: [String], plannedNext: String?) -> String? {
+        guard let p = plannedNext, !p.isEmpty else { return nil }
+        return found.first { $0 == p }
+    }
 }

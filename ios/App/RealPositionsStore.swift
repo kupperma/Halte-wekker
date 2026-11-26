@@ -133,9 +133,13 @@ final class RealPositionsStore: ObservableObject {
             let age: Int = Int(now.timeIntervalSince(f.at).rounded())
             return age > Int(RealPositions.fresh) ? "fix \(age) s old" : nil
         }
-        guard let k = RealPositions.key(tripId) else { return "no train number, not in ovapi" }
+        guard let k = RealPositions.key(tripId) else {
+            let from: String = RealPositions.dataset(tripId).map { " (a trip of \($0))" } ?? ""
+            return "no train number, not in ovapi\(from)"
+        }
         if fixes.isEmpty { return "ovapi positions not in" }
-        guard let f = fixes[k] else { return "not in ovapi positions" }
+        // (0.42.3) which key found nothing, and whether its journey had begun (`RealPositions.noMatchReason`)
+        guard let f = fixes[k] else { return RealPositions.noMatchReason(tripId, key: k, now: now) }
         let age: Int = Int(now.timeIntervalSince(f.at).rounded())
         return age > Int(RealPositions.fresh) ? "fix \(age) s old" : nil
     }

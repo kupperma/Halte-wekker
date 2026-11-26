@@ -56,23 +56,37 @@ final class ChangeGuideTests: XCTestCase {
     }
 
     func test_yourOwnChangeTimeDecidesAMiss() {
-        let next = train("p", 3, "7", walk: 2)
-        let walkOnly = ChangeGuide.guide(arrive: at(0), arrivePlatform: nil, fromTrain: true, grade: nil, next: next, later: [],
+        let next = train("p", 3, "7", walk: 3)
+        let later = [train("q", 20, "6", walk: 3)]
+        let walkOnly = ChangeGuide.guide(arrive: at(0), arrivePlatform: nil, fromTrain: true, grade: nil, next: next, later: later,
                                          learned: nil, now: at(-3), hhmm: hhmm)
-        XCTAssertFalse(walkOnly.missed, "3 min for a 2 min walk")
-        let slow = ChangeGuide.guide(arrive: at(0), arrivePlatform: nil, fromTrain: true, grade: nil, next: next, later: [],
-                                     learned: 4, now: at(-3), hhmm: hhmm)
-        XCTAssertTrue(slow.missed, "you need 4 min to change, it leaves 3 min after you're in")
+        XCTAssertFalse(walkOnly.missed, "3 min for a 3 min walk")
+        let slow = ChangeGuide.guide(arrive: at(0), arrivePlatform: nil, fromTrain: true, grade: nil, next: next, later: later,
+                                     learned: 5, now: at(-3), hhmm: hhmm)
+        XCTAssertTrue(slow.missed, "you need 5 min to change, it leaves 3 min after you're in")
+        // (0.42.3) a minute short or less is tight, not missed
+        let close = ChangeGuide.guide(arrive: at(0), arrivePlatform: nil, fromTrain: true, grade: nil, next: train("p", 3, "7", walk: 2),
+                                      later: later, learned: 4, now: at(-3), hhmm: hhmm)
+        XCTAssertFalse(close.missed)
+        XCTAssertEqual(close.call, .tight)
+        XCTAssertTrue(close.tight)
+        XCTAssertNil(close.missText)
     }
 
     func test_noLaterOneFound() {
+        // (0.42.3) on the way with no ride instead from the change: tight, run; at the change, gone: "likely miss"
         let g = ChangeGuide.guide(arrive: at(10), arrivePlatform: nil, fromTrain: true, grade: nil, next: train("p", 8, "7"),
                                   later: [], learned: nil, now: at(0), hhmm: hhmm)
-        XCTAssertTrue(g.missed)
+        XCTAssertFalse(g.missed)
+        XCTAssertEqual(g.call, .tight)
         XCTAssertEqual(g.target.tripId, "p")
         XCTAssertEqual(g.minutes, -2)
-        XCTAssertEqual(g.countdown, "It leaves before you’re there")
-        XCTAssertEqual(g.missText, "You’ll likely miss the +8")
+        XCTAssertEqual(g.countdown, "Tight — run")
+        XCTAssertNil(g.missText)
+        let gone = ChangeGuide.guide(arrive: at(0), arrivePlatform: nil, fromTrain: true, grade: nil, next: train("p", 8, "7"),
+                                     later: [], learned: nil, now: at(12), hhmm: hhmm, atChange: true)
+        XCTAssertTrue(gone.missed)
+        XCTAssertEqual(gone.missText, "You’ll likely miss the +8")
     }
 
     func test_atTheChangeItCountsFromNow() {

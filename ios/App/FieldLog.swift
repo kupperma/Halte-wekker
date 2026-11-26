@@ -302,6 +302,25 @@ enum FieldFormat {
         "wait · at a change: not going yet (\(moved.map { "\(metres($0)) in 30 s" } ?? "too few fixes"), \(metres(fromStop)) from the stop)"
     }
 
+    /// (0.42.3) "wake · short leg (480 m, wake 1000 m): no alarm, a quiet word before the stop, first fix 30 s in".
+    static func rideShort(spanMetres: Double?, wakeMetres: Double, after: TimeInterval? = nil) -> String {
+        let first: String = after.map { ", first fix \(Int(max(0, $0).rounded())) s in" } ?? ""
+        return "wake · short leg (\(metres(spanMetres)), wake \(metres(wakeMetres))): no alarm, a quiet word before the stop\(first)"
+    }
+
+    /// (0.42.3) "change · the 08:12 should be leaving now: look out for it (no live time, no gps of its own, you 40 m
+    /// from its stop)".
+    static func changeLookOut(_ hhmm: String, live: Bool, youMetres: Double?) -> String {
+        let what: String = live ? "its live time gone by, no gps of its own" : "no live time, no gps of its own"
+        let you: String = youMetres.map { ", you \(metres($0)) from its stop" } ?? ""
+        return "change · the \(hhmm) should be leaving now: look out for it (\(what)\(you))"
+    }
+
+    /// (0.42.3) "ring · held: leg 30 s old, 480 m (nothing rings in a leg's first minute)".
+    static func rideRingHeld(legAge: TimeInterval, metres m: Double?) -> String {
+        "ring · held: leg \(Int(max(0, legAge).rounded())) s old, \(metres(m)) (nothing rings in a leg's first minute)"
+    }
+
     /// "wake · silently (started 1940 m from its stop)": a leg that started inside its wake distance.
     static func rideWake(startedMetres: Double?, after: TimeInterval? = nil) -> String {
         "wake · silently (started \(metres(startedMetres)) from its stop\(after.map { ", first fix \(Int(max(0, $0).rounded())) s in" } ?? ""))"

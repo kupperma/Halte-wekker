@@ -950,6 +950,10 @@ struct ChangeGuideRows: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("\(g.countdown) at \(at)").font(DS.subStrong).monospacedDigit()
                         .foregroundStyle(g.tight ? DS.warning : DS.text).fixedSize(horizontal: false, vertical: true)
+                    if let n = g.note {
+                        // (0.42.3) "Look out for it" (no live time, it may have left), "Tight — run"
+                        Text(n).font(DS.sub).foregroundStyle(g.tight ? DS.warning : DS.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
                     if !line.isEmpty {
                         Text(line).font(DS.sub).monospacedDigit().foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
                     }
