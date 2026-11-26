@@ -90,12 +90,12 @@ class HabitsTest {
 
     @Test fun wordsAndReset() {
         var b = HabitBook()
-        assertEquals(listOf("not yet", "not yet", "none yet"), Habits.rows(b).map { it.value })
+        assertEquals(listOf("not yet", "not yet", "none yet", "none yet"), Habits.rows(b).map { it.value })
         repeat(Habits.WALKS_NEEDED) { b = b.addWalk(1.5) }
         for (m in listOf(3.0, 4.0, 5.0)) b = b.addChange(m)
         repeat(3) { b = b.boarded("Breda, Bolkenplein") }
-        assertEquals(listOf("5.4 km/h", "5 min", "Breda, Bolkenplein"), Habits.rows(b).map { it.value })
-        assertEquals(listOf("Walking speed", "Time you need to change", "Stops you prefer"), Habits.rows(b).map { it.label })
+        assertEquals(listOf("5.4 km/h", "5 min", "Breda, Bolkenplein", "none yet"), Habits.rows(b).map { it.value })
+        assertEquals(listOf("Walking speed", "Time you need to change", "Stops you prefer", "Your usual lines"), Habits.rows(b).map { it.label })
         assertFalse(b.isEmpty); assertTrue(HabitBook().isEmpty)
     }
 

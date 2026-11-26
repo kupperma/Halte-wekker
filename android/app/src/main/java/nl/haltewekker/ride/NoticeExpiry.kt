@@ -14,6 +14,10 @@ object NoticeExpiry {
         "resume-" to 30.0,         // "Continue your trip"
         "wake-missed" to 90.0,     // the school alarm wasn't stopped: leave by …
         "school-" to 12 * 60.0,    // "School alarm tomorrow 07:10", "moved to …"
+        "ready-" to 10.0,          // (A8, iOS 0.39) the quiet "Get ready" one stop before yours
+        "wrongbus-" to 20.0,       // (A7, iOS 0.39.1) "You're on the 154 to Schijndel, not your 306"
+        "otherbus-" to 10.0,       // (A7, iOS 0.39.1) "That's the 154 to Schijndel — not yours"
+        "heads-up-" to 10.0,       // (A7, iOS 0.37.1) the quiet wake-up while you used your phone
     ).sortedByDescending { it.first.length }
 
     /** Minutes a notification with this tag stays; null: until you clear it. */

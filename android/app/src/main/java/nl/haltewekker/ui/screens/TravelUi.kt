@@ -178,7 +178,8 @@ fun HomeTravelCards(here: nl.haltewekker.core.GeoPoint?, onYear: () -> Unit) {
     val soon = works.filter { RailWorks.dayWord(it.dayStart, now).let { w -> w == "Today" || w == "Tomorrow" } }
     if (soon.isNotEmpty()) Card {
         Header("Works on your route")
-        soon.take(2).forEach { Text(RailWorks.headline(it, now, null), color = DS.t.text) }
+        val earlier by TravelNotes.earlier.collectAsState()
+        soon.take(2).forEach { Text(RailWorks.headline(it, now, earlier[it.key]), color = DS.t.text) }
     }
     last?.let { o -> Card { Header("Last way home"); Text(nl.haltewekker.travel.LastTrip.cardText(o) { hhmm(it) }, color = DS.t.text) } }
     year?.let { y ->

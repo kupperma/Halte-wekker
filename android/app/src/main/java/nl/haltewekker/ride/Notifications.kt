@@ -105,7 +105,9 @@ object Notifications {
         val done = ((nl.haltewekker.core.Iso.now() - leg.departure) / total).coerceIn(0.0, 1.0)
         b.setProgress(100, (done * 100).toInt(), false)
         s.legArrival?.let { b.setWhen((it * 1000).toLong()).setShowWhen(true).setUsesChronometer(true).setChronometerCountDown(true) }
-        if (s.phase == Phase.ALARM) b.addAction(0, "Stop alarm", action(context, RideService.ACTION_STOP_ALARM, 10))
+        // (A7) while it rings: Stop alarm, without unlocking (a broadcast, as the alarm's own notification)
+        if (s.phase == Phase.ALARM) b.addAction(0, WristNotice.STOP_TITLE, StopReceiver.intent(context, WristNotice.ALARM_ID, 10))
+        b.setGroup(group(s))
         b.addAction(0, "End trip", action(context, RideService.ACTION_END, 11))
         return b.build()
     }
@@ -120,23 +122,38 @@ object Notifications {
         .addAction(0, "Stop looking", action(context, RideService.ACTION_END, 13))
         .build()
 
-    fun alarm(context: Context, s: RideState): Notification {
+    /** The trip's group (iOS `WristNotice.thread`): one per trip in the shade and on a watch. */
+    fun group(s: RideState?) = WristNotice.thread(s?.startedAt)
+
+    /**
+     * The ringing alarm (iOS 0.37.1 `WristNotice`): short, the stop first ("Get off at Breda · 2 min"), high priority,
+     * over the lock screen by its full-screen intent, its title public even with previews hidden, and a Stop alarm action
+     * that goes to a broadcast receiver (no unlocking, the app doesn't open; a Wear OS watch shows it too). `again`: the
+     * one repeat 30 s later while it still rings ("Still ringing: …"). `backup`: rung by the backup alarm by time.
+     */
+    fun alarm(context: Context, s: RideState, again: Boolean = false, backup: Boolean = false): Notification {
         val leg = s.leg
         val full = PendingIntent.getActivity(context, 1, Intent(context, AlarmActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_USER_ACTION),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        return NotificationCompat.Builder(context, ALARM)
+        val soon = s.ringMinutes?.let { "$it min" } ?: WakeRules.distanceText(s.distance ?: s.wakeMetres)
+        val lines = if (backup && !again) WristNotice.backup(leg?.toStop) else WristNotice.ring(true, leg?.toStop, soon, again = again)
+        val id = if (again) WristNotice.AGAIN_ID else WristNotice.ALARM_ID
+        val pub = NotificationCompat.Builder(context, ALARM).setSmallIcon(R.drawable.ic_stat_ride).setContentTitle(lines.title).build()
+        val b = NotificationCompat.Builder(context, ALARM)
             .setSmallIcon(R.drawable.ic_stat_ride)
-            .setContentTitle("Wake up")
-            .setContentText("${leg?.toStop ?: "Your stop"} in about ${s.ringMinutes?.let { "$it min" } ?: WakeRules.distanceText(s.distance ?: s.wakeMetres)}.")
+            .setContentTitle(lines.title)
+            .setContentText(lines.body)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setFullScreenIntent(full, true)
+            .setPublicVersion(pub)
+            .setGroup(group(s))
             .setContentIntent(full)
-            .setOngoing(true)
-            .addAction(0, "Stop alarm", action(context, RideService.ACTION_STOP_ALARM, 12))
-            .build()
+            .setDeleteIntent(StopReceiver.intent(context, id, if (again) 15 else 14, AlarmStop.Action.DISMISS))
+            .addAction(0, WristNotice.STOP_TITLE, StopReceiver.intent(context, id, if (again) 13 else 12))
+        if (!again) b.setFullScreenIntent(full, true).setOngoing(true)
+        return b.build()
     }
 
     /** The school alarm's news: set, moved (old after 12 hours). */
@@ -178,17 +195,57 @@ object Notifications {
         post(context, NEWS_ID + 2, n, tag)
     }
 
-    fun arrived(context: Context, place: String, then: String?) {
+    /** "You’re at Breda" (iOS `WristNotice.arrived`), with Stop alarm for the chime and the announcement. */
+    fun arrived(context: Context, place: String, then: String?, finished: Boolean = then == null, s: RideState? = null) {
+        val l = WristNotice.arrived(place, then, finished)
         val n = NotificationCompat.Builder(context, ARRIVAL)
             .setSmallIcon(R.drawable.ic_stat_ride)
-            .setContentTitle("You're at $place")
-            .setContentText(then ?: "Get off here.")
+            .setContentTitle(l.title)
+            .setContentText(l.body)
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setGroup(group(s))
             .setContentIntent(openApp(context))
+            .addAction(0, WristNotice.STOP_TITLE, StopReceiver.intent(context, "arrived-$place", 16))
             .setAutoCancel(true)
         post(context, ARRIVAL_ID, n, "arrived-$place")
     }
+
+    /** (A7) Two buttons on one question ("305 or 306?"): each answers to the ride's service. */
+    fun ask(context: Context, title: String, body: String, answers: List<String>, ids: List<String>) {
+        val b = NotificationCompat.Builder(context, NEWS)
+            .setSmallIcon(R.drawable.ic_stat_ride)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setContentIntent(openApp(context))
+            .setAutoCancel(true)
+        for ((k, id) in ids.withIndex()) {
+            val pi = PendingIntent.getService(context, 50 + k, Intent(context, RideService::class.java).setAction(RideService.ACTION_ANSWER)
+                .putExtra(RideService.EXTRA_TRIP, id), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+            b.addAction(0, answers.getOrElse(k) { "This one" }, pi)
+        }
+        post(context, NEWS_ID + 3, b.build(), ASK_TAG)
+    }
+
+    const val ASK_TAG = "which"
+
+    /** (A7) A time-sensitive note of the ride ("You’re on the 154…", "That’s the 154 — not yours"), timed out by its kind. */
+    fun rideNote(context: Context, tag: String, title: String, text: String) {
+        val b = NotificationCompat.Builder(context, NEWS)
+            .setSmallIcon(R.drawable.ic_stat_ride)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setContentIntent(openApp(context))
+            .setAutoCancel(true)
+        post(context, NEWS_ID + 4, b, tag)
+    }
+
+    fun cancelTag(context: Context, tag: String, id: Int) = try { context.getSystemService(NotificationManager::class.java).cancel(tag, id) } catch (_: Exception) {}
 
     fun post(context: Context, id: Int, n: Notification, tag: String? = null) {
         val nm = context.getSystemService(NotificationManager::class.java)

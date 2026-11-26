@@ -34,6 +34,8 @@ data class Ride(
     val toLat: Double? = null,
     val toLon: Double? = null,
     val mode: String = "",
+    /** (A7) Transitous's `agencyName` (NS, Arriva, Qbuzz…): two trains of two companies are two check-outs. */
+    val agency: String? = null,
 ) {
     val id: String get() = "$tripId|${departure.toLong()}"
     val delay: Int get() = if (live) mins(departure - scheduledDeparture) else 0

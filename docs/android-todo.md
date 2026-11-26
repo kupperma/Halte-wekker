@@ -8,6 +8,11 @@ their tests.
 From the request "Make it so you can stop the alarm without unlocking my phone". Rules in `ios/App/AlarmStop.swift`
 (tests `AlarmStopTests`); the iOS wiring in `ios/App/AlarmResponder.swift`.
 
+Android 0.7.0 has a start of it: `AlarmStop` ported (its tests in `WristNoticeTest`), Stop alarm on the alarm, its
+repeat, arriving, the ongoing ride notification while it rings and the school wake-up as a broadcast (`StopReceiver`,
+no unlocking, no app), and the alarm and wake-up titles public on the lock screen. The rest (heads-up, a stop with no
+trip engine handing its answers on, the adaptive wake-up's "answered") comes with 0.8.0.
+
 - [ ] **Stop alarm works on the lock screen, never asks to unlock and never opens the app.** For the trip alarm, its
       repeat, the heads-up, arriving and the backup notification, and the school wake-up's notification fallback.
       Android: the ringing alarm as a full-screen-intent notification (`USE_FULL_SCREEN_INTENT`, `setFullScreenIntent`,
@@ -270,36 +275,36 @@ fused position (`ios/App/BusFusion.swift`, tests `BusFusionTests` and `WaitMarke
 From the field report of 25 November (the 154 to Schijndel taken for the 306 at 's-Hertogenbosch station). Log lines in
 [logs-export.md](logs-export.md) › The wrong bus, a miss at the change, the bus at your stop (0.39.1).
 
-- [ ] A miss at the change (`MissRule` in `ChangeGuide.swift`): before you're there, as before (live arrival + the room
+- [x] A miss at the change (`MissRule` in `ChangeGuide.swift`): before you're there, as before (live arrival + the room
       the change needs > live departure). At the change: missed only once the next ride's live departure has gone by
       60 s with you not on it, and never while its own GPS (fix ≤ 180 s old) has it at or before the stop (≤ 40 m past
       it along its road). The next ride's time: its own trip answer of the last 3 min (asked every 2 min at the change
-      too), else the change's list, else the saved copy, else the plan's.
-- [ ] Never start a leg by the planned one's timetable more than 2 min before its live departure, nor 20 min after it
-      (`TimetableStart`); meanwhile keep looking for the one you're on.
-- [ ] Choosing: the one shown failing by its own GPS 1000 m (a train 2500 m) or more from you (not off its path, not
+      too), else the change's list, else the saved copy, else the plan's. **Android 0.7.0:** `MissRule` and `ChangeGuide` ported and tested (`ride/ChangeGuide.kt`); shown with the change guide from 0.8.0.
+- [x] Never start a leg by the planned one's timetable more than 2 min before its live departure, nor 20 min after it
+      (`TimetableStart`); meanwhile keep looking for the one you're on. **Android 0.7.0.**
+- [x] Choosing: the one shown failing by its own GPS 1000 m (a train 2500 m) or more from you (not off its path, not
       "not sure") while another one fitted by its own GPS this look or in the last 90 s: switch to that one at once
       (`farByGPS`, `gpsRescue`). What the "find another" look's GPS said goes into the choice that follows (a fit 10 s
-      ago protects it from "the only one left").
-- [ ] Wrong bus (`WrongBus`): the ride the leg was planned with is remembered (a switch or replan the app made itself
+      ago protects it from "the only one left"). **Android 0.7.0.**
+- [x] Wrong bus (`WrongBus`): the ride the leg was planned with is remembered (a switch or replan the app made itself
       keeps it; a pick by hand: no alert). On another line, or the same line to another destination, that doesn't go
       to that leg's stop, and sure (the roads split, or its own GPS has fitted you for 75 s: fits at most 3 min apart,
       the newest at most 2 min old): once a trip a time-sensitive notification `wrongbus-<trip start>` (gone after
       20 min) and a ride-screen card "You’re on the 154 to Schijndel, not your 306" with the best way on from the
       planner: "Get off at Kloosterstraat — 306 back at 17:52" (its next stop) or "Stay on to Schijndel — 306 from
-      there at 18:11"; buttons "Pick again" and "Got it". Vectors in `ios/Tests/WrongBusTests.swift`.
-- [ ] Another line at your stop (`OtherAtStop`): waiting for a bus (before the first leg or at a change), within 150 m
+      there at 18:11"; buttons "Pick again" and "Got it". Vectors in `ios/Tests/WrongBusTests.swift`. **Android 0.7.0:** `ride/WrongBus.kt`, `WrongBusTest`; "Pick again" forgets the vehicle and looks again (Android has no "I'm actually on…" list).
+- [x] Another line at your stop (`OtherAtStop`): waiting for a bus (before the first leg or at a change), within 150 m
       of the stop and yours leaving within 10 min: the stop's whole board (every line, asked once a minute from 5 min
       ago) and each one's own GPS; another line's bus within 80 m of you (fix ≤ 120 s), leaving within 5 min of now
       and not after yours (+1 min): a card "That’s the 154 to Schijndel — not yours" / "Your 306: 2 min" (closable) and
       once a bus a notification `otherbus-<trip id>` (gone after 10 min). Your own routes: every line of the list is
       yours. "This bus becomes the 306" is not shown: neither Transitous nor OVapi's positions give a reliable
-      block/vehicle link to the next trip.
-- [ ] Usual line (`UsualLine.learnsFound`): a ride it found by itself teaches +1 only on the line the leg was planned
-      with (nothing planned: any); another line only by your own pick.
-- [ ] The moment you left (`DepartMatch`): "not then" by live times alone needs 180 s off (by its own GPS still 90 s, or
+      block/vehicle link to the next trip. **Android 0.7.0:** the planned bus only (Android has no own routes).
+- [x] Usual line (`UsualLine.learnsFound`): a ride it found by itself teaches +1 only on the line the leg was planned
+      with (nothing planned: any); another line only by your own pick. **Android 0.7.0.**
+- [x] The moment you left (`DepartMatch`): "not then" by live times alone needs 180 s off (by its own GPS still 90 s, or
       45 s more than the one that left); two or more of them at the stop by their own GPS around the moment: no
-      evidence (no pick, no bonus).
+      evidence (no pick, no bonus). **Android 0.7.0.**
 
 ## iOS 0.39.0
 
@@ -336,7 +341,7 @@ From the field report of 25 November (the 154 to Schijndel taken for the 306 at 
 
 ## iOS 0.38.0
 
-- [ ] Departure-moment match (`DepartMatch` in `ios/App/PickRules.swift`): the moment you went from standing at a stop
+- [x] Departure-moment match (`DepartMatch` in `ios/App/PickRules.swift`): the moment you went from standing at a stop
       to moving (the latest run of fixes ≤ 60 m accuracy, all within 25 m or 1.5 × accuracy of its first for 15 s or
       more, then the newest fix 60 m (or 2 × its accuracy) away and at 4 m/s; kept 4 minutes), and per vehicle when it
       left that stop: by its own GPS (its newest or previous fix within 80 m of where you stood from 60 s before the
@@ -347,8 +352,8 @@ From the field report of 25 November (the 154 to Schijndel taken for the 306 at 
       (elsewhere, ≥ 90 s off, or 45 s further off than it) settles the choice after 2 looks in a row that it passes,
       unless another one passed by its own GPS 30 s better while it didn't (after "roads parted" and the GPS run).
       Log: `depart · stood 40 s, left 07:42:25 · 305·7821 left then (live 5 s) · 306·7954 not then (gps elsewhere)`,
-      `choose · … · left the stop with you`.
-- [ ] Your usual line (`UsualLine`, stored in the habits book as `lines`, reset with Settings › Trips & alarm ›
+      `choose · … · left the stop with you`. **Android 0.7.0:** `match/PickRules.kt`, `PickRulesTest`.
+- [x] Your usual line (`UsualLine`, stored in the habits book as `lines`, reset with Settings › Trips & alarm ›
       Learned from your rides): one entry per ride, line + bus/train + the planned departure's minute of the day +
       weekend or not, weight +1 for a ride it found by itself that you rode to the leg's end (2 minutes or more), +2 for
       the one you said you're on ("I'm actually on…", "I'm on this one" on the board or the list, the ask card), −1 for
@@ -357,25 +362,25 @@ From the field report of 25 November (the 154 to Schijndel taken for the 306 at 
       one candidate has that line. A tie-breaker only: getting on, it wins when within 15 s of the best (the planned one
       still goes first); while choosing it gets 20 s off its cost while it holds (enters within 15 s of the best, lets go
       beyond 40 s: hysteresis); never when another one passed by its own GPS while it didn't. Settings row "Your usual
-      lines": "305 at 07:41 on weekdays" (the two most ridden).
-- [ ] Stop pattern for buses (`BusStops`): while choosing between buses only, the candidates' stops within 300 m of your
+      lines": "305 at 07:41 on weekdays" (the two most ridden). **Android 0.7.0:** in `HabitBook.lines`, the Settings row with the others.
+- [x] Stop pattern for buses (`BusStops`): while choosing between buses only, the candidates' stops within 300 m of your
       last 4 minutes of fixes; per stop who calls there (a stop within 60 m), who waits there by the timetable (45 s or
       more between arrival and departure), whose road passes within 40 m. What you did: stood (15 s within 25 m or 1.5 ×
       accuracy, within 40 m of it) or went through (from 120 m before to 120 m after, passing within 40 m, every step ≥
       4 m/s, fixes ≤ 15 s apart, accuracy ≤ 50 m). Against a candidate: you stood at a stop its road passes without it
       calling there; you went through a stop where it would wait. (Going through a stop it calls at counts for nothing:
       a bus passes a stop with nobody at it.) Beyond the fewest any candidate has, 2 or more: 20 s each on its cost, 60
-      s at most. Log: `choose · bus stop pattern · 305·7821 +40 s (2 against it)`.
-- [ ] Ask sooner (`AskSooner`): two still in the running a minute after you left the stop (the moment as the choice
+      s at most. Log: `choose · bus stop pattern · 305·7821 +40 s (2 against it)`. **Android 0.7.0.**
+- [x] Ask sooner (`AskSooner`): two still in the running a minute after you left the stop (the moment as the choice
       began, else choosing time + 20 s; 3 minutes while your usual line breaks the tie), of the same kind, differing in
       line or destination: the ask card at once, buses too: "305 or 306?" ("306 to Uden or 306 to Den Bosch?" for one
       line), buttons "Bus 305" / "Bus 306"; trains as 0.34 ("IC to Breda or IC to Eindhoven?"). The answer is a pick by
       hand, as before. Log: `ask · still tied 62 s after leaving · 305·7821 or 306·7954`. Vectors for all four in
-      `ios/Tests/PickRulesTests.swift`.
+      `ios/Tests/PickRulesTests.swift`. **Android 0.7.0:** the ride screen's card and a notification with two buttons.
 
 ## iOS 0.37.1
 
-- [ ] Notifications that work on a watch (`WristNotice`; iOS mirrors them to a paired Apple Watch while the phone is
+- [x] Notifications that work on a watch (`WristNotice`; iOS mirrors them to a paired Apple Watch while the phone is
       locked, Wear OS mirrors Android's the same way, so no watch app is needed): the trip alarm, the heads-up, arriving,
       the backup alarm and the school wake-up all high priority (iOS: time sensitive), short with the stop first ("Get
       off at Breda · 2 min", "Get off now at Breda", "You’re at Breda", "Get off at Breda soon"; stop names cut to 22
@@ -385,26 +390,26 @@ From the field report of 25 November (the 154 to Schijndel taken for the 306 at 
       or the leg ending cancels it; never for the heads-up). Grouped per trip (`trip-<trip start epoch>`; Android:
       `setGroup`) and the school ones per day; the ringing ones on top. Settings › Trips & alarm: "On an Apple Watch:
       the wake-up taps your wrist; tap Stop alarm there." (Android: "On a Wear OS watch: …"). Vectors in
-      `ios/Tests/WristNoticeTests.swift`.
+      `ios/Tests/WristNoticeTests.swift`. **Android 0.7.0:** `ride/WristNotice.kt` (tests `WristNoticeTest`); Stop alarm is a broadcast to `StopReceiver`; groups `trip-<start>` / `wake-<day>`; the repeat `alarm-again` 30 s after it rang.
 
 ## Left after Android 0.6.0 (A6)
 
 Android 0.6.0 (version code 7) ported iOS 0.32–0.37 (see [android/plan.md](android/plan.md) › As built A6): every pure
 rule below with its tests, and most of it wired in. What's still open:
 
-- [ ] Trains on the same track in the ride: `TrainRules` is ported and tested, but Android's ride has A1's simpler
+- [x] Trains on the same track in the ride: `TrainRules` is ported and tested, but Android's ride has A1's simpler
       matcher (no `choose` state machine, no candidates): the rivals look every 2 minutes, the roads-parted look at
       once, the stopping pattern while choosing, the one-time "IC to … or IC to …?" ask (ride screen and a notification
-      with two buttons) and the trip following the through train (`stayOn`) need that first.
-- [ ] Dead reckoning by the vehicle's own fresh GPS (moved on at its pace): Android reckons at its pace only.
+      with two buttons) and the trip following the through train (`stayOn`) need that first. **Done in Android 0.7.0** (`ride/RideChoice.kt`, `match/Choose.kt`: `VehicleMatch.choose` with the iOS `ChooseGPSTests`; the rivals look every 2 min, the stopping pattern, the ask, `stayOn`).
+- [x] Dead reckoning by the vehicle's own fresh GPS (moved on at its pace): Android reckons at its pace only. **Done in Android 0.7.0** (its fix on the road, moved on at its speed, ≤ 2 min old).
 - [ ] The home map's vehicles moved on at their seen pace (`Advance.place`): only the matcher uses it so far.
 - [ ] Habits in the ranking: your change time as the least room in `Risk.miss` and the preferred-stop bonus in
       `Risk.score` (Android has no `Risk` ranking of options yet); the change odds' `missChance` likewise.
-- [ ] Check-out between train companies: Transitous's `agencyName` isn't parsed on Android, so two trains count as one.
-- [ ] Works: the "Leave 10 min earlier" (a replan for that school day against the usual door-to-door) and the
-      stations of planned trips (only the NS stations nearest Home and School are matched).
-- [ ] OV-fiets on the ride screen's last train leg and in a station's sheet (shown on the trip's notes only).
-- [ ] Student OV and rain on the ride's Go card equivalent (shown on Fastest trip and the home's next-trip card).
+- [x] Check-out between train companies: Transitous's `agencyName` isn't parsed on Android, so two trains count as one. **Done in Android 0.7.0** (`Ride.agency`).
+- [x] Works: the "Leave 10 min earlier" (a replan for that school day against the usual door-to-door) and the
+      stations of planned trips (only the NS stations nearest Home and School are matched). **Android 0.7.0:** the replan and "Leave N min earlier" done; the stations of planned trips still the NS stations nearest Home and School.
+- [x] OV-fiets on the ride screen's last train leg and in a station's sheet (shown on the trip's notes only). **Android 0.7.0:** on the ride screen (the trip's notes for what's left); not yet in a station's sheet.
+- [x] Student OV and rain on the ride's Go card equivalent (shown on Fastest trip and the home's next-trip card). **Done in Android 0.7.0.**
 - [ ] Motion: Android has no Play-Services-free Activity Recognition. The step detector gives "walking" only, so
       "automotive" (sooner looks, the far tier's earlier start) and "stationary" (rough GPS while waiting) stay out.
 - [ ] Your year in travel shared as a picture (it's shared as text without places).

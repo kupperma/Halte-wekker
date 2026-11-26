@@ -175,14 +175,46 @@ object TravelNotes {
             if (a.ok) { worksItems = RailWorks.parse(a.text); worksAt = now }
         }
         val list = RailWorks.impacts(worksItems, rides, now) { code -> codes.station(code)?.let { GeoPoint(it.lat, it.lon) } }
+        if (list.map { it.key } != works.value.map { it.key } || earlier.value.isEmpty()) workOutEarlier(c, list, now)
         works.value = list
         // the evening before at 19:30: one notification per day, set now
         list.firstOrNull { it.dayStart > RailWorks.startOfDay(now) }?.let { i ->
             val at = RailWorks.eveningBefore(i.dayStart)
-            val hl = RailWorks.headline(i, at, null)
+            val hl = RailWorks.headline(i, at, earlier.value[i.key])
             if (at > now) schedule(c, 31, at, "Works on your route", hl, "works-${i.day}")
-            else if (RailWorks.tellNow(i, now)) Notifications.news(c, "works-${i.day}-${i.id}", "Works on your route", RailWorks.headline(i, now, null))
+            else if (RailWorks.tellNow(i, now)) Notifications.news(c, "works-${i.day}-${i.id}", "Works on your route", RailWorks.headline(i, now, earlier.value[i.key]))
         }
+    }
+
+    /** (A7, iOS 0.36 `workOutEarlier`) "Leave N min earlier": per school day with works, minutes against the usual door-to-door. */
+    val earlier = MutableStateFlow<Map<String, Int>>(emptyMap())
+
+    /**
+     * For a school day with works on your way: Transitous asked again for that day (arrive by when you want to be
+     * there, at most 3 days), against your usual door-to-door time on the other school days.
+     */
+    private suspend fun workOutEarlier(c: Context, impacts: List<RailWorks.Impact>, now: Double) {
+        val p = profile(c)
+        val home = p.home ?: return
+        val school = p.school ?: return
+        val week = nl.haltewekker.school.SchoolAlarm.week.value
+        val days = impacts.map { it.day }.toSet()
+        val usual = week.filter { it.day !in days }.mapNotNull { d -> val l = d.leave; val a = d.arrive; if (l != null && a != null) (a - l) / 60 else null }.sorted()
+        val usualMinutes = if (usual.isEmpty()) null else usual[usual.size / 2]
+        val out = HashMap<String, Int>()
+        var asked = 0
+        for (i in impacts) {
+            val d = week.firstOrNull { it.day == i.day } ?: continue
+            if (d.beThere <= now) continue
+            var leave = d.leave
+            if (asked < 3) {
+                asked++
+                val trips = try { nl.haltewekker.data.Transit.plan(home.planId, school.planId, d.beThere, count = 4, arriveBy = true) } catch (_: Exception) { emptyList() }
+                trips.filter { it.end <= d.beThere + 60 }.maxByOrNull { it.start }?.let { leave = it.start }
+            }
+            RailWorks.leaveEarlier(usualMinutes, leave, d.beThere)?.let { out[i.key] = it }
+        }
+        earlier.value = out
     }
 
     private suspend fun refreshLastHome(c: Context, here: GeoPoint, now: Double) {

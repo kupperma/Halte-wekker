@@ -27,8 +27,13 @@ data class HabitBook(
     val boardedAt: Map<String, Int> = emptyMap(),
     val plannedAt: Map<String, Int> = emptyMap(),
     val names: Map<String, String> = emptyMap(),
+    /** (A7, iOS 0.38) the lines you rode, by time of day and kind of day (`UsualLine`). */
+    val lines: List<nl.haltewekker.match.LineRide> = emptyList(),
 ) {
-    val isEmpty: Boolean get() = walks.isEmpty() && changes.isEmpty() && boardedAt.isEmpty() && plannedAt.isEmpty()
+    val isEmpty: Boolean get() = walks.isEmpty() && changes.isEmpty() && boardedAt.isEmpty() && plannedAt.isEmpty() && lines.isEmpty()
+
+    fun rode(line: String, train: Boolean, minute: Int, weekend: Boolean, weight: Int): HabitBook =
+        copy(lines = nl.haltewekker.match.UsualLine.add(nl.haltewekker.match.LineRide(line, train, minute, weekend, weight), lines))
 
     fun addWalk(speed: Double): HabitBook {
         if (!speed.isFinite() || speed < Habits.WALK_MIN || speed > Habits.WALK_MAX) return this
@@ -138,7 +143,8 @@ object Habits {
         val change = changeMinutes(b)?.let { "${it.toInt()} min" } ?: "not yet"
         val stops = preferredStops(b)
         return listOf(Row("Walking speed", walk), Row("Time you need to change", change),
-            Row("Stops you prefer", if (stops.isEmpty()) "none yet" else stops.take(3).joinToString(", ")))
+            Row("Stops you prefer", if (stops.isEmpty()) "none yet" else stops.take(3).joinToString(", ")),
+            Row("Your usual lines", nl.haltewekker.match.UsualLine.words(b.lines).let { if (it.isEmpty()) "none yet" else it.joinToString(", ") }))
     }
 
     internal fun median(xs: List<Double>): Double? {

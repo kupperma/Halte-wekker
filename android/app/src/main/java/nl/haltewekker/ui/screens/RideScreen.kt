@@ -82,6 +82,30 @@ fun RideScreen(s: RideState, onBack: () -> Unit) {
             }
             else -> {}
         }
+        // (A7, iOS 0.34/0.38) "305 or 306?": once, when two are still tied a minute after you left the stop
+        s.ask?.let { q -> Card {
+            Text(q.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = DS.t.text)
+            Text(q.body, color = DS.t.secondary, style = MaterialTheme.typography.bodySmall)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                q.ids.forEachIndexed { k, id -> QuietButton(q.answers.getOrElse(k) { "This one" }) { RideService.send(context, RideService.ACTION_ANSWER, trip = id) } }
+            }
+        } }
+        // (A7, iOS 0.39.1) the wrong bus, and another line's bus at your stop
+        s.wrongBus?.let { w -> Card {
+            Text(w.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = DS.t.warning)
+            Text(w.body, color = DS.t.text)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                QuietButton("Pick again") { RideService.send(context, RideService.ACTION_PICK_AGAIN) }
+                QuietButton("Got it") { RideService.send(context, RideService.ACTION_DISMISS, what = "wrong") }
+            }
+        } }
+        s.otherAtStop?.let { o -> Card {
+            Text(o.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = DS.t.warning)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(o.body, color = DS.t.text, modifier = Modifier.weight(1f))
+                QuietButton("Close") { RideService.send(context, RideService.ACTION_DISMISS, what = "other") }
+            }
+        } }
         if (leg != null && s.phase != Phase.FINISHED) Card {
             Header(if (s.trip.rides.size > 1) "Leg ${s.index + 1} of ${s.trip.rides.size}" else "Your ride", s.legArrival?.let { "there ${Fmt.time(it)}" })
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -111,7 +135,10 @@ fun RideScreen(s: RideState, onBack: () -> Unit) {
                 VehicleSource.BY_GPS -> "Found you on ${if (leg.isTrain) s.vehicleLine else "bus ${s.vehicleLine}"}."
                 VehicleSource.BY_TIMES -> "On ${if (leg.isTrain) s.vehicleLine else "bus ${s.vehicleLine}"}, by its times."
             }, color = DS.t.secondary, style = MaterialTheme.typography.bodySmall)
+            if (s.choosing.size > 1) Text("Checking: ${s.choosing.joinToString(" or ")}…", color = DS.t.secondary, style = MaterialTheme.typography.bodySmall)
             if (s.vehicleSource == VehicleSource.NONE) QuietButton("I'm on it") { RideService.send(context, RideService.ACTION_ON_IT) }
+            // (A7) student OV, rain on the walk and OV-fiets where the last train gets in, for what's left of the trip
+            TripNotes(nl.haltewekker.data.DoorTrip(s.trip.rides.drop(s.index), leg.departure, s.trip.end), emptyList(), now)
         }
         if (s.roughGPS) Text("Long way to go: GPS every 25 s to save battery, the best again well before your stop.",
             color = DS.t.secondary, style = MaterialTheme.typography.bodySmall)

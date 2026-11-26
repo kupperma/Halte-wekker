@@ -3,7 +3,7 @@
 The Android version of Haltewekker, built from the iOS app (`ios/`, SwiftUI) as the reference. It lives in
 `android/` (one Gradle project), with this plan in `docs/android/`. The iOS app and the relay are not changed by it.
 
-Status: **A1 (0.1.0, version code 1), A2 (0.2.0, version code 2), A3 (0.3.0, version code 3: Friends), A4 (0.4.0, version code 4: Friends extras and shared ride logs) A5 (0.5.0, version code 5: Friends map first, the seat picker, the test friend) and A5.1 (0.5.1, version code 6: 1st class in the seat picker) and A6 (0.6.0, version code 7: iOS 0.32–0.37) built.**
+Status: **A1 (0.1.0, version code 1), A2 (0.2.0, version code 2), A3 (0.3.0, version code 3: Friends), A4 (0.4.0, version code 4: Friends extras and shared ride logs) A5 (0.5.0, version code 5: Friends map first, the seat picker, the test friend) and A5.1 (0.5.1, version code 6: 1st class in the seat picker) A6 (0.6.0, version code 7: iOS 0.32–0.37) and A7 (0.7.0, version code 8: the A6 leftovers, iOS 0.37.1, 0.38, 0.39.1) built.**
 
 ## Architecture
 
@@ -218,6 +218,68 @@ byte for byte, and its test vectors as JUnit tests before any screen:
 - 0.32 sharing GPS points, 0.32.1 Settings in topics with search, 0.33 wake by time and motion, 0.34 same-track trains,
   old bus GPS, tunnels, habits and change reliability, 0.35 the leaderboard's rule, today's best and worst, your year
   in travel, 0.36 check-out, student OV, money back, works, last way home, 0.37 OV-fiets, rain, the widget, shortcuts.
+
+### A7 — the A6 leftovers, iOS 0.37.1, 0.38, 0.39.1 (0.7.0, code 8) — built ("As built A7" says how)
+
+- The ride's full choice between vehicles (`choose`), same-track trains, check-out between train companies, works
+  "leave N min earlier", the trip's notes on the ride; 0.37.1 watch-friendly alarm notifications; 0.38 picking the one
+  you're on (departure moment, usual line, bus stops, ask sooner); 0.39.1 the wrong bus, a miss at the change, the
+  timetable start, another line at your stop.
+
+## As built A7 (0.7.0, version code 8): the A6 leftovers, iOS 0.37.1, 0.38, 0.39.1
+
+From `docs/android-todo.md` and the iOS rules and tests. The iOS app and the relay were not changed.
+
+**Choosing (iOS 0.26.1 – 0.39.1, `match/Choose.kt`, `ride/RideChoice.kt`).** `VehicleMatch.choose` (with `prune`,
+`verdict`, `offRoad`, `top`, `sameChoice`, `ChoiceLook`, `ChoiceRun` for iOS's `inout` misses / switch state / GPS run)
+and `ChooseGPS.departLook`, `farByGPS`, `gpsRescue`, `nudged`, tested with the iOS `ChooseGPSTests` (the 2026-11-18/19
+logs). The ride's look (`OnBoardLook`) now returns the others that fit within a minute of the one it takes; then the
+ride chooses between them (at most 3) every 12 s: each candidate's own trip answer as its track (a piece per stop to
+stop on its road, `RideChoice.track`), its own GPS (OVapi; NS by train number, with its previous fix when seen), the
+train stopping pattern (`TrainRules.outByStops`), the one that left the stop with you, the bus stopping pattern and
+your usual line as nudges, today's road check for the one shown. Log lines as iOS (`choose · …`, `depart · …`,
+`choose · bus stop pattern · …`, `choose · usual line · …`, `ask · still tied …`, `rivals · …`, `switch · …`). A train
+that goes on to a later leg's stop in time takes the trip with it (`TrainRules.stayOn`, a "Stay on to …" note). On a
+confirmed train every 2 minutes the rivals look (`TrainRules.rivals`: every train on your track by its NS position;
+their numbers from their trip answers). The ask ("305 or 306?", "IC to Breda or IC to Eindhoven?") is a ride-screen
+card and a notification with two buttons; the answer is a pick by hand. The ride screen says "Checking: Bus 305 or Bus
+306…" meanwhile. Nothing here rings or stops the alarm.
+
+**Picking the one you're on (0.38, `match/PickRules.kt`).** `DepartMatch`, `UsualLine` (in `HabitBook.lines`, the
+Settings row "Your usual lines", reset with the others), `BusStops`, `AskSooner`, tested (`PickRulesTest`). Getting
+on: 30 s off the one that alone left your stop with you; your usual line within 15 s of the best wins unless the
+best is the planned one. Learned: +1 for a ride it found itself and you rode 2 min or more to the leg's end (0.39.1:
+only on the planned line), +2 for an answer or "I'm on it", −1 for the other line it had.
+
+**0.39.1 (`ride/WrongBus.kt`, `ride/ChangeGuide.kt`).** `TimetableStart` (a found timetable-only planned one before
+2 min ahead of its departure or 20 min after: not taken, `wait · not by its timetable …`), `WrongBus` (runs of fits by
+its own GPS, noted on every look; once a ride a card "You’re on the 154 to Schijndel, not your 306" with the planner's
+way on and a `wrongbus-<start>` notification; "Pick again" forgets the vehicle and looks again), `OtherAtStop` (the
+stop's board once a minute while you wait within 150 m for your bus; `otherbus-<trip>`), and `ChangeGuide` with
+`MissRule` ported and tested (shown from A8). `NoticeExpiry` has `ready-`, `wrongbus-`, `otherbus-`, `heads-up-`.
+
+**Alarm notifications (0.37.1 `WristNotice`, 0.42.1 `AlarmStop`, `ride/WristNotice.kt`, `ride/StopReceiver.kt`).**
+Short titles with the stop first ("Get off at Breda · 2 min", the backup "Get off at Breda soon", "You’re at Breda"),
+the trip's group (`trip-<start>`) and the wake-up's (`wake-<day>`), a public version with the title for a hidden lock
+screen, and Stop alarm as a broadcast to `StopReceiver` (not an activity: never asks to unlock, never opens the app;
+Wear OS shows the action): it stops the sound at once and hands the rest to the ride (as Stop in the app); with no
+ride running it only takes the alarm's notifications away. The repeat `alarm-again` 30 s after it rang while it still
+rings. Swiping the ringing alarm away also stops it. Settings › Trips & alarm says it works from a Wear OS watch.
+
+**A6 leftovers.** Check-out between train companies (`Ride.agency` from Transitous's `agencyName`); dead reckoning by
+the vehicle's own fresh GPS (≤ 2 min, on its road, moved on at its speed) before your own pace; works "Leave N min
+earlier" (Transitous asked again for up to 3 school days with works, arrive by, against the median door-to-door of the
+other days; on the home's card and the evening-before notification); the trip's notes (student OV, rain, OV-fiets) for
+what's left of the trip on the ride screen.
+
+### Calls made in A7 (the user can correct)
+
+- A found vehicle with others within a minute of it starts a choice (iOS: those that fit about as well).
+- "Pick again" on the wrong-bus card looks again (Android has no "I'm actually on…" list yet).
+- Another line at your stop only for a planned bus leg (no own routes on Android).
+- Still open from A6: the `Risk` ranking, motion (no Play-Services-free activity recognition), the year as a picture,
+  Settings' search scrolling, the widget's lock-screen sizes, OV-fiets in a station's sheet, planned trips' stations
+  for works, the home map's vehicles at their seen pace (replaced by A8's real GPS first).
 
 ## As built A6 (0.6.0, version code 7): iOS 0.32 – 0.37
 

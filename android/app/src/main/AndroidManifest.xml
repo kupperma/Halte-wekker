@@ -121,6 +121,11 @@
             android:name=".ride.AlarmReceiver"
             android:exported="false" />
 
+        <!-- (A7) Stop alarm from a notification (lock screen, watch): a broadcast, so it never asks to unlock -->
+        <receiver
+            android:name=".ride.StopReceiver"
+            android:exported="false" />
+
         <activity
             android:name=".school.WakeActivity"
             android:exported="false"
