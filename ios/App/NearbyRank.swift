@@ -112,8 +112,10 @@ enum Nearby {
     static let maxSearchPlans = 2
     /// Requests from this screen on their way at once, at most.
     static let maxConcurrent = 2
-    /// Ways asked for per plan, and the departures they span (seconds).
+    /// Ways asked for per plan (at least, and about at most: an answer is 20–35 KB a way), and the departures they
+    /// span (seconds).
     static let itineraries = 8
+    static let maxItineraries = 12
     static let searchWindow = 3600
     /// The longest first walk a plan is asked for (seconds).
     static let maxPreTransit = 2700

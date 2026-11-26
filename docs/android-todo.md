@@ -14,7 +14,7 @@ of them timed out in the Transitous queue, two 429s, 150–210 KB each. Rules in
 `ios/App/NearbyStore.swift`, `NearbyViews.swift`, `NearbyDetail.swift`, `Transit.planPage`.
 
 - [ ] **One plan per search, from where you are.** `/v5/plan` from your coordinate to the destination (its stop, or its
-      spot when it has several), `numItineraries` 8, `searchWindow` 3600, `maxTransfers` 3, `maxPreTransitTime` = the
+      spot when it has several), `numItineraries` 8, `maxItineraries` 12, `searchWindow` 3600, `maxTransfers` 3, `maxPreTransitTime` = the
       walk to 1.6 km (straight × 1.3 at 1.2 m/s, minutes up: 1740 s; at most 2700 s), `detailedTransfers=false`, your
       walking speed once learned. The planner walks to every stop around by itself. Each itinerary goes with the stop its
       first ride leaves from (`Nearby.groupIndex`: one of the stops around with its id, else a bus stop of its name

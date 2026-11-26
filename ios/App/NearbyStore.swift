@@ -235,7 +235,7 @@ final class NearbyStore: ObservableObject {
         let pre: Int = Nearby.preTransit(radius: r)
         let outcome: Transit.PlanOutcome = await Transit.$urgent.withValue(true) { () async -> Transit.PlanOutcome in
             await Transit.planPage(from: from, to: to, at: at, count: Nearby.itineraries, maxTransfers: 3,
-                                   preTransit: pre, window: Nearby.searchWindow, cursor: page)
+                                   preTransit: pre, window: Nearby.searchWindow, cursor: page, most: Nearby.maxItineraries)
         }
         exit()
         guard !Task.isCancelled else { return outcome }
