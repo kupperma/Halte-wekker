@@ -215,6 +215,25 @@ The same switches, words and rules, so the relay and the replay treat both alike
   conditions as the lines (after a trip, else hourly; not during a trip, on a metered/Low Data network or in battery
   saver). Drop the sent points from the queue only after a 200; switching off clears the queue.
 
+### The vehicle you wait for or ride on the map (0.40.3)
+
+What's new in 0.40.3 (`ios/App/RealFirst.swift`, tests `RealFirstTests`; Android parity in
+[android-todo.md](android-todo.md) › iOS 0.40.3): the bus or train you wait for or ride is drawn at its own last GPS fix
+(moved on 20 s at most while clearly moving), the estimate a faint ghost ahead of it. It replaces the `bus fused` line
+below. Once a minute per trip while it's drawn (Fastest trip's map, the live sheet with your stop or while you ride it,
+the home map's next-trip vehicle):
+
+- `vehicle shown · 305·9449 · gps ovapi 48 s · real +20 m · ghost +510 m`: its fix's feed (`ovapi`, or `ns` for a train
+  by its number) and age; where it's drawn and its ghost in metres along its road from the fix itself (rounded to 10,
+  signed; `no ghost` when the estimate is within 150 m). ` · real at its fix, off its road` when drawn at the fix's own
+  place. ` · arriving`, ` · waiting at your stop`, ` · at your stop` by a fix ≤ 90 s old within 80 m of your stop.
+- `vehicle shown · 305·9449 · no gps: <why> · by times`, or `· not drawn` (no live position, e.g. `no fix, road before
+  your stop not known`). `<why>`: `real positions off`, `low power mode`, `ovapi positions not in`, `not in ovapi
+  positions`, `ns positions not in`, `train 3561 not in ns positions`, `no train number, not in ovapi`, `fix 240 s old`,
+  `fix not this journey`, `fix off its road`, `no fix`.
+- `vehicle shown · 305·9449 · on board: drawn where you are` while you ride it; ` · estimated` with Settings › Map › Bus
+  position: Estimated (0.40.1's place).
+
 ### The bus you wait for on the map (0.40.1)
 
 What's new in 0.40.1 (`ios/App/BusFusion.swift`, tests `BusFusionTests`, `WaitMarkerTests`; Android parity in

@@ -328,7 +328,8 @@ struct GoViewNew: View {
         // (from the saved answer: just the way there, without "Leave by … (in 5 min)")
         let target: WalkTarget? = stop.map { s in
             WalkTarget(name: Fmt.place(f.fromStop), lat: s.latitude, lon: s.longitude, rail: f.isTrain,
-                       catchText: saved ? nil : "the \(GoStore.what(f)) at \(Fmt.hhmm(f.departure))", leaves: saved ? nil : f.departure)
+                       catchText: saved ? nil : "the \(GoStore.what(f)) at \(Fmt.hhmm(f.departure))", leaves: saved ? nil : f.departure,
+                       spot: WalkTarget.spotOf(f, f.isTrain ? ns.rail(f) : nil))
         }
         var walk: (() -> Void)? = nil
         if let tg = target { walk = { walkTo = tg } }

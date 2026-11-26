@@ -1754,7 +1754,7 @@ struct GoMap: View {
             fit(Date(), animated: true, toStop: true)
             lastFit = nil
         }
-        .realPositions(ride.map { RealPositions.key($0.tripId) != nil } ?? false, trains: ride?.isTrain ?? false)
+        .realPositions(ride.map { RealPositions.key($0.tripId) != nil || $0.isTrain } ?? false, trains: ride?.isTrain ?? false)
         .task(id: ride?.tripId ?? "") { await run() }
     }
 
@@ -1772,8 +1772,8 @@ struct GoMap: View {
             MapPolyline(walk.polyline).stroke(newLook ? DS.accent : Paper.ink, style: StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round, dash: [0.5, 10]))
         }
         if let t = trip, let m = mine, let r = ride {
-            // (0.40.1) by its GPS and its live times together, gliding; not past your stop before it has left there
-            // (two minutes after its time: a late one may still be coming)
+            // (0.40.3) where it really is: its own GPS (a little moved on at most), else by its times; its estimate as a
+            // faint ghost ahead of it
             let mk = marker(t, mine: m, ride: r, now: now)
             let me: Double = t.metres(ofStop: m)
             // the road it still has to take to you, and on from there (fainter)
@@ -1786,42 +1786,30 @@ struct GoMap: View {
                 MapPolyline(coordinates: t.road(from: at, to: me))
                     .stroke(lineColor(r), style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
             }
-            // (0.40.1) its GPS and its times more than 200 m apart: the stretch between, faintly
-            if let h = mk.shown.hint, !mk.done, min(h.to, me) - h.from > 20 {
-                MapPolyline(coordinates: t.road(from: h.from, to: min(h.to, me)))
-                    .stroke(lineColor(r).opacity(0.25), style: StrokeStyle(lineWidth: 12, lineCap: .round, lineJoin: .round))
+            if let g = mk.shown.ghost, !mk.done, g < me + 30 {
+                Annotation("", coordinate: t.coordinate(atMetres: g), anchor: .center) { GhostDot(color: lineColor(r)) }
             }
-            if let at = mk.shown.metres, !mk.done && at <= me + 30 {
-                Annotation("", coordinate: t.coordinate(atMetres: at), anchor: .center) {
-                    VStack(spacing: 3) {
-                        HStack(spacing: 4) {
-                            Image(systemName: r.isTrain ? "tram.fill" : "bus.fill").font(.system(size: 12, weight: .bold))
-                            Text(r.line).font(newLook ? DS.footnoteStrong : BoardInk.sans(13))
-                        }
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 8).padding(.vertical, 5)
-                        .background(lineColor(r), in: RoundedRectangle(cornerRadius: 7))
-                        .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.white, lineWidth: 2))
-                        .shadow(color: .black.opacity(0.45), radius: 4, y: 2)
-                        if let leaves = mk.shown.waiting {
-                            Text(BusFusion.waitingText(leaves: leaves, clock: Fmt.hhmm)).font(newLook ? DS.footnoteStrong : BoardInk.sans(11)).monospacedDigit()
-                                .foregroundStyle(newLook ? DS.text : Paper.ink)
-                                .padding(.horizontal, 6).padding(.vertical, 2)
-                                .background(newLook ? DS.surface : Color.white, in: Capsule())
-                        }
-                    }
-                }
+            if let c = mk.shown.coordinate(on: t), mk.shown.drawn, !mk.done, (mk.shown.metres ?? 0) <= me + 30 {
+                Annotation("", coordinate: c, anchor: .center) { vehicle(mk.shown, ride: r) }
             }
         }
         if let s = stop, let r = ride {
             Annotation("", coordinate: s, anchor: .bottom) {
                 VStack(spacing: 0) {
-                    HStack(spacing: 5) {
-                        Image(systemName: r.isTrain ? "tram.fill" : "bus.fill").font(.system(size: 11, weight: .bold))
-                        Text(saved ? r.line : "\(r.line) · \(Fmt.hhmm(r.departure))").font(newLook ? DS.footnoteStrong : BoardInk.sans(12)).monospacedDigit()
+                    // (0.40.3) your stop, not the vehicle: a person waiting, light, "no live position" when there's none
+                    let ink: Color = newLook ? DS.mode(train: r.isTrain, line: r.line) : Paper.navy
+                    VStack(spacing: 1) {
+                        HStack(spacing: 5) {
+                            Image(systemName: "figure.stand").font(.system(size: 11, weight: .bold))
+                            Text(saved ? r.line : "\(r.line) · \(Fmt.hhmm(r.departure))").font(newLook ? DS.footnoteStrong : BoardInk.sans(12)).monospacedDigit()
+                        }
+                        if noPosition(now) {
+                            Text("No live position").font(newLook ? DS.footnote : BoardInk.sans(10, .regular))
+                        }
                     }
-                    .foregroundStyle(.white).padding(.horizontal, 8).padding(.vertical, 5)
-                    .background(newLook ? DS.mode(train: r.isTrain, line: r.line) : Paper.navy, in: RoundedRectangle(cornerRadius: newLook ? DS.pillRadius : 4))
+                    .foregroundStyle(ink).padding(.horizontal, 8).padding(.vertical, 5)
+                    .background(newLook ? DS.surface : Color.white, in: RoundedRectangle(cornerRadius: newLook ? DS.pillRadius : 4))
+                    .overlay(RoundedRectangle(cornerRadius: newLook ? DS.pillRadius : 4).stroke(ink, lineWidth: 2))
                     Image(systemName: "triangle.fill").font(.system(size: 9)).foregroundStyle(newLook ? DS.mode(train: r.isTrain, line: r.line) : Paper.navy).rotationEffect(.degrees(180)).offset(y: -2)
                     Circle().fill(Color.white).frame(width: 14, height: 14).overlay(Circle().stroke(newLook ? DS.mode(train: r.isTrain, line: r.line) : Paper.ink, lineWidth: 3.5))
                 }
@@ -1830,9 +1818,41 @@ struct GoMap: View {
         }
     }
 
-    /// (0.40.1) Where to draw the one you're waiting for: where its GPS and its live times together put it
-    /// (`BusFusion`), gliding there without jumps; at your stop with "Waiting · leaves 17:42" when its own fresh fix
-    /// has it standing there before it leaves.
+    /// The vehicle on the map: its line, how its place is known ("GPS 40 s", "by times", fainter), "Waiting · leaves
+    /// 17:42" by its own fresh fix at your stop.
+    @ViewBuilder private func vehicle(_ shown: BusFuser.Shown, ride r: Ride) -> some View {
+        VStack(spacing: 3) {
+            HStack(spacing: 4) {
+                Image(systemName: r.isTrain ? "tram.fill" : "bus.fill").font(.system(size: 12, weight: .bold))
+                Text(r.line).font(newLook ? DS.footnoteStrong : BoardInk.sans(13))
+                if !shown.tag.isEmpty {
+                    Text("· \(shown.tag)").font(newLook ? DS.footnote : BoardInk.sans(11, .regular)).monospacedDigit()
+                }
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 8).padding(.vertical, 5)
+            .background(lineColor(r), in: RoundedRectangle(cornerRadius: 7))
+            .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.white, lineWidth: 2))
+            .shadow(color: .black.opacity(0.45), radius: 4, y: 2)
+            .opacity(shown.dim ? 0.6 : 1)
+            if let leaves = shown.waiting {
+                Text(BusFusion.waitingText(leaves: leaves, clock: Fmt.hhmm)).font(newLook ? DS.footnoteStrong : BoardInk.sans(11)).monospacedDigit()
+                    .foregroundStyle(newLook ? DS.text : Paper.ink)
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(newLook ? DS.surface : Color.white, in: Capsule())
+            }
+        }
+    }
+
+    /// (0.40.3) Its trip is in but there's nothing to draw it by (no fix, the road before your stop not known).
+    private func noPosition(_ now: Date) -> Bool {
+        guard let t = trip, let m = mine, let r = ride else { return false }
+        return marker(t, mine: m, ride: r, now: now).shown.source == .none
+    }
+
+    /// (0.40.3) Where to draw the one you're waiting for: where it really is (`RealFirst`, its own GPS, a little moved
+    /// on at most, else by its times), gliding; its estimate as a ghost ahead; "Waiting · leaves 17:42" when its own
+    /// fresh fix has it standing at your stop before it leaves.
     private func marker(_ t: LiveTrip, mine m: Int, ride r: Ride, now: Date) -> (shown: BusFuser.Shown, done: Bool) {
         let eta: Date = later.shown.map { max($0, r.departure) } ?? r.departure
         let s: BusFuser.Shown = fuser.place(t, tripId: r.tripId, line: r.line, isTrain: r.isTrain, mine: m, mineLeaves: eta,
@@ -1921,8 +1941,8 @@ struct GoMap: View {
             pts.append(s)
             if !toStop, let t = trip, let m = mine, let r = ride {
                 let mk = marker(t, mine: m, ride: r, now: now)
-                if let at = mk.shown.metres {
-                    let bus = t.coordinate(atMetres: at)
+                if let bus = mk.shown.coordinate(on: t), mk.shown.drawn {
+                    let at: Double = mk.shown.metres ?? 0
                     let far = CLLocation(latitude: bus.latitude, longitude: bus.longitude).distance(from: CLLocation(latitude: s.latitude, longitude: s.longitude))
                     if !mk.done && at <= t.metres(ofStop: m) + 30 && far < 6000 { pts.append(bus) }
                 }

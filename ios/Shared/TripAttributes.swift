@@ -34,6 +34,8 @@ struct TripAttributes: ActivityAttributes {
         var changeText: String? = nil   // the change ahead: "Platform 5 → 7 · 3 min walk · 4 min to change"
         var changeLeaves: Date? = nil   // when the next one leaves (the countdown at the change)
         var changeMiss: String? = nil   // "You’ll miss the 08:12 — take the 08:27 from platform 4"
+        // 0.41: walking with arrows to the next stop (optional too)
+        var walkTurn: String? = nil     // the next turn: "→ 40 m · Hoogstraat"
 
         /// The kind to draw.
         var kind: VehicleKind { VehicleKind.stored(vehicle, isTrain: isTrain) }
@@ -42,12 +44,12 @@ struct TripAttributes: ActivityAttributes {
 }
 
 // A state written without the newer fields (`stops`, `ringing`, `vehicle`, `line`; 0.39 `nextStop`, `delay`, `platform`,
-// `changeText`, `changeLeaves`, `changeMiss`) still decodes: they take their defaults. (The synthesized decoding would throw on a missing key, defaults or not.)
+// `changeText`, `changeLeaves`, `changeMiss`; 0.41 `walkTurn`) still decodes: they take their defaults. (The synthesized decoding would throw on a missing key, defaults or not.)
 extension TripAttributes.ContentState {
     enum CodingKeys: String, CodingKey {
         case legTitle, isTrain, distanceText, arrival, finalName, nextText, awake, goingHome, kicker, stopName, progress,
              legFrom, legTo, song, artist, songPlaying, musicApp, stops, ringing, vehicle, line,
-             nextStop, delay, platform, changeText, changeLeaves, changeMiss
+             nextStop, delay, platform, changeText, changeLeaves, changeMiss, walkTurn
     }
 
     init(from decoder: Decoder) throws {
@@ -79,14 +81,17 @@ extension TripAttributes.ContentState {
         changeText = try c.decodeIfPresent(String.self, forKey: .changeText)
         changeLeaves = try c.decodeIfPresent(Date.self, forKey: .changeLeaves)
         changeMiss = try c.decodeIfPresent(String.self, forKey: .changeMiss)
+        walkTurn = try c.decodeIfPresent(String.self, forKey: .walkTurn)
     }
 
     /// (0.39) The line under the ride on the lock screen: "Next: Vught · 3 min late · platform 5" (nil: nothing known).
     var rideLine: String? { LockWords.ride(nextStop: nextStop, delay: delay, platform: platform) }
 
     /// (0.39) The change ahead as the lock screen says it: the miss first, else the platforms and the minutes.
+    /// (0.41) While walking with arrows: the next turn, after a miss.
     var changeLine: String? {
         if let m = changeMiss, !m.isEmpty { return m }
+        if let w = walkTurn, !w.isEmpty { return w }
         if let c = changeText, !c.isEmpty { return c }
         return nil
     }
