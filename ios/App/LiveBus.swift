@@ -109,6 +109,8 @@ struct LiveBusSheet: View {
     var newLook = false         // the new look (0.20): its tokens, in the phone's light or dark
     /// A bus or train tapped on the home map that you could be on (0.20.1): "I'm on this one" starts your trip by hand.
     var onIt: (() -> Void)? = nil
+    /// (0.40.3) You ride this one: your phone's fix, where it's drawn (nil: you don't).
+    var me: (@MainActor () -> CLLocation?)? = nil
     @Environment(\.dismiss) private var dismiss
     @State private var trip: LiveTrip?          // drawn by: without catching up
     @State private var given: LiveTrip?         // as the answer gives it: the times it prints
@@ -140,7 +142,7 @@ struct LiveBusSheet: View {
             .navigationTitle("\(target.rail ? "" : "Bus ")\(target.line) live")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
-            .realPositions(RealPositions.key(target.tripId) != nil, trains: target.rail)
+            .realPositions(RealPositions.key(target.tripId) != nil || target.rail, trains: target.rail)
             .task { await run() }
         }
         .tint(newLook ? DS.accentText : nil)
@@ -154,11 +156,7 @@ struct LiveBusSheet: View {
         UserAnnotation()
         if let trip {
             MapPolyline(coordinates: trip.path).stroke(lineColor.opacity(0.9), style: StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round))
-            // (0.40.1) its GPS and its times more than 200 m apart: the stretch between, faintly
-            if let h = fused(trip, now).hint, h.to - h.from > 20 {
-                MapPolyline(coordinates: trip.road(from: h.from, to: h.to))
-                    .stroke(lineColor.opacity(0.3), style: StrokeStyle(lineWidth: 12, lineCap: .round, lineJoin: .round))
-            }
+            let shown: BusFuser.Shown = fused(trip, now)
             ForEach(Array(trip.stops.enumerated()), id: \.offset) { i, s in
                 Annotation(i == mine ? "Your stop" : "", coordinate: s.coordinate, anchor: .center) {
                     Circle().fill(i == mine ? (newLook ? DS.accent : BoardInk.yellow) : Color.white)
@@ -166,24 +164,38 @@ struct LiveBusSheet: View {
                         .overlay(Circle().stroke(newLook ? (i == mine ? Color.white : lineColor) : BoardInk.navy, lineWidth: i == mine && newLook ? 3 : 1.5))
                 }
             }
-            Annotation(target.line, coordinate: trip.coordinate(atMetres: shownMetres(trip, now)), anchor: .center) {
-                VStack(spacing: 3) {
-                    HStack(spacing: 4) {
-                        Image(systemName: target.rail ? "tram.fill" : "bus.fill").font(.system(size: 12, weight: .bold))
-                        Text(target.line).font(newLook ? DS.footnoteStrong : BoardInk.sans(13))
-                    }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 8).padding(.vertical, 5)
-                    .background(lineColor, in: RoundedRectangle(cornerRadius: 6))
-                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.white, lineWidth: 2))
-                    .shadow(color: .black.opacity(0.4), radius: 4, y: 2)
-                    if let leaves = fused(trip, now).waiting {
-                        Text(BusFusion.waitingText(leaves: leaves, clock: Fmt.hhmm)).font(newLook ? DS.footnoteStrong : BoardInk.sans(11)).monospacedDigit()
-                            .foregroundStyle(newLook ? DS.text : Paper.ink)
-                            .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(newLook ? DS.surface : Color.white, in: Capsule())
-                    }
+            // (0.40.3) its estimate, faintly, when well ahead of where it really is
+            if let g = shown.ghost {
+                Annotation("", coordinate: trip.coordinate(atMetres: g), anchor: .center) { GhostDot(color: lineColor) }
+            }
+            // (0.40.3) where it really is: its own GPS (a little moved on at most), you on board, else by its times
+            if let c = shown.coordinate(on: trip), shown.drawn {
+                Annotation(target.line, coordinate: c, anchor: .center) { marker(shown) }
+            }
+        }
+    }
+
+    /// The vehicle on the map: its line, how its place is known ("GPS 40 s", "by times"), "Waiting · leaves 17:42".
+    @ViewBuilder private func marker(_ shown: BusFuser.Shown) -> some View {
+        VStack(spacing: 3) {
+            HStack(spacing: 4) {
+                Image(systemName: target.rail ? "tram.fill" : "bus.fill").font(.system(size: 12, weight: .bold))
+                Text(target.line).font(newLook ? DS.footnoteStrong : BoardInk.sans(13))
+                if !shown.tag.isEmpty {
+                    Text("· \(shown.tag)").font(newLook ? DS.footnote : BoardInk.sans(11, .regular)).monospacedDigit()
                 }
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 8).padding(.vertical, 5)
+            .background(lineColor, in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.white, lineWidth: 2))
+            .shadow(color: .black.opacity(0.4), radius: 4, y: 2)
+            .opacity(shown.dim ? 0.6 : 1)
+            if let leaves = shown.waiting {
+                Text(BusFusion.waitingText(leaves: leaves, clock: Fmt.hhmm)).font(newLook ? DS.footnoteStrong : BoardInk.sans(11)).monospacedDigit()
+                    .foregroundStyle(newLook ? DS.text : Paper.ink)
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(newLook ? DS.surface : Color.white, in: Capsule())
             }
         }
     }
@@ -370,7 +382,7 @@ struct LiveBusSheet: View {
         var leaves: Date? = nil
         if let m = mine, m < g.stops.count { leaves = atMine(g.departure(m) ?? g.arrival(m)) }
         return fuser.place(t, tripId: target.tripId, line: target.line, isTrain: target.rail, mine: mine, mineLeaves: leaves,
-                           timesAt: updated, now: now)
+                           timesAt: updated, now: now, me: me?())
     }
 
     /// Where to draw it at `now` (metres along): `fused`; where it isn't known (before its trip starts at your stop,
@@ -389,13 +401,23 @@ struct LiveBusSheet: View {
     }
 
     /// Where its position comes from: "Live times, updated 12:30. Position from the bus’s GPS, 40 s ago."
+    /// (0.40.3) By what it's drawn (`BusFuser.Shown`): its own GPS, you on board, its times, or not at all.
     private func footnote(_ t: LiveTrip, _ p: TripPlacement, _ now: Date) -> String {
-        if let f = p.fix {
-            let what = target.rail ? "train" : t.mode.uppercased().contains("TRAM") ? "tram" : "bus"
-            let ago = "Position from the \(what)’s GPS, \(Int(max(0, now.timeIntervalSince(f.at)).rounded())) s ago."
-            return t.live ? "Live times\(updated.map { ", updated \(Fmt.hhmm($0))" } ?? ""). \(ago)" : ago
+        let s: BusFuser.Shown = fused(t, now)
+        let what: String = target.rail ? "train" : t.mode.uppercased().contains("TRAM") ? "tram" : "bus"
+        let times: String = t.live ? "Live times\(updated.map { ", updated \(Fmt.hhmm($0))" } ?? "")." : "No live times for this one."
+        switch s.source {
+        case .onBoard:
+            return "\(times) Drawn where you are: you’re on it."
+        case .gps:
+            let ago: Int = Int(max(0, s.real.fixAge ?? 0).rounded())
+            let ghost: String = s.ghost == nil ? "" : " The faint dot is where its times expect it."
+            return "\(times) Drawn where the \(what)’s own GPS put it \(ago) s ago.\(ghost)"
+        case .byTimes:
+            return t.live ? "\(times) No live position: drawn by its times." : "No live times or position for this one: drawn by the timetable."
+        case .none:
+            return "\(times) No live position for it yet."
         }
-        return t.live ? "Live times\(updated.map { ", updated \(Fmt.hhmm($0))" } ?? ""). Its position is worked out from them." : "No live times for this one: its position follows the timetable."
     }
 
     /// "3 stops away · 1.4 km", "At your stop now", "Due at your stop now", "It has passed your stop"
@@ -410,7 +432,13 @@ struct LiveBusSheet: View {
         let left = t.metres(ofStop: m) - w.metres
         if left < -20 { return "It has passed your stop." }
         let ahead = m - w.next
-        if ahead == 0 { return w.atStop ? "It’s at your stop now!" : "Almost at your stop · \(Fmt.distance(max(0, left)))" }
+        if ahead == 0 {
+            // (0.40.3) only by a fresh fix close to your stop
+            let here: RealFirst.Here? = fused(t, now).here
+            if fused(t, now).real.isHere { return "It’s at your stop now!" }
+            if here == .arriving { return "Almost at your stop · \(Fmt.distance(max(0, left)))" }
+            return "Your stop is next · \(Fmt.distance(max(0, left)))"
+        }
         return "\(ahead + (w.atStop ? 0 : 1)) stop\(ahead + (w.atStop ? 0 : 1) == 1 ? "" : "s") away · \(Fmt.distance(max(0, left)))"
     }
 

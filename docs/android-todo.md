@@ -3,6 +3,51 @@
 The rules and numbers for each are in [logs-export.md](logs-export.md) › For Android (parity), with the iOS files and
 their tests.
 
+## iOS 0.40.3
+
+From the field report ("The buses and trains on the map aren't usually using their GPS locations, while waiting or
+travelling … it's nicer when you see the bus actually arrive and it's actually there, even if it lags a little, than a
+simulated bus that 'should arrive right now at my station' but isn't there yet"; a screenshot of Fastest trip's map at
+Breda platform 4 with the IC 19:38 "in 9 min" drawn at the station). Causes: 0.40.1's fusion counted a fix 1 up to 20 s
+old but 0.15 at 120 s while OVapi's fixes are mostly 25–90 s old (median about 60 s), so the bus was drawn about half by
+its times, its "GPS" part itself moved on by age × speed, and it rolled on to 35 m before your stop while stuck in
+traffic; the home map never asked for NS's train positions (and its next-trip pieces start at your stop, so a fix
+before it was off the road known and the train was drawn by its times at your station); Fastest trip's stop pin
+("IC · 19:38" with a train icon) looked like the train itself. Rules in `ios/App/RealFirst.swift` (tests
+`RealFirstTests`); `BusFusion` is kept as the ghost. Log line in [logs-export.md](logs-export.md) › The vehicle you wait
+for or ride on the map (0.40.3).
+
+- [ ] **Real GPS first** for the bus or train you wait for (Fastest trip's map, the live sheet, the home map's next-trip
+      vehicle) or ride, in metres along its road:
+      - at its **last fix itself**, put on its road when within 60 m of it (else at the fix's own place); fixes up to
+        180 s old; label "· GPS 40 s" (its age; "2 min" from 100 s);
+      - **moved on** only while its last two fixes (or the feed's own speed) had it going ≥ 2 m/s and the feed doesn't
+        say it stands at a stop: at most 20 s × that speed (≤ 30 m/s), never past the next stop it must stop at (a
+        train: every stop; a bus: a timing point, your stop, its last), never within 35 m of your stop while its fix
+        is further than that; no pull from its times;
+      - a new fix **glides** from where it was drawn to its new place over 2 s (smoothstep), forward or back; moves of
+        ≤ 25 m between steps are drawn as they are; no step for 20 s: drawn at once;
+      - the **estimate** (0.40.1's fused place, unchanged) is a small hollow translucent dot without a label, only when
+        it's more than 150 m further on than the vehicle; never closer than 100 m to your stop unless it's due there
+        within 30 s; none once the vehicle is past your stop;
+      - **"Arriving"** (within 80 m before your stop), **"Waiting · leaves 17:42"** (within 35 m, leaving more than
+        60 s from now) and **"It's at your stop"** only by a fix ≤ 90 s old; drawn at the stop then. Without it the
+        sheet says "Your stop is next · 300 m";
+      - a fix off the road known: drawn at the fix when it's no further from your stop than 40 m/s × the time to its
+        live time there + 3 km; else not this journey;
+      - **no usable GPS**: by its times (0.40.1's `byTimes`) along its road before your stop, labelled "· by times",
+        60 % opacity, not closer than 35 m to your stop before its live departure there; its stops starting at your
+        stop and not left there yet (the road before it not known, or its trip starts there): not drawn, "No live
+        position" under the stop pin;
+      - the home map's next-trip vehicle by its **whole trip** (`/trip` every 30 s), not only the map's pieces of it;
+      - **NS positions** asked for wherever a train you wait for or ride is drawn (Fastest trip, the live sheet, the home
+        map while the next trip's first ride or the ride is a train), matched by train number;
+      - **on board**: the vehicle is drawn where your phone is (fix ≤ 30 s old, ±100 m), also in its live sheet.
+- [ ] Fastest trip's stop pin is a stop, not a vehicle: a person-waiting icon, light pill with the line's colour as text
+      and border ("IC · 19:38").
+- [ ] Settings › Map › **Bus position**: Real GPS (default) / Estimated (0.40.1's fused place, no ghost).
+      The on-board matcher keeps its raw GPS (unchanged). Vectors in `ios/Tests/RealFirstTests.swift`.
+
 ## iOS 0.40.2
 
 From the field report ("The Friends tab pops up a new map, which is annoying, and you can't swipe to leave"; "It's hard
