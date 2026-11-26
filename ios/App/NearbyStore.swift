@@ -20,7 +20,12 @@ enum NearbyFetch {
         let dLon: Double = radius * 1.05 / max(1, 111_320 * cos(c.latitude * .pi / 180))
         let q: [URLQueryItem] = [.init(name: "min", value: "\(c.latitude - dLat),\(c.longitude - dLon)"),
                                  .init(name: "max", value: "\(c.latitude + dLat),\(c.longitude + dLon)")]
-        let answer: Any? = try? await Transit.$urgent.withValue(true) { try await Transit.get("/v1/map/stops", q) }
+        let answer: Any?
+        do {
+            answer = try await Transit.$urgent.withValue(true) { () async throws -> Any in try await Transit.get("/v1/map/stops", q) }
+        } catch {
+            answer = nil
+        }
         guard let list = answer as? [[String: Any]] else { return nil }
         let here = GeoPoint(lat: c.latitude, lon: c.longitude)
         var seen = Set<String>()

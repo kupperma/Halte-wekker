@@ -143,6 +143,7 @@ struct NearbyOverview: View {
             }
             if let h = here {
                 Annotation("You", coordinate: h.coordinate, anchor: .center) { youDot }
+                    .annotationTitles(.hidden)
             }
             ForEach(ms) { m in
                 Annotation(m.name, coordinate: m.coordinate, anchor: .center) {
@@ -153,15 +154,16 @@ struct NearbyOverview: View {
                     .disabled(m.state != .ready)
                     .accessibilityLabel(m.spoken)
                 }
+                .annotationTitles(.hidden)
             }
             if following {
                 ForEach(spots) { p in
                     Annotation(p.coming.line, coordinate: p.coordinate, anchor: .center) { vehicleChip(p.coming) }
+                        .annotationTitles(.hidden)
                 }
             }
         }
         .mapStyle(.standard(pointsOfInterest: .excludingAll))
-        .annotationTitles(.hidden)
     }
 
     private var youDot: some View {
