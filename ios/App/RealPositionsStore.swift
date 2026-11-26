@@ -120,6 +120,26 @@ final class RealPositionsStore: ObservableObject {
         return RealPositions.key(tripId).flatMap { previous[$0] }
     }
 
+    /// Whose positions a trip's fix comes from, for the log: "ns" (a train by its number) or "ovapi".
+    func feed(for tripId: String) -> String { numbers[tripId] != nil ? "ns" : "ovapi" }
+
+    /// Why a trip has no fix to draw it by, for the log (nil: none of these; the fix itself wasn't usable).
+    func noGPSReason(for tripId: String, now: Date = Date()) -> String? {
+        guard Self.enabled else { return "real positions off" }
+        if ProcessInfo.processInfo.isLowPowerModeEnabled { return "low power mode" }
+        if let n = numbers[tripId] {
+            if trainFixes.isEmpty { return "ns positions not in" }
+            guard let f = trainFixes[n] else { return "train \(n) not in ns positions" }
+            let age: Int = Int(now.timeIntervalSince(f.at).rounded())
+            return age > Int(RealPositions.fresh) ? "fix \(age) s old" : nil
+        }
+        guard let k = RealPositions.key(tripId) else { return "no train number, not in ovapi" }
+        if fixes.isEmpty { return "ovapi positions not in" }
+        guard let f = fixes[k] else { return "not in ovapi positions" }
+        let age: Int = Int(now.timeIntervalSince(f.at).rounded())
+        return age > Int(RealPositions.fresh) ? "fix \(age) s old" : nil
+    }
+
     /// A vehicle's own GPS for the matcher: a fix of at most `RealPositions.matchFresh`, and the one before it. A
     /// train's from NS by its number; else (a bus, a tram: the app counts trams as trains) OVapi's.
     func gps(for tripId: String, isTrain: Bool, now: Date = Date()) -> VehicleGPS? {
@@ -473,7 +493,7 @@ final class GPSPlacer {
     private var roads: [String: (legs: [RealPositions.Leg], pieces: [VehicleSegment])] = [:]
     private var snaps: [String: (at: Date, spot: RealPositions.Spot?)] = [:]
     private let hold = GPSHold()
-    private var glides: [String: BusFusion.Glide] = [:]     // (0.40.1) the one you wait for, as drawn (kept across new pieces)
+    private let draw = RealDraw()                           // (0.40.3) the one you wait for, as drawn (kept across new pieces)
     private var piecesAt = Date()
 
     /// New pieces: each trip's in departure order, a piece that comes twice once.
@@ -522,16 +542,20 @@ final class GPSPlacer {
         return Placed(coordinate: p.point.coordinate, bearing: p.bearing ?? fix.bearing, piece: road.pieces[at.leg], fix: fix)
     }
 
-    /// The one you wait for, on the home map (0.40.1).
+    /// The one you wait for, on the home map (0.40.1; 0.40.3: where it really is, `RealFirst`).
     struct Fused {
         let coordinate: CLLocationCoordinate2D
         let bearing: Double?
         let piece: VehicleSegment       // the piece it's on
         let fixAt: Date?                // its GPS fix used (nil: by its times alone)
+        var tag: String = ""            // "GPS 40 s", "by times"
+        var dim: Bool = false           // by its times: fainter
+        var ghost: CLLocationCoordinate2D? = nil    // the estimate, faintly, when well ahead
     }
 
-    /// The one you wait for (0.40.1): where its GPS and its live times together put it (`BusFusion`), gliding there
-    /// without jumps, not past your stop before it has left there; nil when the map has none of its pieces. `stop`:
+    /// The one you wait for, by the map's pieces of it (0.40.3, `RealFirst.show`): at its own fix (a little moved on at
+    /// most), the estimate as a ghost, gliding; by its times without a fix, not drawn at your stop when the road before
+    /// it isn't known (its pieces start there). Nil when the map has none of its pieces, or it isn't drawn. `stop`:
     /// your stop (the stop of its pieces nearest to it, within 80 m).
     func fused(_ tripId: String, now: Date, stop: CLLocationCoordinate2D?) -> Fused? {
         guard let road = roads[tripId], !road.legs.isEmpty else { return nil }
@@ -541,34 +565,56 @@ final class GPSPlacer {
                                           scheduledDeparture: s.scheduledDeparture, scheduledArrival: s.scheduledArrival))
         }
         let stops: [BusFusion.Stop] = BusFusion.stops(pieces: pieces)
-        let gf: GPSFix? = RealPositionsStore.shared.fix(for: tripId, now: now)
-        var fix: BusFusion.Fix? = nil
-        if let gf, let sp = snapped(tripId, gf, on: road.legs) {
-            let seen: Double? = RealPositions.observedSpeed(gf, previous: RealPositionsStore.shared.previousFix(for: tripId), on: road.legs)
-            fix = BusFusion.Fix(metres: road.legs[sp.leg].start + sp.along, at: gf.at, speed: seen)
-        }
+        let store: RealPositionsStore = RealPositionsStore.shared
+        let gf: GPSFix? = store.fix(for: tripId, now: now)
         let mine: Int? = stop.flatMap { Self.nearest($0, pieces: road.pieces) }
+        var fix: RealFirst.Fix? = nil
+        if let gf { fix = realFix(tripId, gf, road: road.legs, stop: stop) }
         let live: Bool = road.pieces.contains { $0.realTime }
-        let input = BusFusion.Input(stops: stops, fix: fix, live: live, timesAt: piecesAt, mine: mine, now: now, fromStart: false)
-        let e: BusFusion.Estimate = BusFusion.fuse(input)
-        guard var target: Double = e.metres else {
-            glides[tripId] = nil
-            return nil
+        let train: Bool = road.pieces.first?.isTrain ?? false
+        let input = RealFirst.Input(stops: stops, fix: fix, live: live, timesAt: piecesAt, mine: mine, now: now, fromStart: false,
+                                    isTrain: train)
+        let estimated: Bool = RealDraw.estimated
+        let s: RealFirst.Shown = estimated ? RealFirst.estimated(input) : RealFirst.show(input)
+        let d: (main: Double?, ghost: Double?) = draw.glide(tripId, s, stops: stops, fixAt: gf?.at, now: now, estimated: estimated)
+        let first: VehicleSegment = road.pieces[0]
+        FusionLog.note(tripId: tripId, line: first.line, feed: store.feed(for: tripId), s, estimated: estimated, now: now)
+        guard s.source != .none else { return nil }
+        var ghost: CLLocationCoordinate2D? = nil
+        if let g = d.ghost, let at = RealPositions.spot(atMetres: g, on: road.legs), let p = RealPositions.point(at, on: road.legs) {
+            ghost = p.point.coordinate
         }
-        if let m = mine {
-            let left: Bool = LiveTimes.hasLeft(stops[m].times, now: now)
-            target = LiveTimes.shown(target, mine: stops[m].metres, left: left)
+        let tag: String = RealFirst.tag(s)
+        let dim: Bool = s.source == .byTimes
+        if s.atFix, let gf {
+            let c = CLLocationCoordinate2D(latitude: gf.lat, longitude: gf.lon)
+            var piece: VehicleSegment = first
+            if let m = s.metres, let at = RealPositions.spot(atMetres: m, on: road.legs) { piece = road.pieces[at.leg] }
+            return Fused(coordinate: c, bearing: gf.bearing, piece: piece, fixAt: gf.at, tag: tag, dim: dim, ghost: ghost)
         }
-        var g: BusFusion.Glide = glides[tripId] ?? BusFusion.Glide()
-        let usedAt: Date? = fix == nil ? nil : gf?.at
-        let age: TimeInterval? = gf.map { now.timeIntervalSince($0.at) }
-        let speed: Double = BusFusion.plannedSpeed(stops, at: target)
-        let drawn: Double = g.step(to: target, now: now, speed: speed, fixAt: usedAt, fixAge: age)
-        glides[tripId] = g
-        guard let at = RealPositions.spot(atMetres: drawn, on: road.legs), let p = RealPositions.point(at, on: road.legs) else { return nil }
+        guard let drawn = d.main, let at = RealPositions.spot(atMetres: drawn, on: road.legs),
+              let p = RealPositions.point(at, on: road.legs) else { return nil }
         let piece: VehicleSegment = road.pieces[at.leg]
-        FusionLog.note(tripId: tripId, line: piece.line, isTrain: piece.isTrain, e, drawn: drawn, now: now)
-        return Fused(coordinate: p.point.coordinate, bearing: p.bearing ?? gf?.bearing, piece: piece, fixAt: usedAt)
+        let usedAt: Date? = s.source == .gps ? gf?.at : nil
+        return Fused(coordinate: p.point.coordinate, bearing: p.bearing ?? gf?.bearing, piece: piece, fixAt: usedAt, tag: tag,
+                     dim: dim, ghost: ghost)
+    }
+
+    /// Its fix as `RealFirst` takes it: on its road (with the speed it was seen going), else off it (metres straight to
+    /// your stop).
+    private func realFix(_ tripId: String, _ gf: GPSFix, road legs: [RealPositions.Leg], stop: CLLocationCoordinate2D?) -> RealFirst.Fix {
+        var toMine: Double? = nil
+        if let c = stop {
+            let here = CLLocation(latitude: gf.lat, longitude: gf.lon)
+            toMine = here.distance(from: CLLocation(latitude: c.latitude, longitude: c.longitude))
+        }
+        let stopped: Bool = gf.stopped ?? false
+        guard let sp = snapped(tripId, gf, on: legs) else {
+            return RealFirst.Fix(metres: nil, at: gf.at, speed: gf.speed, stopped: stopped, toMine: toMine)
+        }
+        let seen: Double? = RealPositions.observedSpeed(gf, previous: RealPositionsStore.shared.previousFix(for: tripId), on: legs)
+        let m: Double = legs[sp.leg].start + sp.along
+        return RealFirst.Fix(metres: m, at: gf.at, speed: seen, stopped: stopped, toMine: toMine, crossTrack: sp.crossTrack)
     }
 
     /// A fix on a trip's road, put there once per fix.

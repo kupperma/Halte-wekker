@@ -203,7 +203,8 @@ struct RideViewNew: View {
                         toward: l.to.short, hereNote: "It notices which one you get on by itself.",
                         walk: {
                             walkTo = WalkTarget(name: Fmt.place(r.fromStop), lat: stop.latitude, lon: stop.longitude, rail: r.isTrain,
-                                                catchText: saved ? nil : "the \(GoStore.what(r)) at \(Fmt.hhmm(r.departure))", leaves: saved ? nil : r.departure)
+                                                catchText: saved ? nil : "the \(GoStore.what(r)) at \(Fmt.hhmm(r.departure))", leaves: saved ? nil : r.departure,
+                                                spot: WalkTarget.spotOf(r, r.isTrain ? ns.rail(r) : nil))
                         })
     }
 
@@ -685,7 +686,8 @@ struct ArrivalViewNew: View {
                      footer: changeFooter,
                      walk: {
                          walkTo = WalkTarget(name: Fmt.place(r.fromStop), lat: stop.latitude, lon: stop.longitude, rail: r.isTrain,
-                                             catchText: "the \(GoStore.what(r)) at \(Fmt.hhmm(r.departure))", leaves: r.departure)
+                                             catchText: "the \(GoStore.what(r)) at \(Fmt.hhmm(r.departure))", leaves: r.departure,
+                                             spot: WalkTarget.spotOf(r, r.isTrain ? ns.rail(r) : nil))
                      })
         } else {
             VStack(alignment: .leading, spacing: DS.s12) {

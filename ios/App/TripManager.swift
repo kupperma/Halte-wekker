@@ -4158,7 +4158,14 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         st.changeText = extra.changeText
         st.changeLeaves = extra.changeLeaves
         st.changeMiss = extra.changeMiss
+        st.walkTurn = isRiding ? walkTurn : nil                         // (0.41) walking with arrows
         return st
+    }
+
+    /// (0.41) Walking with arrows (`WalkGuideView`) to the next stop during a trip: its next turn on the lock screen
+    /// ("→ 40 m · Hoogstraat"). Nil when it's closed.
+    var walkTurn: String? {
+        didSet { if walkTurn != oldValue, activity != nil { pushActivity(force: false) } }
     }
 
     /// (0.39) The lock screen's next stop (not yours), delay and platform, and the change ahead.
@@ -4212,8 +4219,10 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             + "|\(s.song ?? "")|\(s.artist ?? "")|\(s.songPlaying)|\(s.ringing)|\(s.nextText ?? "")|\(s.vehicle)|\(s.line)"
             + "|\(s.legFrom?.timeIntervalSince1970 ?? 0)|\(s.legTo?.timeIntervalSince1970 ?? 0)|\(s.stops.count)|\(s.finalName)"
         let more: String = "|\(s.nextStop ?? "")|\(s.delay ?? -999)|\(s.platform ?? "")|\(s.changeText ?? "")|\(s.changeMiss ?? "")"
+            + "|\(s.walkTurn ?? "")"
         key += more                                                       // (0.39)
-        let say = "\(s.legTitle)|\(s.awake)|\(s.ringing)|\(s.kicker)|\(s.changeMiss ?? "")"
+        let say: String = "\(s.legTitle)|\(s.awake)|\(s.ringing)|\(s.kicker)|\(s.changeMiss ?? "")"
+            + "|\(s.walkTurn ?? "")"                                       // (0.41: a new turn goes at once; it changes only per turn)
         let since = Date().timeIntervalSince(lastActivity)
         let changed = key != lastActivityKey
         guard ActivityThrottle.send(changed: changed, phaseChanged: say != lastActivitySay, sinceLast: since) else {

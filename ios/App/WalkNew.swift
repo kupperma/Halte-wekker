@@ -12,6 +12,7 @@ struct WalkMapSheetNew: View {
     @State private var route: MKRoute?
     @State private var camera: MapCameraPosition = .automatic
     @State private var failed = false
+    @State private var guiding = false                  // (0.41) walking with arrows
 
     private var kindColor: Color { target.rail ? DS.train : DS.bus }
 
@@ -46,6 +47,13 @@ struct WalkMapSheetNew: View {
         }
         .tint(DS.accentText)
         .dynamicTypeSize(...DynamicTypeSize.accessibility2)
+        .fullScreenCover(isPresented: $guiding) {
+            WalkGuideView(target: target) { there in
+                guiding = false
+                // there: back to the Go to card, which says you're here
+                if there { DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { dismiss() } }
+            }
+        }
     }
 
     private var info: some View {
@@ -96,7 +104,10 @@ struct WalkMapSheetNew: View {
                     Text("Finding the way…").font(DS.sub).foregroundStyle(DS.secondary)
                 }
             }
-            DSPrimaryButton(title: "Walk there with Apple Maps", icon: "figure.walk", action: openInMaps)
+            // (0.41) turn by turn here, or Apple Maps
+            DSPrimaryButton(title: "Walk with arrows", icon: "arrow.turn.up.right") { guiding = true }
+                .accessibilityHint("Turn by turn on the map, as you walk")
+            DSQuietButton(title: "Walk there with Apple Maps", icon: "map", full: true, action: openInMaps)
         }
         .padding(DS.s16)
         .frame(maxWidth: .infinity, alignment: .leading)
