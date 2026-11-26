@@ -215,6 +215,24 @@ The same switches, words and rules, so the relay and the replay treat both alike
   conditions as the lines (after a trip, else hourly; not during a trip, on a metered/Low Data network or in battery
   saver). Drop the sent points from the queue only after a 200; switching off clears the queue.
 
+### Fastest trip, zoomed out (0.42.2)
+
+What's new in 0.42.2 (`ios/App/NearbyRank.swift`, `ios/App/NearbyStore.swift`; tests `NearbySearchTests`; Android parity in
+[android-todo.md](android-todo.md) › iOS 0.42.2): the stops around you are asked with one plan from where you are (a
+second only when needed), and each search writes one `net` line, so a report like "No bus or train within 1.6 km" can be
+read from the log:
+
+- `nearby · r 1.6 km · stops 9 · plans 1 (+1 page) · ways 6 · 0 failed · 0.8 s · 320 KB`: the walk the last plan took
+  (1.6 or 3.0 km), the stops drawn (the stops around and the ones the ways leave from), the plans sent (a later page
+  counted apart), the stops with a way shown for the time to leave, how many plans got no answer (timed out, a 429,
+  cancelled), the whole search's time and the plans' size. Then, when they apply: ` · cooling` (Transitous asked to slow
+  down: no second plan), ` · no stops` (the stops around couldn't be had; the plan went anyway), ` · seed 3` (Fastest
+  trip's own ways put in).
+- The same line with ` · after the switch to in 20 min` when a switch of the time to leave asked for the next page.
+- `nearby stop · plan · ways 3 · times 12 · 0.9 s · 150 KB`: a stop tapped: its own plan (` · plan failed` when it got no
+  answer; no ` · plan` when the search had its ways already), the departures shown, the next departures of its lines
+  (`/v6/stoptimes`), time and size.
+
 ### The vehicle you wait for or ride on the map (0.40.3)
 
 What's new in 0.40.3 (`ios/App/RealFirst.swift`, tests `RealFirstTests`; Android parity in
