@@ -3,6 +3,14 @@
 The rules and numbers for each are in [logs-export.md](logs-export.md) › For Android (parity), with the iOS files and
 their tests.
 
+## iOS 0.40.1
+
+- [ ] Where to get on (`BoardAt`): the trip's stops are fetched without the 3 s cut-off cancelling them (the screen
+      still waits at most 3 s; an answer that comes later is kept and puts the closer stop on screen when it lands).
+      Before, a slow trip answer was cancelled and asked again from scratch at every look, so the 158 never moved from
+      the bus station to Bolkenplein. The boarding stop is also found by its name when neither the planner's stop id nor
+      its point (within 80 m) matches the trip's list.
+
 ## iOS 0.40.0
 
 - [ ] "From <stop>" in a trip's detail (`FromStop`, Fastest trip under the big card; folded away as "Buses from

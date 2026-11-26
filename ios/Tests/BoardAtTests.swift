@@ -152,4 +152,17 @@ final class BoardAtTests: XCTestCase {
         XCTAssertEqual(BoardAt.walkMinutes(metres: 130), 3)
         XCTAssertEqual(BoardAt.walkMinutes(metres: 500), 10)
     }
+
+    // MARK: (0.40.1) a stand the planner names but puts elsewhere
+
+    func test_planIdAndPointOff_findsTheStopByName() throws {
+        // the planner's own id for the stand isn't in the trip's list, and its point is the station's middle, 150 m off
+        let middle = GeoPoint(lat: 51.6153, lon: 5.5470)
+        XCTAssertNil(BoardAt.better(trip158(), fromId: "nl-other_A", from: middle, departure: at(13), to: denBosch,
+                                    toName: "'s-Hertogenbosch, Centraal Station", you: inTown, now: at(1)))
+        let c = try XCTUnwrap(BoardAt.better(trip158(), fromId: "nl-other_A", from: middle, departure: at(13), to: denBosch,
+                                             toName: "'s-Hertogenbosch, Centraal Station", you: inTown, now: at(1),
+                                             fromName: "Veghel, Busstation"))
+        XCTAssertEqual(c.stop.name, "Veghel, Bolkenplein")
+    }
 }
