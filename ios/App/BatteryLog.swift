@@ -30,7 +30,7 @@ enum GPSMode: String, Codable, CaseIterable, Sendable {
 
 /// Why GPS was on.
 enum GPSReason: String, Codable, CaseIterable, Sendable {
-    case ride, change, fastest, regionLook, lineWatch, home
+    case ride, change, fastest, regionLook, lineWatch, home, walk
 
     var label: String {
         switch self {
@@ -40,6 +40,7 @@ enum GPSReason: String, Codable, CaseIterable, Sendable {
         case .regionLook: return "station look"
         case .lineWatch: return "line watch"
         case .home: return "home screen"
+        case .walk: return "walking with arrows"
         }
     }
 }

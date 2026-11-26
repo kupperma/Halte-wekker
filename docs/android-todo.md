@@ -3,6 +3,42 @@
 The rules and numbers for each are in [logs-export.md](logs-export.md) › For Android (parity), with the iOS files and
 their tests.
 
+## iOS 0.41.0
+
+From the user ("When you're walking towards the station, like in Google Maps, have the arrow: turn right here, turn left
+here … instead of just the text and the button to Google Maps (keep the button)"). Walking turn by turn to the stop or
+platform. Rules in `ios/App/WalkGuide.swift` (tests `WalkGuideTests`); the map, GPS, buzzes and voice in
+`ios/App/WalkGuideView.swift`.
+
+- [ ] **Walk with arrows.** The walk sheet ("Walk there" on the Go to card, at a change, from the boards) has a "Walk with
+      arrows" button above the Apple Maps one (which stays). It opens a full-screen map that follows you (heading up,
+      or north up with a toggle), the route drawn with the walked part dimmed, and a big card on top: the arrow and
+      "In 40 m · turn right onto Hoogstraat", the turn after it small. Below: "4 min · 320 m to go" and, with a ride to
+      catch, "Your bus leaves in 6 min · you’ll make it" / "walk a bit faster" / "hurry, it’s tight" (your own walking
+      speed once learned, else 1.2 m/s; fine with a minute spare, faster when 25 % quicker makes it).
+- [ ] **The route and its arrows.** Apple's walking directions (MapKit `MKDirections`, free) give steps with words (in
+      the phone's language), a length and a shape, but no turn type. The arrow comes from the shape: the direction over
+      the 12 m into a step's start against the 12 m out of it: under 20° straight, under 45° slight, under 120° a turn,
+      under 165° sharp, else a U-turn; a straight shape whose words say left or right is a slight turn that way. Steps
+      without words join their neighbour; the first is the start, the last the stop (one is added when the last turns).
+      **Android has no MapKit:** use OSM-based foot routing instead, to decide later: the public OSRM `foot` profile
+      (its steps carry a maneuver type and modifier, so the arrow can come from those, the shape rule as a fallback;
+      the public demo server is for light use only), Valhalla (pedestrian costing, e.g. a hosted instance), or the
+      GraphHopper free tier (key needed, a daily quota). Google's Directions API is paid.
+- [ ] **Following it.** GPS at best accuracy (3 m filter) only while the screen is in front; off in the background and
+      when it closes. Each fix (accuracy 65 m or better) is placed on the route (the pass nearest to the last place, so
+      a route that doubles back doesn't jump); the step moves on within 15 m of its turn or once past it, never back,
+      and not while off the route. A buzz at 30 m before a turn (not on steps under 40 m), two strong ones at the turn.
+      More than 40 m off for 10 s: a new route from where you are, at most every 20 s. Within 25 m of the stop: "You’re
+      here · Platform 4", a success buzz, and after 2.5 s it closes back to the Go to card (which then says you're here).
+- [ ] **Spoken turns** only with headphones in (the alarm's headphones rule), on its own audio session (never the trip's),
+      not while the alarm rings, with a speaker toggle (remembered). "In 30 metres, turn right onto Hoogstraat".
+- [ ] **Lock screen.** During a trip (walking at a change) the Live Activity's change line shows the next turn
+      ("→ 40 m · Hoogstraat", the stop's platform for the last one) after a "you'll miss it" line; a new optional
+      `walkTurn` in the state (an older state still decodes). Sent per turn (at the new step and at the 30 m buzz), not
+      per metre. Android: the same line in the ongoing trip notification.
+- [ ] The battery log has a new GPS reason "walking with arrows".
+
 ## iOS 0.40.2
 
 From the field report ("The Friends tab pops up a new map, which is annoying, and you can't swipe to leave"; "It's hard

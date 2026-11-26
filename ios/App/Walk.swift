@@ -10,6 +10,7 @@ struct WalkTarget: Identifiable, Hashable {
     var rail = false
     var catchText: String? = nil        // "the 380 at 14:22"
     var leaves: Date? = nil             // when that one leaves, to say when to set off
+    var spot: String? = nil             // (0.41) where at the stop: "Platform 4", "Stop U"
     var coordinate: CLLocationCoordinate2D { .init(latitude: lat, longitude: lon) }
 }
 
@@ -21,6 +22,7 @@ struct WalkMapSheet: View {
     @State private var route: MKRoute?
     @State private var camera: MapCameraPosition = .automatic
     @State private var failed = false
+    @State private var guiding = false                  // (0.41) walking with arrows
 
     var body: some View {
         NavigationStack {
@@ -48,6 +50,12 @@ struct WalkMapSheet: View {
             .task { await findRoute() }
         }
         .preferredColorScheme(.light)
+        .fullScreenCover(isPresented: $guiding) {
+            WalkGuideView(target: target) { there in
+                guiding = false
+                if there { DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { dismiss() } }
+            }
+        }
     }
 
     private var info: some View {
@@ -87,6 +95,12 @@ struct WalkMapSheet: View {
             } else {
                 HStack(spacing: 8) { ProgressView(); Text("Finding the way…").font(BoardInk.sans(12, .regular)).foregroundStyle(Paper.ink.opacity(0.85)) }
             }
+            Button { guiding = true } label: {
+                Label("Walk with arrows", systemImage: "arrow.turn.up.right").font(BoardInk.sans(14)).foregroundStyle(.white)
+                    .frame(maxWidth: .infinity).padding(.vertical, 11).background(Paper.navy, in: RoundedRectangle(cornerRadius: 6))
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("Turn by turn on the map, as you walk")
             Button(action: openInMaps) {
                 Label("Walk there with Apple Maps", systemImage: "figure.walk").font(BoardInk.sans(14)).foregroundStyle(.white)
                     .frame(maxWidth: .infinity).padding(.vertical, 11).background(Paper.green, in: RoundedRectangle(cornerRadius: 6))
