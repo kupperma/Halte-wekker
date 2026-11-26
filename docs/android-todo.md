@@ -3,6 +3,36 @@
 The rules and numbers for each are in [logs-export.md](logs-export.md) › For Android (parity), with the iOS files and
 their tests.
 
+## iOS 0.42.1
+
+From the request "Make it so you can stop the alarm without unlocking my phone". Rules in `ios/App/AlarmStop.swift`
+(tests `AlarmStopTests`); the iOS wiring in `ios/App/AlarmResponder.swift`.
+
+- [ ] **Stop alarm works on the lock screen, never asks to unlock and never opens the app.** For the trip alarm, its
+      repeat, the heads-up, arriving and the backup notification, and the school wake-up's notification fallback.
+      Android: the ringing alarm as a full-screen-intent notification (`USE_FULL_SCREEN_INTENT`, `setFullScreenIntent`,
+      `CATEGORY_ALARM`, shown over the lock screen with `setShowWhenLocked`/`setTurnScreenOn` on its activity) with a
+      **Stop alarm** action whose `PendingIntent` goes to a `BroadcastReceiver` (not an activity, so the keyguard isn't
+      asked for: no `requestDismissKeyguard`), and the same action on the ongoing ride notification while it rings
+      (iOS: the Live Activity's big Stop alarm button; the Dynamic Island shows a bell while it rings).
+- [ ] **A stop from the lock screen is the same as Stop in the app**: the sound, the buzz, the out-loud-after-60-s of
+      "Sound only with headphones", the 30 s repeat; the ring counts as answered for the adaptive wake-up (when you
+      stopped it); with "Ring at the stop" the leg goes to awake (and rings again at the stop), else the leg is done;
+      the backup was already off since the ring. Still on? and the backup behave as after an in-app stop.
+- [ ] **What each answer stops** (`AlarmStop.plan`): a school wake-up notification (`wake-<day>-<n>`) takes that day's
+      three away (pending and shown) whatever you did with it; its Stop alarm also stops a real alarm still ringing.
+      Stop alarm on any trip notification stops the trip alarm; tapping or swiping away the ringing alarm's own
+      notification (or its repeat) does too. Anything else (Still on?, which train, a friend's message) goes to the trip
+      engine as before.
+- [ ] **Works when the app wasn't running**: the receiver must not need the trip engine. With no trip engine nothing
+      rings (it plays the sound), so it only takes the alarm's notifications off the lock screen (`alarm`,
+      `alarm-again`, `backup`, `heads-up-true/false` shown; the backup still to come stays) and makes the ride
+      notification stop saying it rings; answers meant for the trip engine are kept and handed to it when it starts.
+- [ ] The alarm and wake-up notifications show their title on the lock screen even with previews hidden
+      (Android: `VISIBILITY_PUBLIC` for these, or a public version with the title).
+- [ ] Not done on purpose: stopping with a volume or power button (iOS has no public way; on Android it's possible but
+      keep it the same: Stop alarm only).
+
 ## iOS 0.42.0
 
 From the field report ("At a friend's place going home to Centrum it showed one bus, unclear what other routes would come

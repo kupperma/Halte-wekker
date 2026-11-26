@@ -435,7 +435,6 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
                 self.updateWatching(force: true)
             }
         }
-        AlarmControl.stop = { [weak self] in self?.stopAlarm() }
         // "Stop alarm" right on the alarm notification. (No .foreground or .authenticationRequired: it runs on the
         // phone in the background, locked or not, so it also works from a paired Apple Watch, 0.37.1.)
         let stop = UNNotificationAction(identifier: WristNotice.stopAction, title: WristNotice.stopTitle, options: [],
@@ -445,17 +444,22 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         let again = UNNotificationAction(identifier: "STILL_PICK", title: "Pick again", options: [.foreground])
         UNUserNotificationCenter.current().setNotificationCategories([
             // (customDismissAction: swiping the alarm away is reported, and stops it, 0.24.6)
-            UNNotificationCategory(identifier: WristNotice.alarmCategory, actions: [stop], intentIdentifiers: [], options: [.customDismissAction]),
+            // (0.42.1: its title shows even with Show Previews "When Unlocked", so you see what rings before you stop it)
+            UNNotificationCategory(identifier: WristNotice.alarmCategory, actions: [stop], intentIdentifiers: [],
+                                   options: [.customDismissAction, .hiddenPreviewsShowTitle]),
             // (0.37.1) the heads-up, arriving and the backup: Stop alarm too (the chime, the announcement, or the alarm
             // ringing meanwhile)
             UNNotificationCategory(identifier: WristNotice.tripCategory, actions: [stop], intentIdentifiers: [], options: []),
             // the school wake-up's notifications: Stop alarm takes the repeats away (0.37.1)
-            UNNotificationCategory(identifier: WristNotice.wakeCategory, actions: [stop], intentIdentifiers: [], options: [.customDismissAction]),
+            UNNotificationCategory(identifier: WristNotice.wakeCategory, actions: [stop], intentIdentifiers: [],
+                                   options: [.customDismissAction, .hiddenPreviewsShowTitle]),
             UNNotificationCategory(identifier: Self.stillOnCategory, actions: [yes, again], intentIdentifiers: [], options: []),
             // 0.34: "IC to 's-Hertogenbosch or IC to Eindhoven?" (its buttons are named when it asks)
             Self.whichTrainButtons(["The first one", "The other one"]),
         ])
-        UNUserNotificationCenter.current().delegate = self
+        // (0.42.1) `AlarmResponder` is the notifications' delegate from launch on (so a button pressed while the app
+        // wasn't running isn't lost); from here it hands them all to this, as before
+        AlarmResponder.shared.attach(self)
         sound.pauseMusic = pauseMusic
         sound.headphonesOnly = headphonesOnly
         WatchStore.shared.holdAlerts = { [weak self] in self?.phase == .sleeping }
@@ -1444,13 +1448,10 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         }
         Task { @MainActor in
             // (Stop alarm from a paired Apple Watch comes here too, the phone still locked, 0.37.1)
-            let isAlarm = id == WristNotice.alarmId || id == WristNotice.againId
-            if id.hasPrefix("wake-") {
-                WakeAlarm.cancelRepeats(of: id)
-                if action == WristNotice.stopAction { WakeAlarm.stopRinging() }
-            } else if action == WristNotice.stopAction || (isAlarm && (action == UNNotificationDefaultActionIdentifier || action == UNNotificationDismissActionIdentifier)) {
-                self.stopAlarm()
-            }
+            // (0.42.1: the rules in `AlarmStop`, the same with the phone locked, from the Watch, or in the app)
+            let how: AlarmStop.Action = AlarmStop.action(action, open: UNNotificationDefaultActionIdentifier,
+                                                         dismiss: UNNotificationDismissActionIdentifier)
+            AlarmResponder.apply(AlarmStop.plan(id: id, action: how), trip: self)
             // (0.36) "claim money back from NS": NS's claim page
             if id.hasPrefix("nsclaim-"), action == UNNotificationDefaultActionIdentifier, let u = URL(string: DelayClaim.claimURL) {
                 _ = await UIApplication.shared.open(u)

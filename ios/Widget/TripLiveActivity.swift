@@ -238,7 +238,8 @@ struct LockScreenTrip: View {
             RideTrack(progress: s.progress, kind: s.kind, stops: s.stops, look: look, tint: stateTint(s, look))
                 .frame(height: 28)
                 .id(s.stopName)                              // a new leg: a new vehicle rolls in
-            if s.ringing { StopButton(size: 15) }
+            // (0.42.1: bigger, the one thing to do while it rings; it stops it without unlocking)
+            if s.ringing { StopButton(size: 17) }
             else { TripFooter(s: s, look: look) }
         }
         .padding(.horizontal, 18).padding(.vertical, 14)
@@ -289,7 +290,10 @@ struct TripLiveActivity: Widget {
                         .foregroundStyle(look.text).lineLimit(1)
                 }
             } compactTrailing: {
-                if riding(s) {
+                if s.ringing {
+                    // (0.42.1) ringing: the bell, and a press on the island opens Stop alarm
+                    Image(systemName: "bell.fill").font(.system(size: 13, weight: .bold)).foregroundStyle(look.warning)
+                } else if riding(s) {
                     Countdown(to: s.legTo ?? s.arrival).font(.system(size: 13, weight: .bold, design: .rounded))
                         .foregroundStyle(stateTint(s, look)).frame(maxWidth: 46, alignment: .trailing)
                 } else if let st = status(s) {

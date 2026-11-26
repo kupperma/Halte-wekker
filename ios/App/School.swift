@@ -540,9 +540,8 @@ enum WakeAlarm {
 
     /// The fallback's notifications for a day ("wake-<day>-0…2"): once you open or swipe away one, the rest don't come.
     static func cancelRepeats(of id: String) {
-        guard id.hasPrefix("wake-"), let cut = id.lastIndex(of: "-") else { return }
-        let base = String(id[..<cut])
-        let ids = (0..<3).map { "\(base)-\($0)" }
+        let ids = AlarmStop.wakeRepeats(of: id)
+        guard !ids.isEmpty else { return }
         let c = UNUserNotificationCenter.current()
         c.removePendingNotificationRequests(withIdentifiers: ids)
         c.removeDeliveredNotifications(withIdentifiers: ids)
