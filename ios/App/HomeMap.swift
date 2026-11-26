@@ -473,9 +473,10 @@ struct NewHome: View {
         let showV = VehiclePick.shows(vehicleGate) && region != nil && !planOpen
         let route = planOpen || (searchOpen && plan.to != nil) ? plan.route(plan.focused) : []
         let hits: [Transit.StopHit] = searchOpen && plan.to == nil ? searchHits : []
+        let focus: (tripId: String, stop: CLLocationCoordinate2D?)? = waitingFor
         // (the vehicles slide along their road every 2 s while there are any; else the map is redrawn only when it changes)
         return TimelineView(.periodic(from: .now, by: showV && !vehicles.segs.isEmpty ? 2 : 3600)) { tl in
-            let moving: [LiveVehiclesModel.Moving] = showV ? region.map { vehicles.moving(at: tl.date, in: $0) } ?? [] : []
+            let moving: [LiveVehiclesModel.Moving] = showV ? region.map { vehicles.moving(at: tl.date, in: $0, focus: focus) } ?? [] : []
             Map(position: $camera) {
                 UserAnnotation()
                 ForEach(drawn.stops) { s in
@@ -509,6 +510,15 @@ struct NewHome: View {
         }
         // their GPS positions while they're drawn (0.20.2)
         .realPositions(showV)
+    }
+
+    /// The bus you're waiting for (0.40.1): your next trip's first ride while no trip runs, and its stop (when known),
+    /// drawn where its GPS and its live times together put it (`GPSPlacer.fused`).
+    private var waitingFor: (tripId: String, stop: CLLocationCoordinate2D?)? {
+        guard trip.phase == .idle, let r = live.next.first?.first else { return nil }
+        var stop: CLLocationCoordinate2D? = nil
+        if let a = r.fromLat, let o = r.fromLon { stop = CLLocationCoordinate2D(latitude: a, longitude: o) }
+        return (tripId: r.tripId, stop: stop)
     }
 
     /// May the live vehicles be asked for and drawn now (`VehiclePick`).

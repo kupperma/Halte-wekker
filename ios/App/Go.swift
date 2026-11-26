@@ -1696,10 +1696,13 @@ struct GoMap: View {
     @State private var lastFit: Date?
     @State private var hold = GPSHold()     // real positions (0.20.2)
     @State private var later = Approach.Steady()    // its GPS's soonest time at your stop (0.24.5)
+    @State private var fuser = BusFuser()   // (0.40.1) its GPS and its live times together, gliding
+    @State private var tripAt: Date?        // when its live times were fetched
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { tl in
             Map(position: $camera, interactionModes: newLook ? .all : []) { content(tl.date) }
+                .animation(.linear(duration: 1), value: tl.date)        // (0.40.1) the bus slides from second to second
                 .mapStyle(newLook ? .standard(pointsOfInterest: .excludingAll) : .standard(emphasis: .muted, pointsOfInterest: .excludingAll))
                 .onMapCameraChange(frequency: .onEnd) { _ in
                     // a move that isn't its own fit settling is a hand's
@@ -1769,10 +1772,10 @@ struct GoMap: View {
             MapPolyline(walk.polyline).stroke(newLook ? DS.accent : Paper.ink, style: StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round, dash: [0.5, 10]))
         }
         if let t = trip, let m = mine, let r = ride {
-            // by its GPS, else its times; not past your stop before it has left there (two minutes after its time: a
-            // late one may still be coming); (0.40) and not at your stop while its time there is still a while off
+            // (0.40.1) by its GPS and its live times together, gliding; not past your stop before it has left there
+            // (two minutes after its time: a late one may still be coming)
             let mk = marker(t, mine: m, ride: r, now: now)
-            let me = t.metres(ofStop: m)
+            let me: Double = t.metres(ofStop: m)
             // the road it still has to take to you, and on from there (fainter)
             let rest = t.road(from: me, to: t.metres(ofStop: t.stops.count - 1))
             if rest.count > 1 {
@@ -1782,6 +1785,11 @@ struct GoMap: View {
             if let at = mk.shown.metres, at < me - 5 {
                 MapPolyline(coordinates: t.road(from: at, to: me))
                     .stroke(lineColor(r), style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
+            }
+            // (0.40.1) its GPS and its times more than 200 m apart: the stretch between, faintly
+            if let h = mk.shown.hint, !mk.done, min(h.to, me) - h.from > 20 {
+                MapPolyline(coordinates: t.road(from: h.from, to: min(h.to, me)))
+                    .stroke(lineColor(r).opacity(0.25), style: StrokeStyle(lineWidth: 12, lineCap: .round, lineJoin: .round))
             }
             if let at = mk.shown.metres, !mk.done && at <= me + 30 {
                 Annotation("", coordinate: t.coordinate(atMetres: at), anchor: .center) {
@@ -1795,8 +1803,8 @@ struct GoMap: View {
                         .background(lineColor(r), in: RoundedRectangle(cornerRadius: 7))
                         .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.white, lineWidth: 2))
                         .shadow(color: .black.opacity(0.45), radius: 4, y: 2)
-                        if let w = WaitMarker.text(mk.shown.label, clock: Fmt.hhmm) {
-                            Text(w).font(newLook ? DS.footnoteStrong : BoardInk.sans(11)).monospacedDigit()
+                        if let leaves = mk.shown.waiting {
+                            Text(BusFusion.waitingText(leaves: leaves, clock: Fmt.hhmm)).font(newLook ? DS.footnoteStrong : BoardInk.sans(11)).monospacedDigit()
                                 .foregroundStyle(newLook ? DS.text : Paper.ink)
                                 .padding(.horizontal, 6).padding(.vertical, 2)
                                 .background(newLook ? DS.surface : Color.white, in: Capsule())
@@ -1822,25 +1830,20 @@ struct GoMap: View {
         }
     }
 
-    /// (0.40) Where to draw the one you're waiting for, so the map agrees with its time at your stop (`WaitMarker`):
-    /// not at your stop while that's more than two minutes off (unless it really stands there, then "Waiting · leaves").
-    private func marker(_ t: LiveTrip, mine m: Int, ride r: Ride, now: Date) -> (shown: WaitMarker.Shown, done: Bool) {
-        let p = TripPlacement(t, tripId: r.tripId, now: now, hold: hold, mine: m)
-        let me: Double = t.metres(ofStop: m)
-        let left: Bool = LiveTimes.hasLeft(t.stops[m].times, now: now)
-        let drawn: Double = LiveTimes.shown(p.w.metres, mine: me, left: left)
-        if left { return (WaitMarker.Shown(metres: drawn, label: .none), p.w.done) }
-        let byTime = t.position(now)
-        let waiting: Bool = byTime.atStop && byTime.started && byTime.next == m
+    /// (0.40.1) Where to draw the one you're waiting for: where its GPS and its live times together put it
+    /// (`BusFusion`), gliding there without jumps; at your stop with "Waiting · leaves 17:42" when its own fresh fix
+    /// has it standing there before it leaves.
+    private func marker(_ t: LiveTrip, mine m: Int, ride r: Ride, now: Date) -> (shown: BusFuser.Shown, done: Bool) {
         let eta: Date = later.shown.map { max($0, r.departure) } ?? r.departure
-        let s: WaitMarker.Shown = WaitMarker.place(drawn: drawn, byTime: min(byTime.metres, me), mine: me, mineIsFirst: m == 0,
-                                                    started: byTime.started, gpsRaw: p.raw, waitingByTimes: waiting, eta: eta, now: now)
-        return (s, p.w.done)
+        let s: BusFuser.Shown = fuser.place(t, tripId: r.tripId, line: r.line, isTrain: r.isTrain, mine: m, mineLeaves: eta,
+                                            timesAt: tripAt, now: now)
+        let done: Bool = s.metres.map { t.position(metres: $0).done } ?? false
+        return (s, done)
     }
 
     /// Its live times every 30 seconds; the walk again every minute (or when you've moved).
     private func run() async {
-        trip = nil; mine = nil; walk = nil; walkFrom = nil
+        trip = nil; mine = nil; walk = nil; walkFrom = nil; tripAt = nil
         onWalk?(nil)
         later = Approach.Steady(); onLater?(ride?.tripId ?? "", nil)
         var lastTrip = Date.distantPast
@@ -1855,6 +1858,7 @@ struct GoMap: View {
                 lastTrip = now
                 if let t = await Transit.liveTrip(r.tripId), !Task.isCancelled {
                     trip = t.noCatchUp(asOf: Date(), isTrain: r.isTrain)        // a late bus without catching up
+                    tripAt = Date()
                     if mine == nil { mine = Self.findMine(t, r) }
                 }
             }
