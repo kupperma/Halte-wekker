@@ -14,6 +14,9 @@ struct HaltewekkerApp: App {
         // a background wake-up for the school alarm too.
         // A "Test the setup as a new user" that the app stopped in the middle of goes back first (0.23).
         MainActor.assumeIsolated {
+            // (0.42.1) the notifications' buttons and the lock screen's Stop alarm are answered from the very start, also
+            // when iOS starts the app in the background just for them (the window, and so the trip engine, comes later)
+            AlarmResponder.shared.install()
             let recovered = SetupStore.recoverAtLaunch()
             _ = ProfileStore.shared
             _ = PlacesStore.shared
