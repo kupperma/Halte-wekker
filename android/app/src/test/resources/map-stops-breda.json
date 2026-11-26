@@ -1,0 +1,93 @@
+[
+ {
+  "name": "Breda, Nassausingel",
+  "stopId": "nl-OpenOV_4227238",
+  "importance": 3.197458227077732e-06,
+  "lat": 51.59076,
+  "lon": 4.790426,
+  "level": 0.0,
+  "tz": "Europe/Brussels",
+  "vertexType": "TRANSIT",
+  "modes": [
+   "BUS"
+  ]
+ },
+ {
+  "name": "Breda, Claudius Prinsenlaan",
+  "stopId": "nl-OpenOV_4227272",
+  "importance": 1.9853243429679424e-05,
+  "lat": 51.587345,
+  "lon": 4.785291000000001,
+  "level": 0.0,
+  "tz": "Europe/Brussels",
+  "vertexType": "TRANSIT",
+  "modes": [
+   "BUS"
+  ]
+ },
+ {
+  "name": "Breda, Lovensdijkstraat",
+  "stopId": "nl-OpenOV_4227260",
+  "importance": 1.0059305168397259e-05,
+  "lat": 51.585530000000006,
+  "lon": 4.789283000000001,
+  "level": 0.0,
+  "tz": "Europe/Brussels",
+  "vertexType": "TRANSIT",
+  "modes": [
+   "BUS"
+  ]
+ },
+ {
+  "name": "Breda, Lovensdijkstraat",
+  "stopId": "nl-OpenOV_4227256",
+  "importance": 1.0059305168397259e-05,
+  "lat": 51.586493999999995,
+  "lon": 4.791622000000001,
+  "level": 0.0,
+  "tz": "Europe/Brussels",
+  "vertexType": "TRANSIT",
+  "modes": [
+   "BUS"
+  ]
+ },
+ {
+  "name": "Breda, Sophiastraat",
+  "stopId": "nl-OpenOV_4227396",
+  "importance": 6.220905106602004e-06,
+  "lat": 51.591553000000005,
+  "lon": 4.785798000000001,
+  "level": 0.0,
+  "tz": "Europe/Brussels",
+  "vertexType": "TRANSIT",
+  "modes": [
+   "BUS"
+  ]
+ },
+ {
+  "name": "Breda, St.Ignatiusstraat",
+  "stopId": "nl-OpenOV_4227403",
+  "importance": 6.220905106602004e-06,
+  "lat": 51.59086,
+  "lon": 4.7956780000000006,
+  "level": 0.0,
+  "tz": "Europe/Brussels",
+  "vertexType": "TRANSIT",
+  "modes": [
+   "BUS"
+  ]
+ },
+ {
+  "name": "Breda, St.Ignatiusstraat",
+  "stopId": "nl-OpenOV_4227450",
+  "importance": 6.220905106602004e-06,
+  "lat": 51.591038000000005,
+  "lon": 4.795387,
+  "level": 0.0,
+  "tz": "Europe/Brussels",
+  "vertexType": "TRANSIT",
+  "modes": [
+   "BUS"
+  ]
+ }
+]

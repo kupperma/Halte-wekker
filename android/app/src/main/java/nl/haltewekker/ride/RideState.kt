@@ -1,0 +1,93 @@
+package nl.haltewekker.ride
+
+import android.content.Context
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+import nl.haltewekker.data.DoorTrip
+import nl.haltewekker.data.Ride
+
+/** How the ride knows which bus or train you're on. */
+@Serializable
+enum class VehicleSource { NONE, BY_HAND, BY_GPS, BY_TIMES }
+
+/** A running ride (iOS `TripManager`'s published state), saved so it survives the process being restarted. */
+@Serializable
+data class RideState(
+    val trip: DoorTrip,
+    val destination: String,
+    val index: Int = 0,
+    val phase: Phase = Phase.SLEEPING,
+    val startedAt: Double,
+    val legStart: Double,
+    val wakeKm: List<Double>,
+    val vehicleTripId: String? = null,
+    val vehicleLine: String? = null,
+    val vehicleSource: VehicleSource = VehicleSource.NONE,
+    val distance: Double? = null,
+    val accuracy: Double? = null,
+    val speed: Double? = null,
+    val eta: Double? = null,
+    val lastFixAt: Double? = null,
+    val quiet: Boolean = false,
+    val roughGPS: Boolean = false,
+    val note: String? = null,
+    /** (A2) Started by itself, on leaving a home stop or School. */
+    val auto: Boolean = false,
+    /** (A3) The last fix (5 decimals), for friends you show your trips to. */
+    val lastLat: Double? = null,
+    val lastLon: Double? = null,
+    /** (A4) The leg the ride started at (0: from the start, so a finished trip counts on the leaderboard). */
+    val firstLeg: Int? = null,
+    /** (A6, iOS 0.33) Rung by time: the minutes it rang at (the alarm says "in about 3 min"). */
+    val ringMinutes: Int? = null,
+    /** (A6, iOS 0.34) No good GPS for a while: the place goes on along the vehicle's route. */
+    val reckoning: Boolean = false,
+    /** (A6, iOS 0.35) where you were when it started (if known) and when that fix was, for the leaderboard's start. */
+    val startLat: Double? = null,
+    val startLon: Double? = null,
+    val startFixAt: Double? = null,
+    /** (A6, iOS 0.35) the ride that was latest at your stop so far, and by how many minutes. */
+    val lateLine: String? = null,
+    val lateMins: Double? = null,
+    /** (A6, iOS 0.36) the trains' minutes late at their stops, and the train part's planned and actual end (money back). */
+    val trainLates: List<Double> = emptyList(),
+    val trainEndPlanned: Double? = null,
+    val trainEndActual: Double? = null,
+    /** (A6, iOS 0.34) when you got off at a change (for the change time you need), and the vehicle you got off. */
+    val changeArrived: Double? = null,
+    val changeFromVehicle: String? = null,
+) {
+    val leg: Ride? get() = trip.rides.getOrNull(index)
+    val wakeMetres: Double get() = (wakeKm.getOrNull(index) ?: WakeRules.BUS_KM) * 1000
+    val finished: Boolean get() = phase == Phase.FINISHED
+    /** When this leg gets you to your stop: live once it's known, else the plan's. */
+    val legArrival: Double? get() = eta ?: leg?.arrival
+}
+
+/** The ride as state the screens and the notification follow (one per process). */
+object RideStore {
+    private const val KEY = "ride.v1"
+    private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+    private val _state = MutableStateFlow<RideState?>(null)
+    val state: StateFlow<RideState?> = _state
+    private var loaded = false
+
+    fun load(context: Context) {
+        if (loaded) return
+        loaded = true
+        val s = context.getSharedPreferences("haltewekker", Context.MODE_PRIVATE).getString(KEY, null) ?: return
+        _state.value = try { json.decodeFromString<RideState>(s) } catch (_: Exception) { null }
+    }
+
+    fun set(context: Context, s: RideState?) {
+        _state.value = s
+        context.getSharedPreferences("haltewekker", Context.MODE_PRIVATE).edit().apply {
+            if (s == null) remove(KEY) else putString(KEY, json.encodeToString(s))
+        }.apply()
+    }
+
+    fun update(context: Context, f: (RideState) -> RideState) { _state.value?.let { set(context, f(it)) } }
+}

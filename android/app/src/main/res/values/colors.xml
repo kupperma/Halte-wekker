@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="accent">#0E7A55</color>
+    <color name="page">#F1F3F5</color>
+    <color name="icon_bg">#0E7A55</color>
+    <!-- (A6) the widget, light and dark (the app's surface, text and secondary tokens) -->
+    <color name="widget_bg">#FFFFFF</color>
+    <color name="widget_text">#14171A</color>
+    <color name="widget_secondary">#5B636B</color>
+    <color name="widget_warning">#A84219</color>
+</resources>
