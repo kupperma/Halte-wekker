@@ -255,5 +255,664 @@
       "Campus"
     ],
     "shapePoints": 16
+  },
+  "input2": {
+    "about": "(Android 0.10.6, iOS 0.42.9) At a change with no stops of its own: each leg's from and to (fromPt, toPt: [lat, lon]) and the saved road of the rides ahead (road), cut and simplified to at most 80 points for the current ride and the next two, else a straight line; the walk before the current ride too; the phone's fix; the picture's version (pic).",
+    "now": 1800001300,
+    "base": {
+      "v": 1,
+      "name": "Sam",
+      "state": "change",
+      "mode": "train",
+      "line": "IC",
+      "from": "Eindhoven Centraal",
+      "to": "Breda",
+      "dest": "Campus",
+      "dep": 1800001500,
+      "eta": 1800003840,
+      "end": 1800005400,
+      "late": 1,
+      "pos": {
+        "lat": 51.4425123,
+        "lon": 5.4770249,
+        "at": 1800001290
+      },
+      "t": 1800001300
+    },
+    "trip": {
+      "leg": 2,
+      "face": "3dd598",
+      "inbox": true,
+      "pic": 2,
+      "legs": [
+        {
+          "mode": "bus",
+          "line": "305",
+          "from": "Veghel, Busstation",
+          "to": "Eindhoven Centraal",
+          "dep": 1799999640,
+          "arr": 1800000960,
+          "late": 0,
+          "fromPt": [
+            51.6167123,
+            5.5486049
+          ],
+          "toPt": [
+            51.4430567,
+            5.4790111
+          ],
+          "road": [
+            [
+              51.6167123,
+              5.5486049
+            ],
+            [
+              51.53,
+              5.5
+            ],
+            [
+              51.4430567,
+              5.4790111
+            ]
+          ]
+        },
+        {
+          "mode": "walk",
+          "from": "Eindhoven Centraal",
+          "to": "Eindhoven Centraal",
+          "dep": 1800000960,
+          "arr": 1800001200,
+          "mins": 4,
+          "fromPt": [
+            51.4430567,
+            5.4790111
+          ],
+          "toPt": [
+            51.4427,
+            5.4795
+          ]
+        },
+        {
+          "mode": "train",
+          "line": "IC",
+          "num": "3512",
+          "from": "Eindhoven Centraal",
+          "to": "Breda",
+          "dep": 1800001500,
+          "arr": 1800003840,
+          "depPlatform": "4",
+          "arrPlatform": "6",
+          "late": 1,
+          "fromPt": [
+            51.4430567,
+            5.4790111
+          ],
+          "toPt": [
+            51.5955,
+            4.78
+          ],
+          "road": [
+            [
+              51.4461,
+              5.4842
+            ],
+            [
+              51.4430567,
+              5.4790111
+            ],
+            [
+              51.4460863,
+              5.4709293
+            ],
+            [
+              51.447101,
+              5.4648625
+            ],
+            [
+              51.4486349,
+              5.4582765
+            ],
+            [
+              51.45205,
+              5.4498092
+            ],
+            [
+              51.4544611,
+              5.442346
+            ],
+            [
+              51.4552497,
+              5.4365052
+            ],
+            [
+              51.4574604,
+              5.4292424
+            ],
+            [
+              51.4609272,
+              5.4207235
+            ],
+            [
+              51.4626481,
+              5.4139504
+            ],
+            [
+              51.463563,
+              5.4079834
+            ],
+            [
+              51.4664313,
+              5.400063
+            ],
+            [
+              51.4696023,
+              5.3918398
+            ],
+            [
+              51.4707419,
+              5.3856481
+            ],
+            [
+              51.4721022,
+              5.3792356
+            ],
+            [
+              51.4754371,
+              5.3708486
+            ],
+            [
+              51.4780425,
+              5.3631911
+            ],
+            [
+              51.4788612,
+              5.3573202
+            ],
+            [
+              51.4808699,
+              5.3502594
+            ],
+            [
+              51.4843586,
+              5.3417185
+            ],
+            [
+              51.4862759,
+              5.3347491
+            ],
+            [
+              51.4871182,
+              5.3288547
+            ],
+            [
+              51.4898088,
+              5.3211119
+            ],
+            [
+              51.4930982,
+              5.3127703
+            ],
+            [
+              51.4943849,
+              5.3064315
+            ],
+            [
+              51.495589,
+              5.3001753
+            ],
+            [
+              51.498817,
+              5.2918951
+            ],
+            [
+              51.5016062,
+              5.2840538
+            ],
+            [
+              51.5024844,
+              5.2781234
+            ],
+            [
+              51.504294,
+              5.2712617
+            ],
+            [
+              51.5077744,
+              5.2627291
+            ],
+            [
+              51.509893,
+              5.2555584
+            ],
+            [
+              51.5106917,
+              5.2497076
+            ],
+            [
+              51.5131923,
+              5.2421548
+            ],
+            [
+              51.5165743,
+              5.2337207
+            ],
+            [
+              51.5180272,
+              5.2272157
+            ],
+            [
+              51.5190958,
+              5.2210949
+            ],
+            [
+              51.5221926,
+              5.212946
+            ],
+            [
+              51.525151,
+              5.2049354
+            ],
+            [
+              51.5261169,
+              5.1989174
+            ],
+            [
+              51.5277346,
+              5.1922475
+            ],
+            [
+              51.5311768,
+              5.1837531
+            ],
+            [
+              51.5334971,
+              5.1763807
+            ],
+            [
+              51.534282,
+              5.1705437
+            ],
+            [
+              51.5365845,
+              5.1631891
+            ],
+            [
+              51.5400313,
+              5.1546901
+            ],
+            [
+              51.5416656,
+              5.1480037
+            ],
+            [
+              51.5426227,
+              5.1419945
+            ],
+            [
+              51.5455668,
+              5.1339982
+            ],
+            [
+              51.5486761,
+              5.1258368
+            ],
+            [
+              51.5497558,
+              5.1197049
+            ],
+            [
+              51.5511933,
+              5.1132153
+            ],
+            [
+              51.5545681,
+              5.1047883
+            ],
+            [
+              51.557086,
+              5.0972183
+            ],
+            [
+              51.5578873,
+              5.0913648
+            ],
+            [
+              51.5613573,
+              5.0828427
+            ],
+            [
+              51.5616192,
+              5.0776954
+            ],
+            [
+              51.5610126,
+              5.0734164
+            ],
+            [
+              51.5623397,
+              5.0672039
+            ],
+            [
+              51.5640369,
+              5.0606213
+            ],
+            [
+              51.5637051,
+              5.0560676
+            ],
+            [
+              51.563526,
+              5.0513613
+            ],
+            [
+              51.5653365,
+              5.0446653
+            ],
+            [
+              51.5664817,
+              5.0386347
+            ],
+            [
+              51.5658087,
+              5.0344222
+            ],
+            [
+              51.5662696,
+              5.0290759
+            ],
+            [
+              51.5682564,
+              5.0222036
+            ],
+            [
+              51.5687161,
+              5.0168584
+            ],
+            [
+              51.5680434,
+              5.0126457
+            ],
+            [
+              51.5691897,
+              5.006614
+            ],
+            [
+              51.5709996,
+              4.9999186
+            ],
+            [
+              51.5708196,
+              4.9952132
+            ],
+            [
+              51.5704886,
+              4.9906586
+            ],
+            [
+              51.5721866,
+              4.9840753
+            ],
+            [
+              51.5735126,
+              4.9778638
+            ],
+            [
+              51.5729055,
+              4.9735854
+            ],
+            [
+              51.5731686,
+              4.9684369
+            ],
+            [
+              51.5751404,
+              4.9615796
+            ],
+            [
+              51.5758019,
+              4.9560327
+            ],
+            [
+              51.5750922,
+              4.9518569
+            ],
+            [
+              51.5760462,
+              4.9460174
+            ],
+            [
+              51.5779427,
+              4.9392355
+            ],
+            [
+              51.5779325,
+              4.9343602
+            ],
+            [
+              51.5774713,
+              4.929936
+            ],
+            [
+              51.5790329,
+              4.9234889
+            ],
+            [
+              51.5805243,
+              4.917112
+            ],
+            [
+              51.580011,
+              4.9127399
+            ],
+            [
+              51.5800845,
+              4.907781
+            ],
+            [
+              51.5820114,
+              4.9009686
+            ],
+            [
+              51.5828741,
+              4.8952205
+            ],
+            [
+              51.5821574,
+              4.8910517
+            ],
+            [
+              51.5829121,
+              4.8854116
+            ],
+            [
+              51.5848669,
+              4.8785713
+            ],
+            [
+              51.5850411,
+              4.8735117
+            ],
+            [
+              51.584474,
+              4.8691933
+            ],
+            [
+              51.5858785,
+              4.8629033
+            ],
+            [
+              51.5875163,
+              4.8563801
+            ],
+            [
+              51.5871223,
+              4.8518886
+            ],
+            [
+              51.5870187,
+              4.8471068
+            ],
+            [
+              51.5888719,
+              4.8403681
+            ],
+            [
+              51.5899306,
+              4.8344239
+            ],
+            [
+              51.5892372,
+              4.8302319
+            ],
+            [
+              51.5897898,
+              4.8247939
+            ],
+            [
+              51.5917735,
+              4.8179247
+            ],
+            [
+              51.5921423,
+              4.8126705
+            ],
+            [
+              51.5914962,
+              4.8084311
+            ],
+            [
+              51.5927265,
+              4.8023154
+            ],
+            [
+              51.5944881,
+              4.7956682
+            ],
+            [
+              51.5942365,
+              4.7910344
+            ],
+            [
+              51.5939723,
+              4.7864132
+            ],
+            [
+              51.5955,
+              4.78
+            ],
+            [
+              51.598,
+              4.775
+            ]
+          ]
+        },
+        {
+          "mode": "bus",
+          "line": "1",
+          "from": "Breda",
+          "to": "Breda, Hogeschool",
+          "dep": 1800004440,
+          "arr": 1800005220,
+          "depPlatform": "E",
+          "fromPt": [
+            51.5951,
+            4.7811
+          ],
+          "toPt": [
+            51.5701,
+            4.8002
+          ],
+          "road": [
+            [
+              51.5957,
+              4.7795
+            ],
+            [
+              51.5951,
+              4.7811
+            ],
+            [
+              51.5927817,
+              4.782385
+            ],
+            [
+              51.5900156,
+              4.7841178
+            ],
+            [
+              51.5873648,
+              4.7857352
+            ],
+            [
+              51.5851322,
+              4.7869345
+            ],
+            [
+              51.5826764,
+              4.788357
+            ],
+            [
+              51.5801683,
+              4.7898317
+            ],
+            [
+              51.5784355,
+              4.7916145
+            ],
+            [
+              51.5765097,
+              4.7935903
+            ],
+            [
+              51.5750136,
+              4.7951364
+            ],
+            [
+              51.5735997,
+              4.7966003
+            ],
+            [
+              51.571735,
+              4.798515
+            ],
+            [
+              51.5701,
+              4.8002
+            ]
+          ]
+        },
+        {
+          "mode": "walk",
+          "from": "Breda, Hogeschool",
+          "to": "Campus",
+          "dep": 1800005220,
+          "arr": 1800005400,
+          "mins": 3,
+          "fromPt": [
+            51.5701,
+            4.8002
+          ],
+          "toPt": [
+            51.5689,
+            4.8031
+          ]
+        }
+      ]
+    }
+  },
+  "face": {
+    "about": "(Android 0.10.6, iOS 0.42.9) The sharer's picture as put at /live/v1/face: the JPEG's bytes locked with the link's key, AAD \"hw-live-face-v1\\n\" + token.",
+    "plain": "_9j_4AABAgMEBQYHCAkKCwwNDg8QERITFBUWFxgZGhscHR4fICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6O__Z",
+    "nonce": "808182838485868788898a8b",
+    "data": "AYCBgoOEhYaHiImKi3J59jeSq0ZO39iLRFWH12efdkSxwaGxlxwugU5aR6_Wtm2CoJw8tN4DQqgWDntobWeiR2GKuk3Ns9EyCSiGsfanPCLE8U1rYqedqjsqKmRJXZM"
+  },
+  "state2": {
+    "plain": "{\"dep\":1800001500,\"dest\":\"Campus\",\"end\":1800005400,\"eta\":1800003840,\"face\":\"3DD598\",\"from\":\"Eindhoven Centraal\",\"inbox\":true,\"late\":1,\"leg\":2,\"legs\":[{\"arr\":1800000960,\"color\":\"E0632E\",\"dep\":1799999640,\"from\":\"Veghel, Busstation\",\"late\":0,\"line\":\"305\",\"mode\":\"bus\",\"to\":\"Eindhoven Centraal\"},{\"arr\":1800001200,\"dep\":1800000960,\"from\":\"Eindhoven Centraal\",\"mins\":4,\"mode\":\"walk\",\"shape\":\"cn~xHybm`@fAaB\",\"to\":\"Eindhoven Centraal\"},{\"arr\":1800003840,\"arrPlatform\":\"6\",\"color\":\"3B44B0\",\"dep\":1800001500,\"depPlatform\":\"4\",\"from\":\"Eindhoven Centraal\",\"late\":1,\"line\":\"IC\",\"mode\":\"train\",\"num\":\"3512\",\"shape\":\"cn~xHybm`@}Qnq@{N`nAmc@pbB}Cnc@yLll@uTft@mOrnAwd@zcBsNvmAcd@hcBcDtc@qKbk@yTjt@_Kpj@gDzc@kd@ncBqNtmAsd@xcBmD`d@iJzi@wTht@gLxk@_Dpc@wc@|bByN|mAyd@|cBcOhnAqTbt@oM`m@{Cnc@kM|l@qTbt@eOjnA{d@|cBuNzmA{c@~bB_Drc@uTft@s@b_@xBvY}Q~nAdBzx@mQpnAdChY{Aj`@mK~i@{Aj`@fChYoQpnAdBzx@{Q~nAvBtYs@d_@iKzi@cCta@lC`Y_Enc@yJji@|Aby@aRdoAvAhy@aKpi@kD|b@lC`YuCfb@gKvi@a@r^pB~YaR`oAbB|x@eQhnAhCdYmB~`@kK|i@iAx_@~BnYuQvnAfBzx@qH`g@\",\"to\":\"Breda\"},{\"arr\":1800005220,\"color\":\"E0632E\",\"dep\":1800004440,\"depPlatform\":\"E\",\"from\":\"Breda\",\"line\":\"1\",\"mode\":\"bus\",\"shape\":\"kd|yH{xd\\\\nM_GfP{IrOcI|LmF~]cQ|}@y_A\",\"to\":\"Breda, Hogeschool\"},{\"arr\":1800005400,\"dep\":1800005220,\"from\":\"Breda, Hogeschool\",\"mins\":3,\"mode\":\"walk\",\"shape\":\"chwyHgph\\\\nFcQ\",\"to\":\"Campus\"}],\"line\":\"IC\",\"mode\":\"train\",\"name\":\"Sam\",\"pic\":2,\"pos\":{\"at\":1800001290,\"lat\":51.4425123,\"lon\":5.4770249,\"src\":\"phone\"},\"state\":\"change\",\"t\":1800001300,\"to\":\"Breda\",\"v\":2}",
+    "nonce": "909192939495969798999a9b",
+    "data": "AZCRkpOUlZaXmJmamyIbuHbp1z9SUIqx7QeNHjqIIgWGukBi-ITP3cTTG4gTJv8jNzgwQx_jnAb8bZ7T1FLYSEO7w3eGgDvmsizT14jZjDaPKIBq5v3JLe9PzkUg2mM6IVtodzl2p_-DqdLeQyl-YyVVDJyQnKduH1EVO9hf247bqQk6k2Wg0TBF1GX90xSRljqi_5QzKIYv27ecZVUT9FL9-G1f7f1vfCK9kyLSGao5wgbPCGS4QAd7lMPrEeivluPOcFkCew-zoVcIjCDilOgE-diQjeCj83a6IX36R6xYokNDJw4hqdi74ga1pfhTAt7riNHLgDeMLlc9pmrfGir4Rha3OW21hAQUpAMlvRjYaxLVnKGAGXS5FQG5lgDZf0tKmLs2GBGskk730WvrnPNcYya0OS2fm3GqrpNbTdnzSHSjT-sSYU0irl-puvQr1J_pCDSxXBHimAsBh4ZLq4LTBrpRhK4GF8oLokGfj1TdimC2IBeBUYcbzt5yE7T6kHUXf55OBwkJv2RupkRcC7j-DQ2xtcXPZNSVCTRyTX38hry36caQCe6Xcu9KE-1ir4MSkPlHI88ccgIjNfyerXwW9c7jSufMaVIspB0_z3d6ZnX4bx2RuAFXtkKO0e1PxVm7KHE8L_u7U2_lFCG6ba9Pl5mJgMBOcwYxJYEE05-7qPClYTz1BgAKGEHNLEFVQjzXMtBk89cia2QP8IahudAM0MEUglDBJ5qpA6JzoKeuA3_YW3FfKAtICUu49r-UY_MZ1uarrCHNR4KU_urpDUAn_DHoJJ4vffRvpig4CHPY2qyMNXCvbHga2JM65MqGI7PJNDElofF_u6-4lqEtrMtkh2l76uDm8rU0nIZ6gAD3sXxvM8qHkG_qbcGPkH3Whk9sChnI-7jFN2e9_9DF6rEK2S6cUyV38aZjm_Lo4jkBNQxFUkjxV3WdbYgSONKsJ_vJ0aAye4QYNZeFE3cA6Qni8sqvQ4bCNB_Gx-RkQ2SLJjcKimwkzzLAinWWUfM35m1uiVPozthitfhnMwN3hk5iVSPNRje8wMtSSeqnxQAOn1k6ckMT2kEyufkBRFG_FSlTn_ZmPPM1OJ60likTB2LxBjoYGA4F2uf7IoTjlrJ37fN4CmVgV_qABRuLhVCCWRkOJaSt7Uezt0ODvO4vnrmi8AawLGwwqN5Ku_uSgUcNRQT1gUwp2S7-443NQ6U7NFnX-8Gdu1J3ntYDpBQrY47FRU88soZ9pZG-4_AxaF4NT8ttDxZ3oWNAYinS-JPQ13enb-Iar8YnACZ5ttIwQV2tH1Wq7IR8Bw_G8zMGVuotu9B6dNCXPv2Ldl4pXeAwAQ7gAuHiSfJck6N3whk1q0OXlUt7q6dzXO0hdD4pkjCZtNeMIeVIgeuM7yoKuHQOMhjiJ4V8GeZyCwWVVC8j6lV83Rr39SDKm59NWWq_O7cy1JzPW2nOZfJu449tp6vlTECaS8UKupXtzhkkxseFyXjm00SAG831qIqd7JX4MxWFrGlyvTJIRoWrVUQiZ_JbRaFTlx8Dap9MA2QOP893aD4BYShkEuipPPan6XDrIcTJtJqT4GocC0mFK2B-sWo5bR-NbzCgES9JvZr23CwwXkwphKN0ZEpJI074rwumSW1afjnYdWbV1XE4dELAbXtmUx1N8C1ZUi22TYxJdnkDOrocP1dEpv3lzlRT65uSZppgtnWPJR31ethHMNRMOU67qZk0bY8Tkf4_gvLh_Q9IuKj82H6zCO7pRy78MNGX6-9-bfSg9mV_ZlcAGVKOeYsKtCeMD2pU1vKW-DYG0COwJUmQbRJJ4598iuYX_lZnG4GaxG8KiZOQDR2Q6GDRhrfzPCq6-2CdTxEd9_2MggfDOejq7UUlriiGgFhaS_q-JWArtWdWkpBlSHXI7kWZ0j9xA-OmvfMUF9SXDhVF6c_d2ku8oF_qEHa1ZY-WYM4blrgEALHwh7fHEqxkJRgqzKnh5JOOiMN5cJjkGtdrLLVsC7aosnxD6wn7c-y7sY8lB6unCdpQh3X1rH1o3A"
+  },
+  "page2": {
+    "head": "Sam is changing at Eindhoven Centraal",
+    "note": "Waiting on platform 4 · IC 3512 leaves in 3 min"
   }
 }
