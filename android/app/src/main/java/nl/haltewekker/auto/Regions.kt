@@ -108,6 +108,8 @@ object AutoStart {
         val spec = Regions.current(c).firstOrNull { it.id == id } ?: return
         // (A4) the friends extras hear it first: at school (campus), leaving home (the wake-up buddy)
         try { nl.haltewekker.friends.FriendStore.init(c); nl.haltewekker.friends.FriendExtrasStore.region(id, entering) } catch (_: Exception) {}
+        // (iOS 0.42.6) and the school alarm: left home, or at school (no wake-up when you're already going)
+        try { nl.haltewekker.school.SchoolAlarm.region(c, home = role == AutoRules.Role.HOME, entering = entering) } catch (_: Exception) {}
         if (entering) {
             if (role == AutoRules.Role.SCHOOL && spec.entry && s.autoHome && RideStore.state.value == null) {
                 val today = LocalDate.now().toString()

@@ -115,7 +115,10 @@ object RideStore {
     }
 
     fun set(context: Context, s: RideState?) {
+        val old = _state.value
         _state.value = s
+        // (iOS 0.42.6) the school alarm hears a ride start and end (read only): no wake-up when you're already going
+        if ((old == null) != (s == null) || (s?.finished == true && old?.finished != true)) nl.haltewekker.school.SchoolAlarm.rideChanged(context, old, s)
         context.getSharedPreferences("haltewekker", Context.MODE_PRIVATE).edit().apply {
             if (s == null) remove(KEY) else putString(KEY, json.encodeToString(s))
         }.apply()

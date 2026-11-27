@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -64,6 +65,8 @@ import nl.haltewekker.school.PhoneCalendar
 import nl.haltewekker.school.Planned
 import nl.haltewekker.school.ScheduleSource
 import nl.haltewekker.school.SchoolAlarm
+import nl.haltewekker.school.SchoolArrive
+import nl.haltewekker.school.Timetable
 import nl.haltewekker.school.SchoolConfig
 import nl.haltewekker.school.SchoolHints
 import nl.haltewekker.school.WakeAlarm
@@ -307,7 +310,9 @@ fun SchoolHomeCard(onDay: () -> Unit, onSettings: () -> Unit) {
         if (n.alarm != null && n.leave != null) Row {
             Stat("ALARM", if (SchoolAlarm.isSkipped(n.day)) "off" else Fmt.time(n.alarm), big = true)
             Spacer(Modifier.weight(1f)); Stat("LEAVE", Fmt.time(n.leave)); Spacer(Modifier.weight(1f)); Stat("AT SCHOOL", Fmt.time(n.arrive ?: n.beThere))
-        } else Text("Planning the trip…", color = DS.t.secondary)
+        } else Text(SchoolAlarm.goingWords(n.day)?.let { "No alarm today: you're $it." } ?: "Planning the trip…", color = DS.t.secondary)
+        // (iOS 0.42.6) a day whose time you changed says so
+        SchoolAlarm.changedLine(n.day)?.let { Text(it, color = DS.t.accentText, style = MaterialTheme.typography.bodySmall) }
     }
 }
 
@@ -330,6 +335,7 @@ fun DayScreen(onBack: () -> Unit, onSettings: () -> Unit, canStart: Boolean, onS
     val cfg by SchoolAlarm.config.collectAsState()
     val week by SchoolAlarm.week.collectAsState()
     val skipped by SchoolAlarm.skipped.collectAsState()
+    val going by SchoolAlarm.going.collectAsState()
     val note by SchoolAlarm.note.collectAsState()
     val planning by SchoolAlarm.planning.collectAsState()
     val scope = rememberCoroutineScope()
@@ -361,12 +367,15 @@ fun DayScreen(onBack: () -> Unit, onSettings: () -> Unit, canStart: Boolean, onS
                 n.leave == null -> Text(if (planning) "Planning the trip…" else note ?: "No trip found yet.", color = DS.t.secondary)
                 n.leave < now -> Text("You should be on your way: you had to leave at ${Fmt.time(n.leave)}.", color = DS.t.warning)
                 n.alarm != null && n.alarm < now -> Text("Leave ${Fmt.inMinutes(n.leave, now)} (at ${Fmt.time(n.leave)}).", color = DS.t.warning, fontWeight = FontWeight.SemiBold)
+                SchoolAlarm.goingWords(n.day) != null -> Text("No alarm today: you're ${SchoolAlarm.goingWords(n.day)}.", color = DS.t.secondary)
                 n.day in skipped -> Text("No alarm this day: you turned it off.", color = DS.t.secondary)
                 n.alarmSet -> Text("The alarm is set: it rings like an alarm clock, also on silent.", color = DS.t.secondary, style = MaterialTheme.typography.bodySmall)
             }
-            if (n.alarm == null || n.alarm > now) SwitchRow("Wake me this day", "Off: only this day's alarm goes; the trip stays planned.", n.day !in skipped) { on ->
+            if (n.alarm == null || n.alarm > now) SwitchRow("Wake me this day", "Off: only this day's alarm goes; the trip stays planned.", n.day !in skipped && n.day !in going) { on ->
                 SchoolAlarm.setSkipped(c, n.day, !on)
             }
+            // (iOS 0.42.6) this day's "Be there at …"
+            ArriveRow(n, now)
         }
         n.trip?.let { t ->
             Card {
@@ -379,7 +388,7 @@ fun DayScreen(onBack: () -> Unit, onSettings: () -> Unit, canStart: Boolean, onS
         val days = week.filter { it.classStart > now - 12 * 3600 }
         if (days.size > 1) Card {
             Header("This week")
-            days.forEach { p -> WeekRow(p, p.day in skipped, now) { on -> SchoolAlarm.setSkipped(c, p.day, !on) } }
+            days.forEach { p -> WeekRow(p, p.day in skipped || p.day in going, now) { on -> SchoolAlarm.setSkipped(c, p.day, !on) } }
             Text("Each day's alarm moves with the buses until it has rung; then it's left alone.", color = DS.t.secondary, style = MaterialTheme.typography.bodySmall)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -397,10 +406,49 @@ private fun WeekRow(p: Planned, off: Boolean, now: Double, set: (Boolean) -> Uni
         Column(Modifier.weight(1f)) {
             Text("${Fmt.time(p.classStart)} ${p.title}", color = DS.t.text, maxLines = 1)
             Text(listOfNotNull(p.leave?.let { "leave ${Fmt.time(it)}" }, p.lines).joinToString(" · "), color = DS.t.secondary, style = MaterialTheme.typography.bodySmall, maxLines = 1)
+            SchoolAlarm.changedLine(p.day)?.let { Text(it, color = DS.t.accentText, style = MaterialTheme.typography.bodySmall, maxLines = 1) }
         }
         Text(when { off -> "off"; rang -> "rang"; else -> p.alarm?.let(Fmt::time) ?: "–" },
             color = when { off -> DS.t.secondary; rang -> DS.t.secondary; p.alarmSet -> DS.t.accentText; else -> DS.t.warning }, fontWeight = FontWeight.SemiBold)
         if (!rang) Switch(!off, set)
+    }
+}
+
+/** (iOS 0.42.6) A day's "Be there at …": a time, the quick choices, no alarm this day, back to the timetable. */
+@Composable
+private fun ArriveRow(p: Planned, now: Double) {
+    val c = LocalContext.current
+    val arrive by SchoolAlarm.arrive.collectAsState()
+    val changed = arrive[p.day]
+    val at = changed ?: SchoolAlarm.timetableBeThere(p)
+    var open by remember { mutableStateOf(false) }
+    val done = p.rang(now) || p.classStart <= now
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(Modifier.fillMaxWidth().clickable(enabled = !done) { open = !open }, verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Be there at ${Fmt.time(at)}", color = DS.t.text, fontWeight = FontWeight.SemiBold)
+                Text(changed?.let { SchoolArrive.changedLine(it, p.classStart, Fmt::time) } ?: "As your timetable says · change it for this day",
+                    color = if (changed != null) DS.t.accentText else DS.t.secondary, style = MaterialTheme.typography.bodySmall)
+            }
+            if (!done) Text(if (open) "Close" else "Change", color = DS.t.accentText, fontWeight = FontWeight.SemiBold)
+        }
+        if (open && !done) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                QuietButton("Pick a time") {
+                    val z = java.time.Instant.ofEpochMilli((at * 1000).toLong()).atZone(Timetable.amsterdam)
+                    TimePickerDialog(c, { _, h, mi ->
+                        val d = java.time.Instant.ofEpochMilli((p.classStart * 1000).toLong()).atZone(Timetable.amsterdam).toLocalDate()
+                        SchoolAlarm.setArrival(c, p.day, d.atTime(h, mi).atZone(Timetable.amsterdam).toEpochSecond().toDouble())
+                        open = false
+                    }, z.hour, z.minute, true).show()
+                }
+                SchoolArrive.Quick.entries.forEach { q -> QuietButton(q.title) { SchoolAlarm.setArrival(c, p.day, q); open = false } }
+                if (!SchoolAlarm.isSkipped(p.day)) QuietButton("No alarm this day") { SchoolAlarm.setSkipped(c, p.day, true); open = false }
+                if (changed != null) QuietButton("Reset to timetable") { SchoolAlarm.setArrival(c, p.day, null as Double?); open = false }
+            }
+            Text("The trip and your wake-up alarm are planned again for the time you pick, for this day only.", color = DS.t.secondary,
+                style = MaterialTheme.typography.bodySmall)
+        }
     }
 }
 

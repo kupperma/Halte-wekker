@@ -19,6 +19,8 @@ data class Planned(
     val alarmSet: Boolean = false,
     val checked: Double = 0.0,          // when its trip was last planned
     val trip: DoorTrip? = null,
+    /** (iOS 0.42.6) What the alarm was set with: "" as the timetable says, else the day's be-there time. */
+    val label: String? = null,
 ) {
     /** The alarm has gone off (or its time has passed): never touched again, so it can't ring twice. */
     fun rang(now: Double): Boolean = (alarm ?: Double.POSITIVE_INFINITY) <= now
@@ -85,6 +87,7 @@ object SchoolPlan {
         skipped: Set<String>,
         now: Double,
         force: Boolean,
+        arrive: Map<String, Double> = emptyMap(),
         planTrips: suspend (beThere: Double) -> List<DoorTrip>,
     ): Result {
         val out = week.toMutableList()
@@ -100,16 +103,37 @@ object SchoolPlan {
             val old = out.firstOrNull { it.day == k }
             if (old?.rang(now) == true) continue                    // it rang: leave it alone
             if (e.start <= now + MIN_LEAD) continue
-            val be = beThere(e.start, config.earlyMinutes)
+            // (iOS 0.42.6) the day's own "Be there at …" when you changed it, else the timetable's
+            val changed = arrive[k] != null
+            val be = SchoolArrive.beThere(e.start, config.earlyMinutes, arrive[k])
             if (!due(old, e.start, be, now, force)) continue
-            val best = best(planTrips(be), be, now) ?: continue     // no answer just now: keep what it had
-            val at = alarmAt(best.start, config.wakeMinutes)
-            var p = (old ?: Planned(day = k, title = e.title ?: "Class", classStart = e.start, beThere = be)).copy(
-                title = e.title ?: "Class", room = e.room, classStart = e.start, beThere = be,
-                leave = best.start, arrive = best.end, checked = now, trip = best,
-                lines = best.rides.joinToString(" · ") { it.line },
-            )
-            when (val a = SchoolSkip.decide(at, k, skipped, p.alarm, p.alarmSet, now)) {
+            val label = if (changed) be.toLong().toString() else ""
+            val best = best(planTrips(be), be, now)
+            var p: Planned
+            if (best == null) {
+                // no answer just now: keep what it had; right after you changed the day's time, its trip moved by the
+                // change, so the alarm follows at once (planned again at the next chance)
+                val ol = old?.leave
+                if (old == null || old.beThere == be || old.classStart != e.start || ol == null) continue
+                val leave = SchoolArrive.shiftedLeave(ol, old.beThere, be)
+                if (leave <= now) continue
+                p = old.copy(beThere = be, leave = leave, arrive = old.arrive?.let { SchoolArrive.shiftedLeave(it, old.beThere, be) },
+                    checked = 0.0, trip = null)
+            } else {
+                p = (old ?: Planned(day = k, title = e.title ?: "Class", classStart = e.start, beThere = be)).copy(
+                    title = e.title ?: "Class", room = e.room, classStart = e.start, beThere = be,
+                    leave = best.start, arrive = best.end, checked = now, trip = best,
+                    lines = best.rides.joinToString(" · ") { it.line },
+                )
+            }
+            val leave = p.leave ?: continue
+            val at = alarmAt(leave, config.wakeMinutes)
+            var action = SchoolSkip.decide(at, k, skipped, p.alarm, p.alarmSet, now)
+            // the same minute with new words (a changed be-there time): set again while it's more than 5 min ahead
+            if (action == SchoolSkip.Action.Keep && p.alarmSet && k !in skipped && (p.label ?: "") != label && at > now + 5 * 60) {
+                action = SchoolSkip.Action.Set(at, schedule = true)
+            }
+            when (val a = action) {
                 SchoolSkip.Action.Keep -> {}
                 SchoolSkip.Action.Clear -> {
                     if (p.alarmSet) ops.add(AlarmOp.Cancel(k))
@@ -117,9 +141,9 @@ object SchoolPlan {
                 }
                 is SchoolSkip.Action.Set -> {
                     if (p.alarmSet && !a.schedule) ops.add(AlarmOp.Cancel(k))
-                    if (a.schedule) ops.add(AlarmOp.Set(k, a.at, best.start, e.start, p.title))
+                    if (a.schedule) ops.add(AlarmOp.Set(k, a.at, leave, e.start, p.title))
                     val wasSet = old?.alarmSet == true
-                    p = p.copy(alarm = a.at, alarmSet = a.schedule)
+                    p = p.copy(alarm = a.at, alarmSet = a.schedule, label = if (a.schedule) label else p.label)
                     if (a.schedule && !wasSet) added.add(p)
                 }
             }

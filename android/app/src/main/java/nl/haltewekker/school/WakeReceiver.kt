@@ -19,6 +19,8 @@ class WakeReceiver : BroadcastReceiver() {
             val now = Iso.now()
             // moved and set again (that one rings), or long past (the phone was off): not this one
             if (now < at - 10 * 60 || now > at + 30 * 60) return
+            // (iOS 0.42.6) already on the way (a trip to school, at school, or left home on a ride): not this morning
+            if (SchoolAlarm.checkOnTheWay(context, now, ringing = true)) return
         }
         val i = Intent(context, WakeService::class.java).setAction(WakeService.ACTION_RING).putExtras(intent)
         try { ContextCompat.startForegroundService(context, i) } catch (_: Exception) {
