@@ -34,6 +34,7 @@ enum NoticeExpiry {
         ("ready-", 10),            // (0.39) the quiet "Get ready" one stop before yours: you're there by then
         ("wrongbus-", 20),         // (0.39.1) "You're on the 154 to Schijndel, not your 306": off or on by then
         ("otherbus-", 10),         // (0.39.1) "That's the 154 to Schijndel — not yours": it has left by then
+        ("livemsg-", 60),          // (0.42.5) a message from someone with your live link
     ].sorted { $0.0.count > $1.0.count }
 
     /// The delivered notifications to take off now: `delivered` is (identifier, when it arrived).

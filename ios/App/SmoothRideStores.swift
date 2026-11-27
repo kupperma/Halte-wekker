@@ -78,6 +78,11 @@ final class RideCacheStore {
         Task.detached(priority: .utility) { try? data.write(to: url, options: [.atomic]) }
     }
 
+    /// (0.42.5) The newest saved copy of a ride as it is (the live link's stops and road), not older than `RideCache.maxAge`.
+    func saved(_ tripId: String) -> SavedRide? {
+        saved?.rides.last { $0.tripId == tripId && Date().timeIntervalSince($0.savedAt) <= RideCache.maxAge }
+    }
+
     /// The saved copy of a ride as a live trip (its stops, times, platforms and road) and when it was saved.
     func liveTrip(_ tripId: String, trip: Date?) -> (trip: LiveTrip, at: Date)? {
         guard let r = RideCache.ride(tripId, in: saved, trip: trip, now: Date()) else { return nil }

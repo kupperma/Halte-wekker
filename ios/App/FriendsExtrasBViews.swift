@@ -63,6 +63,8 @@ struct LiveLinkCard: View {
                         .font(DS.footnote).foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
                         .padding(.horizontal, DS.s4)
                 }
+                // (0.42.5) someone else's live link, pasted
+                LiveOpenRow()
             } else if let l = live.link {
                 shared(l, l.keys.link)
             } else if running {
@@ -93,8 +95,10 @@ struct LiveLinkCard: View {
             ? "The page says you’ve arrived\(until.isEmpty ? "" : " until \(until)"), then the link ends."
             : "Anyone with the link sees this trip live: what you’re on, where you are and when you arrive. It ends when you arrive or end the trip (at most 4 hours)."
         return VStack(alignment: .leading, spacing: DS.s8) {
-            DSHeader(title: l.arrived ? "Live link · arrived" : "Live link", sub: l.name)
+            DSHeader(title: l.arrived ? "Live link · arrived" : "Live link", sub: Self.sub(l))
             Text(text).font(DS.sub).foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
+            // (0.42.5) messages from the people with the link, and a reply
+            if !(l.msgs ?? []).isEmpty { LiveLinkMessages(link: l) }
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: DS.s8) {
                     sendButton(link)
@@ -114,6 +118,14 @@ struct LiveLinkCard: View {
         } message: {
             Text("The page says the link has ended, at once.")
         }
+    }
+
+    /// (0.42.5) "💬 1 message" while there are unread ones, else your name on the page.
+    private static func sub(_ l: LiveLinkStore.Link) -> String {
+        let n: Int = l.unread
+        if n == 0 { return l.name }
+        let words: String = n == 1 ? "1 message" : "\(n) messages"
+        return "💬 " + words
     }
 
     /// (0.30.1) The link goes as text: a link handed over as a link can come back without its key (the part after #).

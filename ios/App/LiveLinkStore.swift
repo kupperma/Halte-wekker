@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import UserNotifications
 
 /// Live link (0.30): a web page with your trip's live times for someone without the app (a parent), made from the ride
 /// screen or Friends while a trip runs. The lock and the rules are in `LiveLink.swift` (tested); the relay's side is
@@ -22,6 +23,24 @@ final class LiveLinkStore: ObservableObject {
         var arrived: Bool = false
         /// When the relay drops it (as it last said).
         var exp: Date?
+        /// (0.42.5) Messages from the link's viewers (the newest 50), the newest one read, seen up to, your answers.
+        var msgs: [Msg]? = nil
+        var lastSeq: Int? = nil
+        var seen: Int? = nil
+        var replies: [LiveReply]? = nil
+
+        var unread: Int { (msgs ?? []).filter { $0.seq > (seen ?? 0) }.count }
+    }
+
+    /// (0.42.5) One message from someone with the link, as read (`LiveMessages.open`).
+    struct Msg: Codable, Equatable, Identifiable {
+        var seq: Int
+        var at: Date
+        var from: String
+        var fromKind: String
+        var friendId: String?
+        var text: String
+        var id: Int { seq }
     }
 
     private struct Saved: Codable {
@@ -56,11 +75,9 @@ final class LiveLinkStore: ObservableObject {
         if link != saved.link { link = saved.link }
     }
 
-    /// The name the page says ("Sam is on bus 305…"): your friends name, else the one you typed last time.
+    /// The name the page says ("Sam is on bus 305…"): your friends name, else the one you typed last time (`LiveNames`).
     var defaultName: String {
-        let friends: String = FriendStore.shared.book?.myName ?? ""
-        if !friends.isEmpty { return friends }
-        return UserDefaults.standard.string(forKey: Self.nameKey) ?? ""
+        LiveNames.sender(friends: FriendStore.shared.book?.myName, typed: UserDefaults.standard.string(forKey: Self.nameKey))
     }
 
     var url: URL? { link.flatMap { URL(string: $0.keys.link) } }
@@ -105,6 +122,8 @@ final class LiveLinkStore: ObservableObject {
             if Date() >= (l.exp ?? l.created.addingTimeInterval(LiveRules.maxAge)) {
                 saved.link = nil
                 save()
+            } else {
+                enqueue { await self.inbox() }
             }
             return
         }
@@ -151,7 +170,64 @@ final class LiveLinkStore: ObservableObject {
         } else if let v = t.vehicle, let r = rides.first(where: { $0.tripId == v.tripId }) {
             late = LiveRules.late(live: t.legTo ?? t.legArrival, scheduled: r.scheduledArrival)
         }
-        return LiveRules.state(tr, name: l.name, dep: dep, late: late, now: Date())
+        let now = Date()
+        let base: LiveState = LiveRules.state(tr, name: l.name, dep: dep, late: late, now: now)
+        // (0.42.5, payload v2) the whole trip: its legs, the leg you're on (its stops and road), the vehicle's own GPS
+        return LiveTripV2.build(base, v2Trip(t, now: now), now: now)
+    }
+
+    /// The trip as `LiveTripV2` takes it: the legs (the planned rides, the one you're on as it goes), the current leg's
+    /// stops and road (the saved copy of its ride, else its live stops), the vehicle's own fix, the coach you shared.
+    private func v2Trip(_ t: TripManager, now: Date) -> LiveTripV2.Trip {
+        let planned: [PlannedRide] = t.route?.planned ?? []
+        let share = FriendTravelShare.shared
+        var legs: [LiveTripV2.LegIn] = []
+        var curTrip: String? = nil
+        for (k, l) in t.legs.enumerated() {
+            let p: PlannedRide? = planned[safe: k]
+            let train: Bool = l.mode == .train
+            var x = LiveTripV2.LegIn(mode: train ? "train" : "bus", line: p.map { $0.isTrain ? Transit.trainLabel($0.line) : $0.line },
+                                     from: l.from.short, to: l.to.short)
+            var tripId: String? = p?.tripId
+            if k == t.index {
+                if let v = t.vehicle {
+                    x.line = v.isTrain ? Transit.trainLabel(v.line) : v.line
+                    tripId = v.tripId
+                }
+                x.dep = (t.legFrom ?? p?.departure)?.timeIntervalSince1970
+                x.arr = (t.legArrival ?? t.legTo)?.timeIntervalSince1970
+                curTrip = tripId
+            } else {
+                x.dep = p?.departure.timeIntervalSince1970
+            }
+            x.depPlatform = p?.platform
+            if let id = tripId, let r = RideCacheStore.shared.saved(id) {
+                if x.arr == nil, let i = RideCache.stop(near: GeoPoint(l.to.coordinate), in: r) { x.arr = (r.stops[i].arrival ?? r.stops[i].departure)?.timeIntervalSince1970 }
+                if let i = RideCache.stop(near: GeoPoint(l.to.coordinate), in: r) { x.arrPlatform = r.stops[i].platform }
+            }
+            if let id = tripId, id == share.coachTrip, let c = share.coach {
+                x.coach = c.n
+                x.deck = c.seat?.deck
+            }
+            if let id = tripId { x.num = share.numbers[id] }
+            legs.append(x)
+        }
+        var trip = LiveTripV2.Trip(legs: legs, leg: t.index)
+        if let leg = t.leg, let id = curTrip, let r = RideCacheStore.shared.saved(id), r.stops.count >= 2 {
+            let a: Int = RideCache.stop(near: GeoPoint(leg.from.coordinate), in: r) ?? 0
+            let b: Int = RideCache.stop(near: GeoPoint(leg.to.coordinate), in: r, after: a) ?? (r.stops.count - 1)
+            if b > a {
+                trip.stops = r.stops[a...b].map { LiveTripV2.StopIn(name: $0.name, lat: $0.lat, lon: $0.lon, t: ($0.arrival ?? $0.departure)?.timeIntervalSince1970) }
+                trip.shape = r.shape
+            }
+        } else if !t.vehicleStops.isEmpty {
+            trip.stops = t.vehicleStops.map { LiveTripV2.StopIn(name: $0.name, lat: $0.coordinate.latitude, lon: $0.coordinate.longitude, t: $0.arrival?.timeIntervalSince1970) }
+        }
+        if let id = curTrip, t.vehicle != nil, let f = RealPositionsStore.shared.fix(for: id, now: now) {
+            trip.vehicle = LiveTripV2.Vehicle(lat: f.lat, lon: f.lon, at: f.at.timeIntervalSince1970)
+        }
+        trip.face = LiveTripV2.face(FriendStore.shared.account)
+        return trip
     }
 
     // MARK: making, stopping
@@ -230,10 +306,84 @@ final class LiveLinkStore: ObservableObject {
         }
     }
 
+    // MARK: messages (0.42.5): read with the link's secret, opened with its key; never logged, only counted
+
+    private struct Inbox: Decodable {
+        struct M: Decodable { let seq: Int; let at: Double?; let data: String }
+        let msgs: [M]
+    }
+    private var asking = false
+
+    /// The new messages: each one a notification ("💬 Kim: On my way"), kept on the link card.
+    private func inbox() async {
+        guard !asking, let l = saved.link else { return }
+        asking = true
+        defer { asking = false }
+        let a = await raw("/live/v1/inbox", ["secret": B64URL.encode(l.keys.secret), "after": l.lastSeq ?? 0])
+        guard a.status == 200, let box = try? JSONDecoder().decode(Inbox.self, from: a.data) else { return }
+        var got: [Msg] = []
+        for m in box.msgs {
+            guard let d = B64URL.decode(m.data), let x = LiveMessages.open(d, key: l.keys.key, token: l.keys.token) else { continue }
+            got.append(Msg(seq: m.seq, at: Date(timeIntervalSince1970: m.at ?? x.at), from: x.from, fromKind: x.fromKind, friendId: x.friendId, text: x.text))
+        }
+        guard var cur = saved.link, cur.keys == l.keys else { return }
+        let top: Int = box.msgs.map(\.seq).max() ?? (cur.lastSeq ?? 0)
+        var all: [Msg] = cur.msgs ?? []
+        for m in got where !all.contains(where: { $0.seq == m.seq }) { all.append(m) }
+        cur.msgs = Array(all.suffix(50))
+        cur.lastSeq = max(cur.lastSeq ?? 0, top)
+        saved.link = cur
+        save()
+        for m in got { notify(m) }
+        if !got.isEmpty { FieldLog.shared.add(.ride, "live link: \(got.count) new message" + (got.count == 1 ? "" : "s")) }
+    }
+
+    /// Who it's from, as this app shows it: the friend (an app's message carries their account), the name they gave.
+    func sender(_ m: Msg) -> String {
+        LiveMessages.sender(LiveMessage(from: m.from, fromKind: m.fromKind, friendId: m.friendId, text: m.text, at: 0)) { id in
+            FriendStore.shared.book?.friends.first { $0.id == id }?.name
+        }
+    }
+
+    private func notify(_ m: Msg) {
+        let c = UNMutableNotificationContent()
+        c.title = "💬 " + sender(m)
+        c.body = m.text
+        c.sound = .default
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "livemsg-\(m.seq)", content: c, trigger: nil)) { _ in }
+    }
+
+    /// You looked at them (the card): the pages say "Seen".
+    func markSeen() {
+        guard var l = saved.link, l.unread > 0, let top = l.msgs?.map(\.seq).max() else { return }
+        let ids: [String] = (l.msgs ?? []).filter { $0.seq > (l.seen ?? 0) }.map { "livemsg-\($0.seq)" }
+        l.seen = top
+        saved.link = l
+        save()
+        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ids)
+        let keys = l.keys
+        enqueue { _ = await self.call("/live/v1/ack", ["secret": B64URL.encode(keys.secret), "seq": top]) }
+    }
+
+    /// "Reply": every page of the link shows it under the messages.
+    func reply(_ text: String) async -> Bool {
+        guard let l = saved.link else { return false }
+        let t: String = LiveTripV2.clean(text, LiveMessages.maxText)
+        guard !t.isEmpty else { return false }
+        let r = LiveReply(text: t, at: Date().timeIntervalSince1970.rounded(.down), re: l.msgs?.last?.seq)
+        guard let data = try? LiveMessages.sealReply(r, key: l.keys.key, token: l.keys.token) else { return false }
+        let a: Answer = await call("/live/v1/reply", ["secret": B64URL.encode(l.keys.secret), "data": B64URL.encode(data)])
+        guard case .ok = a, var cur = saved.link, cur.keys == l.keys else { return false }
+        cur.replies = Array(((cur.replies ?? []) + [r]).suffix(10))
+        saved.link = cur
+        save()
+        return true
+    }
+
     // MARK: the relay
 
-    private enum Answer { case ok(exp: Int?), ended, slow, failed }
-    private struct Reply: Decodable { let exp: Int? }
+    private enum Answer { case ok(exp: Int?, mseq: Int, seq: Int), ended, slow, failed }
+    private struct Reply: Decodable { let exp: Int?; let mseq: Int?; let seq: Int? }
 
     @discardableResult
     private func put(_ s: LiveState, arrived: Bool) async -> Bool {
@@ -245,7 +395,7 @@ final class LiveLinkStore: ObservableObject {
         let a: Answer = await call("/live/v1/put", body)
         guard var cur = saved.link, cur.keys == l.keys else { return false }       // stopped meanwhile
         switch a {
-        case .ok(let exp):
+        case .ok(let exp, let mseq, _):
             cur.lastSent = now
             cur.lastKey = LiveRules.key(s)
             cur.last = s
@@ -253,6 +403,8 @@ final class LiveLinkStore: ObservableObject {
             saved.link = cur
             problem = nil
             save()
+            // (0.42.5) a message came: read it now (the put said there's one)
+            if mseq > (cur.lastSeq ?? 0) { await inbox() }
             return true
         case .ended:
             saved.link = nil
@@ -263,19 +415,27 @@ final class LiveLinkStore: ObservableObject {
         }
     }
 
-    private func call(_ path: String, _ body: [String: Any]) async -> Answer {
+    /// The relay's raw answer (status, body); -1 when it couldn't be reached.
+    private func raw(_ path: String, _ body: [String: Any]) async -> (status: Int, data: Data) {
         guard let url = URL(string: LiveCrypto.relay + path),
-              let data = try? JSONSerialization.data(withJSONObject: body, options: [.sortedKeys]) else { return .failed }
+              let data = try? JSONSerialization.data(withJSONObject: body, options: [.sortedKeys]) else { return (-1, Data()) }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.httpBody = data
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.cachePolicy = .reloadIgnoringLocalCacheData
-        guard let a = try? await Net.response(req, lane: .background, budget: Self.budget, label: "live" + String(path.dropFirst(8))) else {
-            return .failed
-        }
+        let label: String = "live" + String(path.split(separator: "?").first?.dropFirst(8) ?? "")
+        guard let a = try? await Net.response(req, lane: .background, budget: Self.budget, label: label) else { return (-1, Data()) }
+        return (a.status, a.data)
+    }
+
+    private func call(_ path: String, _ body: [String: Any]) async -> Answer {
+        let a = await raw(path, body)
+        if a.status < 0 { return .failed }
         switch a.status {
-        case 200: return .ok(exp: (try? JSONDecoder().decode(Reply.self, from: a.data))?.exp)
+        case 200:
+            let r: Reply? = try? JSONDecoder().decode(Reply.self, from: a.data)
+            return .ok(exp: r?.exp, mseq: r?.mseq ?? 0, seq: r?.seq ?? 0)
         case 410: return .ended
         case 429: return .slow
         default: return .failed
