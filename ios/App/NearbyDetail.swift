@@ -37,7 +37,7 @@ struct NearbyDetailSheet: View {
     /// surer than that one).
     private var marks: (fastest: String?, surest: String?) {
         let d: [DoorTrip] = soon
-        // (0.42.7) by live arrival (the trips are freshened with the newest live times)
+        // (0.42.8) by live arrival (the trips are freshened with the newest live times)
         let arrivals: [Date] = d.map(\.end)
         let changes: [Int] = d.map { $0.rides.count - 1 }
         let leaves: [Date] = d.map(\.first.departure)
@@ -189,7 +189,7 @@ struct NearbyDetailSheet: View {
         .accessibilityLabel("\(b.train ? "Train" : "Bus") \(b.line) at \(Fmt.hhmm(b.time)) to \(b.headsign), \(live)")
     }
 
-    /// (0.42.7) "live" only with live times; "+3" (and the timetable's time struck through beside it) when late.
+    /// (0.42.8) "live" only with live times; "+3" (and the timetable's time struck through beside it) when late.
     private func status(_ r: Ride) -> (text: String, color: Color, shown: NearbyLive.Shown) {
         let sh: NearbyLive.Shown = NearbyLive.shown(departure: r.departure, scheduled: r.scheduledDeparture, live: r.live, cancelled: r.cancelled)
         let color: Color = sh.late ? DS.warning : sh.word == "live" ? DS.accentText : DS.secondary

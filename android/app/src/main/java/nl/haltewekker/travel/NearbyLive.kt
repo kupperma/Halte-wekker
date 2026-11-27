@@ -3,7 +3,7 @@ package nl.haltewekker.travel
 import kotlin.math.roundToInt
 
 /**
- * (iOS 0.42.7 `NearbyLive`) The stops around you by live times: a way's legs freshened by newer live times of the same
+ * (iOS 0.42.8 `NearbyLive`) The stops around you by live times: a way's legs freshened by newer live times of the same
  * trips (by trip id: the stop's board), and how a time is shown ("14:41 +3", the planned one struck through). Plain
  * rules, tested with the iOS vectors (`NearbyLiveTest`). Times in seconds since 1970.
  */

@@ -109,6 +109,7 @@ enum SettingsIndex {
         // Friends
         SettingsEntry(id: "friends.open", title: "Friends", topic: .friends, keywords: ["chats", "groups", "requests", "friend code", "backup code", "sharing"]),
         SettingsEntry(id: "friends.test", title: "Test friend", topic: .friends, keywords: ["bot", "add a test friend", "remove test friend", "try friends"]),
+        SettingsEntry(id: "friends.music", title: "Share what I’m listening to", topic: .friends, keywords: ["listening now", "music", "song", "spotify", "last.fm", "lastfm", "apple music", "now playing", "listen too"]),
         // Map & home
         SettingsEntry(id: "map.homeStyle", title: "Home style", topic: .map, keywords: ["live around you", "next trip first", "home screen"]),
         SettingsEntry(id: "map.style", title: "Map style", topic: .map, keywords: ["standard", "muted", "satellite", "hybrid"]),

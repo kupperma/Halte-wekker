@@ -140,7 +140,7 @@ fun NearbyView(destId: String, destName: String, seed: List<DoorTrip>, onTrip: (
                 at = here; askedAt = Iso.now()
             }
             now = Iso.now()
-            // (iOS 0.42.7) what a stop's board freshened (live times by trip id)
+            // (iOS 0.42.8) what a stop's board freshened (live times by trip id)
             store.result?.let { if (it !== result) result = it }
             delay(15_000)
         }
@@ -225,7 +225,7 @@ private fun tagColor(t: Nearby.Tag) = when (t) { Nearby.Tag.FASTEST -> Color(0xF
 
 @Composable
 private fun TagChip(t: Nearby.Tag) {
-    // (iOS 0.42.7) never "Fastes / t": one line, the row's other text gives way
+    // (iOS 0.42.8) never "Fastes / t": one line, the row's other text gives way
     Text(t.title, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false,
         modifier = Modifier.background(tagColor(t), RoundedCornerShape(6.dp)).padding(horizontal = 6.dp, vertical = 2.dp))
 }
@@ -269,7 +269,7 @@ private fun StopSheet(s: Shown, store: NearbyStore, w: Nearby.Window, now: Doubl
         info = null
         info = try { store.stop(s.group, s.trips, w.leave + walk * 60.0) } catch (_: Exception) { NearbyStore.StopInfo(s.trips, emptyList(), true) }
     }
-    // (iOS 0.42.7) the stop's board freshened its departures: those, in the same order
+    // (iOS 0.42.8) the stop's board freshened its departures: those, in the same order
     val trips = info?.trips?.takeIf { it.isNotEmpty() && (s.trips.isEmpty() || it.size == s.trips.size) } ?: s.trips
     val deps = trips.map(store::dep)
     val idx = Nearby.shown(deps, w)
@@ -355,7 +355,7 @@ private fun StopSheet(s: Shown, store: NearbyStore, w: Nearby.Window, now: Doubl
 @Composable
 private fun TimeRow(t: DoorTrip, now: Double) {
     val f = t.first
-    // (iOS 0.42.7) the live time ("14:41 +3", the planned one struck through); "live" only with live times
+    // (iOS 0.42.8) the live time ("14:41 +3", the planned one struck through); "live" only with live times
     val sh = NearbyLive.shown(f.departure, f.scheduledDeparture, f.live, f.cancelled)
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         t.rides.take(3).forEach { RidePill(it) }

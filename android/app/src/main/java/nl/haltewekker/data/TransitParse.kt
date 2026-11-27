@@ -104,7 +104,7 @@ object TransitParse {
     fun keepUseful(all: List<DoorTrip>, now: Double, keep: Int, here: nl.haltewekker.core.GeoPoint? = null, speed: Double = WalkFirst.PLANNER_SPEED,
                    log: ((String) -> Unit)? = null): List<DoorTrip> {
         val seen = HashSet<String>()
-        // (iOS 0.42.7) walks by their distance, a short first hop swapped for the walk; kept by the live departure
+        // (iOS 0.42.8) walks by their distance, a short first hop swapped for the walk; kept by the live departure
         var note: String? = null
         val fixed = if (here == null) all else all.map { t -> WalkFirst.fixed(t, here, now, speed).also { if (note == null) note = it.second }.first }
         note?.let { n -> log?.invoke(n) }

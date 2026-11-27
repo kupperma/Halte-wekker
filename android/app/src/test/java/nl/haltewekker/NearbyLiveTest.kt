@@ -11,7 +11,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 
-/** iOS 0.42.7 `NearbyLiveTests`, the same vectors (minutes after 2026-11-27 00:00 UTC). */
+/** iOS 0.42.8 `NearbyLiveTests`, the same vectors (minutes after 2026-11-27 00:00 UTC). */
 class NearbyLiveTest {
     private val base = 1_795_737_600.0
     private fun hm(h: Int, m: Int) = base + (h * 60.0 + m) * 60

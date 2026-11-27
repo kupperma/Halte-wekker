@@ -1,6 +1,6 @@
 import XCTest
 
-/// 0.42.7: the stops around you by live times (the same vectors as Android's `NearbyLiveTest`; minutes after
+/// 0.42.8: the stops around you by live times (the same vectors as Android's `NearbyLiveTest`; minutes after
 /// 2026-11-27 00:00 UTC).
 final class NearbyLiveTests: XCTestCase {
     private let base: Double = 1_795_737_600

@@ -3,7 +3,7 @@
 The rules and numbers for each are in [logs-export.md](logs-export.md) › For Android (parity), with the iOS files and
 their tests.
 
-## iOS 0.42.7
+## iOS 0.42.8
 
 Three field reports on the planner's ways: "The new screen doesn't account for delayed time" (Breda 14:37: Fastest
 trip "Bus 5 … 14:41 +3", the stop's sheet "5 14:38 live"), "The app missed this one" (Breda 14:48: the 14:38 IC to

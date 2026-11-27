@@ -32,7 +32,7 @@ class NearbyStore(val destId: String, private val seed: List<DoorTrip>) {
                       val plans: Int, val pages: Int, val failed: Int, val bytes: Int, val askedAt: Double)
 
     private val gate = Semaphore(Nearby.MAX_CONCURRENT)
-    // (iOS 0.42.7) newer live times of the trips (the stops' boards), and when each departure's own answer came
+    // (iOS 0.42.8) newer live times of the trips (the stops' boards), and when each departure's own answer came
     @Volatile private var updates: Map<String, NearbyLive.Update> = emptyMap()
     private val answeredAt = java.util.concurrent.ConcurrentHashMap<String, Double>()
 
@@ -73,7 +73,7 @@ class NearbyStore(val destId: String, private val seed: List<DoorTrip>) {
         val speed = HabitStore.pedestrianSpeed() ?: nl.haltewekker.data.WalkFirst.PLANNER_SPEED
         for (t0 in trips) {
             if (t0.rides.isEmpty()) continue
-            // (iOS 0.42.7) the walk by its distance, a short first hop swapped for the walk to the next stop
+            // (iOS 0.42.8) the walk by its distance, a short first hop swapped for the walk to the next stop
             val t = nl.haltewekker.data.WalkFirst.fixed(t0, here, Iso.now(), speed).first
             val b = boarding(t)
             var i = Nearby.groupIndex(b, gs)
@@ -190,7 +190,7 @@ class NearbyStore(val destId: String, private val seed: List<DoorTrip>) {
         }
         val lines = trips.map { it.first.line to it.first.headsign }.toSet()
         val board = if (Transit.cooling) emptyList() else bg { Transit.board(listOf(g.ids.first()), n = 16) }
-        // (iOS 0.42.7) the board's live times freshen the stop's own departures too (by trip id), not only the others
+        // (iOS 0.42.8) the board's live times freshen the stop's own departures too (by trip id), not only the others
         val asOf = Iso.now()
         freshen(board.map { NearbyLive.update(board = it.tripId, time = it.time, scheduled = it.scheduled, live = it.live, asOf = asOf) })
         trips = trips.map(::fresh)

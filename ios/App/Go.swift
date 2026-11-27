@@ -702,7 +702,7 @@ final class GoStore: ObservableObject {
         return list
     }
 
-    /// (0.42.7) The next ones under the card: the five that get you there soonest, shown by when they leave (live).
+    /// (0.42.8) The next ones under the card: the five that get you there soonest, shown by when they leave (live).
     static func nextOnes(_ l: [DoorTrip]) -> [DoorTrip] {
         let five: [DoorTrip] = Array(l.sorted(by: sooner).prefix(5))
         return five.sorted { $0.first.departure < $1.first.departure }

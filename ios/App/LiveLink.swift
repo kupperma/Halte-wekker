@@ -239,7 +239,7 @@ enum LiveRules {
 
     /// A fingerprint of what changes the page at once: the stage, the vehicle, the leg's ends.
     static func key(_ s: LiveState) -> String {
-        "\(s.state)|\(s.mode)|\(s.line ?? "")|\(s.num ?? "")|\(s.from ?? "")|\(s.to ?? "")"
+        "\(s.state)|\(s.mode)|\(s.line ?? "")|\(s.num ?? "")|\(s.from ?? "")|\(s.to ?? "")|\(s.music?.title ?? "")"
     }
 }
 

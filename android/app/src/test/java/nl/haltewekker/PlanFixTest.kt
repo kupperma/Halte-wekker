@@ -15,7 +15,7 @@ import java.time.Instant
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 
-/** iOS 0.42.7 `PlanFixTests`, the same vectors (minutes after 2026-11-27 00:00 UTC). */
+/** iOS 0.42.8 `PlanFixTests`, the same vectors (minutes after 2026-11-27 00:00 UTC). */
 class PlanFixTest {
     private val base = 1_795_737_600.0
     private fun hm(h: Int, m: Int) = base + (h * 60.0 + m) * 60

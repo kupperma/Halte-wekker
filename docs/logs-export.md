@@ -215,10 +215,10 @@ The same switches, words and rules, so the relay and the replay treat both alike
   conditions as the lines (after a trip, else hourly; not during a trip, on a metered/Low Data network or in battery
   saver). Drop the sent points from the queue only after a 200; switching off clears the queue.
 
-### Live times on the stops around you, late trains kept, walks by their distance (0.42.7)
+### Live times on the stops around you, late trains kept, walks by their distance (0.42.8)
 
-What's new in 0.42.7 (`ios/App/NearbyLive.swift`, `ios/App/PlanFix.swift`; tests `NearbyLiveTests`, `PlanFixTests`;
-Android parity in [android-todo.md](android-todo.md) › iOS 0.42.7). New lines in the net log:
+What's new in 0.42.8 (`ios/App/NearbyLive.swift`, `ios/App/PlanFix.swift`; tests `NearbyLiveTests`, `PlanFixTests`;
+Android parity in [android-todo.md](android-todo.md) › iOS 0.42.8). New lines in the net log:
 
 - `walk · planner 10 min (780 m) · yours 4 min (1.35 m/s) · used yours` (or `used the planner's`): once per plan, the
   first way's walk to its first stop as the planner timed it and by its distance.

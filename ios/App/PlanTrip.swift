@@ -69,7 +69,7 @@ final class PlanTripModel: ObservableObject {
         let now = Date()
         let (at, arriveBy): (Date, Bool) = {
             switch when {
-            // (0.42.7) from 15 minutes back: a late train or bus whose timetable time has passed is in the answer
+            // (0.42.8) from 15 minutes back: a late train or bus whose timetable time has passed is in the answer
             case .now: return (LiveKeep.askAt(now: now, atStation: true), false)
             case .leave(let d): return (d.addingTimeInterval(-60), false)
             case .arrive(let d): return (d, true)

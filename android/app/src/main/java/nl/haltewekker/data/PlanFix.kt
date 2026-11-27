@@ -6,7 +6,7 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 
 /**
- * (iOS 0.42.7 `PlanFix`) Ways kept and ordered by their live times (a late train whose timetable time has passed stays),
+ * (iOS 0.42.8 `PlanFix`) Ways kept and ordered by their live times (a late train whose timetable time has passed stays),
  * and walks timed by their distance with a short first hop swapped for the walk. Plain rules, tested with the iOS
  * vectors (`PlanFixTest`). Times in seconds since 1970.
  */

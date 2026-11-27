@@ -1,6 +1,6 @@
 import Foundation
 
-// 0.42.7: two field reports on the planner's ways. Plain rules (Foundation only), tested in `PlanFixTests`; Android has
+// 0.42.8: two field reports on the planner's ways. Plain rules (Foundation only), tested in `PlanFixTests`; Android has
 // the same (`data/PlanFix.kt`, `PlanFixTest`).
 // - "The app missed this one" (Breda 14:48: the 14:38 Intercity to Eindhoven, 10 min late, still at platform 3, never
 //   offered): a way is kept by its live departure, never its timetable time; at a station the planner is asked from 15

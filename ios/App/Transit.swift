@@ -28,7 +28,7 @@ struct Ride: Identifiable, Hashable, Codable {
     var toLon: Double? = nil
     /// (0.36) Who runs it ("NS", "Arriva"), from Transitous; for where you check out at a change between train companies.
     var agency: String? = nil
-    /// (0.42.7) The planner's walking distance to this ride (its foot route, metres), when it said.
+    /// (0.42.8) The planner's walking distance to this ride (its foot route, metres), when it said.
     var walkMetres: Double? = nil
     var delay: Int { live ? Int((departure.timeIntervalSince(scheduledDeparture) / 60).rounded()) : 0 }
     var rideMinutes: Int { Fmt.mins(arrival.timeIntervalSince(departure)) }
@@ -462,11 +462,11 @@ enum Transit {
                 case .station(let s):
                     station = s
                     stationKnown = true
-                    // (0.42.7) from 15 minutes back: a late train whose timetable time has passed is in the answer
+                    // (0.42.8) from 15 minutes back: a late train whose timetable time has passed is in the answer
                     g.addTask { FromHerePart.fromStation(await planAll(from: s?.id, to: to.ids, at: LiveKeep.askAt(now: now, atStation: true),
                                                                        count: LiveKeep.count(count, atStation: true))) }
                 case .fromStation(let got):
-                    // (0.42.7) NS's board of the station: its trains' live times (a late one the planner had at its
+                    // (0.42.8) NS's board of the station: its trains' live times (a late one the planner had at its
                     // timetable time), and only the ways whose changes are still made with them
                     let trips: [DoorTrip] = await nsLive(got, station: station)
                     // At a station: from the station itself too. From your GPS spot inside a big one, the walk to the
@@ -492,7 +492,7 @@ enum Transit {
         return keepUseful(all, here: here, station: station, now: now, keep: keep, log: true)
     }
 
-    /// (0.42.7) A station's trips with NS's live times (by train number, from its board): a late train is moved to its
+    /// (0.42.8) A station's trips with NS's live times (by train number, from its board): a late train is moved to its
     /// live time, and a way whose changes it no longer makes goes.
     private static func nsLive(_ trips: [DoorTrip], station: NearStop?) async -> [DoorTrip] {
         guard let st = station, let code = NSStore.code(stopId: st.id, name: st.name), trips.contains(where: { $0.first.isTrain }) else { return trips }
@@ -521,7 +521,7 @@ enum Transit {
         return out
     }
 
-    /// (0.42.7) A way's first walk timed by its distance (the planner's foot route, or the straight line when that's
+    /// (0.42.8) A way's first walk timed by its distance (the planner's foot route, or the straight line when that's
     /// odd), and a short first hop swapped for walking straight to the next ride's stop when that makes the same ride.
     /// `note`: the field log's line for the walk, when it changed it.
     static func walkFixed(_ t: DoorTrip, here: CLLocation, now: Date) -> (trip: DoorTrip, note: String?) {
@@ -560,7 +560,7 @@ enum Transit {
     /// The trips worth showing, soonest first: no ride to where you are already, nothing that has left, none a later
     /// trip beats, at most `keep`.
     private static func keepUseful(_ all: [DoorTrip], here: CLLocation, station: NearStop?, now: Date, keep: Int, log: Bool) -> [DoorTrip] {
-        // (0.42.7) walks by their distance, a short first hop swapped for the walk
+        // (0.42.8) walks by their distance, a short first hop swapped for the walk
         var notes: [String] = []
         var all: [DoorTrip] = all.map { t in
             let r = walkFixed(t, here: here, now: now)
@@ -579,7 +579,7 @@ enum Transit {
         let direct = all.filter { !hop($0) }
         if !direct.isEmpty { all = direct }
         var seen = Set<String>()
-        // (0.42.7) by its live departure (a late train whose timetable time has passed stays)
+        // (0.42.8) by its live departure (a late train whose timetable time has passed stays)
         all = all.filter { t in
             LiveKeep.keep(LiveKeep.Way(departure: t.first.departure, scheduled: t.first.scheduledDeparture, start: t.start, cancelled: t.first.cancelled), now: now)
                 && seen.insert(t.id).inserted

@@ -1,6 +1,6 @@
 import Foundation
 
-// 0.42.7: the stops around you by live times. From the field report "The new screen doesn't account for delayed time":
+// 0.42.8: the stops around you by live times. From the field report "The new screen doesn't account for delayed time":
 // at 14:37 the classic Fastest trip said "Bus 5 to Centraal Station 14:41 +3 min", the stop's sheet "5 14:38 live"
 // (its plan answer was a few minutes old, and its fresher board left out the departures it had). Plain rules, tested in
 // `NearbyLiveTests`; Android has the same (`travel/NearbyLive.kt`, `NearbyLiveTest`).
