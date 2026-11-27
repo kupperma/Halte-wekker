@@ -263,7 +263,7 @@ struct HomeView: View {
             guard !goStore.isOpen else { return }            // (on its way out: Fastest trip has the screen)
             Task { await live.refresh(trip.direction, at: near.position) }
         }
-        .sheet(item: $walkTo) { WalkMapSheet(target: $0).presentationDetents([.large]) }
+        .fullScreenCover(item: $walkTo) { WalkGuideView(target: $0) { _ in walkTo = nil } }      // (0.42.4) Walk there: the arrows at once
         .sheet(item: $liveTrack) { LiveBusSheet(target: $0).presentationDetents([.large]) }
         .sheet(isPresented: $showMoving) { LiveAllSheet(center: near.position?.coordinate ?? Place.breda.coordinate).presentationDetents([.large]) }
         .sheet(isPresented: $showSteady) { SteadySheet().presentationDetents([.large]) }
@@ -1620,7 +1620,7 @@ struct RideView: View {
         }
         .environment(\.seeThrough, true)
         .background { GeometryReader { g in Color.clear.onAppear { screenH = g.size.height }.onChange(of: g.size.height) { _, h in screenH = h } } }
-        .sheet(item: $walkTo) { WalkMapSheet(target: $0).presentationDetents([.large]) }
+        .fullScreenCover(item: $walkTo) { WalkGuideView(target: $0) { _ in walkTo = nil } }      // (0.42.4) Walk there: the arrows at once
         .sheet(isPresented: $picking) { RidePickSheet().presentationDetents([.medium, .large]) }
         .onChange(of: trip.pickAgain) { _, p in if p { trip.pickAgain = false; picking = true } }
         .animation(.easeInOut(duration: 0.4), value: trip.waitingToBoard)

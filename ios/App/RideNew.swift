@@ -44,7 +44,7 @@ struct RideViewNew: View {
         }
         .background(DS.page.ignoresSafeArea())
         .dynamicTypeSize(...DynamicTypeSize.accessibility2)
-        .sheet(item: $walkTo) { WalkMapSheetNew(target: $0).presentationDetents([.large]) }
+        .fullScreenCover(item: $walkTo) { WalkGuideView(target: $0) { _ in walkTo = nil } }      // (0.42.4) Walk there: the arrows at once
         .sheet(isPresented: $picking) { RidePickSheet().presentationDetents([.medium, .large]) }
         .animation(DS.quick, value: trip.waitingToBoard)
         .onAppear {
@@ -637,7 +637,7 @@ struct ArrivalViewNew: View {
         }
         .background(DS.page.ignoresSafeArea())
         .dynamicTypeSize(...DynamicTypeSize.accessibility2)
-        .sheet(item: $walkTo) { WalkMapSheetNew(target: $0).presentationDetents([.large]) }
+        .fullScreenCover(item: $walkTo) { WalkGuideView(target: $0) { _ in walkTo = nil } }      // (0.42.4) Walk there: the arrows at once
         .onAppear { withAnimation(.spring(response: 0.45, dampingFraction: 0.6)) { pop = true } }
         .task(id: trip.index) {
             while !Task.isCancelled {
