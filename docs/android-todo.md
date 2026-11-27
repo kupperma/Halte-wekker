@@ -52,6 +52,41 @@ never got a second look). A plan that split one train in two legs wasn't handled
       no sound either. The school wake-up at home is unchanged. **Android 0.10.6:** `AlarmPlayer.ring(loudLater)`,
       `WakeRules.loudLater`, the switch in `SettingsScreen`.
 
+## iOS 0.42.8
+
+Three field reports on the planner's ways: "The new screen doesn't account for delayed time" (Breda 14:37: Fastest
+trip "Bus 5 … 14:41 +3", the stop's sheet "5 14:38 live"), "The app missed this one" (Breda 14:48: the 14:38 IC to
+Eindhoven, 10 min late, still at platform 3, never offered) and "it says it's a 10-minute walk. It's more like 3–4
+minutes … it recommends taking the bus near my home to then take the other bus". Rules in `ios/App/NearbyLive.swift`
+and `ios/App/PlanFix.swift` (`LiveKeep`, `WalkFirst`; tests `NearbyLiveTests`, `PlanFixTests`), the wiring in
+`NearbyStore.freshen`, `NearbyDetail`, `NearbyViews`, `Transit.tripsFrom`/`keepUseful`/`walkFixed`/`nsLive`,
+`GoStore.nextOnes`, `PlanTrip`.
+
+- [x] **The stops around you by live times.** A way's legs are freshened by newer live times of the same trips (by trip
+      id, at any of their stops: the delay applies to the leg's own timetable times): the stop's board
+      (`/v6/stoptimes`, all of it, not only "Also from here") and Fastest trip's own ways (each time it updates). Only
+      an update newer than the way's own answer counts, only live ones; the same one twice changes nothing more. The
+      ranking, the colours, Fastest/Surest (by live arrival: the same arrival, fewer changes, then the later one), the
+      leave-in and the whole-trip bars follow. Times shown "14:41 +3" with the planned 14:38 struck through and grey;
+      "live" only with live times ("timetable" without); the list row says "· leaves 14:41 +3". Tags never wrap
+      (one line, fixed size; the row's other text gives way). **Android 0.10.5:** `travel/NearbyLive.kt`
+      (`NearbyLiveTest`, every iOS vector), `NearbyStore.freshen`/`fresh` from the stop's board, `TimeRow` with the
+      struck planned time, tags on one line. (Android's Fastest trip doesn't feed the nearby view yet.)
+- [x] **A late departure still to leave is kept.** Ways are kept by their live departure (no more than 30 s ago, not
+      cancelled, set off at most 90 s ago), never the timetable time; at a station the planner is asked from 15 minutes
+      back (3 more ways), the rest 2 minutes back; Plan's "now" from 15 minutes back too. At a station NS's board (relay
+      `/ns/departures`) moves a train of the answer to its live time by train number, and a way whose changes it no
+      longer makes (room ≥ the walk, ≥ 1 min) goes. Fastest trip's next ones: the five there soonest, shown by live
+      departure. **Android 0.10.5:** `data/PlanFix.kt` `LiveKeep` (`PlanFixTest`), `TransitParse.keepUseful` by live
+      departure, `Transit.tripsFrom` and the plan screens from 15 minutes back. NS's board merge: not on Android yet.
+- [x] **Walks by their distance, no silly hop first.** The first walk is timed by its distance (the planner's foot
+      route `distance`, or the straight line × 1.3 when that route is over twice the straight line) at the speed it
+      was planned with (yours after 5 walks, else 1.2 m/s), never longer than the planner's minutes; a first ride of 6
+      minutes or less is swapped for walking straight to the next ride's stop when that makes the same ride (a minute
+      to spare) and the walk is no more than 1.3 × the hop (Fastest trip, the stops around you). Logged once per plan:
+      `walk · planner 10 min (780 m) · yours 4 min (1.35 m/s) · used yours`. **Android 0.10.5:** `WalkFirst` (same
+      vectors), in `keepUseful` (Fastest trip, the plan screens) and `NearbyStore.place`.
+
 ## iOS 0.42.7 (Listening now)
 
 Sharing the song you listen to while you travel, with friends and on your live link. Rules, the relay route and the

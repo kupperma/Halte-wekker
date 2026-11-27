@@ -188,6 +188,8 @@ struct LiveViewSheet: View {
         VStack(alignment: .leading, spacing: DS.s8) {
             Text(LiveWords.headline(s)).font(DS.headline).foregroundStyle(.white).fixedSize(horizontal: false, vertical: true)
             if let d = LiveWords.detail(s) { Text(d).font(DS.sub).foregroundStyle(.gray) }
+            // (listening now) what they listen to, while it's fresh
+            if let m = ListeningCard.fresh(s.music, now: Date()) { ListeningCard(music: m) }
             ForEach(Array((s.legs ?? []).enumerated()), id: \.offset) { i, l in
                 let now: Bool = i == (s.leg ?? 0) && s.stage != .arrived
                 Text(legLine(l)).font(now ? DS.subStrong : DS.sub).foregroundStyle(now ? Color.white : Color.gray)

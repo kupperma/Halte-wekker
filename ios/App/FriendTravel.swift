@@ -78,6 +78,9 @@ struct TravelState: Codable, Equatable {
     var leg: Int?
     var legs: Int?
     var coach: Coach?
+    /// (Listening now, relay 2026-11-27) The song playing now, when you share it with friends (`MusicShare`): the
+    /// live link's `music`. An app before it leaves it out and ignores it.
+    var music: LiveMusic? = nil
 
     var stage: Stage { Stage(rawValue: state) ?? .riding }
     var isTrain: Bool { mode == "train" }
