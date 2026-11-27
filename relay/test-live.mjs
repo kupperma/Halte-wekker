@@ -494,7 +494,7 @@ if (!LIVE) {
   const left = [...env.LIVE.objects.get("t:" + token).store.map.keys()];
   assert.deepEqual(left, ["s"], "the messages go with the link");
 }
-assert.equal((await post(`/live/v1/msg?t=${token}`, { data: b64u(reply) }, { "CF-Connecting-IP": "203.0.113.9" })).status, 410);
+assert.equal((await post(`/live/v1/msg?t=${token}`, { data: b64u(reply) }, LIVE ? {} : { "CF-Connecting-IP": "203.0.113.9" })).status, 410);
 assert.equal((await post("/live/v1/inbox", { secret: b64u(secret), after: 0 })).status, 410);
 page = await runPage(link, script, storage);
 assert.equal(page.els.head.textContent, "This link has ended");

@@ -25,6 +25,10 @@ object Notifications {
     const val SCHOOL = "school"
     const val WAKE = "wake"
     const val NEWS = "news"
+    /** (0.10.1) A train's platform changed, or it's cancelled. */
+    const val TRAINS = "trains"
+    /** (0.10.1) A message from someone with your live link. */
+    const val LIVE_MSG = "live_messages"
     const val RIDE_ID = 1
     const val ALARM_ID = 2
     const val ARRIVAL_ID = 3
@@ -59,6 +63,12 @@ object Notifications {
         })
         nm.createNotificationChannel(NotificationChannel(NEWS, "Trips by themselves", NotificationManager.IMPORTANCE_HIGH).apply {
             description = "A trip started by itself when you left a home stop or school; looking for your bus or train."
+        })
+        nm.createNotificationChannel(NotificationChannel(TRAINS, "Platform changes", NotificationManager.IMPORTANCE_HIGH).apply {
+            description = "Your train's platform changed, or it's cancelled (every train of the trip that runs)."
+        })
+        nm.createNotificationChannel(NotificationChannel(LIVE_MSG, "Live link messages", NotificationManager.IMPORTANCE_HIGH).apply {
+            description = "A message from someone you sent your live link to."
         })
     }
 
@@ -106,7 +116,7 @@ object Notifications {
         if (s.offline) parts.add("no network: going by the saved stops and times")
         val text = parts.joinToString(" · ")
         // (A8) the change line (the miss first) under it
-        val change = listOfNotNull(s.changeMiss, s.changeLine).firstOrNull()
+        val change = listOfNotNull(s.platformNote, s.changeMiss, s.changeLine).firstOrNull()
         b.setContentTitle(title).setContentText(text)
         if (change != null) b.setStyle(NotificationCompat.BigTextStyle().bigText("$text\n$change"))
         if (s.changeSwitch != null) b.addAction(0, "Switch", action(context, RideService.ACTION_SWITCH_CHANGE, 17))
@@ -188,6 +198,35 @@ object Notifications {
             .setContentIntent(openApp(context, screen))
             .setAutoCancel(true)
         post(context, NEWS_ID + 1, n, tag)
+    }
+
+    /** (0.10.1) A platform change or a cancelled train, at once: quiet (no sound) while the ride sleeps. */
+    fun platform(context: Context, tag: String, title: String, text: String, quiet: Boolean) {
+        val n = NotificationCompat.Builder(context, TRAINS)
+            .setSmallIcon(R.drawable.ic_stat_ride)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_STATUS)
+            .setSilent(quiet)
+            .setContentIntent(openApp(context))
+            .setAutoCancel(true)
+        post(context, NEWS_ID + 3, n, tag)
+    }
+
+    /** (0.10.1) "💬 Kim: On my way" from someone with your live link (`livemsg-<seq>`); tapping opens Friends. */
+    fun liveMessage(context: Context, seq: Int, title: String, text: String) {
+        val n = NotificationCompat.Builder(context, LIVE_MSG)
+            .setSmallIcon(R.drawable.ic_stat_ride)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .setContentIntent(openApp(context, "friends"))
+            .setAutoCancel(true)
+        post(context, NEWS_ID + 4, n, "livemsg-$seq")
     }
 
     /** (A6) a note whose tap opens a web page (NS's claim page). */

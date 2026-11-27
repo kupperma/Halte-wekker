@@ -418,6 +418,8 @@ class RideService : Service() {
                     }
                     saveRidesAhead(now)
                     updateChangeGuide(now)
+                    // (0.10.1) every train of the trip: a new platform or a cancelled train, told at once
+                    scope.launch { platformLook(now) }
                     scheduleBackup()
                 }
                 notifyRide(force = false)
@@ -575,12 +577,26 @@ class RideService : Service() {
 
     private fun stopRide() {
         tick?.cancel()
+        PlatformWatch.clear()
         stopReckon()
         nl.haltewekker.motion.StepMotion.stop()
         try { lm.removeUpdates(listener) } catch (_: Exception) {}
         intervalMs = 0
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
+    }
+
+    /** (0.10.1) `PlatformWatch`: quiet while you sleep on the ride, with sound when you're awake; the trip gets the new platform. */
+    private suspend fun platformLook(now: Double) {
+        val s = RideStore.state.value ?: return
+        val codes = nl.haltewekker.friends.NSCodes.get(this)
+        PlatformWatch.tick(s, now, { r -> codes.code(r.fromId, r.fromStop) }, { Notifications.time(it) }) { a ->
+            val sleeping = RideStore.state.value?.phase == Phase.SLEEPING
+            PlatformWatch.post(this, a, quiet = sleeping)
+            FieldLog.ride(if (a.cancelled) "a train of the trip is cancelled · told" else "a train's platform changed · told" + if (sleeping) " quietly" else "")
+            RideStore.update(this) { it.copy(trip = PlatformWatch.applied(it.trip, a), platformNote = "${a.title}: ${a.body}") }
+            notifyRide(force = true)
+        }
     }
 
     private fun notifyRide(force: Boolean) {

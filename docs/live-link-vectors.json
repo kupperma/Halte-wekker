@@ -1,0 +1,259 @@
+{
+  "about": "Live link test vectors (relay 2026-11-27: payload v2, messages). Checked by relay/test-live.mjs, ios/Tests/LiveTripV2Tests.swift and android LiveTripV2Test.kt. All names and places are made up.",
+  "secret": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+  "key": "ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8",
+  "token": "2x1Ot-EFfLIivv_lmStBuw",
+  "link": "https://haltewekker-relay.tsfaw1.workers.dev/live/2x1Ot-EFfLIivv_lmStBuw#k=ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8",
+  "appLink": "haltewekker://live/2x1Ot-EFfLIivv_lmStBuw#k=ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8",
+  "input": {
+    "now": 1800000000,
+    "base": {
+      "v": 1,
+      "name": "Sam",
+      "state": "riding",
+      "mode": "bus",
+      "line": "305",
+      "from": "Veghel, Busstation",
+      "to": "Eindhoven Centraal",
+      "dest": "Campus",
+      "eta": 1800000960,
+      "end": 1800005400,
+      "late": 0,
+      "pos": {
+        "lat": 51.55001,
+        "lon": 5.46802,
+        "at": 1799999985
+      },
+      "t": 1800000000
+    },
+    "trip": {
+      "leg": 0,
+      "legs": [
+        {
+          "mode": "bus",
+          "line": "305",
+          "from": "Veghel, Busstation",
+          "to": "Eindhoven Centraal",
+          "dep": 1799999640,
+          "arr": 1800000960,
+          "late": 0
+        },
+        {
+          "mode": "walk",
+          "from": "Eindhoven Centraal",
+          "to": "Eindhoven Centraal",
+          "dep": 1800000960,
+          "arr": 1800001200,
+          "mins": 4
+        },
+        {
+          "mode": "train",
+          "line": "IC",
+          "num": "3512",
+          "from": "Eindhoven Centraal",
+          "to": "Breda",
+          "dep": 1800001500,
+          "arr": 1800003840,
+          "depPlatform": "4",
+          "arrPlatform": "6",
+          "coach": 3,
+          "deck": "upper",
+          "late": 1
+        },
+        {
+          "mode": "bus",
+          "line": "1",
+          "from": "Breda",
+          "to": "Breda, Hogeschool",
+          "dep": 1800004440,
+          "arr": 1800005220,
+          "depPlatform": "E"
+        },
+        {
+          "mode": "walk",
+          "from": "Breda, Hogeschool",
+          "to": "Campus",
+          "dep": 1800005220,
+          "arr": 1800005400,
+          "mins": 3
+        }
+      ],
+      "stops": [
+        {
+          "name": "Veghel, Busstation",
+          "lat": 51.6167123,
+          "lon": 5.5486049,
+          "t": 1799999640
+        },
+        {
+          "name": "Eerde",
+          "lat": 51.605,
+          "lon": 5.53,
+          "t": 1799999880
+        },
+        {
+          "name": "Sint-Oedenrode, Centrum",
+          "lat": 51.57,
+          "lon": 5.47,
+          "t": 1799999980
+        },
+        {
+          "name": "Rijksweg",
+          "lat": 51.54,
+          "lon": 5.475,
+          "t": 1800000180
+        },
+        {
+          "name": "Son, Centrum",
+          "lat": 51.512,
+          "lon": 5.493,
+          "t": 1800000420
+        },
+        {
+          "name": "Eindhoven  Centraal\u0007",
+          "lat": 51.4430567,
+          "lon": 5.4790111,
+          "t": 1800000960
+        }
+      ],
+      "shape": [
+        [
+          51.62,
+          5.555
+        ],
+        [
+          51.6167123,
+          5.5486049
+        ],
+        [
+          51.6111,
+          5.5402
+        ],
+        [
+          51.605,
+          5.53
+        ],
+        [
+          51.5975,
+          5.5181
+        ],
+        [
+          51.59,
+          5.505
+        ],
+        [
+          51.5801,
+          5.4877
+        ],
+        [
+          51.57,
+          5.47
+        ],
+        [
+          51.5655,
+          5.4651
+        ],
+        [
+          51.56,
+          5.46
+        ],
+        [
+          51.551,
+          5.467
+        ],
+        [
+          51.54,
+          5.475
+        ],
+        [
+          51.526,
+          5.484
+        ],
+        [
+          51.512,
+          5.493
+        ],
+        [
+          51.5011,
+          5.4905
+        ],
+        [
+          51.49,
+          5.488
+        ],
+        [
+          51.47,
+          5.482
+        ],
+        [
+          51.4561,
+          5.4802
+        ],
+        [
+          51.4430567,
+          5.4790111
+        ],
+        [
+          51.44,
+          5.47
+        ]
+      ],
+      "vehicle": {
+        "lat": 51.5480123,
+        "lon": 5.4685049,
+        "at": 1799999988
+      },
+      "face": "3dd598",
+      "inbox": true,
+      "music": {
+        "title": "Night Song",
+        "artist": "The Bands",
+        "app": "Spotify",
+        "url": "https://open.spotify.com/track/0000000000000000000000",
+        "coverUrl": "https://i.scdn.co/image/ab67616d0000b2730000000000000000000000",
+        "at": "2027-01-15T07:59:00Z"
+      }
+    }
+  },
+  "state": {
+    "plain": "{\"dest\":\"Campus\",\"end\":1800005400,\"eta\":1800000960,\"face\":\"3DD598\",\"from\":\"Veghel, Busstation\",\"inbox\":true,\"late\":0,\"leg\":0,\"legs\":[{\"arr\":1800000960,\"color\":\"E0632E\",\"dep\":1799999640,\"from\":\"Veghel, Busstation\",\"late\":0,\"line\":\"305\",\"mode\":\"bus\",\"to\":\"Eindhoven Centraal\"},{\"arr\":1800001200,\"dep\":1800000960,\"from\":\"Eindhoven Centraal\",\"mins\":4,\"mode\":\"walk\",\"to\":\"Eindhoven Centraal\"},{\"arr\":1800003840,\"arrPlatform\":\"6\",\"coach\":3,\"color\":\"3B44B0\",\"deck\":\"upper\",\"dep\":1800001500,\"depPlatform\":\"4\",\"from\":\"Eindhoven Centraal\",\"late\":1,\"line\":\"IC\",\"mode\":\"train\",\"num\":\"3512\",\"to\":\"Breda\"},{\"arr\":1800005220,\"color\":\"E0632E\",\"dep\":1800004440,\"depPlatform\":\"E\",\"from\":\"Breda\",\"line\":\"1\",\"mode\":\"bus\",\"to\":\"Breda, Hogeschool\"},{\"arr\":1800005400,\"dep\":1800005220,\"from\":\"Breda, Hogeschool\",\"mins\":3,\"mode\":\"walk\",\"to\":\"Campus\"}],\"line\":\"305\",\"mode\":\"bus\",\"music\":{\"app\":\"Spotify\",\"artist\":\"The Bands\",\"at\":\"2027-01-15T07:59:00Z\",\"coverUrl\":\"https://i.scdn.co/image/ab67616d0000b2730000000000000000000000\",\"title\":\"Night Song\",\"url\":\"https://open.spotify.com/track/0000000000000000000000\"},\"name\":\"Sam\",\"next\":3,\"pos\":{\"at\":1799999988,\"lat\":51.54801,\"lon\":5.4685,\"src\":\"gps\"},\"shape\":\"mk`zHwuz`@`b@ns@be@v~@zm@jiAvkB~|Db~@rmBb[r]ja@z^fw@wj@vcA_q@~mDooBbcArNjdArN~{Bnd@zuAfJnpAlF\",\"state\":\"riding\",\"stops\":[{\"lat\":51.61671,\"lon\":5.5486,\"name\":\"Veghel, Busstation\",\"t\":1799999640},{\"lat\":51.605,\"lon\":5.53,\"name\":\"Eerde\",\"t\":1799999880},{\"lat\":51.57,\"lon\":5.47,\"name\":\"Sint-Oedenrode, Centrum\",\"t\":1799999980},{\"lat\":51.54,\"lon\":5.475,\"name\":\"Rijksweg\",\"t\":1800000180},{\"lat\":51.512,\"lon\":5.493,\"name\":\"Son, Centrum\",\"t\":1800000420},{\"lat\":51.44306,\"lon\":5.47901,\"name\":\"Eindhoven Centraal\",\"t\":1800000960}],\"t\":1800000000,\"to\":\"Eindhoven Centraal\",\"v\":2}",
+    "nonce": "404142434445464748494a4b",
+    "data": "AUBBQkNERUZHSElKS7l22eQjAucxcHExRfU_IlA_rPjtkWKd71bOpDBQ3_sy-j89e0K9gxx8rw20reCD1uioxRLbi7OYXN7rU2LhYSgNwoSqc1FTb8gmc3JV5Q4CZGgDrMDAi-cgRU__TnpIVbl8d_1E2aXrkeuZeyMpbjypYdRmuv9qnOXw_NtR7QHGzzG2B6WuUyRzjEZ1mJNWMm00Prz2KHJ277mLm1vSscZekSIJAuHSvVO1MMsoMw-64CQVnoQdff6FgE_Pl8fOLYDpA0KpebpXAOXma9REI8eygFoYupxYActYJ0ltVaicc9wIeK6iOmK8u81rmQTYUzPZM7r49VsSxzYKAbaxBCG5YEx1-riJpeavcQlTLzlfxEQ8J5ubT1tTPMJCRsyjqM1WQ8aSxOv8eH7Yc6PUePetHcETuoVtyfjLalmnlbFlHBZ8RGt_6Aif7Ed_ZAgr1ZdrwzAanZ-eevplmrVFZf84DsOOiSKYbXT_3pqFZaOvdFbbop5oK-eD1za9QGmBoB__dH0VmIEzDqMraDodAgp31v6iTHCD6kFStM8S6WFfblqUKKXbR_usQi8BYk5ccOx9Bx1goeejnHaxwApEpnwVfuLNp1VVcHLyjH_lhlJVmAkVv8xoUiIyAIok8X_ON0HiDer4LQq1NNY6MMAFSxqXyIzCnB_jlXgaduSPcFX4lxfSf_BYLSaAe58tqkW7SkHVTEpuIabQQG_DJC69VmLDtMpPKjAo6puj2JWnTQ9kfL8PTssJFvVq55beLdhmnroLBQLgxi9SaSXOsbsFhNErgWHBVQP5RY5jxBPzPZJUMEu_gckS-h4fJJbOSA5A1GVtHdLnLZxGhUstqM1DnSEl0jNS8ZumhPvJGjLQWKDoMuvxEfNeZyCQtG-iuj90a4dBjFLAmXIjJXB5o6Eak9T1evlw0tEKZLwtj7g03kScBahTNPVwwGfjPE3jNAjsLbsZIkScGsN_ACCBl9UBvzG6RYirZf9qMYZmYp5XlOAgibKFL-eY-WdL813Sj483kxBBfQaGzQDqJTAITLqfw531jjwvY98KSB8KBBPdSCja-cQ90ZzDp8-wL2GE5gg3RJ7Jqz2NHy3u75mOix_moG5hifOViLT93a1Cvaljt28ZvHmqQpNrf0YM5fPD7BvQVYXWega32LX-48jDPkSNXtNBsKs1IquAdBlSmVoLMQFxDe3Dy7lmM6nfmUz31v2ATSM3Bo3IiSo3bwWloeMSKjMf99IdYpZmvlBky2_-6Lsos_V3P-g0R6J7QoL3hml8-Iyea3s49YEZ8SmatjBH0-y-rKYEfH02xx5Psczs5JCbREY2nxo_saPY1DSC3cvegYChgvZ_Fjtjl0Iaj1XK9TknvT_B44Dym-2HldXf28av3YbvUAtA16-6JzSg7ThF1CuiU3FVP9ADcCuQzX6Z4_MmPEIdtrt_cpM6DdbAbzsJHMLsFOeJhcKLUQOjBf6OiSMTzL-GvG4JwSZsaNHVEkdjzShHnMzhRDGxFJeZSo5V7xV9WnOliH335w6j1mTfB0hVCo8pgUUvMmVTQpiulB-SoOHyD0jzItAICXeQPiMslXG6szmO4dgmDs1CFRIUTkCo_A8S7CqiEtT7WUsLRmpwAtXN7IAyxyvmU-ZgZVN-oTfY1i9Hb43Y0RdnpX9gzjv-aNLWpVpsliALFGEVPrNWjqussCh7vMlBc_LiLBoOGNWIpy2JlHqdCNCezX3DhWZOSuYrT8q_J5RPTGi0jBC9ZlAkWRvXWSEaZzedtTEzVZi8yVoaXonifw-0-w8AYqXhG_IgWK9JahlfZHUHBMoBv7F751BQtLyXmGnFjsOqSo2I-sXynJvgRzt6J4EtO_8xxAAspTWb_aqKwoHyPj_of4_bgmjcZ9WJ_CFzWWOMnLcRoJHfM3oirbquL6Nc5L0s_YyqvERpGrycVkt8Qt-bSVfShm6dL-DTv5goQ0ZU3NsfB33K7eiWJ6i96Rdod-QhXtJGOyiwWEMfmRwxRAm6gOxaT7k2aGrDTEJ55iTs4Sx96DoT_sg_ecSCnK1xjSdH-qTfMs7T28ac5AzXKiL50DLi5J8w2c4hyqs4sRpu7117sQlzMs5lPpTtHydorQqthiHeZXS6RN_Pza4U23XOHFPNYekL6Qk2YYmxeXGzdBW_TefPkFnNRx77TTE41LvSv_rdeEsC3PmesLkO-GaKVmmCEjdSeWhCSwpALPlmAq-xKwQ6zH4c3Fofdbt7L7WNfLt-zhMZ0-3Yh0kZK3d77k-hJKSps-pU39bEATNS1ytHuzCyIr_R-RmGH7OPTbodWVowC3TPVfcXlGKyM9oH54bDG2vMzG9R52ljQP4THcBdrEkqRA"
+  },
+  "message": {
+    "plain": "{\"at\":1800000030,\"from\":\"Kim\",\"fromKind\":\"web\",\"text\":\"👋 On my way\"}",
+    "nonce": "505152535455565758595a5b",
+    "data": "AVBRUlNUVVZXWFlaW8qCyWYTFUY1BD86Kl05sJ_wzilNF5tbOoC3sTeSJgJfk6krkw9P3VAfsBsjjeGD-I81QjpRAOjCxDqCAAGhVTjTXXWVuSBBxYx3WZdBu-oZjsyjLUPeFg"
+  },
+  "appMessage": {
+    "plain": "{\"at\":1800000040,\"friendId\":\"3c157621a97cf055f5804a9826c6d1e1\",\"from\":\"Lou\",\"fromKind\":\"app\",\"text\":\"I’m at the station\"}",
+    "nonce": "606162636465666768696a6b",
+    "data": "AWBhYmNkZWZnaGlqa5m2zN_R6kptyXRXjCV6R0leJf1wKGg2rULDm1Kt4tAMVZxKsRWi6cw_GlVtBzxHP3n9XpD0PM8AjG6BQi_qcxGOZHxKuyKZ3wftDGenG0iJkBNZpxn4TtTDSIu2zaK6IIJ3wObbosQl9xf9Mpx7fvL_kpDxUDtaMonvLF2uAafbW71dYUe1RuhojL8"
+  },
+  "reply": {
+    "plain": "{\"at\":1800000060,\"re\":1,\"text\":\"See you there\"}",
+    "nonce": "707172737475767778797a7b",
+    "data": "AXBxcnN0dXZ3eHl6exJcAx_1kvZmGCsQcFjCNiNEabLKKyJR0-OVBDCgTaM_sf-K0Yq7KUzSc3hDZqa9zEND_jzWJCZGOm763Qsv7w"
+  },
+  "page": {
+    "head": "Sam is on bus 305",
+    "sub": "to Eindhoven Centraal · on time",
+    "legs": [
+      "305",
+      "🚶",
+      "IC",
+      "1",
+      "🚶 Campus"
+    ],
+    "timeline": [
+      "Veghel, Busstation",
+      "On bus 305",
+      "Eindhoven Centraal",
+      "IC 3512 to Breda",
+      "Breda",
+      "Bus 1 to Breda, Hogeschool",
+      "Campus"
+    ],
+    "shapePoints": 16
+  }
+}

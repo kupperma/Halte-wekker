@@ -18,6 +18,8 @@ object NoticeExpiry {
         "wrongbus-" to 20.0,       // (A7, iOS 0.39.1) "You're on the 154 to Schijndel, not your 306"
         "otherbus-" to 10.0,       // (A7, iOS 0.39.1) "That's the 154 to Schijndel — not yours"
         "heads-up-" to 10.0,       // (A7, iOS 0.37.1) the quiet wake-up while you used your phone
+        "platform-" to 20.0,       // (0.10.1) a platform change or cancelled train: the train has left by then
+        "livemsg-" to 60.0,        // (0.10.1) a message from someone with your live link
     ).sortedByDescending { it.first.length }
 
     /** Minutes a notification with this tag stays; null: until you clear it. */

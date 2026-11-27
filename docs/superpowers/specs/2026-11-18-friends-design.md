@@ -1305,3 +1305,100 @@ stays. One optional field in the `scores` body, additive: an older app ignores i
   `ScoresRules.build(today:)`, `ScoresRules.due(soon:)` (`FriendExtrasB.swift`).
 - `FriendTogetherStore`: `todayPeople`, and `scoresToday` in Friends/together.json (what `today` last went).
 - Your year in travel (Settings › Advanced) is on the phone only and sends nothing.
+
+
+## As built (relay 2026-11-27, iOS 0.42.5, Android 0.10.1)
+
+The live link (0.30) gets a **new page**, the **whole trip** in its state (payload v2), **messages back** from the people
+with the link (and the sharer's answers), and **an app that opens a live link** itself. Everything in "As built (0.30)"
+and "(0.30.1)" holds: the token, the key in the fragment, the lock (`0x01 ‖ nonce ‖ AES-256-GCM ‖ tag`, AAD
+`"hw-live-v1\n" + token`) and every route are as they were; a 0.30 app's links keep working and draw in the new look.
+
+### The page (`relay/live.js`, its script `relay/live-app.js`)
+- A full-screen dark map: MapLibre GL JS 4.7.1 from unpkg (pinned, with its SRI hash) and OpenFreeMap's dark style
+  (`https://tiles.openfreemap.org/styles/dark`; no key, no cookies; credits folded into the map's (i)). The current
+  leg's road in its line colour (the part done bright, the rest at 35 %), its stops as rings (passed ones bright), the
+  stop it goes to as a green dot with its name, the vehicle as its line's pill at `pos` gliding there over 10 s (a jump
+  over ~5 km, a hidden page or *reduce motion*: at once). Framed on the road and the vehicle for each new leg, then it
+  follows only when the vehicle leaves the free part of the map; a drag stops that until "⌖". No WebGL or no library:
+  the card alone on a dark background.
+- The card (a bottom sheet with a handle on a phone: 30 / 56 / 88 % of the height; a 400 px side panel from 900 px):
+  the initial on `face` (else a colour from the name); an eyebrow **Live** / **Waiting** / **Changing** / **Almost
+  there** (yellow: riding and arriving within 3 min, or the next stop is the last and within 5) / **Arrived** / **Last
+  seen 10:02** (grey: no update for 3 min; "· the phone may be out of reach" after 10) / **Ended** / **Key missing** /
+  **Can’t open**; "Sam is on bus 305" / "to Eindhoven Centraal · on time"; an "● 12 s" age; the **listening now** strip
+  (below); the big time (riding: the stop it goes to, "10:03", "in 16 min · 4 stops", "Then Campus 11:17"; waiting:
+  when it leaves; at a change: where that ride gets to); a note at a change ("Waiting on platform 4 · IC 3512 leaves in
+  3 min", "Walking 4 min to platform 4 · …") or almost there ("Change to IC 3512 to Breda · platform 4 · leaves 10:12
+  (9 min)") or arrived ("The live trip has ended. The link stops working soon."); the legs row (`305 → 🚶 → IC → 1 →
+  🚶 Campus`, done ones faded, the current outlined); the whole trip as a timeline (times on the left, done grey, "now"
+  pulsing in the line colour, the rest hollow): got on, on the ride (next stop · lateness · "GPS 12 s" / "phone 12 s"),
+  each change ("change · walk 4 min to platform 4", done: "got off · walking to platform 4"), each next ride ("IC 3512 to
+  Breda" · from · platform · "coach 3, upper deck"), the end ("arrives · 3 min walk"). A v1 state shows its one ride and
+  "Breda · there around 08:45". English only, the viewer's clock. CSP `default-src 'none'; script-src 'self'
+  https://unpkg.com; style-src 'unsafe-inline' https://unpkg.com; img-src data: blob: https://tiles.openfreemap.org
+  https://i.scdn.co https://*.mzstatic.com https://lastfm.freetls.fastly.net; connect-src 'self'
+  https://tiles.openfreemap.org; worker-src blob:; child-src blob:; …`. No trackers; nothing but the map's tiles leaves.
+- **Listening now** (only when `music` is there and its `at` is under 10 minutes old): the cover (only from `i.scdn.co`,
+  `*.mzstatic.com`, `lastfm.freetls.fastly.net`; else a ♪ tile), an equalizer and "LISTENING NOW", the title, "artist ·
+  app", and "Open ↗" when `url` is on `open.spotify.com`, `music.apple.com` or `www.last.fm` (https only). All text is set
+  as text. The apps don't fill `music` yet (reserved: their builders take it, nil by default).
+- On a phone, "Open in Haltewekker" (top right) opens `haltewekker://live/<token>#k=<key>`.
+
+### Payload v2 (inside the same lock; `LiveTripV2` in `ios/App/LiveTripV2.swift` and `android/…/friends/LiveTripV2.kt`)
+- Every v1 key stays as 0.30 has it (`v` becomes 2). Added, each optional:
+  - `legs`: ≤ 12 `{mode ("bus"|"train"|"tram"|"metro"|"ferry"|"walk"), line?, num? (trains), color? ("RRGGBB": bus
+    E0632E, intercity 3B44B0, sprinter 0A93B5 (line SPR…/SNG…/S + digit), tram/metro 7A55B0, ferry 2A7898; none for a
+    walk), from, to (≤ 40 each), dep?, arr? (whole unix s; the current leg's `arr` its live arrival), depPlatform?,
+    arrPlatform? (≤ 8; a bus's is its stop letter), coach? (1–30) and deck? ("upper"|"lower") only for the train you
+    shared a coach on, late? (0–600, rides), mins? (0–120, walks)}`. Walks between rides from the planner's walk
+    before each ride; the last walk to the trip's end.
+  - `leg`: the index in `legs` of the ride you're on, or waiting for (at a change: the next ride).
+  - `stops`: ≤ 60 of the current leg, where you got on to where you get off (more: the first 59 and the last),
+    `{name, lat, lon (5 decimals, half away from zero), t? (its live time, else timetable)}`; `next`: the first with
+    `t` after now (waiting: 0; none: the last).
+  - `shape`: the current leg's road as Google's encoded polyline (5 decimals): the vehicle's road cut at the points
+    nearest the first and the last stop (searching on from the first), equal neighbours dropped, Douglas–Peucker in
+    integer 1e-5 degrees with tolerance 1, doubled until ≤ 200 points (perpendicular distance² = cross² / len², in
+    doubles, the first largest wins). No road: straight between the stops.
+  - `pos` gains `src`: "gps" (the vehicle's own position from the open feeds, OVapi or NS, preferred when fresh) or
+    "phone" (this phone's fix, as v1).
+  - `face`: the initial's colour ("RRGGBB": the friends account's avatar colour, else the accent); `inbox`: true when
+    the app reads messages (the page shows its box); `music` (above): `{title (≤ 80), artist? (≤ 60), app? (≤ 20),
+    url?, coverUrl? (https, ≤ 500), at (ISO 8601)}`.
+- Sorted keys, no escaped slashes, at most 12 000 bytes (over it the road goes, then the stops); the relay takes ≤ 16 KB.
+- Names: `name` is the sender's own — their Friends name, else the name they typed for live links (`LiveNames`); an
+  empty one reads "Your friend". Nothing else is ever put there.
+
+### Messages back
+- From the page (a box when `inbox` is true: "Send Sam a message", the chips "👋 On my way", "I’m at the station",
+  "Running late", "Call me", ≤ 280 characters, an optional name kept in that browser for the link) or from an app that
+  opened the link: `{from (≤ 40), fromKind: "web"|"app", friendId? (an app's friends account, 32 hex), text (≤ 280),
+  at}` locked with the link's key, AAD `"hw-live-msg-v1\n" + token`, posted as `POST /live/v1/msg?t=<token>
+  {"data"}` (≤ 2 KB) → `{"ok","seq","at"}`. Only while the link is live; ≤ 50 a link (429 `full`), one per 10 s and 20 an
+  hour per network address (hashed) and link (429 `slow_down`); 410 ended, 404 gone.
+- The sharer's phone: each put's answer says `mseq` (the newest message); when it's past what it has, `POST
+  /live/v1/inbox {"secret","after"}` → `{"msgs":[{"seq","at","data"}],"mseq","seen"}`. Each one a notification "💬 Kim: On
+  my way" (an app's message by the friend's name when `friendId` is a friend; no name: "Someone with your link"; id
+  `livemsg-<seq>`, gone after 60 min) and on the live link card; once on screen `POST /live/v1/ack {"secret","seq"}`
+  and the pages say "Seen ✓✓" (`GET /live/v1/get` adds `mseq` and `seen`). No extra wake-ups: only on the ride's tick.
+- "Reply": `{text, at, re?}` locked with AAD `"hw-live-reply-v1\n" + token`, `POST /live/v1/reply {"secret","data"}`
+  (one per 5 s, the newest 10 kept); every page shows them under the messages (`replies` in `get`).
+- All of it goes when the link ends (or at its 4 hours). Nothing logs a message, only how many.
+
+### An app opens a live link
+- `haltewekker://live/<token>#k=<key>` (the page's button), the https link (Android: opened by the app when allowed;
+  both: pasted in Friends › "Follow someone’s live link", or shared to the Android app as text): the trip as the page
+  reads it, polled every 15 s while it's open, with the same message box; a message from the app carries your own
+  name and your friends account.
+
+### Test vectors (`docs/live-link-vectors.json`; checked by `relay/test-live.mjs`, `ios/Tests/LiveTripV2Tests.swift`,
+`android/app/src/test/java/nl/haltewekker/LiveTripV2Test.kt`)
+- Secret 0x00–0x1f, key 0x20–0x3f, token `2x1Ot-EFfLIivv_lmStBuw`; the builder's input (`input`: a v1 state and the
+  trip: five legs, six stops, a 20-point road, the vehicle's fix, a face, music) gives exactly
+  `` {"dest":"Campus","end":1800005400,"eta":1800000960,"face":"3DD598","from":"Veghel, Busstation","inbox":true,"late":0,"leg":0,"legs":[{"arr":1800000960,"color":"E0632E","dep":1799999640,"from":"Veghel, Busstation","late":0,"line":"305","mode":"bus","to":"Eindhoven Centraal"},{"arr":1800001200,"dep":1800000960,"from":"Eindhoven Centraal","mins":4,"mode":"walk","to":"Eindhoven Centraal"},{"arr":1800003840,"arrPlatform":"6","coach":3,"color":"3B44B0","deck":"upper","dep":1800001500,"depPlatform":"4","from":"Eindhoven Centraal","late":1,"line":"IC","mode":"train","num":"3512","to":"Breda"},{"arr":1800005220,"color":"E0632E","dep":1800004440,"depPlatform":"E","from":"Breda","line":"1","mode":"bus","to":"Breda, Hogeschool"},{"arr":1800005400,"dep":1800005220,"from":"Breda, Hogeschool","mins":3,"mode":"walk","to":"Campus"}],"line":"305","mode":"bus","music":{"app":"Spotify","artist":"The Bands","at":"2027-01-15T07:59:00Z","coverUrl":"https://i.scdn.co/image/ab67616d0000b2730000000000000000000000","title":"Night Song","url":"https://open.spotify.com/track/0000000000000000000000"},"name":"Sam","next":3,"pos":{"at":1799999988,"lat":51.54801,"lon":5.4685,"src":"gps"},"shape":"mk`zHwuz`@`b@ns@be@v~@zm@jiAvkB~|Db~@rmBb[r]ja@z^fw@wj@vcA_q@~mDooBbcArNjdArN~{Bnd@zuAfJnpAlF","state":"riding","stops":[{"lat":51.61671,"lon":5.5486,"name":"Veghel, Busstation","t":1799999640},{"lat":51.605,"lon":5.53,"name":"Eerde","t":1799999880},{"lat":51.57,"lon":5.47,"name":"Sint-Oedenrode, Centrum","t":1799999980},{"lat":51.54,"lon":5.475,"name":"Rijksweg","t":1800000180},{"lat":51.512,"lon":5.493,"name":"Son, Centrum","t":1800000420},{"lat":51.44306,"lon":5.47901,"name":"Eindhoven Centraal","t":1800000960}],"t":1800000000,"to":"Eindhoven Centraal","v":2} ``
+  (1751 bytes), locked with nonce `404142434445464748494a4b`. A web message `{"at":1800000030,"from":"Kim","fromKind":"web","text":"👋 On my way"}` (nonce
+  `505152535455565758595a5b`), an app's `{"at":1800000040,"friendId":"3c157621a97cf055f5804a9826c6d1e1","from":"Lou","fromKind":"app","text":"I’m at the station"}` (nonce `606162636465666768696a6b`) and an answer
+  `{"at":1800000060,"re":1,"text":"See you there"}` (nonce `707172737475767778797a7b`), each with its locked bytes in the file.
+- The page draws it as "Sam is on bus 305" / "to Eindhoven Centraal · on time", legs `305 → 🚶 → IC → 1 → 🚶 Campus`, a
+  16-point road.

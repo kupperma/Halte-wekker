@@ -3,6 +3,36 @@
 The rules and numbers for each are in [logs-export.md](logs-export.md) › For Android (parity), with the iOS files and
 their tests.
 
+## iOS 0.42.5 (the live link: the whole trip, messages back)
+
+The live-trip page was redone (relay 2026-11-27) and both apps send it the whole trip. Rules, routes and the vector in
+[the friends spec](superpowers/specs/2026-11-18-friends-design.md) › "As built (relay 2026-11-27, iOS 0.42.5, Android
+0.10.1)"; the shared vector `docs/live-link-vectors.json` is checked by the page's script, iOS and Android alike.
+
+- [x] **Payload v2**: the legs (rides and walks, line colours, platforms, the coach you shared), the leg you're on, its
+      stops and road (≤ 200 points, encoded), the next stop, the vehicle's own GPS first (`pos.src`), the face colour,
+      `inbox`, and a reserved `music` (nil). The v1 keys stay. **Android 0.10.1:** `friends/LiveTripV2.kt`
+      (`LiveTripV2Test`, byte for byte against the vector), built in `LiveLinkStore.state` from the ride, the saved copy
+      of its ride (`RideCacheStore.saved`) and OVapi/NS fixes.
+- [x] **Messages back**: the page's (and another app's) messages read on the ride's tick when a put says there's one
+      (`mseq`), a notification "💬 Kim: On my way" (`livemsg-<seq>`, 60 min, channel "Live link messages"), on the live
+      link card with "Reply"; seen once shown (`/live/v1/ack`). **Android 0.10.1:** `LiveMessages`, `LiveLinkStore.inbox`,
+      `markSeen`, `reply`.
+- [x] **Open a live link in the app**: `haltewekker://live/<token>#k=…` (the page's "Open in Haltewekker"), the https
+      link, pasted in Friends, or shared as text; the trip with its map and a message box that sends your own name and
+      friends account. **Android 0.10.1:** `friends/LiveView.kt`, `ui/friends/LiveViewScreen.kt`, the manifest's filters.
+
+## Android 0.10.1 (Android only)
+
+- [x] **No "Did you check out?" unless you turn it on**: off by default, turned off once for every install
+      (`Settings.migrated`, `CheckOutOffTest`), Settings › Trips & alarm › "Check-out reminder" turns it on again; a
+      pending one checks the switch before it goes, and a left-over one is taken off when the app starts. (iOS: 0.42.4.)
+- [x] **Every train of the trip is watched for a new platform or a cancellation** (`ride/PlatformWatch.kt`,
+      `PlatformWatchTest`): each train leg from the one you're on or wait for (also at a change), leaving within 3 h,
+      seeded with the planner's planned platform, NS's board at most once a minute; told at once (quiet while the ride
+      sleeps, with sound when awake; channel "Platform changes", `platform-…`, 20 min); the leg gets the new platform
+      (the change card, the ride's notification). (iOS: 0.42.4.)
+
 ## iOS 0.42.3
 
 From a field log of 27 November. Rules in `ios/App/MissCall.swift` (with `ChangeGuide.swift`) and

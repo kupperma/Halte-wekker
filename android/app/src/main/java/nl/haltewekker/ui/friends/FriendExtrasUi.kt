@@ -46,6 +46,7 @@ import nl.haltewekker.friends.ScoreBoard
 import nl.haltewekker.friends.ScoresRules
 import nl.haltewekker.friends.TimetableDays
 import nl.haltewekker.friends.TravelFreshness
+import nl.haltewekker.friends.TravelWords
 import nl.haltewekker.friends.TripAnswer
 import nl.haltewekker.friends.TripCard
 import nl.haltewekker.friends.TripTake
@@ -96,6 +97,8 @@ fun LiveLinkIdleNote() {
     val rs = nl.haltewekker.ride.RideStore.state.collectAsState().value
     if (link == null && !LiveLinkStore.running(rs)) Text("While a trip runs you can share a live link with someone without the app.", color = DS.t.secondary,
         style = MaterialTheme.typography.bodySmall)
+    // (relay 2026-11-27) and someone else's live link, pasted
+    LiveOpenRow()
 }
 
 /** "Waiting for you to wait": each friend's wait (in `chat` only, when given), with "I’ll wait" / "Take the next one with you". */
@@ -217,9 +220,24 @@ fun LiveLinkCard(ride: RideState? = null, idleNote: Boolean = true) {
         return
     }
     Card {
-        Header("Live link", if (l != null && !l.arrived) "Shared" else null)
+        val unread = l?.unread ?: 0
+        Header("Live link", if (unread > 0) "💬 " + (if (unread == 1) "1 message" else "$unread messages") else if (l != null && !l.arrived) "Shared" else null)
         if (l != null) {
             l.last?.let { Text(LiveWords.headline(it), color = DS.t.text); LiveWords.detail(it)?.let { d -> Text(d, color = DS.t.secondary) } }
+            // (relay 2026-11-27) messages from the people with the link; seen once they're on screen
+            if (l.msgs.isNotEmpty()) {
+                LaunchedEffect(l.msgs.size) { LiveLinkStore.markSeen() }
+                l.msgs.takeLast(5).forEach { m ->
+                    val who = m.friendId?.let { LiveLinkStore.friendName(it) } ?: m.from.ifEmpty { "Someone with your link" }
+                    Text("💬 $who · ${TravelWords.clock(m.at)}: ${m.text}", color = DS.t.text)
+                }
+                l.replies.takeLast(3).forEach { r -> Text("You · ${TravelWords.clock(r.at)}: ${r.text}", color = DS.t.secondary, style = MaterialTheme.typography.bodySmall) }
+                var reply by remember { mutableStateOf("") }
+                var sent by remember { mutableStateOf<String?>(null) }
+                OutlinedTextField(reply, { if (it.length <= 280) reply = it }, Modifier.fillMaxWidth(), label = { Text("Reply (everyone with the link sees it)") }, singleLine = true)
+                QuietButton("Reply") { scope.launch { sent = if (LiveLinkStore.reply(reply)) { reply = ""; null } else "Couldn’t send it. Try again in a few seconds." } }
+                sent?.let { Note(it) }
+            }
             Text(if (l.arrived) "“Arrived” stays on the page for 15 minutes." else "The page shows your trip until it ends (at most 4 hours). Only people with the link can see it.",
                 color = DS.t.secondary, style = MaterialTheme.typography.bodySmall)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

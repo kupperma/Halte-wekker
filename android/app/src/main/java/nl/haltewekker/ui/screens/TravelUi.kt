@@ -114,7 +114,7 @@ fun TravelHelpCard() {
         }
         Text("DUO's windows: when a ride is free, at a discount or full fare, on plan options (40% off trains, 34% off buses).",
             color = DS.t.secondary, style = MaterialTheme.typography.bodySmall)
-        SwitchRow("Check-out reminder", "“Did you check out?” a minute after you get off where the card wants it: at the end, off a bus, between bus and train. The app can't see your card.",
+        SwitchRow("Check-out reminder", "Off unless you turn it on. “Did you check out?” a minute after you get off where the card wants it: at the end, off a bus, between bus and train. The app can’t see your card.",
             s.checkOut) { v -> app.store.updateSettings { it.copy(checkOut = v) } }
         SwitchRow("Money back for a late train", "Once, after a trip whose trains got you there 30 min late or more, with a tap to NS's claim page.",
             s.delayClaim) { v -> app.store.updateSettings { it.copy(delayClaim = v) } }
