@@ -14,7 +14,7 @@ From a field log of 27 November. Rules in `ios/App/MissCall.swift` (with `Change
       leaving now · Look out for it", quietly. With a live time but no GPS: a minute's grace, then "May have left ·
       Look out for it" (near its stop: look out) until 3 min, then missed. Its own fresh GPS (≤ 90 s) decides first:
       at or before the stop (40 m slack) not missed; 150 m or more past it, within a minute of its time or later,
-      missed. **Android 0.9.0:** `ride/ChangeGuide.kt` `MissCall` (`MissCallTest`, every iOS vector); the ride's change guide passes the next ride's live flag (its stop's board) and your distance to its stop. Its own GPS (`Seen.gone`/`notLeft`) is not looked up yet on Android: `Seen.NONE`.
+      missed. **Android 0.9.0:** `ride/ChangeGuide.kt` `MissCall` (`MissCallTest`, every iOS vector); the ride's change guide passes the next ride's live flag (its stop's board) and your distance to its stop. **Android 0.9.1:** its own GPS too (`MissCall.seenOnRoad`: its trip asked every 2 min, OVapi by trip or NS by number, ≤ 3 min old, put on its road against its stop).
 - [x] **A miss is told only once it held for a minute** (looks in between say "May have left"); a told miss that a
       later look takes back is logged, never told again for that look. **Android 0.9.0:** `MissCall.step` in `RideService.updateChangeGuide`; a take-back is logged (`change · miss taken back · …`).
 - [x] **On the way (still on the ride into the change)**: missed only when your arrival (live or GPS) plus the change
@@ -25,21 +25,21 @@ From a field log of 27 November. Rules in `ios/App/MissCall.swift` (with `Change
       line again (unless the next leg is on that line), and when its boarding place is known, within 500 m of the next
       leg's stop or where you get off. None left: on the way "Tight — run" (no "You'll miss"); at the change "You'll
       likely miss the 08:12". **Android 0.9.0:** `MissCall.sane` (feeding = the ride you're on, change places = the next leg's stop and where you get off).
-- [ ] **A leg shorter than the wake distance (or 800 m) doesn't ring** when the wake rule fires: awake without the
+- [x] **A leg shorter than the wake distance (or 800 m) doesn't ring** when the wake rule fires: awake without the
       alarm; a quiet "Get off at the next stop" notification once, not in its first minute, when the stop before yours
       is reached by its times, or 90 s before it's in, or (no times) halfway from where it started; the announcement at
       the stop only after the first minute and within half the way it started from (200–450 m). Dead reckoning the
-      same. **Android 0.9.0:** the rules only (`ShortLeg`, `ShortLegTest` vectors in `MissCallTest`); not wired into the ride's alarm yet (left for the next builder: it touches the ring path).
-- [ ] **Nothing rings in a leg's first minute**: within 20 s a firing wake rule wakes it silently (as before), from
-      20 to 60 s it waits; a normal leg rings at the next fix after that (the alarm always rings for a normal leg). **Android 0.9.0:** rule ported (`ShortLeg.onFire`), not wired yet.
-- [ ] **On the planned next ride without the leg ending** (going away from this leg's stop, the "wrong way" look finds
+      same. **Android 0.9.0:** the rules only (`ShortLeg`, `ShortLegTest` vectors in `MissCallTest`); **Android 0.9.1:** wired (`ride/LegAlarm.kt`, applied by `RideService.onLocation`/`reckonStep`; `LegAlarmTest` runs whole synthetic legs): the quiet word is a silent notification (`Notifications.quiet`), the stop before yours by the vehicle's trip; `quietLeg` and `legStartMetres` kept in the ride's state.
+- [x] **Nothing rings in a leg's first minute**: within 20 s a firing wake rule wakes it silently (as before), from
+      20 to 60 s it waits; a normal leg rings at the next fix after that (the alarm always rings for a normal leg). **Android 0.9.0:** rule ported (`ShortLeg.onFire`). **Android 0.9.1:** wired (`LegAlarm.fix`, `ring · held` in the log); Android's leg starts when the previous one ended (at the change), as before.
+- [x] **On the planned next ride without the leg ending** (going away from this leg's stop, the "wrong way" look finds
       among the vehicles on your road, or the one you're on board, the ride the next leg was planned with): end this leg
       and start the next one on it ("next leg"), plan kept, alarm armed, no choice to pick from. Before, it planned the
-      rest again from it ("wrong way") and asked to pick between it and another train on the same track. **Android 0.9.0:** `NextLegGuard.plannedNextAmong` ported and tested; not wired (Android's ride has no "wrong way" replan to replace).
-- [ ] **OVapi positions**: the match is by OVapi's own trip_id (after `nl-OpenOV_` in the Transitous id), checked
+      rest again from it ("wrong way") and asked to pick between it and another train on the same track. **Android 0.9.0:** `NextLegGuard.plannedNextAmong` ported and tested. **Android 0.9.1:** wired (`LegAlarm.onRoad`): going away from this leg's stop (800 m / 2 km further than you've been, moving ≥ 5 m/s) it looks at what's on your road (the matcher's look, the next leg's ride first); also when the ride's own look finds the next leg's planned ride by its own GPS, or a choice settles on it. Android has no "wrong way" plan again: neither found, it looks again after another stretch.
+- [x] **OVapi positions**: the match is by OVapi's own trip_id (after `nl-OpenOV_` in the Transitous id), checked
       against the live feed: no id-format problem; trips missing at night simply aren't in the feed (not started yet,
       or their bus sends nothing) and go by their times. Log which key found nothing and whether its journey had
-      begun (start time from the Transitous id, 24:00+ the next day). **Android 0.9.0:** `RealPositions.noMatchReason`/`startTime`/`dataset` ported and tested (the key was already OVapi's own trip_id); the log line isn't written yet.
+      begun (start time from the Transitous id, 24:00+ the next day). **Android 0.9.0:** `RealPositions.noMatchReason`/`startTime`/`dataset` ported and tested (the key was already OVapi's own trip_id); **Android 0.9.1:** the log line (`vehicle shown · … · no gps: no ovapi match for trip_id … (started 22:40) · by times`, `RealPositions.noGPSReason`).
 ## iOS 0.42.2
 
 **Android 0.9.0:** the rules of 0.42.0 and 0.42.2 are ported with every iOS vector (`travel/Nearby.kt`: `NearbyTest` holds `NearbyRankTests` and `NearbySearchTests`; `travel/TripTimeline.kt`: `TripTimelineTest`). The nearby-stops view itself (the fetch design, the map's circles, the stop sheet, the Whole-trip rows) is not built yet; the items below stay open.

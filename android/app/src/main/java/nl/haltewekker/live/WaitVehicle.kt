@@ -74,7 +74,7 @@ class WaitVehicle {
      * `gps`: its own fix (OVapi by trip, NS by train number); `me`: your phone's fix while you ride it.
      */
     fun place(t: TransitParse.LiveTrip, tripId: String, line: String, isTrain: Boolean, mine: Int?, mineLeaves: Double?, timesAt: Double?,
-              now: Double, gps: GPSFix?, feed: String, me: Me? = null, estimated: Boolean = false): Placed {
+              now: Double, gps: GPSFix?, feed: String, me: Me? = null, estimated: Boolean = false, why: (() -> String?)? = null): Placed {
         if (glideId != tripId) { main.reset(); ghostGlide.reset(); old.reset(); lastFix = null; previousFix = null; glideId = tripId; loggedAt = 0.0 }
         val r = road(t)
         tripStop = t.stops.map { it.point }
@@ -105,6 +105,8 @@ class WaitVehicle {
         if (s.source == RealFirst.Source.NONE) point = null
         if (now - loggedAt >= 60 || now < loggedAt) {
             loggedAt = now
+            // (0.9.1, iOS 0.42.3 `FusionLog`) by times or not drawn: why it has no fix ("no ovapi match for trip_id …")
+            if (s.source == RealFirst.Source.BY_TIMES || s.source == RealFirst.Source.NONE) why?.invoke()?.let { s.why = it }
             FieldLog.match(RealFirst.logLine("$line·${tripId.takeLast(4)}", feed, s, est))
         }
         return Placed(s, point, ghostAt?.let { Geo.pointAtMetres(it, r.path) })

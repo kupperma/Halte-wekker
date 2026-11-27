@@ -259,7 +259,10 @@ class HomeModel(app: Application) : AndroidViewModel(app) {
         } else RealPositions.usable(LiveFeeds.buses.fixes, ride.tripId, now)
         val mine = if (onBoard) null else nl.haltewekker.live.WaitVehicle.mine(t, ride.from, ride.fromStop)
         val placed = placer.place(t, ride.tripId, ride.line, train, mine, if (onBoard) null else ride.departure, focusTripAt, now, gps, feed,
-            if (onBoard) meFix else null, estimated)
+            if (onBoard) meFix else null, estimated) {
+                RealPositions.noGPSReason(realPositions, ride.tripId, if (train) RealPositions.trainNumber(ride.num.ifEmpty { t.num }) else null,
+                    LiveFeeds.buses.fixes, LiveFeeds.trains, now)
+            }
         val label = if (train) TransitParse.trainLabel(ride.name.ifEmpty { ride.line }) else ride.line
         _focus.value = Focus(ride, placed, Tokens.light.kind(ride.kind).toArgb(), label, if (onBoard) null else (ride.from ?: mine?.let { t.stops[it].point }), onBoard)
     }

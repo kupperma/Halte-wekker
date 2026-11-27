@@ -166,6 +166,29 @@ object MissCall {
         return if (vehicleMetres > stopMetres + GONE_SLACK) Seen.GONE else Seen.NONE
     }
 
+    /**
+     * (0.9.1, iOS `TripManager.plannedSeen`) the next ride's own fix against its stop on its road: its trip's `path`
+     * (else its stops), its `stops`, where it leaves from (`from`: its nearest stop within 1.5 km), the fix `fixAge`
+     * seconds old. Off its road (150 m), or no stop near: `NONE`.
+     */
+    fun seenOnRoad(path: List<nl.haltewekker.core.GeoPoint>, stops: List<nl.haltewekker.core.GeoPoint>, from: nl.haltewekker.core.GeoPoint,
+                   fix: nl.haltewekker.core.GeoPoint, fixAge: Double): Seen {
+        if (stops.size < 2) return Seen.NONE
+        val road = if (path.size >= 2) path else stops
+        val k = stops.indices.minByOrNull { nl.haltewekker.core.Geo.metres(stops[it], from) } ?: return Seen.NONE
+        if (nl.haltewekker.core.Geo.metres(stops[k], from) > RideCache.NEAR) return Seen.NONE
+        var prev = 0.0
+        var stopAt = 0.0
+        for (i in 0..k) {
+            val along = nl.haltewekker.core.Geo.pass(stops[i], road, prev, 40.0)?.projection?.along ?: prev
+            prev = max(prev, along)
+            stopAt = prev
+        }
+        val pr = nl.haltewekker.core.Geo.pass(fix, road, stopAt, 30.0)?.projection ?: return Seen.NONE
+        if (pr.crossTrack > nl.haltewekker.live.Advance.MAX_OFF_ROUTE) return Seen.NONE
+        return seen(pr.along, stopAt, fixAge)
+    }
+
     fun fresh(gpsAge: Double?, liveAge: Double?): Boolean =
         (gpsAge != null && gpsAge.isFinite() && gpsAge >= -60 && gpsAge <= GPS_FRESH) ||
             (liveAge != null && liveAge.isFinite() && liveAge >= -60 && liveAge <= LIVE_FRESH)

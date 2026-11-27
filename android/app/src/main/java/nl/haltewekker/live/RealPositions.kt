@@ -208,6 +208,26 @@ object RealPositions {
         return if (now < st.first) "$base: not started yet, starts ${st.second}" else "$base (started ${st.second})"
     }
 
+    /**
+     * (0.9.1, iOS `RealPositionsStore.noGPSReason`) why a trip has no fix to draw it by, for the field log: "real
+     * positions off", "train 3540 not in ns positions", "no ovapi match for trip_id …: not started yet, starts 24:10",
+     * "fix 240 s old"; null: none of these. `number`: its train number when it's a train.
+     */
+    fun noGPSReason(enabled: Boolean, tripId: String, number: Int?, buses: Map<String, GPSFix>, trains: Map<Int, GPSFix>, now: Double): String? {
+        if (!enabled) return "real positions off"
+        if (number != null) {
+            if (trains.isEmpty()) return "ns positions not in"
+            val f = trains[number] ?: return "train $number not in ns positions"
+            val age = Math.round(now - f.at)
+            return if (age > FRESH.toLong()) "fix $age s old" else null
+        }
+        val k = key(tripId) ?: return "no train number, not in ovapi" + (dataset(tripId)?.let { " (a trip of $it)" } ?: "")
+        if (buses.isEmpty()) return "ovapi positions not in"
+        val f = buses[k] ?: return noMatchReason(tripId, k, now)
+        val age = Math.round(now - f.at)
+        return if (age > FRESH.toLong()) "fix $age s old" else null
+    }
+
     /** When the trip starts by its Transitous id ("20261201_24:10_…": 00:10 the next day, Dutch time), and the text. */
     fun startTime(transitousTripId: String): Pair<Double, String>? {
         val parts = transitousTripId.split("_", limit = 3)

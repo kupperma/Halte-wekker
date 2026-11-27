@@ -81,6 +81,10 @@ data class RideState(
     val changeLine: String? = null,
     val changeMiss: String? = null,
     val changeSwitch: String? = null,
+    /** (0.9.1, iOS 0.42.3 `ShortLeg`) awake without the alarm (a short leg, or one started inside its wake distance), and
+     *  how far from its stop this leg started (its first good fix). */
+    val quietLeg: Boolean = false,
+    val legStartMetres: Double? = null,
 ) {
     val leg: Ride? get() = trip.rides.getOrNull(index)
     val wakeMetres: Double get() = (wakeKm.getOrNull(index) ?: WakeRules.BUS_KM) * 1000

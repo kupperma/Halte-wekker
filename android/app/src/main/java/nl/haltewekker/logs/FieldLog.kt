@@ -97,7 +97,17 @@ object FieldFormat {
     fun rideStart(how: String, vehicle: String?, stopMetres: Double?, leg: Int, of: Int) =
         "start · $how · ${vehicle ?: "no vehicle yet"} · its stop ${metres(stopMetres)} from you · leg $leg/$of"
 
-    fun rideWake(startedMetres: Double?) = "wake · silently (started ${metres(startedMetres)} from its stop)"
+    fun rideWake(startedMetres: Double?, after: Double? = null) =
+        "wake · silently (started ${metres(startedMetres)} from its stop${after?.let { ", first fix ${max(0.0, it).roundToInt()} s in" } ?: ""})"
+
+    /** (0.9.1, iOS 0.42.3) "wake · short leg (530 m, wake 2000 m): no alarm, a quiet word before the stop". */
+    fun rideShort(spanMetres: Double?, wakeMetres: Double, after: Double? = null) =
+        "wake · short leg (${metres(spanMetres)}, wake ${metres(wakeMetres)}): no alarm, a quiet word before the stop" +
+            (after?.let { ", first fix ${max(0.0, it).roundToInt()} s in" } ?: "")
+
+    /** (0.9.1, iOS 0.42.3) "ring · held: leg 35 s old, 1600 m (nothing rings in a leg's first minute)". */
+    fun rideRingHeld(legAge: Double, metres: Double?) =
+        "ring · held: leg ${max(0.0, legAge).roundToInt()} s old, ${metres(metres)} (nothing rings in a leg's first minute)"
 
     fun rideRing(why: String, metres: Double?, legAge: Double, started: Double?) =
         "ring · $why · ${metres(metres)} · leg ${max(0.0, legAge).roundToInt()} s old · started ${metres(started)}"

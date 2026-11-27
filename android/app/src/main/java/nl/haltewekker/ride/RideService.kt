@@ -297,17 +297,36 @@ class RideService : Service() {
         }
         noteSpeed(fix)
         // (A6, iOS 0.33) the distance rule as it always was; by time also the time rule, whichever comes first
-        // (`WakeRule`). Within 20 s of the leg's start either one wakes it silently.
+        // (`WakeRule`). (0.9.1, iOS 0.42.3 `ShortLeg`) within 20 s of the leg's start either one wakes it silently; a
+        // short leg never rings (a quiet "Get off at the next stop" instead); nothing rings in a leg's first minute, a
+        // normal leg rings at the next fix after it (`LegAlarm.fix`).
         val good = fix.accuracy >= 0 && fix.accuracy < WakeRules.GOOD_ACCURACY
-        if (s.phase == Phase.SLEEPING) {
-            val fire = if (good) wakeFire(fix, d, s) else null
-            if (fire != null) {
-                if (now - s.legStart < WakeRules.EARLY_LEG) {
-                    FieldLog.ride(FieldFormat.rideWake(d))
-                    RideStore.update(this) { it.copy(phase = Phase.AWAKE, note = "You started close to your stop: it tells you when you're there.") }
-                } else ring(WakeRule.log(fire), fire)
+        val age = now - s.legStart
+        val fire = if (s.phase == Phase.SLEEPING && good) wakeFire(fix, d, s) else null
+        val step = LegAlarm.fix(legOf(s), age, d, fix.accuracy, fire != null, legIsShort(s))
+        if (step.leg.startedMetres != s.legStartMetres) RideStore.update(this) { it.copy(legStartMetres = step.leg.startedMetres) }
+        when (step.act) {
+            LegAlarm.Do.RING -> ring(WakeRule.log(fire!!), fire)
+            LegAlarm.Do.WAKE_SHORT -> wakeQuietly(short = true, metres = d, after = age)
+            LegAlarm.Do.WAKE_EARLY -> wakeQuietly(short = false, metres = d, after = age)
+            LegAlarm.Do.HOLD -> rideLogOnce("ring-held|${s.index}", 120.0, FieldFormat.rideRingHeld(age, d))
+            LegAlarm.Do.ARRIVE -> arrive()
+            LegAlarm.Do.NOT_YET -> rideLogOnce("arrive-early|${s.index}", 60.0, "arrive · not yet: ${Math.round(d)} m from the stop of a short leg")
+            else -> {}
+        }
+        RideStore.state.value?.let { if (it.phase == Phase.AWAKE && it.quietLeg) checkShortNotice(d, now) }
+        // (0.9.1, iOS 0.42.3 `RideGuards.plannedNextAmong`) going away from this leg's stop: on the ride the next leg was
+        // planned with? Then this leg is done and the next one starts on it.
+        val cur0 = RideStore.state.value
+        if (fix.accuracy >= 0 && fix.accuracy < 150 && cur0 != null && cur0.index == s.index) {
+            legClosest = minOf(legClosest ?: d, d)
+            val cur = cur0
+            if (!awayLooked && cur.index + 1 < cur.trip.rides.size && cur.vehicleSource != VehicleSource.BY_HAND &&
+                (cur.phase == Phase.SLEEPING || cur.phase == Phase.AWAKE) && LegAlarm.goingAway(legClosest, d) && LegAlarm.moving(fix.speed, fix.accuracy)) {
+                awayLooked = true
+                scope.launch { awayLook(cur.index) }
             }
-        } else if (WakeRules.onFix(s.phase, d, fix.accuracy, now - s.legStart, s.wakeMetres) == WakeRules.Action.ARRIVE) arrive()
+        }
         // (A8, iOS 0.39) still ringing within 450 m of the stop: it got there before you reacted
         if (s.phase == Phase.ALARM && good && d <= 450) noteWakeOutcome(s, stopped = false)
         // (A6, iOS 0.32) Share GPS points during rides (when on): the trip's own fixes, nothing asked for
@@ -354,6 +373,11 @@ class RideService : Service() {
                             }
                             f = null
                         }
+                        // (0.9.1, iOS 0.42.3) the next leg's planned ride, with you by its own GPS: you're on the next leg
+                        if (f != null && f.byGPS && LegAlarm.onRoad(listOf(f.tripId), null, s.trip.rides.getOrNull(s.index + 1)?.tripId, leg.tripId) is LegAlarm.Road.NextLeg) {
+                            boardedPlannedNext(f.tripId, f.line, f.isTrain, "found on board")
+                            f = null
+                        }
                         if (f != null) {
                             RideStore.update(this) {
                                 it.copy(vehicleTripId = f.tripId, vehicleLine = f.line,
@@ -388,6 +412,7 @@ class RideService : Service() {
                         wakeRoute = w.route
                         wakeLive = w.arrival?.takeIf { w.live && !w.saved }?.let { it to Iso.now() }
                         RideStore.update(this) { it.copy(eta = w.arrival ?: it.eta, nextStop = w.nextStop, delayMin = w.delayMin) }
+                        wakeBeforeAt = w.beforeAt
                         checkGetReady(w, now)
                         if (!w.saved && w.trip != null) RideStore.state.value?.let { st -> if (RideCacheStore.due(v, now)) RideCacheStore.put(this, v, w.trip, st.startedAt, now) }
                     }
@@ -409,7 +434,7 @@ class RideService : Service() {
         val st = app.store.settings.value
         val quiet = WakeRules.quiet(st.headphonesOnly, AudioRoute.privateOutput(this))
         val leg = s.leg
-        FieldLog.ride(FieldFormat.rideRing(why, s.distance, Iso.now() - s.legStart, startMetres(s)))
+        FieldLog.ride(FieldFormat.rideRing(why, s.distance, Iso.now() - s.legStart, s.legStartMetres ?: startMetres(s)))
         val minutes = (fire as? WakeRule.Fire.Time)?.minutes
         RideStore.update(this) { it.copy(phase = Phase.ALARM, quiet = quiet, note = null, roughGPS = false, ringMinutes = minutes, rangAt = Iso.now(), againSent = false, wakeNoted = false) }
         stopReckon()
@@ -447,7 +472,7 @@ class RideService : Service() {
         val leg = s.leg ?: return
         val st = app.store.settings.value
         val next = s.trip.rides.getOrNull(s.index + 1)
-        FieldLog.ride(FieldFormat.rideArrive("by GPS", s.distance, s.accuracy, Iso.now() - s.legStart, null))
+        FieldLog.ride(FieldFormat.rideArrive(if (s.quietLeg) "by GPS, quietly" else "by GPS", s.distance, s.accuracy, Iso.now() - s.legStart, s.legStartMetres))
         legDone()
         val quiet = WakeRules.quiet(st.headphonesOnly, AudioRoute.privateOutput(this))
         AlarmPlayer.chime(this, if (st.announce) WakeRules.announcement(leg.toStop, leg.isTrain, false) else null, quiet)
@@ -489,7 +514,7 @@ class RideService : Service() {
             RideStore.update(this) {
                 it.copy(index = it.index + 1, phase = Phase.SLEEPING, legStart = now, vehicleTripId = null, vehicleLine = null,
                     vehicleSource = VehicleSource.NONE, eta = null, distance = null, quiet = false, note = null, roughGPS = false,
-                    ringMinutes = null, reckoning = false, changeArrived = now, changeFromVehicle = s.vehicleTripId)
+                    ringMinutes = null, reckoning = false, changeArrived = now, changeFromVehicle = s.vehicleTripId, quietLeg = false, legStartMetres = null)
             }
             requestLocation(RideGPS.intervalMs(false))
             scheduleBackup()
@@ -643,6 +668,102 @@ class RideService : Service() {
     private fun resetLegWake() {
         smoother.reset(); lastSpeedFix = null; wakeLive = null; wakeRoute = emptyList()
         lastGood = null; stopReckon()
+        legClosest = null; awayLooked = false; wakeBeforeAt = null
+    }
+
+    // MARK: (0.9.1, iOS 0.42.3) short legs, the first minute, the next leg's planned ride
+
+    private var legClosest: Double? = null                     // the nearest this leg has been to its stop (150 m fixes)
+    private var awayLooked = false                             // going away: looked at what's on your road this stretch
+    private var wakeBeforeAt: Double? = null                   // the stop before yours, by its times (the vehicle's trip)
+    private val logged = HashMap<String, Double>()
+
+    private fun rideLogOnce(key: String, every: Double, text: String) {
+        val now = Iso.now()
+        logged[key]?.let { if (now - it < every) return }
+        if (logged.size > 60) logged.entries.removeAll { now - it.value >= 600 }
+        logged[key] = now
+        FieldLog.ride(text)
+    }
+
+    private fun legOf(s: RideState) = LegAlarm.Leg(s.phase, s.quietLeg, s.readyTold, s.legStartMetres)
+
+    /** This leg is shorter than its wake distance (or 800 m): it never rings (`ShortLeg.isShort`). */
+    private fun legIsShort(s: RideState): Boolean = ShortLeg.isShort(LegAlarm.span(s.leg?.from, s.leg?.to), s.wakeMetres)
+
+    /** Awake without the alarm: a short leg (the quiet word comes later), or one that started inside its wake distance. */
+    private fun wakeQuietly(short: Boolean, metres: Double, after: Double?) {
+        val s = RideStore.state.value ?: return
+        if (s.phase != Phase.SLEEPING) return
+        FieldLog.ride(if (short) FieldFormat.rideShort(LegAlarm.span(s.leg?.from, s.leg?.to), s.wakeMetres, after) else FieldFormat.rideWake(metres, after))
+        RideStore.update(this) { it.copy(phase = Phase.AWAKE, quietLeg = true,
+            note = if (short) "A short ride: a quiet word before your stop, no alarm." else "You started close to your stop: it tells you when you're there.") }
+        cancelBackup()
+        notifyRide(force = true)
+    }
+
+    /** (iOS `checkShortNotice`) a quiet leg's "Get off at the next stop": once a leg, not in its first minute. */
+    private fun checkShortNotice(d: Double, now: Double) {
+        val s = RideStore.state.value ?: return
+        val leg = s.leg ?: return
+        val step = LegAlarm.notice(legOf(s), now - s.legStart, LegAlarm.beforeReached(wakeBeforeAt, now), s.legArrival?.let { it - now }, d)
+        if (step.act != LegAlarm.Do.NOTICE) return
+        RideStore.update(this) { it.copy(readyTold = true) }
+        val (t, b) = ShortLeg.words(WristNotice.stop(leg.toStop))
+        rideLogOnce("short-ready|${s.index}", 600.0, "get ready · short leg: get off at the next stop (${Math.round(d)} m, leg ${Math.round(now - s.legStart)} s old)")
+        Notifications.quiet(this, GetReady.id(s.startedAt, s.index), t, b, s)
+        notifyRide(force = true)
+    }
+
+    /**
+     * (iOS `wrongWay`'s first checks) going away from this leg's stop: the vehicles on your road. The one you're on
+     * among them: carry on. The ride the next leg was planned with: this leg is done, the next starts on it. Else it
+     * looks again after another stretch (Android plans nothing again from it).
+     */
+    private suspend fun awayLook(index: Int) {
+        val s = RideStore.state.value ?: return
+        if (s.index != index) return
+        val next = s.trip.rides.getOrNull(index + 1) ?: return
+        val now = Iso.now()
+        val l = OnBoardLook()
+        try { withContext(Dispatchers.Default) { l.look(fixes.toList(), next, now, app.store.settings.value.realPositions) } } catch (_: Exception) {}
+        val found = l.lastJudged.filter { it.cost != null }.map { it.id }
+        val cur = RideStore.state.value ?: return
+        if (cur.index != index) return
+        when (val r = LegAlarm.onRoad(found, cur.vehicleTripId, next.tripId, cur.leg?.tripId)) {
+            is LegAlarm.Road.NextLeg -> boardedPlannedNext(r.tripId, l.lastLines[r.tripId] ?: next.line, next.isTrain, "on its road")
+            LegAlarm.Road.CarryOn -> { legClosest = cur.distance; awayLooked = false }
+            LegAlarm.Road.Nothing -> {
+                rideLogOnce("away|$index", 300.0, "away · going away from this leg's stop · ${found.size} on your road, not the next leg's planned ride: looks again later")
+                legClosest = cur.distance; awayLooked = false
+            }
+        }
+    }
+
+    /**
+     * (iOS 0.42.3 `boardedPlannedNext`) on the ride the next leg was planned with without this leg ending (a short hop
+     * to the station, its stop never reached by GPS): this leg is done and the next one starts on it ("next leg"), its
+     * alarm armed, the plan kept, nothing to pick.
+     */
+    private fun boardedPlannedNext(tripId: String, line: String, isTrain: Boolean, why: String) {
+        val s = RideStore.state.value ?: return
+        if (!(s.phase == Phase.SLEEPING || s.phase == Phase.AWAKE) || s.index + 1 >= s.trip.rides.size) return
+        val now = Iso.now()
+        val label = FieldFormat.vehicle(line, tripId, isTrain)
+        rideLogOnce("on-next|${s.index}", 120.0, "arrive · already on the next leg's $label ($why): this leg is done")
+        FieldLog.ride(FieldFormat.rideArrive("on the next leg's ride", s.distance, s.accuracy, now - s.legStart, s.legStartMetres))
+        legDone()
+        val cur = RideStore.state.value ?: return
+        if (cur.index != s.index + 1) return
+        RideStore.update(this) { it.copy(vehicleTripId = tripId, vehicleLine = line, vehicleSource = VehicleSource.BY_GPS, changeArrived = null) }
+        val leg = cur.leg
+        val here = fixes.lastOrNull()?.p
+        FieldLog.ride(FieldFormat.rideStart("next leg (its planned ride, $why)", label, if (here != null && leg?.to != null) Geo.metres(here, leg.to!!) else null,
+            cur.index + 1, cur.trip.rides.size))
+        RideStore.state.value?.let { noteBoarding(it, tripId, fixes.toList()) }
+        etaAt = 0.0
+        scope.launch { afterFound(tripId, split = false) }
+        notifyRide(force = true)
     }
 
     private fun startMetres(s: RideState): Double? {
@@ -731,12 +852,15 @@ class RideService : Service() {
         val to = leg.to ?: return
         val d = Geo.metres(at, to)
         RideStore.update(this) { it.copy(distance = d) }
-        if (s.phase == Phase.SLEEPING && now - s.legStart >= WakeRules.EARLY_LEG) {
+        // (0.9.1, iOS 0.42.3) not in the leg's first minute; a short leg wakes quietly (`LegAlarm.reckoned`)
+        if (s.phase == Phase.SLEEPING && now - s.legStart >= ShortLeg.NO_RING_FOR) {
             val i = wakeInput(s, d, maxOf(0.0, end - e.metres), pace, now) ?: return
             val fire = DeadReckon.decide(i)
-            if (DeadReckon.mayRing(fire, deadReckoned = true) && fire != null) {
-                ring("reckoned (${e.source.raw}) · " + WakeRule.log(fire), fire)
-                return
+            val step = LegAlarm.reckoned(legOf(s), now - s.legStart, DeadReckon.mayRing(fire, deadReckoned = true) && fire != null, legIsShort(s))
+            when (step.act) {
+                LegAlarm.Do.RING -> { ring("reckoned (${e.source.raw}) · " + WakeRule.log(fire!!), fire); return }
+                LegAlarm.Do.WAKE_SHORT -> { wakeQuietly(short = true, metres = d, after = null); return }
+                else -> {}
             }
         }
         notifyRide(force = false)
@@ -807,7 +931,7 @@ class RideService : Service() {
         // ride instead from the change, and a miss told only once it held a minute
         val nextBoard = board.firstOrNull { it.tripId == next.tripId }
         val you = if (s.lastLat != null && s.lastLon != null) nl.haltewekker.core.GeoPoint(s.lastLat, s.lastLon) else null
-        val seen = MissCall.Next(nextBoard?.live ?: next.live, MissCall.Seen.NONE, you?.let { y -> next.from?.let { nl.haltewekker.core.Geo.metres(y, it) } })
+        val seen = MissCall.Next(nextBoard?.live ?: next.live, nextSeen(next, atChange, now), you?.let { y -> next.from?.let { nl.haltewekker.core.Geo.metres(y, it) } })
         val fresh = s.vehicleSource != VehicleSource.NONE || (s.lastFixAt?.let { now - it <= MissCall.LIVE_FRESH } ?: false) && s.legArrival != null
         val feeding = MissCall.Feeding(s.vehicleTripId ?: prev.tripId, prev.line, prev.isTrain)
         val nextRide = ChangeGuide.Ride(next.tripId, next.line, next.isTrain, liveNext, next.platform, next.walkBefore, next.from)
@@ -823,6 +947,32 @@ class RideService : Service() {
         if (g.missed && s.changeMiss == null) FieldLog.ride("change · ${g.missText}")
         RideStore.update(this) { it.copy(changeLine = line, changeMiss = g.missText, changeSwitch = sw) }
         pendingSwitch = if (sw != null) g.target else null
+    }
+
+    private var nextTrip: Pair<String, TransitParse.LiveTrip>? = null
+    private var nextTripAt = 0.0
+
+    /**
+     * (0.9.1, iOS `plannedSeen`) at a change, the next ride's own GPS (OVapi by its trip, NS by its number, ≤ 3 min)
+     * against its stop on its road: at or before it (not left), or well past it (gone); else `NONE`. Its trip asked
+     * at most every 2 minutes.
+     */
+    private suspend fun nextSeen(next: nl.haltewekker.data.Ride, atChange: Boolean, now: Double): MissCall.Seen {
+        if (!atChange || !app.store.settings.value.realPositions) return MissCall.Seen.NONE
+        val from = next.from ?: return MissCall.Seen.NONE
+        val t = nextTrip?.takeIf { it.first == next.tripId && now - nextTripAt < 120 }?.second
+            ?: (try { Transit.trip(next.tripId, maxAge = 60.0) } catch (_: Exception) { null })?.also { nextTrip = next.tripId to it; nextTripAt = now }
+            ?: return MissCall.Seen.NONE
+        val f = try {
+            if (next.isTrain || RealPositions.isRail(t.mode)) RealPositions.trainNumber(next.num.ifEmpty { t.num })?.let { n -> LiveFeeds.trainFixes()[n] }
+                ?.let { RealPositions.usable(it, next.tripId, now, MissRule.FIX_FRESH) }
+            else RealPositions.usable(LiveFeeds.busFixes(), next.tripId, now, MissRule.FIX_FRESH)
+        } catch (_: Exception) { null } ?: return MissCall.Seen.NONE
+        val seen = MissCall.seenOnRoad(t.path, t.stops.map { it.point }, from, f.point, now - f.at)
+        if (seen != MissCall.Seen.NONE) rideLogOnce("next-seen|${next.tripId}|$seen", 120.0,
+            "change · ${FieldFormat.vehicle(next.line, next.tripId, next.isTrain)} by its own GPS (${Math.round(now - f.at)} s): " +
+                if (seen == MissCall.Seen.NOT_LEFT) "not left its stop yet" else "well past its stop")
+        return seen
     }
 
     private var pendingSwitch: ChangeGuide.Ride? = null
@@ -891,6 +1041,14 @@ class RideService : Service() {
         when (out) {
             is RideChoice.Outcome.Settle -> {
                 val c = names[out.id]
+                // (0.9.1, iOS 0.42.3) settled on the ride the next leg was planned with: that's the next leg
+                if (c != null && LegAlarm.onRoad(listOf(out.id), null, s.trip.rides.getOrNull(s.index + 1)?.tripId, s.leg?.tripId) is LegAlarm.Road.NextLeg) {
+                    choice.clear()
+                    RideStore.update(this) { it.copy(choosing = emptyList(), ask = null) }
+                    Notifications.cancelTag(this, Notifications.ASK_TAG, Notifications.NEWS_ID + 3)
+                    boardedPlannedNext(c.tripId, c.line, c.isTrain, "found on board")
+                    return
+                }
                 RideStore.update(this) { it.copy(choosing = emptyList(), ask = null) }
                 Notifications.cancelTag(this, Notifications.ASK_TAG, Notifications.NEWS_ID + 3)
                 val cur = RideStore.state.value ?: return
@@ -1049,8 +1207,10 @@ class RideService : Service() {
         val newRides = rides.subList(0, s.index) + mine + rides.subList(k + 1, rides.size)
         val kms = s.wakeKm.subList(0, minOf(s.index + 1, s.wakeKm.size)) + s.wakeKm.drop(k + 1)
         RideStore.update(this) { it.copy(trip = it.trip.copy(rides = newRides, end = if (k + 1 >= rides.size) (st.arrival ?: it.trip.end) else it.trip.end),
-            wakeKm = kms, eta = null, distance = null, phase = if (it.phase == Phase.AWAKE) Phase.SLEEPING else it.phase) }
+            wakeKm = kms, eta = null, distance = null, phase = if (it.phase == Phase.AWAKE) Phase.SLEEPING else it.phase,
+            quietLeg = if (it.phase == Phase.AWAKE) false else it.quietLeg, legStartMetres = null) }
         etaAt = 0.0; wakeRoute = emptyList(); wakeLive = null
+        legClosest = null; awayLooked = false; wakeBeforeAt = null
         backupScheduledFor = null; scheduleBackup()
         FieldLog.ride("stay on · ${FieldFormat.vehicle(cur.vehicleLine ?: leg.line, tripId, true)} to $name · no change at ${skipped.joinToString(", ")}")
         val nextRide = rides.getOrNull(k + 1)

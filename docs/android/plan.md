@@ -240,6 +240,34 @@ byte for byte, and its test vectors as JUnit tests before any screen:
 
 ### A9 — iOS 0.41, 0.42.0, 0.42.2, 0.42.3 (0.9.0, code 11) — partly built ("As built A9" says what)
 
+### A9.1 — the 0.42.3 alarm rules wired (0.9.1, code 12) — built ("As built A9.1" says how)
+
+## As built A9.1 (0.9.1, version code 12): short legs, the first minute, the next leg's ride
+
+**The ring path as one pure step (`ride/LegAlarm.kt`, `LegAlarmTest`).** `LegAlarm.fix` takes the leg (phase, quiet,
+told, where it started), the fix (seconds into the leg, metres to its stop, accuracy), whether the wake rule fired and
+whether the leg is short (`ShortLeg.isShort`: the straight line from its first to its last stop within the wake
+distance or 800 m), and says RING / WAKE_SHORT / WAKE_EARLY / HOLD / ARRIVE / NOT_YET; `reckoned` the same for dead
+reckoning (nothing in the first minute, short: quiet); `notice` the quiet "Get off at the next stop". `RideService`
+applies it: within 20 s a firing wake rule wakes quietly (as before), 20–60 s it holds (`ring · held` in the log), after
+that a normal leg rings at the next fix; a short leg is awake without the alarm (`wake · short leg …`), its quiet word a
+silent notification once, after the first minute, when the stop before yours is reached by the vehicle's trip, 90 s
+before it's in, or halfway; a quiet leg arrives only after its first minute and within half the way it started from
+(200–450 m). `quietLeg` and `legStartMetres` are in `RideState` (old saved rides decode with the defaults).
+
+**The next leg's planned ride (`LegAlarm.onRoad`, iOS `RideGuards.plannedNextAmong`).** Going away from this leg's stop
+(800 m further than you've been within 3 km of it, else 2 km; a fix ≥ 5 m/s, ≤ 100 m), once a stretch, the matcher
+looks at what's on your road (the next leg's ride as its planned one, so its NS position is used): the vehicle you're on
+among them, carry on; the next leg's planned ride, this leg ends ("on the next leg's ride") and the next starts on it
+(`start · next leg (its planned ride, on its road)`), alarm armed, no choice; else it looks again later. The ride's own
+look finding the next leg's ride by its own GPS, or a choice settling on it, does the same ("found on board").
+
+**The next ride's own GPS at a change.** `MissCall.seenOnRoad`: its trip (every 2 min), its OVapi or NS fix (≤ 3 min),
+put on its road against its stop: not left (at or before it, 40 m) or gone (150 m past). Logged once when it says so.
+
+**The log line.** `RealPositions.noGPSReason` (iOS `RealPositionsStore.noGPSReason`) in the `vehicle shown · …` line when
+it's by times or not drawn: `no gps: no ovapi match for trip_id 400100123: not started yet, starts 24:10`.
+
 ## As built A9 (0.9.0, version code 11): the rules of iOS 0.41–0.42.3
 
 **Pure rules, with every iOS vector.** `travel/WalkGuide.kt` (`WalkGuideTest`; Android adds `Turn.of(type, modifier)`
@@ -257,8 +285,8 @@ says "Should be leaving now · Look out for it", "May have left · Look out for 
 **Not built yet (left for the next builder).** The walk-with-arrows screen (OSRM foot route
 `https://routing.openstreetmap.de/routed-foot/route/v1/foot/{lon},{lat};{lon},{lat}?steps=true&geometries=geojson&overview=full`,
 throttled ≤ 1 per 20 s, cached, `Net.userAgent`; buzzes, spoken turns with headphones, "You're here · Platform 4");
-the nearby-stops view with its 0.42.2 fetch design and Whole-trip rows; `ShortLeg` and `NextLegGuard` in the ride's
-alarm path; the next ride's own GPS for `MissCall.seen`; the `no gps: no ovapi match …` log line. A Transitous
+the nearby-stops view with its 0.42.2 fetch design and Whole-trip rows; (done in 0.9.1: `ShortLeg` and `NextLegGuard` in
+the ride's alarm path, the next ride's own GPS for `MissCall.seen`, the `no gps: no ovapi match …` log line). A Transitous
 cool-down after a 429 (the nearby view's `cooling`) is also still to add in `data/Transit.kt`.
 
 ## As built A8.1 (0.8.1, version code 10): the rest of iOS 0.40
