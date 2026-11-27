@@ -36,7 +36,7 @@ data class LiveLeg(
     val deck: String? = null,
     val late: Int? = null,
     val mins: Int? = null,
-    /** (0.10.7) This leg's own road, encoded as the state's `shape`: the next two rides' (≤ 80 points), else where it
+    /** (0.10.8) This leg's own road, encoded as the state's `shape`: the next two rides' (≤ 80 points), else where it
      *  goes from and to (two points); the current ride's only when the state has no road or stops of its own. */
     val shape: String? = null,
 )
@@ -64,7 +64,7 @@ object LiveTripV2 {
         val mode: String, val line: String? = null, val num: String? = null, val from: String, val to: String,
         val dep: Double? = null, val arr: Double? = null, val depPlatform: String? = null, val arrPlatform: String? = null,
         val coach: Int? = null, val deck: String? = null, val late: Int? = null, val mins: Int? = null,
-        /** (0.10.7) Where it starts and ends, and its vehicle's whole road when saved (cut here to this leg). */
+        /** (0.10.8) Where it starts and ends, and its vehicle's whole road when saved (cut here to this leg). */
         val fromPt: GeoPoint? = null, val toPt: GeoPoint? = null, val road: List<GeoPoint> = emptyList(),
     )
     data class StopIn(val name: String, val lat: Double, val lon: Double, val t: Double? = null)
@@ -82,7 +82,7 @@ object LiveTripV2 {
         /** This app reads messages (the page shows its message box). */
         val inbox: Boolean = true,
         val music: LiveMusic? = null,
-        /** (0.10.7) The version of your picture the relay has (`LiveFace`), when it has one. */
+        /** (0.10.8) The version of your picture the relay has (`LiveFace`), when it has one. */
         val pic: Int? = null,
     )
 
@@ -214,7 +214,7 @@ object LiveTripV2 {
             face = t.face?.takeIf { Regex("^[0-9A-Fa-f]{6}$").matches(it) }?.uppercase(), inbox = if (t.inbox) true else null, music = music,
             pic = t.pic?.takeIf { it >= 1 },
         )
-        // (0.10.7) each leg's own road from the one before the current (a walk) on: the next two rides' in full
+        // (0.10.8) each leg's own road from the one before the current (a walk) on: the next two rides' in full
         val cur = s.leg ?: 0
         val own = s.shape != null || s.stops != null
         val straight = arrayOfNulls<String>(legs.size)
@@ -370,7 +370,7 @@ object LiveMessages {
 }
 
 /**
- * (0.10.7) Your Friends picture on a live link's page: 128 px, a JPEG of at most 12 KB, locked with the link's key under
+ * (0.10.8) Your Friends picture on a live link's page: 128 px, a JPEG of at most 12 KB, locked with the link's key under
  * its own AAD ("hw-live-face-v1\n" + token) and put once at `/live/v1/face` (again when the picture changes); the state's
  * `pic` says which one the relay has, so the page fetches it once. No picture: nothing is put.
  */

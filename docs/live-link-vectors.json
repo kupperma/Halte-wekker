@@ -257,7 +257,7 @@
     "shapePoints": 16
   },
   "input2": {
-    "about": "(Android 0.10.7, iOS 0.42.9) At a change with no stops of its own: each leg's from and to (fromPt, toPt: [lat, lon]) and the saved road of the rides ahead (road), cut and simplified to at most 80 points for the current ride and the next two, else a straight line; the walk before the current ride too; the phone's fix; the picture's version (pic).",
+    "about": "(Android 0.10.8, iOS 0.42.10) At a change with no stops of its own: each leg's from and to (fromPt, toPt: [lat, lon]) and the saved road of the rides ahead (road), cut and simplified to at most 80 points for the current ride and the next two, else a straight line; the walk before the current ride too; the phone's fix; the picture's version (pic).",
     "now": 1800001300,
     "base": {
       "v": 1,
@@ -901,7 +901,7 @@
     }
   },
   "face": {
-    "about": "(Android 0.10.7, iOS 0.42.9) The sharer's picture as put at /live/v1/face: the JPEG's bytes locked with the link's key, AAD \"hw-live-face-v1\\n\" + token.",
+    "about": "(Android 0.10.8, iOS 0.42.10) The sharer's picture as put at /live/v1/face: the JPEG's bytes locked with the link's key, AAD \"hw-live-face-v1\\n\" + token.",
     "plain": "_9j_4AABAgMEBQYHCAkKCwwNDg8QERITFBUWFxgZGhscHR4fICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6O__Z",
     "nonce": "808182838485868788898a8b",
     "data": "AYCBgoOEhYaHiImKi3J59jeSq0ZO39iLRFWH12efdkSxwaGxlxwugU5aR6_Wtm2CoJw8tN4DQqgWDntobWeiR2GKuk3Ns9EyCSiGsfanPCLE8U1rYqedqjsqKmRJXZM"
