@@ -193,7 +193,7 @@ final class LiveTripV2Tests: XCTestCase {
         XCTAssertEqual(String(decoding: try LiveCrypto.encoder.encode(s), as: UTF8.self), FriendLiveTests.plain)
     }
 
-    // MARK: (0.42.9) each leg's own road, the picture: docs/live-link-vectors.json's input2, state2 and face
+    // MARK: (0.42.10) each leg's own road, the picture: docs/live-link-vectors.json's input2, state2 and face
 
     private func vectors() throws -> [String: Any] {
         let url = Bundle(for: Self.self).url(forResource: "live-link-vectors", withExtension: "json")

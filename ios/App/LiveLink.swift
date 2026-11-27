@@ -61,7 +61,7 @@ struct LiveState: Codable, Equatable {
     var legs: [LiveLeg]? = nil
     var music: LiveMusic? = nil
     var next: Int? = nil
-    /// (0.42.9) The version of the sharer's picture at `/live/v1/face` (`LiveFace`): the page fetches it again when it changes.
+    /// (0.42.10) The version of the sharer's picture at `/live/v1/face` (`LiveFace`): the page fetches it again when it changes.
     var pic: Int? = nil
     var shape: String? = nil
     var stops: [LiveStop]? = nil

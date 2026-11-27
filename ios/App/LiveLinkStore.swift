@@ -29,7 +29,7 @@ final class LiveLinkStore: ObservableObject {
         var lastSeq: Int? = nil
         var seen: Int? = nil
         var replies: [LiveReply]? = nil
-        /// (0.42.9) The picture the relay has (`LiveFace.stamp`) and its version (the state's `pic`; none: not put).
+        /// (0.42.10) The picture the relay has (`LiveFace.stamp`) and its version (the state's `pic`; none: not put).
         var picStamp: String? = nil
         var pic: Int? = nil
 
@@ -209,7 +209,7 @@ final class LiveLinkStore: ObservableObject {
                 x.dep = p?.departure.timeIntervalSince1970
             }
             x.depPlatform = p?.platform
-            // (0.42.9) where it goes from and to, and the saved road of the rides ahead (the page draws the rest of the trip)
+            // (0.42.10) where it goes from and to, and the saved road of the rides ahead (the page draws the rest of the trip)
             x.fromPt = GeoPoint(l.from.coordinate)
             x.toPt = GeoPoint(l.to.coordinate)
             if k >= t.index, let id = tripId, let r = RideCacheStore.shared.saved(id) { x.road = r.shape }
@@ -265,7 +265,7 @@ final class LiveLinkStore: ObservableObject {
             problem = "Couldn’t make the link. Check your connection and try again."
             return nil
         }
-        // (0.42.9) your picture, then a state that says so (the relay takes one every 5 s)
+        // (0.42.10) your picture, then a state that says so (the relay takes one every 5 s)
         if faceDue(l) {
             enqueue {
                 await self.sendFace()
@@ -277,7 +277,7 @@ final class LiveLinkStore: ObservableObject {
         return URL(string: l.keys.link)
     }
 
-    // MARK: your picture (0.42.9): 128 px, ≤ 12 KB, locked with the link's key; put once, again when it changes
+    // MARK: your picture (0.42.10): 128 px, ≤ 12 KB, locked with the link's key; put once, again when it changes
 
     private func faceDue(_ l: Link) -> Bool {
         LiveFace.due(LiveFace.stamp(FriendStore.shared.myPicture), sent: l.picStamp ?? "", lastTry: faceTried, now: Date())

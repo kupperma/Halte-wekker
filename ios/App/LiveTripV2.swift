@@ -25,7 +25,7 @@ struct LiveLeg: Codable, Equatable {
     var deck: String? = nil
     var late: Int? = nil
     var mins: Int? = nil
-    /// (0.42.9) This leg's own road, encoded as the state's `shape`: the next two rides' (≤ 80 points), else where it goes
+    /// (0.42.10) This leg's own road, encoded as the state's `shape`: the next two rides' (≤ 80 points), else where it goes
     /// from and to (two points); the current ride's only when the state has no road or stops of its own.
     var shape: String? = nil
 }
@@ -73,7 +73,7 @@ enum LiveTripV2 {
         var deck: String? = nil
         var late: Int? = nil
         var mins: Int? = nil
-        /// (0.42.9) Where it starts and ends, and its vehicle's whole road when saved (cut here to this leg).
+        /// (0.42.10) Where it starts and ends, and its vehicle's whole road when saved (cut here to this leg).
         var fromPt: GeoPoint? = nil
         var toPt: GeoPoint? = nil
         var road: [GeoPoint] = []
@@ -105,7 +105,7 @@ enum LiveTripV2 {
         /// This app reads messages (the page shows its message box).
         var inbox: Bool = true
         var music: LiveMusic? = nil
-        /// (0.42.9) The version of your picture the relay has (`LiveFace`), when it has one.
+        /// (0.42.10) The version of your picture the relay has (`LiveFace`), when it has one.
         var pic: Int? = nil
     }
 
@@ -300,7 +300,7 @@ enum LiveTripV2 {
             }
         }
         if let p = t.pic, p >= 1 { s.pic = p }
-        // (0.42.9) each leg's own road from the one before the current (a walk) on: the next two rides' in full
+        // (0.42.10) each leg's own road from the one before the current (a walk) on: the next two rides' in full
         let cur: Int = s.leg ?? 0
         let own: Bool = s.shape != nil || s.stops != nil
         var straight: [String?] = Array(repeating: nil, count: legs.count)
@@ -430,7 +430,7 @@ enum LiveMessages {
     }
 }
 
-/// (0.42.9) Your Friends picture on a live link's page: 128 px, a JPEG of at most 12 KB, locked with the link's key under
+/// (0.42.10) Your Friends picture on a live link's page: 128 px, a JPEG of at most 12 KB, locked with the link's key under
 /// its own AAD ("hw-live-face-v1\n" + token) and put once at `/live/v1/face` (again when the picture changes); the state's
 /// `pic` says which one the relay has, so the page fetches it once. No picture: nothing is put.
 enum LiveFace {
