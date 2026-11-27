@@ -112,7 +112,9 @@ final class FriendExtrasStore: NSObject, ObservableObject, CLLocationManagerDele
     func attach(_ t: TripManager) {
         guard trip == nil else { return }
         trip = t
-        t.onRegion = { [weak self] id, entered in self?.region(id, entered: entered) }
+        // (0.42.6) the school alarm hears them too (leaving home, at school): passed on, not replaced
+        let prev = t.onRegion
+        t.onRegion = { [weak self] id, entered in prev?(id, entered); self?.region(id, entered: entered) }
         t.$phase.removeDuplicates().sink { [weak self] p in
             if p != .idle && p != .finished { self?.markLeft() }
         }.store(in: &subs)

@@ -215,6 +215,19 @@ The same switches, words and rules, so the relay and the replay treat both alike
   conditions as the lines (after a trip, else hourly; not during a trip, on a metered/Low Data network or in battery
   saver). Drop the sent points from the queue only after a 200; switching off clears the queue.
 
+### The school wake-up when you're already going, and "Be there at …" per day (0.42.6)
+
+What's new in 0.42.6 (`ios/App/SchoolArrive.swift`, `ios/App/School.swift`; tests `SchoolArriveTests`; Android parity
+in [android-todo.md](android-todo.md) › iOS 0.42.6). New lines in the ride log:
+
+- `school alarm · skipped: already on the way (trip 07:12)` (or `already at school (08:40)`): this morning's school
+  wake-up was taken off (AlarmKit's alarm and the notifications) because a trip to school started, you got to school,
+  or a trip or ride started and you left home.
+- `school alarm · 2026-11-27: turned back on after the skip`: you turned that day's alarm back on on Your day.
+- `school alarm · 2026-11-27: be there 09:00` (or `be there as the timetable says`): the day's time changed (Your day,
+  the card, Siri); `school alarm · 2026-11-27: no plan just now · leave moved to 07:40 by the change` when the planner
+  had no answer right after it.
+
 ### False "You'll miss", short legs, the planned train at a change, OVapi keys (0.42.3)
 
 What's new in 0.42.3 (`ios/App/MissCall.swift` with `ChangeGuide.swift`, `ios/App/ShortLeg.swift`,

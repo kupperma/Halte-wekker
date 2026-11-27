@@ -133,6 +133,38 @@ struct StartTripIntent: AppIntent {
     }
 }
 
+/// (0.42.6) "Be at school at 9": the next school day's "Be there at …"; its trip and wake-up alarm are planned again.
+struct BeAtSchoolIntent: AppIntent {
+    static var title: LocalizedStringResource = "Be at school at a time"
+    static var description = IntentDescription("Changes when you want to be at school on your next school day: the trip there and your wake-up alarm follow.")
+    static var openAppWhenRun: Bool = false
+
+    @Parameter(title: "Time", requestValueDialog: IntentDialog("When do you want to be at school?"))
+    var time: Date
+
+    init() {}
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        let school = SchoolAlarm.shared
+        let now = Date()
+        let days: [SchoolAlarm.Planned] = school.week.filter { $0.classStart > now && !$0.rang }
+        guard school.on, let p = days.min(by: { $0.classStart < $1.classStart }) else {
+            return .result(dialog: "There’s no school day planned to change. Turn on the school alarm in Haltewekker first.")
+        }
+        let cal = Calendar.current
+        let hm = cal.dateComponents([.hour, .minute], from: time)
+        guard let at = cal.date(bySettingHour: hm.hour ?? 9, minute: hm.minute ?? 0, second: 0, of: p.classStart) else {
+            return .result(dialog: "I couldn’t read that time.")
+        }
+        if school.applyArrival(p.day, at) { await school.refresh(now: true, staleOnly: true) }
+        let when: String = SchoolAlarm.dayWord(p.classStart)
+        let alarm: String = school.week.first(where: { $0.day == p.day })?.alarm.map { " Your alarm: \(Fmt.hhmm($0))." } ?? ""
+        let text: String = "Be at school \(when) at \(Fmt.hhmm(at)), class \(Fmt.hhmm(p.classStart)).\(alarm)"
+        return .result(dialog: "\(text)")
+    }
+}
+
 struct HaltewekkerShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
         AppShortcut(intent: WhensMyBusIntent(), phrases: [
@@ -157,5 +189,10 @@ struct HaltewekkerShortcuts: AppShortcutsProvider {
             "\(.applicationName) start my trip",
             "I’m on it in \(.applicationName)",
         ], shortTitle: "Start my trip", systemImageName: "play.fill")
+        AppShortcut(intent: BeAtSchoolIntent(), phrases: [
+            "Be at school at a time with \(.applicationName)",
+            "Change when I’m at school with \(.applicationName)",
+            "\(.applicationName) be at school earlier",
+        ], shortTitle: "Be at school at", systemImageName: "clock.arrow.circlepath")
     }
 }

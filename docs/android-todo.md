@@ -3,6 +3,39 @@
 The rules and numbers for each are in [logs-export.md](logs-export.md) › For Android (parity), with the iOS files and
 their tests.
 
+## iOS 0.42.6
+
+From the field report "The alarm went off when I was already on a trip to school. I was meeting friends earlier, so I
+left two hours earlier and set my own alarm. Maybe add a change-arrival-time option?". Rules in
+`ios/App/SchoolArrive.swift` (`SchoolArrive`, `OnTheWay`; tests `SchoolArriveTests`), the wiring in
+`ios/App/School.swift` (`checkOnTheWay`, `setArrival`, `alarmFor`) and `ios/App/ArriveViews.swift`; the log lines in
+[logs-export.md](logs-export.md) › 0.42.6.
+
+- [x] **Never ring when you're already going.** Today's school wake-up (still to ring) is skipped when (a) a trip toward
+      school (your fixed route to school, or its last stop within 1.5 km of school) started this morning (from 03:00)
+      and either runs or you're not back home (a fix ≤ 15 min old within 500 m of home rings again), (b) you got to
+      school today (the school region, a trip to school that reached its last stop, or a fresh fix within 400 m),
+      (c) a trip or ride started this morning and you left home's region this morning or a fresh fix is more than
+      1 km from home. Moving around at home without a trip or ride never skips it; a trip that started before 03:00
+      doesn't count. iOS cancels the AlarmKit alarm and the `wake-<day>-0…2` notifications, on a trip start, a region,
+      the trip's position (each minute) and every plan (background refresh too); a quiet notification says "No school
+      alarm today · You're already on the way (trip 07:12)", and the day's switch on Your day turns it back on (not
+      skipped again that day). **Android 0.10.x:** `school/SchoolArrive.kt` `OnTheWay` (`SchoolArriveTest`, every iOS
+      vector); a ride's start and end from `RideStore.set`, home's exit and school's entry from `AutoStart.onRegion`,
+      every plan, and `WakeReceiver` checks once more as the alarm goes off (decided as if still to come).
+- [x] **"Be there at …" per day.** Your day / Your week (and the school alarm's card): the day's be-there time (default
+      the timetable's: first class minus how early), a time picker, "1 h earlier", "2 h earlier", "30 min later" (from
+      the timetable's), "No alarm this day", "Reset to timetable"; shows "Changed: be there 09:00 (class 11:00)". Per
+      date (yyyy-MM-dd, `school.arrive`), gone after its day; whole minutes, the timetable's own minute is no change,
+      more than 12 h from the class is refused. Planning arrives by it at once (and in the background); with no answer
+      from the planner right after a change, the old trip moves by the change (leave and arrival shifted, planned again
+      at the next chance). The alarm's label and the wake-up notification: "Time to get up · be there 09:00", "Leave
+      07:50 to be there 09:00 (class 11:00)" (as before when the day isn't changed); a new label alone sets the alarm
+      again while it's more than 5 min ahead. Siri / Shortcuts: "Be at school at a time" for the next school day.
+      **Android 0.10.x:** `SchoolArrive` and `SchoolPlan.plan(arrive = …)` (the same shift and relabel), `DayScreen`'s
+      "Be there at" row (time picker, the quick choices, no alarm this day, reset), the home card's changed line.
+      No Siri on Android.
+
 ## iOS 0.42.3
 
 From a field log of 27 November. Rules in `ios/App/MissCall.swift` (with `ChangeGuide.swift`) and

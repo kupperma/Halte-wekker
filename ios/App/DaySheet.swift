@@ -322,6 +322,8 @@ struct DaySheet: View {
                     .disabled(p.rang || tooLate(p) || !school.on)
                     .accessibilityHint("This day only")
                     Text(wakeNote(p, item)).font(DS.footnote).foregroundStyle(DS.secondary)
+                    // (0.42.6) this day's "Be there at …": change it, the plan and the alarm follow
+                    if school.on { ArriveRow(day: p.day).padding(.top, 4) }
                 }
             }
         case .leave:
@@ -360,6 +362,7 @@ struct DaySheet: View {
 
     private func wakeNote(_ p: SchoolAlarm.Planned, _ item: DayTimeline.Item) -> String {
         if p.rang && p.alarmId != nil { return "It has rung" }
+        if let w = school.goingWords(p.day) { return "Off: you’re \(w)" }
         if school.isSkipped(p.day) { return "Off for this day" }
         if tooLate(p) { return "Too late for an alarm on this day" }
         return item.detail ?? "This day only"

@@ -1,4 +1,5 @@
 import BackgroundTasks
+import Combine
 import CoreLocation
 import EventKit
 import SwiftUI
@@ -13,7 +14,9 @@ import AlarmKit
 @MainActor
 final class SchoolAlarm: ObservableObject {
     static let shared = SchoolAlarm()
-    weak var trip: TripManager?
+    /// The trip (read only): set by TripManager as it starts, also when iOS starts the app in the background. (0.42.6)
+    /// Its start, its end and where it goes tell whether you're already on the way this morning (`OnTheWay`).
+    weak var trip: TripManager? { didSet { if let t = trip, t !== oldValue { watchMorning(t) } } }
     /// The calendar store, made in the background the first time it's needed (it loads your calendars).
     private var storeObj: EKEventStore?
     private func calendarStore() async -> EKEventStore {
@@ -49,12 +52,15 @@ final class SchoolAlarm: ObservableObject {
         var alarm: Date?
         var alarmId: String?
         var checked: Date               // when its trip was last planned
+        /// (0.42.6) The words the alarm was set with ("title|body"): set again when they change (a new be-there time).
+        var label: String?
         /// The alarm has gone off (or its time has passed): never touched again, so it can't ring twice.
         var rang: Bool { (alarm ?? .distantFuture) <= Date() }
     }
 
     /// The next school day, with the full trip (for the metro line), for the screens.
     struct Day: Equatable {
+        var day: String = ""            // yyyy-MM-dd (0.42.6)
         let title: String
         let room: String?
         let classStart: Date
@@ -68,6 +74,16 @@ final class SchoolAlarm: ObservableObject {
     @Published private(set) var week: [Planned] = []
     /// The days (yyyy-MM-dd) whose wake-up alarm you turned off on Your day: that day only (`SchoolSkip`).
     @Published private(set) var skipped: Set<String> = []
+    /// (0.42.6) "Be there at …" per day (yyyy-MM-dd), instead of the timetable's: gone after its day (`SchoolArrive`).
+    @Published private(set) var arrive: [String: Date] = [:]
+    /// (0.42.6) The days whose alarm was skipped because you were already on the way, and why (`OnTheWay`).
+    @Published private(set) var going: [String: String] = [:]
+    /// (0.42.6) The days you turned back on after such a skip: not skipped again.
+    var keepRinging: Set<String> = []
+    /// (0.42.6) What was seen this morning: a trip's start, toward school, at school, leaving home.
+    var seen = OnTheWay.Seen(day: "")
+    var morningSubs: Set<AnyCancellable> = []
+    var lastTripPhase: TripManager.Phase = .idle
     private var trips: [String: DoorTrip] = [:]         // this session's trips, by day
 
     private var lastPlan = Date.distantPast
@@ -82,6 +98,7 @@ final class SchoolAlarm: ObservableObject {
         week = (d.data(forKey: "school.week").flatMap { try? JSONDecoder().decode([Planned].self, from: $0) } ?? [])
             .filter { $0.classStart > Date().addingTimeInterval(-2 * 86400) }
         skipped = SchoolSkip.prune(Set(d.stringArray(forKey: SchoolSkip.key) ?? []), today: Fmt.ymd.string(from: Date()))
+        loadMorning()
         updateNext()
         // the timetable changed (TimeEdit synced): plan again, once a burst of changes has settled
         observer = NotificationCenter.default.addObserver(forName: .EKEventStoreChanged, object: nil, queue: .main) { _ in
@@ -128,7 +145,7 @@ final class SchoolAlarm: ObservableObject {
     @Published private(set) var next: Day?
     private func updateNext() {
         guard let p = week.filter({ $0.classStart > Date() }).min(by: { $0.classStart < $1.classStart }) else { next = nil; return }
-        next = Day(title: p.title, room: p.room, classStart: p.classStart, beThere: p.beThere, trip: trips[p.day], leave: p.leave, alarm: p.alarm)
+        next = Day(day: p.day, title: p.title, room: p.room, classStart: p.classStart, beThere: p.beThere, trip: trips[p.day], leave: p.leave, alarm: p.alarm)
     }
 
     /// Turned on: ask for the calendar and the alarm, pick the school calendar, plan.
@@ -334,6 +351,9 @@ final class SchoolAlarm: ObservableObject {
 
     private func plan(force: Bool) async {
         await restoreTurnedOn()
+        // (0.42.6) the day's changes still to come; this morning's alarm skipped if you're already on the way
+        pruneDays()
+        checkOnTheWay()
         allowed = EKEventStore.authorizationStatus(for: .event) == .fullAccess
         let schedule = Self.schedule
         guard allowed || schedule != .calendars else { note = "Allow calendar access to read your timetable."; return }
@@ -351,7 +371,8 @@ final class SchoolAlarm: ObservableObject {
             let old = week.first { $0.day == k }
             if let old, old.rang { continue }                               // it rang: leave it alone
             guard e.startDate > now.addingTimeInterval(20 * 60) else { continue }
-            let beThere = e.startDate.addingTimeInterval(-Double(earlyMinutes) * 60)
+            // (0.42.6) the day's own "Be there at …" when you changed it, else the timetable's
+            let beThere: Date = SchoolArrive.beThere(classStart: e.startDate, early: earlyMinutes, override: arrive[k])
             // near days often (live times), far days now and then (the timetable); always when the class moved
             let soon = e.startDate.timeIntervalSince(now) < 36 * 3600
             let moved = old.map { $0.classStart != e.startDate || $0.beThere != beThere } ?? true
@@ -361,7 +382,12 @@ final class SchoolAlarm: ObservableObject {
             var seen = Set<String>()
             let inTime = all.filter { $0.end <= beThere.addingTimeInterval(60) && $0.first.departure > now && seen.insert($0.id).inserted }
             guard var best = inTime.max(by: { ($0.start, -$0.rides.count) < ($1.start, -$1.rides.count) }) else {
-                continue                                                    // no answer just now: keep what it had
+                // no answer just now: keep what it had; (0.42.6) right after you changed the day's time, its trip moved by
+                // the change, so the alarm follows at once (and it's planned again at the next chance)
+                if let old, old.beThere != beThere, old.classStart == e.startDate, let ol = old.leave {
+                    if await shiftForChange(old, beThere: beThere, oldLeave: ol, now: now) { changed = true }
+                }
+                continue
             }
             // A change you'll make: also the earlier buses onto the same train, and the latest one that leaves room to
             // change (a late 306 shouldn't cost you the train, and the next one is 20 to 30 minutes later).
@@ -386,35 +412,11 @@ final class SchoolAlarm: ObservableObject {
             p.title = e.title ?? "Class"; p.room = e.location; p.classStart = e.startDate; p.beThere = beThere
             p.leave = best.start; p.arrive = best.end; p.checked = now
             p.lines = best.rides.map { $0.isTrain ? $0.line : $0.line }.joined(separator: " · ")
-            // move the alarm only if its minute changed; set none if it's already too late for one, or the day is off
-            // (on the day as it is now: it may have been turned off and on while this waited for the network)
-            let cur = SchoolSkip.current(snapshot: (p.alarm, p.alarmId),
-                                         live: week.first(where: { $0.day == k }).map { (alarm: $0.alarm, id: $0.alarmId) })
-            p.alarm = cur.alarm; p.alarmId = cur.id
-            switch SchoolSkip.decide(alarmAt, day: k, skipped: skipped, current: p.alarm, hasId: p.alarmId != nil, now: now) {
-            case .keep:
-                break
-            case .clear:
-                // turned off for this day: no alarm (the trip is still planned, to show)
-                await WakeAlarm.cancelInBackground(p.alarmId, day: k)
-                p.alarmId = nil; p.alarm = nil
-                changed = true
-            case .set(let at, let schedule):
-                await WakeAlarm.cancelInBackground(p.alarmId, day: k)
-                p.alarmId = nil
-                p.alarm = at
-                if schedule {
-                    p.alarmId = await WakeAlarm.schedule(at: at, day: k, title: "Time to get up",
-                                                         body: "Leave \(Fmt.hhmm(best.start)) for your \(Fmt.hhmm(e.startDate)) class")
-                }
-                changed = true
-                if old == nil || old?.alarmId == nil { added.append(p) }
-            }
-            // turned off while this was planning: its alarm goes after all
-            if skipped.contains(k), p.alarmId != nil || p.alarm != nil {
-                await WakeAlarm.cancelInBackground(p.alarmId, day: k)
-                p.alarmId = nil; p.alarm = nil
-            }
+            let text = alarmText(day: k, leave: best.start, classStart: e.startDate, beThere: beThere)
+            let r = await alarmFor(p, at: alarmAt, text: text, now: now)
+            p = r.p
+            if r.changed { changed = true }
+            if r.added { added.append(p) }
             if let i = week.firstIndex(where: { $0.day == k }) { week[i] = p } else { week.append(p) }
         }
         week.removeAll { $0.classStart < now.addingTimeInterval(-2 * 86400) }
@@ -436,12 +438,16 @@ final class SchoolAlarm: ObservableObject {
         if !set.isEmpty {
             let list = set.prefix(5).map { "\(Self.shortDay($0.classStart)) \(Fmt.hhmm($0.alarm!))" }.joined(separator: " · ")
             let title = set.count == 1 ? "School alarm \(Self.dayWord(set[0].alarm!)) \(Fmt.hhmm(set[0].alarm!))" : "\(set.count) school alarms set"
-            let body = set.count == 1 ? "Leave \(Fmt.hhmm(set[0].leave!)) · first class \(Fmt.hhmm(set[0].classStart)) \(set[0].title)" : list
+            var body = set.count == 1 ? "Leave \(Fmt.hhmm(set[0].leave!)) · first class \(Fmt.hhmm(set[0].classStart)) \(set[0].title)" : list
+            // (0.42.6) a day whose time you changed says so
+            if set.count == 1, let c = changedLine(set[0].day) { body += " · " + c }
             NoticeLog.shared.add(key: "school-set-\(list)", title: title, body: body, kind: "ok")
             Notices.shared.show(title: title, body: body, kind: "ok")
         } else if let o = oldNext, let n = next, o.classStart == n.classStart, let a = o.alarm, let b = n.alarm, abs(b.timeIntervalSince(a)) >= 5 * 60, b > Date() {
             let title = "School alarm moved to \(Fmt.hhmm(b))"
-            let body = "Was \(Fmt.hhmm(a)) · the buses changed · leave \(Fmt.hhmm(n.leave ?? b)) for \(Fmt.hhmm(n.classStart)) \(n.title)"
+            // (0.42.6) a day whose time you changed: the time you picked instead of "the buses changed"
+            let why: String = arrival(n.day).map { "be there \(Fmt.hhmm($0)) (class \(Fmt.hhmm(n.classStart)))" } ?? "the buses changed"
+            let body = "Was \(Fmt.hhmm(a)) · \(why) · leave \(Fmt.hhmm(n.leave ?? b)) for \(Fmt.hhmm(n.classStart)) \(n.title)"
             NoticeLog.shared.add(key: "school-move-\(Int(b.timeIntervalSince1970))", title: title, body: body, kind: "late")
             Notices.shared.show(title: title, body: body, kind: "late")
         }
@@ -781,6 +787,8 @@ struct SchoolAlarmCard: View {
                         Spacer()
                         stat("AT \(RoleWords.current.school.uppercased())", Fmt.hhmm(n.trip?.end ?? n.beThere), big: false)
                     }
+                    // (0.42.6) the day's "Be there at …", to change for that day
+                    ArriveRow(day: n.day, paper: true)
                     if a < Date() {
                         Text("The alarm time has passed: leave by \(Fmt.hhmm(l)).").font(BoardInk.sans(12)).foregroundStyle(Paper.late)
                     } else {
@@ -793,7 +801,10 @@ struct SchoolAlarmCard: View {
                         PlanButtons(go: go, wake: { wake(t) })
                     }
                 } else {
-                    Text(school.note ?? "Planning the trip…").font(BoardInk.sans(12.5)).foregroundStyle(Paper.muted)
+                    let off: String? = school.goingWords(n.day).map { "No alarm today: you’re \($0)." }
+                        ?? (school.isSkipped(n.day) ? "No alarm this day: you turned it off." : nil)
+                    Text(off ?? school.note ?? "Planning the trip…").font(BoardInk.sans(12.5)).foregroundStyle(Paper.muted)
+                    if off != nil { ArriveRow(day: n.day, paper: true) }
                 }
                 weekList
                 AlarmCheck(compact: true)
@@ -952,13 +963,14 @@ struct PlanButtons: View {
 // MARK: Your day (0.19): a day's alarm off, and what the timetable says beyond the first class
 
 extension SchoolAlarm {
-    func isSkipped(_ day: String) -> Bool { skipped.contains(day) }
+    /// Off for the day: turned off on Your day, or (0.42.6) skipped because you were already on the way.
+    func isSkipped(_ day: String) -> Bool { skipped.contains(day) || going[day] != nil }
 
     /// The wake-up alarm of one day off (or on again). Off: only that day's alarm goes now (if it hasn't rung); the
     /// rest of the morning (Fastest trip opening by itself, the nudge) and every other day stay as they are. On again:
     /// its alarm is set at once from the trip it has, and that day is planned again.
     func setSkipped(_ day: String, _ skip: Bool) {
-        if skip { skipped.insert(day); restoreDays.remove(day) } else { skipped.remove(day) }
+        if skip { skipped.insert(day); restoreDays.remove(day) } else { skipped.remove(day); unGo(day) }
         d.set(Array(skipped).sorted(), forKey: SchoolSkip.key)
         if skip, let i = week.firstIndex(where: { $0.day == day }), !week[i].rang {
             let id = week[i].alarmId
@@ -982,13 +994,13 @@ extension SchoolAlarm {
         let days = restoreDays
         restoreDays = []
         for day in days {
-            guard !skipped.contains(day), let i = week.firstIndex(where: { $0.day == day }), week[i].alarmId == nil,
+            guard !offDays.contains(day), let i = week.firstIndex(where: { $0.day == day }), week[i].alarmId == nil,
                   let at = SchoolSkip.restore(leave: week[i].leave, wakeMinutes: wakeMinutes, now: Date()) else { continue }
             let p = week[i]
-            let id = await WakeAlarm.schedule(at: at, day: day, title: "Time to get up",
-                                              body: "Leave \(Fmt.hhmm(p.leave ?? at)) for your \(Fmt.hhmm(p.classStart)) class")
-            if let j = week.firstIndex(where: { $0.day == day }), !skipped.contains(day), week[j].alarmId == nil {
-                week[j].alarm = at; week[j].alarmId = id
+            let text = alarmText(day: day, leave: p.leave ?? at, classStart: p.classStart, beThere: p.beThere)
+            let id = await WakeAlarm.schedule(at: at, day: day, title: text.title, body: text.body)
+            if let j = week.firstIndex(where: { $0.day == day }), !offDays.contains(day), week[j].alarmId == nil {
+                week[j].alarm = at; week[j].alarmId = id; week[j].label = text.title + "|" + text.body
                 save()
             } else {
                 await WakeAlarm.cancelInBackground(id, day: day)
@@ -1001,6 +1013,9 @@ extension SchoolAlarm {
     func clearSkipped() {
         skipped = []; restoreDays = []
         d.removeObject(forKey: SchoolSkip.key)
+        // (0.42.6) and no day's own time, no skip for being on the way
+        arrive = [:]; going = [:]; keepRinging = []
+        d.removeObject(forKey: SchoolArrive.key); d.removeObject(forKey: OnTheWay.goingKey); d.removeObject(forKey: OnTheWay.keepKey)
     }
 
     /// The trip planned for a day this session (with its rides), if any.
@@ -1037,5 +1052,294 @@ extension SchoolAlarm {
     /// When a day's last class ends (from `events`), if it has classes.
     nonisolated static func classesEnd(_ events: [ComingUp.Event], on day: Date) -> Date? {
         events.filter { !$0.allDay && !$0.cancelled && !$0.startOnly && Calendar.current.isDate($0.start, inSameDayAs: day) }.map(\.end).max()
+    }
+}
+
+// MARK: (0.42.6) Be there at … per day, and never ringing when you're already on the way
+
+extension SchoolAlarm {
+    /// The days without an alarm: turned off on Your day, or skipped because you were already on the way.
+    var offDays: Set<String> { skipped.union(going.keys) }
+
+    /// The day's own "Be there at …", if you changed it.
+    func arrival(_ day: String) -> Date? { arrive[day] }
+
+    /// The timetable's be-there time for a planned day (its first class minus how early you want to be there).
+    func timetableBeThere(_ p: Planned) -> Date { SchoolArrive.timetable(classStart: p.classStart, early: earlyMinutes) }
+
+    /// "Changed: be there 09:00 (class 11:00)", when the day's time is yours.
+    func changedLine(_ day: String) -> String? {
+        guard let a = arrive[day], let p = week.first(where: { $0.day == day }) else { return nil }
+        return SchoolArrive.changedLine(beThere: a, classStart: p.classStart, clock: Fmt.hhmm)
+    }
+
+    /// The alarm's words for a day (as before unless you changed its time).
+    func alarmText(day: String, leave: Date, classStart: Date, beThere: Date) -> (title: String, body: String) {
+        SchoolArrive.alarmText(leave: leave, classStart: classStart, beThere: beThere, changed: arrive[day] != nil, clock: Fmt.hhmm)
+    }
+
+    /// "Be there at …" for one day (nil: the timetable's again). The day's trip and alarm are planned again at once.
+    func setArrival(_ day: String, _ t: Date?) {
+        if applyArrival(day, t) { Task { await refresh(now: true, staleOnly: true) } }
+    }
+
+    /// The same, without planning (the caller plans). True when it changed.
+    @discardableResult
+    func applyArrival(_ day: String, _ t: Date?) -> Bool {
+        var v: Date? = t
+        if let t, let p = week.first(where: { $0.day == day }) {
+            v = SchoolArrive.normalized(t, timetable: timetableBeThere(p), classStart: p.classStart)
+        }
+        if arrive[day] == v { return false }
+        if let v { arrive[day] = v } else { arrive.removeValue(forKey: day) }
+        saveArrive()
+        if let i = week.firstIndex(where: { $0.day == day }) { week[i].checked = .distantPast; save() }
+        let line = v.map { "school alarm · \(day): be there \(Fmt.hhmm($0))" } ?? "school alarm · \(day): be there as the timetable says"
+        FieldLog.shared.add(.ride, line)
+        return true
+    }
+
+    /// A quick choice for a day: 1 h or 2 h earlier, 30 min later (from the timetable's time).
+    func setArrival(_ day: String, quick q: SchoolArrive.Quick) {
+        guard let p = week.first(where: { $0.day == day }) else { return }
+        setArrival(day, SchoolArrive.quick(q, timetable: timetableBeThere(p)))
+    }
+
+    fileprivate func saveArrive() {
+        let raw: [String: Double] = arrive.mapValues { $0.timeIntervalSince1970 }
+        d.set(raw, forKey: SchoolArrive.key)
+    }
+
+    fileprivate func saveGoing() {
+        d.set(going, forKey: OnTheWay.goingKey)
+        d.set(Array(keepRinging).sorted(), forKey: OnTheWay.keepKey)
+    }
+
+    fileprivate func saveSeen() { d.set(try? JSONEncoder().encode(seen), forKey: OnTheWay.key) }
+
+    /// At the start: the changes, the skips and this morning's record, as kept.
+    fileprivate func loadMorning() {
+        let today = Fmt.ymd.string(from: Date())
+        let raw = d.dictionary(forKey: SchoolArrive.key) as? [String: Double] ?? [:]
+        arrive = SchoolArrive.prune(raw.mapValues { Date(timeIntervalSince1970: $0) }, today: today)
+        going = OnTheWay.prune(d.dictionary(forKey: OnTheWay.goingKey) as? [String: String] ?? [:], today: today)
+        keepRinging = Set((d.stringArray(forKey: OnTheWay.keepKey) ?? []).filter { $0 >= today })
+        let s: OnTheWay.Seen? = d.data(forKey: OnTheWay.key).flatMap { try? JSONDecoder().decode(OnTheWay.Seen.self, from: $0) }
+        seen = OnTheWay.fresh(s, day: today)
+    }
+
+    /// Yesterday's changes and skips go (a change is for its date only).
+    fileprivate func pruneDays() {
+        let today = Fmt.ymd.string(from: Date())
+        let a = SchoolArrive.prune(arrive, today: today)
+        if a.count != arrive.count { arrive = a; saveArrive() }
+        let g = OnTheWay.prune(going, today: today)
+        let k = keepRinging.filter { $0 >= today }
+        if g.count != going.count || k.count != keepRinging.count { going = g; keepRinging = k; saveGoing() }
+    }
+
+    /// No answer from the planner right after a change: the old trip moved by the change, and the alarm with it.
+    /// True when the day changed.
+    fileprivate func shiftForChange(_ old: Planned, beThere: Date, oldLeave: Date, now: Date) async -> Bool {
+        let leave: Date = SchoolArrive.shiftedLeave(oldLeave: oldLeave, oldBeThere: old.beThere, newBeThere: beThere)
+        guard leave > now else { return false }
+        var p = old
+        p.leave = leave
+        p.arrive = old.arrive.map { SchoolArrive.shiftedLeave(oldLeave: $0, oldBeThere: old.beThere, newBeThere: beThere) }
+        p.beThere = beThere
+        p.checked = .distantPast                    // (planned again with live times at the next chance)
+        trips[p.day] = nil
+        let alarmAt = leave.addingTimeInterval(-Double(wakeMinutes) * 60)
+        let text = alarmText(day: p.day, leave: leave, classStart: p.classStart, beThere: beThere)
+        let r = await alarmFor(p, at: alarmAt, text: text, now: now)
+        if let i = week.firstIndex(where: { $0.day == p.day }) { week[i] = r.p } else { week.append(r.p) }
+        FieldLog.shared.add(.ride, "school alarm · \(p.day): no plan just now · leave moved to \(Fmt.hhmm(leave)) by the change")
+        return true
+    }
+
+    /// The day's alarm for `at`: set, moved, kept or taken away as `SchoolSkip.decide` says (as before 0.42.6); the
+    /// same minute with new words (a changed be-there time) is set again while it's more than 5 minutes ahead.
+    fileprivate func alarmFor(_ p0: Planned, at alarmAt: Date, text: (title: String, body: String), now: Date) async -> (p: Planned, changed: Bool, added: Bool) {
+        var p = p0
+        let k = p.day
+        let wasSet = p0.alarmId != nil
+        var changed = false, added = false
+        // move the alarm only if its minute changed; set none if it's already too late for one, or the day is off
+        // (on the day as it is now: it may have been turned off and on while this waited for the network)
+        let cur = SchoolSkip.current(snapshot: (p.alarm, p.alarmId),
+                                     live: week.first(where: { $0.day == k }).map { (alarm: $0.alarm, id: $0.alarmId) })
+        p.alarm = cur.alarm; p.alarmId = cur.id
+        let label: String = text.title + "|" + text.body
+        let off: Set<String> = offDays
+        var action: SchoolSkip.Action = SchoolSkip.decide(alarmAt, day: k, skipped: off, current: p.alarm, hasId: p.alarmId != nil, now: now)
+        let relabel: Bool = action == .keep && p.alarmId != nil && !off.contains(k) && (p.label ?? label) != label
+        if relabel, alarmAt > now.addingTimeInterval(5 * 60) { action = .set(alarmAt, schedule: true) }
+        switch action {
+        case .keep:
+            break
+        case .clear:
+            // turned off for this day: no alarm (the trip is still planned, to show)
+            await WakeAlarm.cancelInBackground(p.alarmId, day: k)
+            p.alarmId = nil; p.alarm = nil
+            changed = true
+        case .set(let at, let schedule):
+            await WakeAlarm.cancelInBackground(p.alarmId, day: k)
+            p.alarmId = nil
+            p.alarm = at
+            if schedule {
+                p.alarmId = await WakeAlarm.schedule(at: at, day: k, title: text.title, body: text.body)
+                p.label = label
+            }
+            changed = true
+            if !wasSet { added = true }
+        }
+        // turned off while this was planning: its alarm goes after all
+        if offDays.contains(k), p.alarmId != nil || p.alarm != nil {
+            await WakeAlarm.cancelInBackground(p.alarmId, day: k)
+            p.alarmId = nil; p.alarm = nil
+        }
+        return (p, changed, added)
+    }
+
+    // MARK: already on the way
+
+    /// Watches the trip (read only): its start, its end, where you are while it runs, and leaving home or getting to
+    /// school (its regions).
+    fileprivate func watchMorning(_ t: TripManager) {
+        morningSubs = []
+        t.$phase.removeDuplicates().receive(on: DispatchQueue.main).sink { [weak self] p in
+            self?.phaseChanged(p)
+        }.store(in: &morningSubs)
+        t.$distance.throttle(for: .seconds(60), scheduler: DispatchQueue.main, latest: true).sink { [weak self] _ in
+            self?.positionChanged()
+        }.store(in: &morningSubs)
+        // (the Friends extras hear the regions too: each passes them on)
+        let prev = t.onRegion
+        t.onRegion = { id, entered in
+            prev?(id, entered)
+            SchoolAlarm.shared.regionChanged(id, entered: entered)
+        }
+    }
+
+    /// 03:00 today: "this morning" starts.
+    private func morningStart(_ now: Date) -> Date {
+        Calendar.current.date(bySettingHour: OnTheWay.morningHour, minute: 0, second: 0, of: now) ?? Calendar.current.startOfDay(for: now)
+    }
+
+    /// Today's record (a new one on a new day).
+    private func todaySeen(_ now: Date) -> OnTheWay.Seen { OnTheWay.fresh(seen, day: Fmt.ymd.string(from: now)) }
+
+    /// Does the trip that runs go to school? Your fixed route there, or its last stop near school.
+    private func tripToSchool(_ t: TripManager) -> Bool {
+        let s = CLLocation(latitude: Place.school.coordinate.latitude, longitude: Place.school.coordinate.longitude)
+        let last: Double? = t.legs.last.map { CLLocation(latitude: $0.to.coordinate.latitude, longitude: $0.to.coordinate.longitude).distance(from: s) }
+        let fixed: Bool = (t.route?.isFixed ?? false) && t.direction == .toSchool
+        return OnTheWay.towardSchool(lastStopMetres: last, fixedToSchool: fixed)
+    }
+
+    private func phaseChanged(_ p: TripManager.Phase) {
+        let before = lastTripPhase
+        lastTripPhase = p
+        guard let t = trip, !t.demo else { return }
+        let now = Date()
+        guard now >= morningStart(now) else { return }
+        var s = todaySeen(now)
+        if p == .idle { return }
+        if p == .finished {
+            // the trip got to its last stop: at school when that's school
+            if tripToSchool(t), s.atSchool == nil { s.atSchool = now }
+        } else if before == .idle || before == .finished {
+            // a trip or ride started (not a step of one that runs since last night)
+            if s.tripAt == nil { s.tripAt = now }
+            if tripToSchool(t), s.schoolTripAt == nil { s.schoolTripAt = now }
+        }
+        if s != seen { seen = s; saveSeen() }
+        checkOnTheWay()
+    }
+
+    private func positionChanged() {
+        guard let t = trip, !t.demo, t.phase != .idle else { return }
+        let now = Date()
+        guard now >= morningStart(now) else { return }
+        var s = todaySeen(now)
+        if s.atSchool == nil, let f = t.lastFix {
+            let m = f.distance(from: CLLocation(latitude: Place.school.coordinate.latitude, longitude: Place.school.coordinate.longitude))
+            if OnTheWay.atSchool(metres: m, fixAt: f.timestamp, now: now) { s.atSchool = now }
+        }
+        if s != seen { seen = s; saveSeen() }
+        checkOnTheWay()
+    }
+
+    /// A region (also when iOS wakes the app in the background for it): left home, or got to school.
+    fileprivate func regionChanged(_ id: String, entered: Bool) {
+        let now = Date()
+        guard now >= morningStart(now) else { return }
+        var s = todaySeen(now)
+        let role = RoleRegions.role(ofRegion: id)
+        if !entered, role == .home || id == Place.home.key, s.leftHome == nil { s.leftHome = now }
+        if entered, role == .school, s.atSchool == nil { s.atSchool = now }
+        if s != seen { seen = s; saveSeen() }
+        checkOnTheWay()
+    }
+
+    /// How far the last fix is from home (the nearer of Home and where it last saw you at home), and when it was.
+    private func homeFix() -> (metres: Double?, at: Date?) {
+        guard let f = trip?.lastFix, f.horizontalAccuracy >= 0, f.horizontalAccuracy < 300 else { return (nil, nil) }
+        var spots: [CLLocation] = [CLLocation(latitude: Place.home.coordinate.latitude, longitude: Place.home.coordinate.longitude)]
+        if let a = d.object(forKey: "school.homeLat") as? Double, let o = d.object(forKey: "school.homeLon") as? Double {
+            spots.append(CLLocation(latitude: a, longitude: o))
+        }
+        let m: Double? = spots.map { f.distance(from: $0) }.min()
+        return (m, f.timestamp)
+    }
+
+    /// This morning's alarm goes when you're already on the way (`OnTheWay.decide`): AlarmKit's alarm and the
+    /// notifications both, said once in the field log and as a quiet notification. A day you turned back on stays on.
+    func checkOnTheWay() {
+        guard on else { return }
+        let now = Date()
+        let today = Fmt.ymd.string(from: now)
+        guard going[today] == nil, !keepRinging.contains(today), !skipped.contains(today),
+              let i = week.firstIndex(where: { $0.day == today }) else { return }
+        let p = week[i]
+        let t = trip
+        let running: Bool = t.map { $0.phase != .idle && $0.phase != .finished && !$0.demo } ?? false
+        let toSchool: Bool = running && t.map { tripToSchool($0) } == true
+        let h = homeFix()
+        let live = OnTheWay.Live(running: running, runningToSchool: toSchool, homeMetres: h.metres, fixAt: h.at)
+        let decision = OnTheWay.decide(day: today, today: today, alarm: p.alarm, now: now, morning: morningStart(now), seen: todaySeen(now), live: live)
+        guard case .skip(let reason) = decision else { return }
+        let words = OnTheWay.words(reason, clock: Fmt.hhmm)
+        going[today] = words
+        saveGoing()
+        let id = p.alarmId
+        week[i].alarmId = nil; week[i].alarm = nil
+        save()
+        updateNext()
+        Task.detached { WakeAlarm.cancel(id, day: today) }
+        FieldLog.shared.add(.ride, OnTheWay.logLine(reason, clock: Fmt.hhmm))
+        let title = "No school alarm today"
+        let body = "You’re \(words). Turn it back on in Your day."
+        NoticeLog.shared.add(key: "school-going-\(today)", title: title, body: body, kind: "ok")
+        if UIApplication.shared.applicationState == .active {
+            Notices.shared.show(title: title, body: body, kind: "ok")
+        } else {
+            let n = UNMutableNotificationContent()
+            n.title = title; n.body = body
+            n.interruptionLevel = .passive
+            UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "school-going-\(today)", content: n, trigger: nil)) { _ in }
+        }
+    }
+
+    /// Why a day's alarm was skipped ("already on the way (trip 07:12)"), if it was.
+    func goingWords(_ day: String) -> String? { going[day] }
+
+    /// A skipped day turned back on (Your day): it rings again, and isn't skipped again that day.
+    fileprivate func unGo(_ day: String) {
+        guard going[day] != nil else { return }
+        going.removeValue(forKey: day)
+        keepRinging.insert(day)
+        saveGoing()
+        FieldLog.shared.add(.ride, "school alarm · \(day): turned back on after the skip")
     }
 }
