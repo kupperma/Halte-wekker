@@ -87,6 +87,8 @@ fun PlanScreen(start: Direction?, canStart: Boolean, onBack: () -> Unit, onStart
     var now by remember { mutableDoubleStateOf(Iso.now()) }
     var again by remember { mutableIntStateOf(0) }
     var fromLabel by remember { mutableStateOf("") }
+    var goTrip by remember { mutableStateOf<DoorTrip?>(null) }
+    var showNearby by rememberSaveable { mutableStateOf(nearbyFirst(canStart, planned = false)) }
 
     LaunchedEffect(dest, again) {
         val d = dest ?: return@LaunchedEffect
@@ -100,7 +102,9 @@ fun PlanScreen(start: Direction?, canStart: Boolean, onBack: () -> Unit, onStart
                 val n = Iso.now()
                 val got = TransitParse.keepUseful(Transit.plan("${from.lat},${from.lon}", d.planId, n - 120, count = 6), n, 6)
                 loading = false; asked = true; now = Iso.now()
-                if (got.isNotEmpty() || trips.isEmpty()) trips = got
+                // (0.10.0) a way taken from the stops around ("Go") stays first until it has left
+                val kept = goTrip?.takeIf { g -> g.first.departure > n - 60 && got.none { it.id == g.id } }
+                if (got.isNotEmpty() || trips.isEmpty()) trips = listOfNotNull(kept) + got
                 // (A8.1, iOS 0.40) "Time to go", later by your own walking speed once learned (2 min spare)
                 nl.haltewekker.travel.TimeToGo.check(context, trips.firstOrNull(), now)
                 val leaveIn = got.firstOrNull()?.let { it.first.departure - now }
@@ -137,26 +141,35 @@ fun PlanScreen(start: Direction?, canStart: Boolean, onBack: () -> Unit, onStart
         }
         val d = dest
         if (d != null && !searching) {
-            Text("$fromLabel to ${d.name}", color = DS.t.secondary)
-            if (trips.isEmpty() && asked && !loading) Note(Transit.lastTrouble ?: "No trips found. Try again in a minute.")
-            // (A8, iOS 0.40 `GhostDepartures.order`) a first ride with no live data close to leaving on a live line: after the others
-            val ordered = GhostDepartures.order(trips.map { GhostDepartures.Option(it.id, it.first.line, it.first.departure, it.first.scheduledDeparture, it.first.live, it.first.cancelled) }, now)
-                .mapNotNull { id -> trips.firstOrNull { it.id == id } }
-            val big = ordered.firstOrNull { it.id == selected } ?: ordered.firstOrNull()
-            ordered.forEach { t ->
-                TripRow(t, now, selected = selected == t.id) { selected = if (selected == t.id) null else t.id }
-                // (A8.1, iOS 0.40) "From <stop>" under the big card: the next departures where you get on
-                if (big?.id == t.id) FromStopFold(t, trips.filter { it.id != t.id }, d.planId) { sw ->
-                    trips = listOf(sw) + trips.filter { it.id != sw.id }; selected = sw.id
-                }
-                if (selected == t.id) Card {
-                    t.rides.forEach { LegRow(it) }
-                    TripNotes(t, trips, now)
-                    if (t.walkAfter > 0) Text("Walk ${t.walkAfter} min to ${d.name}", color = DS.t.secondary, style = MaterialTheme.typography.bodySmall)
-                    if (canStart) BigButton("I'm on it: start the ride") { onStart(t, d.name) }
-                    else Text("A ride is running: end it first.", color = DS.t.secondary)
-                    // A3: as a card a friend can take
-                    nl.haltewekker.ui.friends.SendTripButton { nl.haltewekker.ui.friends.TripCards.card(t, d.name, d.point, d == profile.home) }
+            // (0.10.0, iOS 0.42.0/0.42.2) Fastest trip opens on the stops around you (not on board); "Your trip and other
+            // times" shows the trip cards as before, "All stops around you" goes back
+            if (showNearby && canStart) NearbyView(d.planId, d.name, trips, onTrip = { showNearby = false },
+                onGo = { t -> goTrip = t; trips = listOf(t) + trips.filter { it.id != t.id }; selected = t.id; showNearby = false })
+            else {
+                if (canStart) androidx.compose.material3.TextButton(onClick = { showNearby = true }) { Text("All stops around you") }
+                Text("$fromLabel to ${d.name}", color = DS.t.secondary)
+                if (trips.isEmpty() && asked && !loading) Note(Transit.lastTrouble ?: "No trips found. Try again in a minute.")
+                // (A8, iOS 0.40 `GhostDepartures.order`) a first ride with no live data close to leaving on a live line: after the others
+                val ordered = GhostDepartures.order(trips.map { GhostDepartures.Option(it.id, it.first.line, it.first.departure, it.first.scheduledDeparture, it.first.live, it.first.cancelled) }, now)
+                    .mapNotNull { id -> trips.firstOrNull { it.id == id } }
+                val big = ordered.firstOrNull { it.id == selected } ?: ordered.firstOrNull()
+                ordered.forEach { t ->
+                    TripRow(t, now, selected = selected == t.id) { selected = if (selected == t.id) null else t.id }
+                    // (A8.1, iOS 0.40) "From <stop>" under the big card: the next departures where you get on
+                    if (big?.id == t.id) FromStopFold(t, trips.filter { it.id != t.id }, d.planId) { sw ->
+                        trips = listOf(sw) + trips.filter { it.id != sw.id }; selected = sw.id
+                    }
+                    if (selected == t.id) Card {
+                        t.rides.forEach { LegRow(it) }
+                        // (0.10.0, iOS 0.41) "Walk there": to the first stop with arrows, or in the maps app
+                        t.first.from?.let { at -> WalkThere(WalkTarget(at, t.first.fromStop, t.first.platform, t.first.departure, walkWhat(t.first))) }
+                        TripNotes(t, trips, now)
+                        if (t.walkAfter > 0) Text("Walk ${t.walkAfter} min to ${d.name}", color = DS.t.secondary, style = MaterialTheme.typography.bodySmall)
+                        if (canStart) BigButton("I'm on it: start the ride") { onStart(t, d.name) }
+                        else Text("A ride is running: end it first.", color = DS.t.secondary)
+                        // A3: as a card a friend can take
+                        nl.haltewekker.ui.friends.SendTripButton { nl.haltewekker.ui.friends.TripCards.card(t, d.name, d.point, d == profile.home) }
+                    }
                 }
             }
         }

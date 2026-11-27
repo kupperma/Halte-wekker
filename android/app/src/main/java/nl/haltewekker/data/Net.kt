@@ -9,7 +9,7 @@ import okhttp3.Request
 import java.util.concurrent.TimeUnit
 
 /** An answer: its status, body and ETag (null body: no answer at all). */
-class NetAnswer(val status: Int, val body: ByteArray?, val etag: String?) {
+class NetAnswer(val status: Int, val body: ByteArray?, val etag: String?, val retryAfter: String? = null) {
     val ok: Boolean get() = status in 200..299 && body != null
     val text: String get() = body?.toString(Charsets.UTF_8) ?: ""
 }
@@ -34,7 +34,7 @@ object Net {
                 val u = url.toHttpUrl().newBuilder().apply { params.forEach { (k, v) -> addQueryParameter(k, v) } }.build()
                 val req = Request.Builder().url(u).header("User-Agent", userAgent)
                     .apply { if (etag != null) header("If-None-Match", etag) }.build()
-                client.newCall(req).execute().use { r -> NetAnswer(r.code, r.body?.bytes(), r.header("ETag")) }
+                client.newCall(req).execute().use { r -> NetAnswer(r.code, r.body?.bytes(), r.header("ETag"), r.header("Retry-After")) }
             } catch (e: Exception) {
                 NetAnswer(-1, null, null)
             }

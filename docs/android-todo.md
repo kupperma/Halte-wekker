@@ -42,7 +42,7 @@ From a field log of 27 November. Rules in `ios/App/MissCall.swift` (with `Change
       begun (start time from the Transitous id, 24:00+ the next day). **Android 0.9.0:** `RealPositions.noMatchReason`/`startTime`/`dataset` ported and tested (the key was already OVapi's own trip_id); **Android 0.9.1:** the log line (`vehicle shown · … · no gps: no ovapi match for trip_id … (started 22:40) · by times`, `RealPositions.noGPSReason`).
 ## iOS 0.42.2
 
-**Android 0.9.0:** the rules of 0.42.0 and 0.42.2 are ported with every iOS vector (`travel/Nearby.kt`: `NearbyTest` holds `NearbyRankTests` and `NearbySearchTests`; `travel/TripTimeline.kt`: `TripTimelineTest`). The nearby-stops view itself (the fetch design, the map's circles, the stop sheet, the Whole-trip rows) is not built yet; the items below stay open.
+**Android 0.9.0:** the rules of 0.42.0 and 0.42.2 are ported with every iOS vector (`travel/Nearby.kt`: `NearbyTest` holds `NearbyRankTests` and `NearbySearchTests`; `travel/TripTimeline.kt`: `TripTimelineTest`). **Android 0.10.0:** the view is built (`ui/screens/NearbyScreen.kt`, `travel/NearbyStore.kt`), with the 0.42.2 fetch design.
 
 From the field report at 23:10 in Veghel ("No bus or train from the stops within 1.6 km in this time" with buses every
 half hour and the classic Fastest trip showing a way: "That's not possible") and the requests "Could you add how many
@@ -52,53 +52,53 @@ of them timed out in the Transitous queue, two 429s, 150–210 KB each. Rules in
 `NearbyRankTests`, `NearbySearchTests`) and `ios/App/TripTimeline.swift` (tests `TripTimelineTests`); the iOS wiring in
 `ios/App/NearbyStore.swift`, `NearbyViews.swift`, `NearbyDetail.swift`, `Transit.planPage`.
 
-- [ ] **One plan per search, from where you are.** `/v5/plan` from your coordinate to the destination (its stop, or its
+- [x] **One plan per search, from where you are.** `/v5/plan` from your coordinate to the destination (its stop, or its
       spot when it has several), `numItineraries` 8, `maxItineraries` 12, `searchWindow` 3600, `maxTransfers` 3, `maxPreTransitTime` = the
       walk to 1.6 km (straight × 1.3 at 1.2 m/s, minutes up: 1740 s; at most 2700 s), `detailedTransfers=false`, your
       walking speed once learned. The planner walks to every stop around by itself. Each itinerary goes with the stop its
       first ride leaves from (`Nearby.groupIndex`: one of the stops around with its id, else a bus stop of its name
       within 300 m, else the nearest within 120 m, a station 400 m); a stop that's none of them is added with its own
-      circle (`Nearby.newGroup`; a name already taken gets `@<id>`). Its walk is the planner's own walk from your spot.
-- [ ] **A second plan only when needed** (`Nearby.nextPlan`, two per search at most): fewer than 3 stops have a way and
+      circle (`Nearby.newGroup`; a name already taken gets `@<id>`). Its walk is the planner's own walk from your spot. **Android 0.10.0:** `NearbyStore.search` (`Transit.planPage`); the planner's own walk; Android's destination is the place's `planId`.
+- [x] **A second plan only when needed** (`Nearby.nextPlan`, two per search at most): fewer than 3 stops have a way and
       there's a `nextPageCursor` (the next page, `maxPreTransitTime` for 3 km, so 2700 s), or the first got no answer
-      (asked once more, the same wider walk, no cursor). Never while Transitous asks to slow down (after a 429).
-- [ ] **The stops around** (`/v1/map/stops`, 1 km, kept 10 min) are only drawn (8 at most, as 0.42.0); the ones with no
+      (asked once more, the same wider walk, no cursor). Never while Transitous asks to slow down (after a 429). **Android 0.10.0:** `NearbyStore.search`/`more` with `Nearby.nextPlan`; `Transit.cooling` stops it.
+- [x] **The stops around** (`/v1/map/stops`, 1 km, kept 10 min) are only drawn (8 at most, as 0.42.0); the ones with no
       way from the plan are grey dots. **Tap one**: its own plan (from its first id, at when you can be there, 5
       itineraries; one stop at a time), and its next departures (`/v6/stoptimes`, 16, from when you can be there; kept a
       minute) of the same lines and headsigns as its ways, under "Also from here". A failed one: "Couldn’t check this stop
-      just now (the planner is busy or didn’t answer)." with Try again.
-- [ ] **At most 2 requests at once from this screen**; nothing re-fired or cancelled by the time switch.
-- [ ] **Leave now / In 10 / In 20 filter what's in** (no new plan); one second after the last switch, the next page only
+      just now (the planner is busy or didn’t answer)." with Try again. **Android 0.10.0:** `Transit.nearStops` (kept 10 min), `Nearby.groups`; grey dots; a tap plans that stop and asks its board (`NearbyStore.stop`, kept a minute; "Try again" when it failed).
+- [x] **At most 2 requests at once from this screen**; nothing re-fired or cancelled by the time switch. **Android 0.10.0:** its own `Semaphore(2)`, all in `Polite`'s background lane.
+- [x] **Leave now / In 10 / In 20 filter what's in** (no new plan); one second after the last switch, the next page only
       when fewer than 3 stops have a ranked way for that time and the search has a plan left. Asked again after 5
-      minutes on screen (what's shown stays), or when you moved 250 m or the destination changed.
-- [ ] **The window** (`Nearby.shown`): a way counts when you leave your door at or after the time you set off (its
+      minutes on screen (what's shown stays), or when you moved 250 m or the destination changed. **Android 0.10.0:** chips filter locally; `NearbyStore.more` a second after the last switch; asked again after 5 min or 250 m.
+- [x] **The window** (`Nearby.shown`): a way counts when you leave your door at or after the time you set off (its
       departure less your walk, counted once; 30 s grace), with no upper bound: every way leaving your door within 35
       minutes, and at least the next 2 of a stop however late (tonight's last, or tomorrow's first). **Ranked** (tags,
       colours, the legend) only when it leaves your door within those 35 minutes, waits at most 90 minutes anywhere (before
       the first ride or at a change) and is there within 3 hours of setting off (`Nearby.ranked`); the others are drawn
-      grey, tagged "later", with their day ("tomorrow", a weekday; nil today and the night after until 04:00).
-- [ ] **Fastest trip's own ways are always in**, with their stop, in every window; nothing for that time: its stop is
-      shown with its way from now ("Nothing found yet for that time: this is your trip’s way…").
-- [ ] **What the screen says** (`Nearby.statusLine`): "No bus or train from the stops within 1.6 km in this time…" only
+      grey, tagged "later", with their day ("tomorrow", a weekday; nil today and the night after until 04:00). **Android 0.10.0:** `Nearby.shown`/`ranked`/`best` on `NearbyStore.dep` (door = the trip's start); later ones grey with their day.
+- [x] **Fastest trip's own ways are always in**, with their stop, in every window; nothing for that time: its stop is
+      shown with its way from now ("Nothing found yet for that time: this is your trip’s way…"). **Android 0.10.0:** the PlanScreen's own trips are the seed; the status line says so.
+- [x] **What the screen says** (`Nearby.statusLine`): "No bus or train from the stops within 1.6 km in this time…" only
       when the planner answered and your trip has no way either; no answer: "Couldn’t check the stops around you just now
       (no answer in time / the planner is busy). Your trip has the fastest way."; some in: "Couldn’t check every stop
       just now (…): these are the ones in."; stops tapped that failed: "Couldn’t check N stops just now (…). Tap one to try
-      again."
-- [ ] **Surest only at 70 % on time or more** (`Nearby.surestAt`), on the list and in a stop's sheet; else no Surest.
-- [ ] **Overnight ways apart.** In a stop's sheet the late ones (as above) get their own group, "Tomorrow morning" (there
-      tomorrow before noon) or "Later · Sat", on their own time axis; never Fastest or Surest.
-- [ ] **Circles that would overlap are one** (`Nearby.merge`): closer than 40 pt at the map's zoom, the earliest there
-      is drawn (at its own place) with "+N"; grey dots under a circle are left out.
-- [ ] **Whole trip rows** (`TripTimeline`): the time axis ticks every 10/15/30 min, 1/2/3/6 h, the smallest step with
+      again." **Android 0.10.0:** `Nearby.statusLine` under the map ("1.6 km").
+- [x] **Surest only at 70 % on time or more** (`Nearby.surestAt`), on the list and in a stop's sheet; else no Surest. **Android 0.10.0:** `Nearby.tags`/`surestOf`; how sure on Android: your own rides from the travel log (≥ 4), else a rough model (live delay at the end, rush hours, room at each change). No `DelayBook`/`Steady` on Android yet.
+- [x] **Overnight ways apart.** In a stop's sheet the late ones (as above) get their own group, "Tomorrow morning" (there
+      tomorrow before noon) or "Later · Sat", on their own time axis; never Fastest or Surest. **Android 0.10.0:** `Nearby.split`/`laterTitle` in the stop sheet, on Times and Whole trip.
+- [x] **Circles that would overlap are one** (`Nearby.merge`): closer than 40 pt at the map's zoom, the earliest there
+      is drawn (at its own place) with "+N"; grey dots under a circle are left out. **Android 0.10.0:** `Nearby.merge` at the map's zoom (40 dp in metres), "+N" on the circle's bitmap.
+- [x] **Whole trip rows** (`TripTimeline`): the time axis ticks every 10/15/30 min, 1/2/3/6 h, the smallest step with
       labels 56 pt apart, the start and end always, none closer (`tickStep`, `ticks(width:)`). Each row's leave and arrive
       times always, moved apart around the row's middle when the row is short (`ends`, 40 pt a time, 6 pt between). Every
       gap labelled with its minutes (`gapLabels`): the walk to the first stop "🚶 2" (with a wait: "🚶2 + 1 wait"), each
       change "6 min" or "🚶3 + 5 wait", the last walk "🚶 4"; centred on the gap when it fits (6 + 6.5 pt a character,
       14 the walker, 4 pt spare), else under the bar with a tick, in the first of two rows where it overlaps nothing (left
       out when neither has room). A change under 3 min red, under your learned change time yellow. Each ride's own
-      minutes inside its bar ("41 min") when they fit (8 pt spare).
-- [ ] **Field log** (`.net`): one line per search, see [logs-export.md](logs-export.md) › Fastest trip, zoomed out
-      (0.42.2).
+      minutes inside its bar ("41 min") when they fit (8 pt spare). **Android 0.10.0:** `TripTimeline` rows drawn with Compose (ticks, ends, gap labels with tones, ride minutes); gold = fastest, green = surest, tap selects.
+- [x] **Field log** (`.net`): one line per search, see [logs-export.md](logs-export.md) › Fastest trip, zoomed out
+      (0.42.2). **Android 0.10.0:** `nearby · …` and `nearby stop · …` lines (`Nearby.logLine`/`stopLogLine`) in the net log.
 
 ## iOS 0.42.1
 
@@ -141,7 +141,7 @@ From the field report ("At a friend's place going home to Centrum it showed one 
 out at about the same time"). Fastest trip, zoomed out (concept N5, with N4's whole-trip timelines). Rules in
 `ios/App/NearbyRank.swift` (tests `NearbyRankTests`) and `ios/App/TripTimeline.swift` (tests `TripTimelineTests`).
 
-- [ ] **Fastest trip opens on the stops around you.** Not on board, not a planned (Be there by / class) trip, not the demo:
+- [x] **Fastest trip opens on the stops around you.** Not on board, not a planned (Be there by / class) trip, not the demo:
       a map of every bus stop and train station you could walk to, each planned to the destination. Candidate stops from
       Transitous `/v1/map/stops` in a square of 1 km (then 1.6, 2.2, 3 km while fewer than 3 stops have a way); one entry
       per station (`parentId`); same-name stops within 300 m are one stop (both sides of the road, up to 2 ids); at most 8
@@ -149,24 +149,24 @@ out at about the same time"). Fastest trip, zoomed out (concept N5, with N4's wh
       planned (`/v5/plan`, from its id, to the destination's stop, or its spot when it has several; 5 itineraries, at
       most 3 transfers) from when you can be there; drawn as each answer comes in; Fastest trip's own trips are put
       with their stops too. Every request through the normal Transitous limiter (a few at a time, pause on 429). The
-      whole answer is kept 1 minute per place (~200 m), destination and leave time; asked again after 3 minutes on screen.
-- [ ] **Walk**: straight line × 1.3 at 1.2 m/s, whole minutes up (`Nearby.plannedWalk`), shown at your learned speed
+      whole answer is kept 1 minute per place (~200 m), destination and leave time; asked again after 3 minutes on screen. **Android 0.10.0:** `ui/screens/NearbyScreen.kt` `NearbyView`, opened first in Fastest trip (PlanScreen) when no ride runs; the 0.42.2 fetch design above (one plan from you), not the 0.42.0 per-stop plans. Android has no demo or planned (Be there by) Fastest trip.
+- [x] **Walk**: straight line × 1.3 at 1.2 m/s, whole minutes up (`Nearby.plannedWalk`), shown at your learned speed
       with 2 min spare (`WalkPlan`, as 0.40). A departure counts when you make it setting off at the window start
-      (30 s grace) and it leaves within 35 minutes after that (plus the walk).
-- [ ] **Leave now / In 10 min / In 20 min** switch (the window's start), re-planned.
-- [ ] **Circles**: colour by the stop's earliest arrival you make: green `#3DD598` → `#C9D45A` → `#E8A33D` → red `#E86F5A`,
+      (30 s grace) and it leaves within 35 minutes after that (plus the walk). **Android 0.10.0:** the planner's own walk; `Nearby.plannedWalk` for stops without a way.
+- [x] **Leave now / In 10 min / In 20 min** switch (the window's start), re-planned. **Android 0.10.0:** filters what's in (0.42.2), no new plan.
+- [x] **Circles**: colour by the stop's earliest arrival you make: green `#3DD598` → `#C9D45A` → `#E8A33D` → red `#E86F5A`,
       between the earliest and latest (at least 8 min apart), minutes inside; legend "arrive 18:44 … 18:58". **Ring** =
       how sure: solid at ≥ 85 % on time, dashed under, thin grey when it only goes by the time of day. Map framed on
-      you and the stops with a way (×1.4, at least 600 m).
-- [ ] **How sure** (`Nearby.sure`): on time = less than 3 min late at the destination. Your own rides on the trip's last
+      you and the stops with a way (×1.4, at least 600 m). **Android 0.10.0:** bitmaps per circle (fill, minutes to arrival, ring solid / dashed / thin grey), the legend's gradient; framed by `Nearby.frame`.
+- [x] **How sure** (`Nearby.sure`): on time = less than 3 min late at the destination. Your own rides on the trip's last
       line to its last stop (the app's delay book from your rides; ≥ 4 rides, the last 20): the share on time, "usually
       +N min" (median, when ≥ 1); else the model's chance (time of day, the line's live delays now and what was seen):
       "on time about NN% (by live times)" or "(by the time of day)"; either times the chance of making each change.
-      Clamped to 1–99 %.
-- [ ] **Tags**: Fastest = earliest arrival (tie: shorter walk, then later departure); Surest = highest on-time % (tie:
+      Clamped to 1–99 %. **Android 0.10.0:** see Surest above (own rides from the travel log, else a rough model).
+- [x] **Tags**: Fastest = earliest arrival (tie: shorter walk, then later departure); Surest = highest on-time % (tie:
       earlier arrival), the fastest itself when it's as sure; Slower = 5 min or more after the fastest. List order:
-      fastest, surest, then by arrival. Row: stop, walk, line chips, leaves, big arrival, on time NN%.
-- [ ] **A stop tapped**: a half sheet (the map above still usable): walk, tag, "Arrive X: on time NN% of your last N
+      fastest, surest, then by arrival. Row: stop, walk, line chips, leaves, big arrival, on time NN%. **Android 0.10.0:** `Nearby.tags`, `Nearby.ordered` for the list.
+- [x] **A stop tapped**: a half sheet (the map above still usable): walk, tag, "Arrive X: on time NN% of your last N
       rides · usually +1 min" (only what's backed; else "by live times"); Times (next 6 departures you make: line, time,
       live / +N / timetable / cancelled, arrive) or **Whole trip**: each departure as a timeline on one shared axis
       (start rounded down, end up to 5 min, at least 20 min; ticks every 10 / 15 / 30 min): walk (dotted), wait (thin),
@@ -174,9 +174,9 @@ out at about the same time"). Fastest trip, zoomed out (concept N5, with N4's wh
       0.16 of the axis to the one before or to the trip's end times), leave and arrive times at its ends; gold border =
       fastest, green = surest; tap selects. **On the line now**: the next 3 vehicles of those departures with their own
       GPS age ("GPS 20 s"), "in 9 min · 4 stops" (stops to go by the fix on its road; dropped once past your stop),
-      drawn on the map with the first one's road. **Go · leave in N min** makes it your trip (as From <stop>).
-- [ ] "Your trip" (top right) or "Your trip and other times" shows Fastest trip's cards as before; "All stops around
-      you" on them goes back.
+      drawn on the map with the first one's road. **Go · leave in N min** makes it your trip (as From <stop>). **Android 0.10.0:** the sheet below the map (the map stays usable): Times / Whole trip, "On the line now" (OVapi / NS fixes, drawn on the map; stops to go not counted on Android), "Also from here" (`/v6/stoptimes` of its lines), "Go · leave in N min" (the way first and chosen in Fastest trip's cards) and Walk there.
+- [x] "Your trip" (top right) or "Your trip and other times" shows Fastest trip's cards as before; "All stops around
+      you" on them goes back. **Android 0.10.0:** "Your trip and other times" / "All stops around you".
 
 ## iOS 0.41.0
 
@@ -185,13 +185,13 @@ here … instead of just the text and the button to Google Maps (keep the button
 platform. Rules in `ios/App/WalkGuide.swift` (tests `WalkGuideTests`); the map, GPS, buzzes and voice in
 `ios/App/WalkGuideView.swift`.
 
-- [ ] **Walk with arrows.** The walk sheet ("Walk there" on the Go to card, at a change, from the boards) has a "Walk with
+- [x] **Walk with arrows.** The walk sheet ("Walk there" on the Go to card, at a change, from the boards) has a "Walk with
       arrows" button above the Apple Maps one (which stays). It opens a full-screen map that follows you (heading up,
       or north up with a toggle), the route drawn with the walked part dimmed, and a big card on top: the arrow and
       "In 40 m · turn right onto Hoogstraat", the turn after it small. Below: "4 min · 320 m to go" and, with a ride to
       catch, "Your bus leaves in 6 min · you’ll make it" / "walk a bit faster" / "hurry, it’s tight" (your own walking
-      speed once learned, else 1.2 m/s; fine with a minute spare, faster when 25 % quicker makes it). **Android 0.9.0:** `travel/WalkGuide.kt` ported with every iOS vector (`WalkGuideTest`), plus OSRM's maneuver type/modifier as the arrow (`Turn.of`, the shape rule as the fallback). The screen, the OSRM foot route fetch, buzzes and voice are not built yet.
-- [ ] **The route and its arrows.** Apple's walking directions (MapKit `MKDirections`, free) give steps with words (in
+      speed once learned, else 1.2 m/s; fine with a minute spare, faster when 25 % quicker makes it). **Android 0.9.0:** `travel/WalkGuide.kt` ported with every iOS vector (`WalkGuideTest`), plus OSRM's maneuver type/modifier as the arrow (`Turn.of`, the shape rule as the fallback). The screen, the OSRM foot route fetch, buzzes and voice are not built yet. **Android 0.10.0:** `ui/screens/WalkScreen.kt` (`WalkThere`: "Walk with arrows" above "Open in maps", on Fastest trip's chosen card, at a change on the ride screen, in a nearby stop's sheet), full screen over the app (`WalkNav`); heading up / north up and voice toggles remembered.
+- [x] **The route and its arrows.** Apple's walking directions (MapKit `MKDirections`, free) give steps with words (in
       the phone's language), a length and a shape, but no turn type. The arrow comes from the shape: the direction over
       the 12 m into a step's start against the 12 m out of it: under 20° straight, under 45° slight, under 120° a turn,
       under 165° sharp, else a U-turn; a straight shape whose words say left or right is a slight turn that way. Steps
@@ -199,20 +199,20 @@ platform. Rules in `ios/App/WalkGuide.swift` (tests `WalkGuideTests`); the map, 
       **Android has no MapKit:** use OSM-based foot routing instead, to decide later: the public OSRM `foot` profile
       (its steps carry a maneuver type and modifier, so the arrow can come from those, the shape rule as a fallback;
       the public demo server is for light use only), Valhalla (pedestrian costing, e.g. a hosted instance), or the
-      GraphHopper free tier (key needed, a daily quota). Google's Directions API is paid.
-- [ ] **Following it.** GPS at best accuracy (3 m filter) only while the screen is in front; off in the background and
+      GraphHopper free tier (key needed, a daily quota). Google's Directions API is paid. **Android 0.10.0:** OSRM's public foot profile (`travel/WalkRoute.kt`: routing.openstreetmap.de, steps with maneuvers → `WalkGuide.Turn.of`, words built from the maneuver and street name in English), asked at most every 20 s, kept per place, only the two coordinates sent.
+- [x] **Following it.** GPS at best accuracy (3 m filter) only while the screen is in front; off in the background and
       when it closes. Each fix (accuracy 65 m or better) is placed on the route (the pass nearest to the last place, so
       a route that doubles back doesn't jump); the step moves on within 15 m of its turn or once past it, never back,
       and not while off the route. A buzz at 30 m before a turn (not on steps under 40 m), two strong ones at the turn.
       More than 40 m off for 10 s: a new route from where you are, at most every 20 s. Within 25 m of the stop: "You’re
-      here · Platform 4", a success buzz, and after 2.5 s it closes back to the Go to card (which then says you're here).
-- [ ] **Spoken turns** only with headphones in (the alarm's headphones rule), on its own audio session (never the trip's),
-      not while the alarm rings, with a speaker toggle (remembered). "In 30 metres, turn right onto Hoogstraat".
+      here · Platform 4", a success buzz, and after 2.5 s it closes back to the Go to card (which then says you're here). **Android 0.10.0:** `LocationManager` GPS + network (1 s, 3 m) only while the screen is started; `WalkGuide.locate`/`warn`/`offRoute`/`arrived`; buzzes by `Vibrator`; "You’re here · Platform 4" then it closes (the Go to card doesn't say you're there on Android).
+- [x] **Spoken turns** only with headphones in (the alarm's headphones rule), on its own audio session (never the trip's),
+      not while the alarm rings, with a speaker toggle (remembered). "In 30 metres, turn right onto Hoogstraat". **Android 0.10.0:** Android `TextToSpeech` of its own, only with headphones in (`AudioRoute.privateOutput`), never while the trip alarm or the school wake-up rings, speaker toggle remembered.
 - [ ] **Lock screen.** During a trip (walking at a change) the Live Activity's change line shows the next turn
       ("→ 40 m · Hoogstraat", the stop's platform for the last one) after a "you'll miss it" line; a new optional
       `walkTurn` in the state (an older state still decodes). Sent per turn (at the new step and at the 30 m buzz), not
       per metre. Android: the same line in the ongoing trip notification.
-- [ ] The battery log has a new GPS reason "walking with arrows".
+- [ ] The battery log has a new GPS reason "walking with arrows". **Android 0.10.0:** no battery log on Android; the field log says `walk · with arrows to … · gps on (walking with arrows)` and `walk · closed · gps off`. The lock-screen turn line (above) is not built yet.
 
 ## iOS 0.40.3
 

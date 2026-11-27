@@ -34,8 +34,8 @@ android {
         applicationId = "nl.haltewekker.android"
         minSdk = 26
         targetSdk = 35
-        versionCode = 12
-        versionName = "0.9.1"
+        versionCode = 13
+        versionName = "0.10.0"
         // phones: ARM only (the map's native library is 11 MB per ABI; x86 is emulators and a few Chromebooks)
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }

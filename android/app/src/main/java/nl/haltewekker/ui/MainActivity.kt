@@ -164,6 +164,9 @@ private fun Root() {
         Screen.CALENDARS -> CalendarsScreen(onBack = { screen = Screen.SETTINGS })
         Screen.WEEK -> WeekScreen(onBack = { screen = Screen.SETTINGS })
     }
+    // (0.10.0, iOS 0.41) walking with arrows, over whatever screen opened it
+    val walk by nl.haltewekker.ui.screens.WalkNav.target.collectAsState()
+    walk?.let { w -> nl.haltewekker.ui.screens.WalkScreen(w) { nl.haltewekker.ui.screens.WalkNav.close() } }
     // (A6) the shortcuts and the widget's stop (nothing starts over a running trip: IntentActions)
     val sc by MainActivity.shortcut.collectAsState()
     val widgetStop by MainActivity.stop.collectAsState()

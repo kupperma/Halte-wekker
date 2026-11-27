@@ -7,6 +7,8 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import nl.haltewekker.core.GeoPoint
 import nl.haltewekker.core.Iso
+import nl.haltewekker.core.obj
+import nl.haltewekker.core.s
 import java.util.concurrent.ConcurrentHashMap
 
 /** Talks to Transitous (free, volunteer-run: keep requests light). The network half of iOS `Transit.swift`. */
@@ -16,8 +18,26 @@ object Transit {
     @Volatile var lastTrouble: String? = null
         private set
 
+    /** (0.10.0, iOS `Net.Polite.transitous`) a few at a time, a pause after a 429 (see `Polite`). */
+    val polite = Polite()
+
+    /** Transitous asked to slow down and the pause is on: background requests (the nearby stops) aren't sent. */
+    val cooling: Boolean get() = polite.coolingLeft != null
+
     private suspend fun ask(path: String, params: List<Pair<String, String>>): String? {
-        val a = Net.get(BASE + path, params)
+        val lane = kotlin.coroutines.coroutineContext[Polite.LaneElement]?.lane ?: Polite.Lane.URGENT
+        val placed = try { polite.enter(lane, 30.0) } catch (_: Polite.Refused) {
+            lastTrouble = "Transitous asked to slow down (cooling down)"
+            nl.haltewekker.logs.FieldLog.add(nl.haltewekker.logs.FieldEntry.Kind.NET, "$path · ${Polite.COOLING_NOTE}")
+            return null
+        }
+        if (!placed) { lastTrouble = "Transitous is busy (no answer in time)"; return null }
+        val sent = polite.sending()
+        val a = try { Net.get(BASE + path, params) } finally { polite.exit(lane) }
+        if (a.status == 429) {
+            polite.slowDown(a.retryAfter, sent)
+            nl.haltewekker.logs.FieldLog.add(nl.haltewekker.logs.FieldEntry.Kind.NET, "$path · 429 · paused ${Math.round(polite.coolingLeft ?: 0.0)} s")
+        } else if (a.status in 200..399) polite.answered()
         lastTrouble = when {
             a.status == -1 -> "No connection to Transitous"
             a.status == 429 -> "Transitous asked to slow down (HTTP 429)"
@@ -53,6 +73,28 @@ object Transit {
         }
         return trips
     }
+
+    /** (0.10.0, iOS `Transit.planPage`) one page of a plan, its next page's cursor and its size; `failed`: no answer. */
+    class Page(val trips: List<DoorTrip>, val cursor: String?, val bytes: Int, val failed: Boolean)
+
+    /**
+     * The nearby stops' plan (iOS 0.42.2): 8 itineraries (12 at most) in the next hour, 3 transfers at most, the walk
+     * to the first stop up to `preTransit` seconds (0: the planner's own), without transfer details; your walking speed
+     * once learned. `cursor`: the next page of an earlier one.
+     */
+    suspend fun planPage(from: String, to: String, at: Double, preTransit: Int, cursor: String?, count: Int = nl.haltewekker.travel.Nearby.ITINERARIES): Page =
+        withContext(Dispatchers.Default) {
+            val walk = nl.haltewekker.travel.HabitStore.pedestrianSpeed()
+            val q = mutableListOf("fromPlace" to from, "toPlace" to to, "numItineraries" to "$count",
+                "maxItineraries" to "${nl.haltewekker.travel.Nearby.MAX_ITINERARIES}", "searchWindow" to "${nl.haltewekker.travel.Nearby.SEARCH_WINDOW}",
+                "maxTransfers" to "3", "time" to Iso.format(Math.floor(at / 60) * 60), "detailedTransfers" to "false")
+            if (preTransit > 0) q.add("maxPreTransitTime" to "$preTransit")
+            if (cursor != null) q.add("pageCursor" to cursor)
+            walk?.let { q.add("pedestrianSpeed" to String.format(java.util.Locale.ROOT, "%.1f", it)) }
+            val body = ask("/v5/plan", q) ?: return@withContext Page(emptyList(), null, 0, true)
+            val next = TransitParse.json(body).obj?.s("nextPageCursor")
+            Page(TransitParse.parsePlan(body), next, body.length, false)
+        }
 
     /** Trips from a spot to a place, soonest first, without the ones a later trip beats. */
     suspend fun tripsFrom(here: GeoPoint, to: String, keep: Int = 5): List<DoorTrip> {

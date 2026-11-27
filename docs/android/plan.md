@@ -242,6 +242,46 @@ byte for byte, and its test vectors as JUnit tests before any screen:
 
 ### A9.1 — the 0.42.3 alarm rules wired (0.9.1, code 12) — built ("As built A9.1" says how)
 
+### A10 — the nearby stops, walking with arrows, Transitous's cool-down (0.10.0, code 13) — built ("As built A10" says how)
+
+## As built A10 (0.10.0, version code 13): the stops around you, walking with arrows, the cool-down
+
+**Transitous's cool-down (`data/Polite.kt`, `PoliteTest`; iOS `Net.Polite`).** Every `Transit.ask` takes a place: at
+most 4 at once, 2 of them background; a waiting urgent one goes first. A 429 pauses (Retry-After within 5–120 s, else
+20 s, doubling, reset by an answer); during a pause background requests are turned away at once (`cooling down` in the
+net log) and urgent ones go one at a time. The lane is a coroutine context element (`withContext(Polite.Background)`);
+not said: urgent (the ride, the screens). `Transit.cooling` for the nearby view. `NetAnswer.retryAfter`.
+
+**The stops around you (`travel/NearbyStore.kt`, `ui/screens/NearbyScreen.kt`; iOS `NearbyStore`, `NearbyViews`,
+`NearbyDetail`).** Fastest trip (PlanScreen) opens on it when no ride runs; "Your trip and other times" shows the trip
+cards as before, "All stops around you" goes back. The search: `/v1/map/stops` (kept 10 min) and one `/v5/plan` from
+your coordinate (`Transit.planPage`: 8/12 itineraries, an hour, 3 transfers, the walk to 1.6 km, the next page by its
+cursor), at most 2 at once in the background lane; each way with the stop its first ride leaves from (`Nearby.groupIndex`
+/ `newGroup`); a second page only when needed (`Nearby.nextPlan`), never while cooling; asked again after 5 min or
+250 m. Leave now / In 10 / In 20 filter; a second after the last switch `more` asks the next page when needed. The map
+is its own MapLibre view: circle bitmaps (arrival colour `Nearby.color`, minutes to arrival, the ring by `Nearby.ring`,
+"+N" by `Nearby.merge` at the zoom), grey dots, you, the vehicles on the line now; the legend; the status line
+(`Nearby.statusLine`); the list (`Nearby.ordered`, Fastest / Surest / Slower). A stop tapped: walk, tags, "Arrive X: …",
+Times / Whole trip (`TripTimeline` drawn with Compose; overnight ones apart), On the line now (OVapi/NS fixes with their
+age), its own plan when it had no way, Also from here (`/v6/stoptimes`), Go · leave in N min, Walk there. The log lines
+`nearby · …` and `nearby stop · …`.
+
+**Walking with arrows (`travel/WalkRoute.kt`, `ui/screens/WalkScreen.kt`; iOS `WalkGuideView`).** The OSRM foot route
+(routing.openstreetmap.de, `Net.userAgent`, only the two coordinates; at most every 20 s, kept per ~25 m place), its
+maneuvers as arrows and words; `WalkNav` draws the screen over the app; GPS + network fixes only while it's started;
+`WalkGuide` for the step, the 30 m buzz and the turn's two, off the route (a new route), the hurry line and "You’re
+here · Platform 4" (closes after 2.5 s). Spoken turns by its own `TextToSpeech`, only with headphones, silent while an
+alarm rings. `WalkThere` (arrows + Open in maps) on Fastest trip's chosen card, at a change, in a nearby stop's sheet.
+
+### Calls made in A10 (the user can correct)
+
+- How sure on Android: your own rides (the travel log's lateness on that line to that stop, ≥ 4), else a rough model
+  (a live delay at the end, rush hours, the room at each change); iOS has `DelayBook`/`Steady`/`Risk.miss` for it.
+- On the line now gives no "N stops" (it would need each vehicle's trip); "Go" puts the way first in Fastest trip's
+  cards (kept there until it leaves) instead of a From <stop> trip.
+- The walk's words are English, built from OSRM's maneuver and the street's name; no lock-screen turn line yet.
+- Requests that don't say a lane are urgent, so the cool-down only holds back the nearby view's.
+
 ## As built A9.1 (0.9.1, version code 12): short legs, the first minute, the next leg's ride
 
 **The ring path as one pure step (`ride/LegAlarm.kt`, `LegAlarmTest`).** `LegAlarm.fix` takes the leg (phase, quiet,
@@ -287,7 +327,7 @@ says "Should be leaving now · Look out for it", "May have left · Look out for 
 throttled ≤ 1 per 20 s, cached, `Net.userAgent`; buzzes, spoken turns with headphones, "You're here · Platform 4");
 the nearby-stops view with its 0.42.2 fetch design and Whole-trip rows; (done in 0.9.1: `ShortLeg` and `NextLegGuard` in
 the ride's alarm path, the next ride's own GPS for `MissCall.seen`, the `no gps: no ovapi match …` log line). A Transitous
-cool-down after a 429 (the nearby view's `cooling`) is also still to add in `data/Transit.kt`.
+cool-down after a 429 (the nearby view's `cooling`) is also still to add in `data/Transit.kt`. (All done in 0.10.0.)
 
 ## As built A8.1 (0.8.1, version code 10): the rest of iOS 0.40
 

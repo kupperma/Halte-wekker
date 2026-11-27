@@ -146,6 +146,11 @@ fun RideScreen(s: RideState, onBack: () -> Unit) {
             s.changeMiss?.let { Text(it, color = DS.t.warning, fontWeight = FontWeight.SemiBold) }
             s.changeLine?.let { Text(it, color = DS.t.text) }
             if (s.changeSwitch != null) QuietButton("Switch to that one") { RideService.send(context, RideService.ACTION_SWITCH_CHANGE) }
+            // (0.10.0, iOS 0.41) at the change: walk there with arrows (or in the maps app)
+            val atChange = s.index > 0 && s.vehicleTripId == null && s.phase == Phase.SLEEPING
+            val nx = if (atChange) leg else s.trip.rides.getOrNull(s.index + 1)
+            val at = nx?.from
+            if (atChange && nx != null && at != null) WalkThere(WalkTarget(at, nx.fromStop, nx.platform, nx.departure, walkWhat(nx)))
         }
         if (s.offline) Note("No network: going by the stops and times saved on your phone.")
         s.nextStop?.let { n -> if (s.phase == Phase.SLEEPING) Text("Next: $n" + (s.delayMin?.let { d -> " · " + if (d >= 1) "$d min late" else if (d <= -1) "${-d} min early" else "on time" } ?: ""),
