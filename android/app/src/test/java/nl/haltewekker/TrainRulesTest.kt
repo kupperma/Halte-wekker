@@ -103,18 +103,64 @@ class TrainRulesTest {
 
     private fun p(m: Double) = Fx.east(m)
 
-    @Test fun stayOnToTheEndOfTheLastLeg() {
-        val ends = listOf(p(3000.0), p(6000.0))
-        val deps = listOf(t0, t0 + 900)
-        val calls = listOf(TrainRules.Call(p(0.0), t0), TrainRules.Call(p(3000.0), t0 + 600), TrainRules.Call(p(6000.0), t0 + 1200))
-        assertEquals(1 to 2, TrainRules.stayOn(0, ends, deps, calls, t0 + 60))
-        assertNull(TrainRules.stayOn(0, ends, deps, calls.take(2), t0 + 60))
+    private fun at(s: Double) = t0 + s
+
+    /** Breda → Tilburg → Eindhoven by train, then a bus from the bus bay 300 m on (iOS `TrainRulesTests.through`). */
+    private val through = listOf(
+        TrainRules.StayLeg(p(0.0), p(20_000.0), "Breda", "Tilburg", at(0.0), at(1500.0), "t3529", "3529"),
+        TrainRules.StayLeg(p(20_000.0), p(50_000.0), "Tilburg", "Eindhoven Centraal", at(1920.0), at(3900.0), "t3631", "3631"),
+        TrainRules.StayLeg(p(50_300.0), p(70_000.0), "Eindhoven, Station", "Veghel, Centrum", at(4200.0), at(6000.0), "b305", ""))
+
+    private fun calls(eindhoven: Double) = listOf(
+        TrainRules.Call(p(0.0), at(0.0), "Breda"), TrainRules.Call(p(20_000.0), at(1500.0), "Tilburg"),
+        TrainRules.Call(p(50_050.0), at(eindhoven), "Eindhoven"), TrainRules.Call(p(62_000.0), at(eindhoven + 600), "Helmond"))
+
+    @Test fun throughTrainReachingTheNextChangeInTimeIsMerged() {
+        assertEquals(TrainRules.StayHit(1, 2, false), TrainRules.stayOn(0, through, "t3529", "3529", calls(3840.0), at(60.0)))
+        assertEquals(1, TrainRules.stayOn(0, through, "t3529", "3529", calls(3990.0), at(60.0))?.leg)
     }
 
-    @Test fun stayOnInTimeForTheRideAfter() {
-        val ends = listOf(p(3000.0), p(6000.0), p(9000.0))
-        val calls = listOf(TrainRules.Call(p(3000.0), t0 + 600), TrainRules.Call(p(6000.0), t0 + 1200))
-        assertEquals(1, TrainRules.stayOn(0, ends, listOf(t0, t0 + 700, t0 + 1500), calls, t0)?.first)
-        assertNull(TrainRules.stayOn(0, ends, listOf(t0, t0 + 700, t0 + 1250), calls, t0))
+    @Test fun slowerThroughTrainIsNotMerged() {
+        assertNull(TrainRules.stayOn(0, through, "t3529", "3529", calls(4080.0), at(60.0)))
+        val tight = through.toMutableList().also { it[2] = it[2].copy(departure = at(3930.0)) }
+        assertNull(TrainRules.stayOn(0, tight, "t3529", "3529", calls(3900.0), at(60.0)))
+        assertNull(TrainRules.stayOn(0, through, "t3529", "3529", calls(3840.0).take(2), at(60.0)))
+        assertNull(TrainRules.stayOn(0, through, "t3529", "3529", calls(3840.0), at(3850.0)))
+    }
+
+    @Test fun sameTrainNumberAcrossLegsIsMerged() {
+        val split = through.toMutableList().also { it[1] = it[1].copy(tripId = "other-id", num = "IC 3529") }
+        assertEquals(TrainRules.StayHit(1, null, true), TrainRules.stayOn(0, split, "t3529", "3529", emptyList(), at(60.0)))
+        val byTrip = through.toMutableList().also { it[1] = it[1].copy(tripId = "t3529", num = "") }
+        assertEquals(TrainRules.StayHit(1, 2, true), TrainRules.stayOn(0, byTrip, "t3529", "", calls(4500.0), at(60.0)))
+        assertNull(TrainRules.stayOn(0, through, "t3529", "3529", emptyList(), at(60.0)))
+    }
+
+    @Test fun stayOnByTheRideAftersStopOrTheStationName() {
+        val legs = through.toMutableList()
+        legs[1] = legs[1].copy(to = p(51_000.0))
+        assertEquals(2, TrainRules.stayOn(0, legs, "t3529", "3529", calls(3840.0), at(60.0))?.call)
+        legs[1] = legs[1].copy(toName = "Somewhere else")
+        legs[2] = legs[2].copy(from = p(50_200.0))
+        assertEquals(2, TrainRules.stayOn(0, legs, "t3529", "3529", calls(3840.0), at(60.0))?.call)
+        legs[2] = legs[2].copy(from = p(53_000.0), fromName = "Elsewhere")
+        assertNull(TrainRules.stayOn(0, legs, "t3529", "3529", calls(3840.0), at(60.0)))
+    }
+
+    @Test fun stayOnToTheEndOfTheLastLeg() {
+        val legs = listOf(TrainRules.StayLeg(p(0.0), p(3000.0), departure = t0), TrainRules.StayLeg(p(3000.0), p(6000.0), departure = t0 + 900))
+        val c = listOf(TrainRules.Call(p(0.0), t0), TrainRules.Call(p(3000.0), t0 + 600), TrainRules.Call(p(6000.0), t0 + 1200))
+        assertEquals(TrainRules.StayHit(1, 2, false), TrainRules.stayOn(0, legs, "x", "", c, t0 + 60))
+        assertNull(TrainRules.stayOn(0, legs, "x", "", c.take(2), t0 + 60))
+        assertNull(TrainRules.stayOn(1, legs, "x", "", c, t0 + 60))
+    }
+
+    @Test fun stayLogAndHeadline() {
+        assertEquals("stay on · IC 3529 also reaches Eindhoven 15:44 (plan changed at Tilburg 15:05 → IC 3631 15:12)",
+            TrainRules.stayLog("IC 3529", "Eindhoven", "15:44", "Tilburg", "15:05", "IC 3631", "15:12", false))
+        assertEquals("Intercity to Zwolle" to "Get off at Tilburg", TrainRules.headline("Intercity", "Zwolle", "Tilburg", null))
+        assertEquals("Stay on to Eindhoven", TrainRules.headline("Intercity", "Zwolle", "Eindhoven", "Eindhoven").first)
+        assertEquals("Bus 305 to Eindhoven, Station" to null, TrainRules.headline("Bus 305", "Eindhoven, Station", "Eindhoven Centraal", null))
+        assertEquals("Intercity to Zwolle · get off at Tilburg", TrainRules.lockHeadline("Intercity", "Zwolle", "Tilburg", null))
     }
 }

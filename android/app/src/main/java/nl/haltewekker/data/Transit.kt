@@ -103,7 +103,7 @@ object Transit {
         val all = plan("${here.lat},${here.lon}", to, LiveKeep.askAt(now, true), count = LiveKeep.count(5, true))
         val speed = nl.haltewekker.travel.HabitStore.pedestrianSpeed() ?: WalkFirst.PLANNER_SPEED
         val kept = TransitParse.keepUseful(all, now, keep, here, speed) { nl.haltewekker.logs.FieldLog.add(nl.haltewekker.logs.FieldEntry.Kind.NET, it) }
-        // (iOS 0.42.9) home: off at your own home stop when the last ride calls there
+        // (iOS 0.42.10) home: off at your own home stop when the last ride calls there
         if (home == null || homeStops.isEmpty()) return kept
         val own = homeStops.map { HomeAlight.Own(it.id, GeoPoint(it.lat, it.lon)) }
         return kept.mapIndexed { i, t ->

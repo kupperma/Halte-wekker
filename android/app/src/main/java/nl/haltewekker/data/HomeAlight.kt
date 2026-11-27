@@ -6,7 +6,7 @@ import kotlin.math.ceil
 import kotlin.math.max
 
 /**
- * (iOS 0.42.9 `HomeAlight`) On the way home, off at your own home stop (the setup's) when the last ride calls there:
+ * (iOS 0.42.10 `HomeAlight`) On the way home, off at your own home stop (the setup's) when the last ride calls there:
  * the one with the shortest walk home at your speed, not the planner's first stop in town. Plain rules, tested with
  * the iOS vectors (`HomeAlightTest`). Times in seconds since 1970.
  */
