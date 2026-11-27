@@ -38,7 +38,7 @@ function rules() {
   assert.equal(parsePoint("95,5"), null);
   assert.equal(stationKey("bd", P(51.5955, 4.7799)), "st:BD@51.60,4.78");
   assert.equal(stationKey("Den Bosch", P(51.69, 5.29)), "st:den bosch@51.69,5.29");
-  assert.ok(overpassQuery(P(51.5955, 4.7799)).includes("around:400,51.595500,4.779900"));
+  assert.ok(overpassQuery(P(51.5955, 4.7799)).startsWith("[out:json][timeout:25][bbox:51.59188,4.77412,51.59912,4.78568];("));
 }
 
 /** Each station: [track, from, side, confidence]. The two sides of an island give opposite answers, and the other
@@ -181,7 +181,7 @@ async function route() {
   assert.equal(asked[0].u, "https://overpass-api.de/api/interpreter");
   assert.equal(asked[0].init.method, "POST");
   assert.equal(asked[0].init.headers["User-Agent"], USER_AGENT);
-  assert.ok(decodeURIComponent(asked[0].init.body).includes('way["railway"="rail"](around:400,51.595500,4.779900)'));
+  assert.ok(decodeURIComponent(asked[0].init.body).includes('way["railway"="rail"];);out tags geom;'));
   assert.equal((await (await go(q("8", FROM.ettenLeur))).json()).side, "right");
   assert.equal(asked.length, 1);
   // 30 days later: asked again

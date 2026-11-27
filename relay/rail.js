@@ -19,7 +19,7 @@
 //  nothing). "low": the line bends between the two stops, or the match was loose.
 //
 // OSM data: one Overpass request per station on a miss (a second instance only when the first can't answer; a descriptive User-Agent, 25 s, nothing personal), trimmed to
-// the platforms and rails within 400 m and kept 30 days in a Durable Object ("Rail", one per station); a busy Overpass
+// the platforms and rails in a box 400 m around it and kept 30 days in a Durable Object ("Rail", one per station); a busy Overpass
 // (429/504/no answer) is asked again only after 10 minutes. Map data © OpenStreetMap contributors, ODbL.
 
 export const OVERPASS = "https://overpass-api.de/api/interpreter";
@@ -205,13 +205,14 @@ export function sideOf(data, track, from, at) {
   return { side, confidence: sure ? "high" : "low", platformRef: refs.length === 1 ? refs[0] : t };
 }
 
-/** The Overpass question for a station at {lat, lon}. */
+/** The Overpass question for a station at {lat, lon}: a box 400 m around it (a box is what Overpass finds fast). */
 export function overpassQuery(at) {
-  const a = `(around:${RADIUS},${at.lat.toFixed(6)},${at.lon.toFixed(6)})`;
-  return `[out:json][timeout:25];(` +
-    `way["railway"~"^(platform|platform_edge)$"]${a};relation["railway"="platform"]${a};` +
-    `way["public_transport"="platform"]["train"="yes"]${a};node["railway"="platform"]${a};` +
-    `way["railway"="rail"]${a};);out tags geom;`;
+  const dLat = RADIUS / R_LAT, dLon = RADIUS / (R_LON * Math.cos((at.lat * Math.PI) / 180));
+  const b = `(${(at.lat - dLat).toFixed(5)},${(at.lon - dLon).toFixed(5)},${(at.lat + dLat).toFixed(5)},${(at.lon + dLon).toFixed(5)})`;
+  return `[out:json][timeout:25][bbox:${b.slice(1, -1)}];(` +
+    `way["railway"="platform"];way["railway"="platform_edge"];relation["railway"="platform"];` +
+    `way["public_transport"="platform"]["train"="yes"];node["railway"="platform"];` +
+    `way["railway"="rail"];);out tags geom;`;
 }
 
 const STATION = /^[A-Za-z0-9][A-Za-z0-9 '’.()\-]{0,39}$/;
