@@ -143,7 +143,10 @@ final class GoStore: ObservableObject {
 
     /// Out of the screen: everything stops, and its notifications go.
     func close() {
-        stopWatching()
+        stopWatching(why: isOpen ? "closed" : "not open")
+        // (no trip from it: the trains it watched for you go; a trip that started watches its own)
+        if trip?.phase == .idle { WatchStore.shared.setRideWatches([]) }
+        trainsWatched = nil
         if let k = planKey { UserDefaults.standard.set(k, forKey: "go.closedPlan") }
         planKey = nil; deadline = nil; deadlineLabel = nil; chosen = nil; chosenByHand = false
         isOpen = false
@@ -162,6 +165,15 @@ final class GoStore: ObservableObject {
     private var movedMax = 0.0                 // …and the furthest you've been from there
     private var watchedFirst: Date?            // the departure it watched first: missed and not gone, it stops by itself
     private var extrasKept: [DoorTrip] = []    // the extras of the last look in front (behind the screen: no new ones)
+    // 0.42.4: getting on wherever you get on (`WaitStart`)
+    private var waitState = WaitStart.State()      // the looks so far at what moves with you
+    private var reachKnown: [String: (goes: Bool, at: Date)] = [:]   // a trip takes you on (from where you were then)
+    private var lastWatched: DoorTrip?                 // the last live trip it watched (kept while the screen says "moving")
+    private var fastSince: Date?                   // at bus speed since (for the pace of the looks)
+    private var trainsWatched: String?             // the way whose trains are watched for a platform change
+    private var waitLogged: (key: String, at: Date)?                  // the last look's call in the field log, and when
+    /// Moving at bus or train speed for half a minute (`WaitStart.movingRule`): the stops around you make no sense now.
+    @Published private(set) var atVehicleSpeed = false
 
     private func begin(_ d: Place) {
         loop?.cancel(); detect?.cancel()
@@ -172,7 +184,14 @@ final class GoStore: ObservableObject {
         told = [:]; toldEnd = nil; toldGo = []; missed = nil
         chosenMisses = 0; toldBeats = []
         since = Date()
+        let again: Bool = watching
         watching = true
+        waitState = WaitStart.State(); reachKnown = [:]; lastWatched = nil; waitLogged = nil; atVehicleSpeed = false; fastSince = nil
+        // (0.42.4) the look at what you got on belongs to this store, not to a screen: it runs while it watches, whatever
+        // is in front (the cards, the stops around you, a sheet, the home), and with the phone locked (its GPS goes on
+        // in the background while it watches: `GPSPolicy`). Motion & Fitness too: it was the home screen's alone.
+        Motion.shared.live(true, for: "go")
+        FieldLog.shared.add(.ride, WaitStart.onLine(again: again, inFront: UIApplication.shared.applicationState == .active))
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
         trip?.setGo(true)
         look?.cancel()
@@ -239,6 +258,9 @@ final class GoStore: ObservableObject {
                     unsure = LookBackoff.State(); nextAt = .distantPast
                 }
                 last = await self.checkBoarding(last)
+                // (0.42.4) the trains of the way it watches, for a platform change, also before the trip starts
+                self.watchTrains()
+                await WatchStore.shared.check()
                 if self.movingUnknown {
                     unsure = LookBackoff.step(unsure, key: last)
                     nextAt = Date().addingTimeInterval(LookBackoff.wait(unsure) - 1)
@@ -247,8 +269,12 @@ final class GoStore: ObservableObject {
         }
     }
 
-    private func stopWatching() {
+    private func stopWatching(why: String) {
+        if watching { FieldLog.shared.add(.ride, WaitStart.offLine(why: why)) }
         watching = false
+        Motion.shared.live(false, for: "go")
+        if atVehicleSpeed { atVehicleSpeed = false }
+        waitState = WaitStart.State(); reachKnown = [:]; lastWatched = nil; fastSince = nil
         loop?.cancel(); loop = nil
         detect?.cancel(); detect = nil
         look?.cancel(); look = nil
@@ -264,7 +290,7 @@ final class GoStore: ObservableObject {
     private func stopIfMissed(now: Date) -> Bool {
         guard !demo, onBoard == nil, trip?.phase == .idle,
               GoPace.autoStop(watched: watchedFirst, deadline: deadline, movedMetres: movedMax, now: now) else { return false }
-        stopWatching()
+        stopWatching(why: "the trip you waited for has gone")
         tell("Stopped watching", "The trip you were waiting for has gone and you stayed here · open Fastest trip again when you need it",
              kind: "info", sound: false)
         return true
@@ -273,7 +299,7 @@ final class GoStore: ObservableObject {
     /// Watching for `maxHours`: it stops by itself, and says so.
     private func stopIfLong(now: Date) -> Bool {
         guard now.timeIntervalSince(since) > Self.maxHours * 3600 else { return false }
-        stopWatching()
+        stopWatching(why: "after \(Int(Self.maxHours)) hours")
         tell("Stopped watching", "After \(Int(Self.maxHours)) hours · open Fastest trip again when you need it", kind: "info", sound: false)
         return true
     }
@@ -299,7 +325,12 @@ final class GoStore: ObservableObject {
         // you're on (beside this, not in the way) and plan from it; until then, say so. (In a car it plans once you stop.)
         // (0.26.2: or by where your fixes went, at that speed: in a train the GPS's own speed is often unknown)
         let byTrack: Bool = trip.map { OnBoardRules.movingByTrack($0.recentFixes, now: Date(), speed: 8) } ?? false
-        if (LiveStore.movingFix(loc) && loc.speed >= 8) || byTrack, loc.timestamp.timeIntervalSinceNow > -30, trip?.phase == .idle, !demo {
+        // (0.42.4: or half a minute at bus speed, a stop on the way included: a bus through town rarely does 8 m/s, and
+        // the screen went on planning a walk back to the stop it had passed, with you on the bus)
+        let byWait: Bool = trip.map { t in
+            WaitStart.movingRule(WaitStart.moving(t.recentFixes, now: Date()), motion: WaitStart.hint(Motion.shared.now())) == nil
+        } ?? false
+        if (LiveStore.movingFix(loc) && loc.speed >= 8) || byTrack || byWait, loc.timestamp.timeIntervalSinceNow > -30, trip?.phase == .idle, !demo {
             lookAgain()
             movingUnknown = true
             best = nil; others = []; asOf = nil; error = nil
@@ -311,7 +342,7 @@ final class GoStore: ObservableObject {
         let target = CLLocation(latitude: dest.coordinate.latitude, longitude: dest.coordinate.longitude)
         if loc.distance(from: target) < 400 && loc.horizontalAccuracy < 200 {
             arrived = true
-            stopWatching()
+            stopWatching(why: "you're there")
             return
         }
         let d = dest
@@ -891,47 +922,188 @@ final class GoStore: ObservableObject {
 
     // MARK: on board?
 
-    /// Every few seconds: is your GPS moving with a bus or train? One look is enough for the one it's watching (or one of the
-    /// others it found); any other one has to be the same twice and take you there.
+    /// Every few seconds while it watches (0.42.4, `WaitStart`): are you moving like a bus or train, with one that fits
+    /// your GPS and takes you on? Wherever you got on (a stop before the planned one too): the ride it watches, another
+    /// departure of its line (an earlier 305), or another line that gets you there. Sure of one that doesn't: the wrong-bus
+    /// alert. Each look's call goes to the field log. It returns what it saw, for the pace of the looks (a new key each
+    /// look while it's on its way to starting keeps them quick).
+    /// (Before 0.42.4 one that wasn't among the ways on screen needed the same best twice in a row and a second matcher
+    /// to agree on exactly that trip, and nothing was looked at while the bus stood at a stop: boarding the earlier 305
+    /// at the bus station, with the 306 on the same road, it never started.)
     private func checkBoarding(_ last: String?) async -> String? {
-        guard let trip, trip.phase == .idle, watching, !lookingOnBoard else { return nil }
+        guard let trip, WaitStart.lookRuns(watching: watching, tripIdle: trip.phase == .idle, demo: demo) == nil else { return nil }
         let R = MatchRules.current()
-        // (only a live answer is one it's watching: a saved one gets no head start)
-        let ranked = await trip.matchVehicles(mode: nil, planned: asOf == nil ? best?.first.tripId : nil, place: "board")
-        guard var m = ranked.first else { seen = nil; return nil }
+        // (only a live answer is one it's watching: a saved one gets no head start; kept while the screen says "moving")
+        let live: Bool = asOf == nil
+        if live, let b = best { lastWatched = b }
+        let watched: DoorTrip? = live ? (best ?? lastWatched) : nil
+        let planned: Ride? = watched?.first
+        let ranked: [Match] = await trip.matchVehicles(mode: nil, planned: planned?.tripId, place: "board")
         guard watching, trip.phase == .idle else { return nil }
-        // at bus speed, not running for it while it passes you
-        guard (trip.currentSpeed ?? 0) >= 3.5 else { return last }
-        // (the saved answer on screen isn't one it's watching: only a live answer can start your trip)
-        let live = asOf == nil
-        let all: [DoorTrip] = live ? [best].compactMap { $0 } + others : []
-        // Buses that leave the same stop together (the 305 and the 306 at Veghel) fit about the same at first: the one
-        // it's watching wins when it fits nearly as well.
-        if live, let b = best, m.vehicle.tripId != b.first.tripId,
-           let bm = ranked.first(where: { $0.vehicle.tripId == b.first.tripId }), bm.score < m.score + R.plannedEdge { m = bm }
-        let twice = last == m.vehicle.tripId
-        // the others that fit about as well: the ride keeps them in the running until there's real distance between them
-        let close = ranked.filter { $0.vehicle.tripId != m.vehicle.tripId && $0.cost < m.cost + R.close }.map(\.vehicle)
-        if let t = all.first(where: { $0.first.tripId == m.vehicle.tripId }) {
-            // one look for the line it's watching; another line has to be the same twice
-            let sameLine = (live ? best : nil).map { $0.first.line == m.vehicle.line } ?? true
-            if (m.cost < R.oneLookWatched && sameLine) || twice {
-                board(t, m.vehicle, alternatives: all, couldBe: close)
-                return nil
+        let now = Date()
+        let fixes: [Fix] = trip.recentFixes
+        let moving: WaitStart.Moving = WaitStart.moving(fixes, now: now)
+        let hint: WaitStart.Hint = WaitStart.hint(Motion.shared.now())
+        let fast: Bool = WaitStart.movingRule(moving, motion: hint) == nil
+        if fast != atVehicleSpeed { atVehicleSpeed = fast }
+        if fast { if fastSince == nil { fastSince = now } } else if moving.seconds <= 0 { fastSince = nil }
+        let cands: [WaitStart.Candidate] = await candidates(ranked, planned: planned, close: R.close, now: now)
+        guard watching, trip.phase == .idle else { return nil }
+        let rules = WaitStart.Rules(oneLook: R.oneLookWatched, close: R.close)
+        let out: WaitStart.Outcome = WaitStart.step(waitState, moving: moving, motion: hint, candidates: cands, rules: rules)
+        waitState = out.state
+        let busy: Bool = moving.seconds > 0 || !cands.isEmpty
+        switch out.call {
+        case .start(let id):
+            logLook(out.line, key: "start", busy: true, now: now)
+            guard let m = ranked.first(where: { $0.vehicle.tripId == id }) else { return nil }
+            // the others that fit about as well: the ride keeps them in the running until there's real distance between them
+            let close: [Vehicle] = ranked.filter { $0.vehicle.tripId != id && $0.cost < m.cost + R.close }.map(\.vehicle)
+            guard let why = await startOn(m.vehicle, couldBe: close, watched: watched, fixes: fixes) else { return nil }
+            FieldLog.shared.add(.match, "wait · \(TripManager.logLabel(m.vehicle)) · not started: \(why)")
+            if watching { seen = m.vehicle }
+            return "\(id)|\(out.progress)"
+        case .wrongBus(let id):
+            logLook(out.line, key: "wrong bus", busy: true, now: now)
+            if let m = ranked.first(where: { $0.vehicle.tripId == id }) { await tellWrongBus(m.vehicle, planned: planned) }
+            return id
+        case .hold(let why):
+            logLook(out.line, key: why, busy: busy, now: now)
+            seen = fast ? ranked.first?.vehicle : nil
+            guard let id = ranked.first?.vehicle.tripId else { return nil }
+            // (on its way to starting, or in the first 3 minutes at bus speed: a new key each look keeps them every 6 s;
+            // after that the looks back off as before)
+            let early: Bool = fastSince.map { now.timeIntervalSince($0) < 180 } ?? (moving.seconds > 0)
+            return out.progress > 0 || early ? "\(id)|\(Int(now.timeIntervalSince1970))" : id
+        }
+    }
+
+    /// The matcher's best (4 at most) as `WaitStart` judges them: by their own GPS or their times, how long that GPS has
+    /// been with you, the ride it watches or its line, and (for those about as good as the best) whether they take you on.
+    private func candidates(_ ranked: [Match], planned: Ride?, close: Double, now: Date) async -> [WaitStart.Candidate] {
+        guard let trip, let top = ranked.first else { return [] }
+        var out: [WaitStart.Candidate] = []
+        for m in ranked.prefix(4) {
+            let v: Vehicle = m.vehicle
+            var c = WaitStart.Candidate(id: v.tripId, label: TripManager.logLabel(v), line: v.line, cost: m.cost)
+            c.gpsAge = trip.gpsAge(of: v.tripId)
+            c.gpsFor = trip.gpsWithYou(v.tripId, now: now)
+            if let p = planned {
+                c.planned = p.tripId == v.tripId
+                c.plannedLine = p.isTrain == v.isTrain && WaitStart.sameLine(p.line, v.line)
             }
-            seen = m.vehicle
-            return m.vehicle.tripId
+            if m.cost <= top.cost + close { c.reaches = await takesYouOn(v.tripId) }
+            out.append(c)
         }
-        if twice, let loc = trip.lastFix, let ob = await LiveStore.onBoardTrips(loc, to: dest, reuse: true, history: { trip.recentFixes }),
-           ob.0.vehicle.tripId == m.vehicle.tripId, let t = ob.1.first {
-            // a long way round is probably not a bus you're on (a car or bike next to one)
-            if asOf == nil, let b = best, t.end > b.end.addingTimeInterval(30 * 60) { seen = nil; return m.vehicle.tripId }
-            guard watching, trip.phase == .idle else { return nil }
-            board(t, ob.0.vehicle, alternatives: all, couldBe: ranked.map(\.vehicle).filter { $0.tripId != ob.0.vehicle.tripId && close.contains($0) })
-            return nil
+        return out
+    }
+
+    /// The trip takes you on from here (`WaitStart.reaches`): to the stop the watched ride gets you to, where a later
+    /// ride of a way on screen leaves, or the destination. Kept 2 minutes per trip; nil: its stops couldn't be had.
+    private func takesYouOn(_ tripId: String) async -> Bool? {
+        if let k = reachKnown[tripId], Date().timeIntervalSince(k.at) < 120 { return k.goes }
+        let stops: [TripStop] = await Transit.$urgent.withValue(true) { await Transit.tripStops(tripId) }
+        guard !stops.isEmpty else { return nil }
+        let list: [WaitStart.Stop] = stops.map { WaitStart.Stop(name: $0.name, point: GeoPoint($0.coordinate), time: $0.arrival) }
+        let here: GeoPoint? = trip?.lastFix.map { GeoPoint($0.coordinate) }
+        let goes: Bool = WaitStart.reaches(list, here: here, targets: reachTargets(), now: Date())
+        reachKnown[tripId] = (goes: goes, at: Date())
+        return goes
+    }
+
+    /// Where a ride may take you on to: the destination, and of each way on screen (or the one it watched) the stop its
+    /// first ride gets you to and where each later ride leaves.
+    private func reachTargets() -> [GeoPoint] {
+        var out: [GeoPoint] = [GeoPoint(dest.coordinate)]
+        let ways: [DoorTrip] = [best ?? lastWatched].compactMap { $0 } + others
+        for t in ways {
+            if let a = t.first.toLat, let o = t.first.toLon { out.append(GeoPoint(lat: a, lon: o)) }
+            for r in t.rides.dropFirst() {
+                if let a = r.fromLat, let o = r.fromLon { out.append(GeoPoint(lat: a, lon: o)) }
+            }
         }
-        seen = m.vehicle
-        return m.vehicle.tripId
+        return out
+    }
+
+    /// Start the trip on `v` (0.42.4): the way on screen that rides it (the one it watches, or another it found), else the
+    /// ways on from it, planned now from its next stop (an earlier bus: maybe an earlier train). The leg starts where you
+    /// got on (`boardedFrom`). Nil: started; else why not.
+    private func startOn(_ v: Vehicle, couldBe: [Vehicle], watched: DoorTrip?, fixes: [Fix]) async -> String? {
+        guard let trip, let loc = trip.lastFix else { return "no fix" }
+        let d = dest
+        let live: Bool = asOf == nil
+        let onScreen: [DoorTrip] = live ? [best].compactMap { $0 } + others : []
+        var way: DoorTrip? = onScreen.first { $0.first.tripId == v.tripId }
+        var alternatives: [DoorTrip] = onScreen
+        if way == nil {
+            let history: @MainActor @Sendable () -> [Fix] = { trip.recentFixes }
+            let ob = await Transit.$urgent.withValue(true, operation: {
+                await LiveStore.onBoardTrips(loc, to: d, tripId: v.tripId, reuse: true, history: history)
+            })
+            guard watching, dest == d, trip.phase == .idle else { return "stopped watching" }
+            guard let ob, let first = ob.1.first else { return "no way on from it" }
+            // another line a long way round is probably not one you're on (a car or bike next to it)
+            if let w = watched, !WaitStart.sameLine(w.first.line, v.line), first.end > w.end.addingTimeInterval(30 * 60) {
+                return "a long way round"
+            }
+            way = first
+            alternatives = ob.1
+        }
+        guard let t = way else { return "no way" }
+        let boarded: DoorTrip = await boardedFrom(t, vehicle: v, fixes: fixes)
+        guard watching, dest == d, trip.phase == .idle else { return "stopped watching" }
+        return board(boarded, v, alternatives: alternatives, couldBe: couldBe) ? nil : "its stop is where you are"
+    }
+
+    /// The way `t` on `v`, got on where you got on (0.42.4, `WaitStart.repoint`): its first ride from the stop of its
+    /// trip nearest to where you started moving at bus speed, at its time there, when that's another stop than the way
+    /// had (one before the planned stop, or "On board" where it found you). Else `t` as it is.
+    private func boardedFrom(_ t: DoorTrip, vehicle v: Vehicle, fixes: [Fix]) async -> DoorTrip {
+        guard let here = fixes.last?.p, let start = WaitStart.startedMoving(fixes, now: Date()) else { return t }
+        let stops: [TripStop] = await Transit.$urgent.withValue(true) { await Transit.tripStops(v.tripId) }
+        let list: [WaitStart.Stop] = stops.map { WaitStart.Stop(name: $0.name, point: GeoPoint($0.coordinate), time: $0.arrival) }
+        let r: Ride = t.first
+        var had: GeoPoint?
+        if let a = r.fromLat, let o = r.fromLon { had = GeoPoint(lat: a, lon: o) }
+        guard let i = WaitStart.repoint(list, startedAt: start, here: here, planned: had) else { return t }
+        let s: TripStop = stops[i]
+        let at: Date = s.arrival ?? r.departure
+        let late: TimeInterval = r.departure.timeIntervalSince(r.scheduledDeparture)
+        let stop = BoardAt.Stop(id: "onboard", name: s.name, point: GeoPoint(s.coordinate), departure: at,
+                                scheduledDeparture: at.addingTimeInterval(-late))
+        let f: Ride = r.boarding(at: stop, walk: 0)
+        let off: Int = had.map { Int((Geo.metres($0, GeoPoint(s.coordinate)) / 10).rounded()) * 10 } ?? 0
+        FieldLog.shared.add(.match, "wait · \(TripManager.logLabel(v)) · got on at its stop \(i + 1) of \(stops.count), \(off) m from where the way had it")
+        return DoorTrip(rides: [f] + Array(t.rides.dropFirst()), start: t.start, end: t.end)
+    }
+
+    /// Sure you're on one that doesn't take you on (0.42.4): say so (the 0.39.1 wrong-bus alert), not silence. Once for
+    /// that one while it watches (`WaitStart.State.told`).
+    private func tellWrongBus(_ v: Vehicle, planned: Ride?) async {
+        let lt: LiveTrip? = await Transit.$urgent.withValue(true) { await Transit.liveTrip(v.tripId) }
+        let to: String = lt.map { Fmt.place($0.headsign) } ?? ""
+        let mine: String = planned?.line ?? ""
+        let toWords: String = to.isEmpty ? "" : " to \(to)"
+        let title: String = mine.isEmpty ? "You’re on the \(v.line)\(toWords)" : WrongBus.title(line: v.line, to: to, planned: mine)
+        let body: String = "It doesn’t go to \(dest.short). \(WrongBus.noFix)."
+        FieldLog.shared.add(.match, "wait · " + WrongBus.logLine(label: TripManager.logLabel(v), to: to, planned: mine, fix: WrongBus.noFix))
+        guard watching, trip?.phase == .idle else { return }
+        tell(title, body, kind: "info")
+    }
+
+    /// (0.42.4) Every train of the way it watches (not only a first ride that's a train) is watched for a platform change
+    /// or a cancellation while you wait for it (`WatchStore.rideWatches`); again when it watches another way.
+    private func watchTrains() {
+        guard watching, !demo, trip?.phase == .idle, asOf == nil, let b = best, b.id != trainsWatched else { return }
+        trainsWatched = b.id
+        WatchStore.shared.setRideWatches(WatchStore.rideWatches(b))
+    }
+
+    /// A look's line in the field log (`WaitStart.logDue`).
+    private func logLook(_ line: String, key: String, busy: Bool, now: Date) {
+        guard WaitStart.logDue(key: key, last: waitLogged, busy: busy, now: now) else { return }
+        waitLogged = (key: key, at: now)
+        FieldLog.shared.add(.match, line)
     }
 
     /// On board: the trip starts by itself (the ride screen takes over) and the watching stops.
@@ -1158,7 +1330,7 @@ struct GoView: View {
             }
         }
         .environment(\.colorScheme, .light)
-        .sheet(item: $walkTo) { WalkMapSheet(target: $0).presentationDetents([.large]) }
+        .fullScreenCover(item: $walkTo) { WalkGuideView(target: $0) { _ in walkTo = nil } }      // (0.42.4) Walk there: the arrows at once
         .sheet(item: $liveTrack) { LiveBusSheet(target: $0).presentationDetents([.large]) }
         .sheet(isPresented: $showSteady) { SteadySheet().presentationDetents([.large]) }
         .sheet(isPresented: $choosing) {

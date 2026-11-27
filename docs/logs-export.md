@@ -227,6 +227,35 @@ in [android-todo.md](android-todo.md) › iOS 0.42.6). New lines in the ride log
 - `school alarm · 2026-11-27: be there 09:00` (or `be there as the timetable says`): the day's time changed (Your day,
   the card, Siri); `school alarm · 2026-11-27: no plan just now · leave moved to 07:40 by the change` when the planner
   had no answer right after it.
+### Getting on wherever you get on (0.42.4)
+
+What's new in 0.42.4 (`ios/App/WaitStart.swift`, tests `WaitStartTests`; wiring in `GoStore.checkBoarding` and
+`TripManager.boardedHere`; Android parity in [android-todo.md](android-todo.md) › iOS 0.42.4). While Fastest trip
+watches, one line per look in the match log (every look while you move or something moves with you; otherwise once a
+minute while it says the same):
+
+- `wait · moving 9 m/s 40 s · candidates bus 305·2718 gps 12 s fits, bus 306·1234 times elsewhere · start bus 305·2718`: seconds
+  at bus speed (6 m/s) in the last 2 minutes and your speed now; up to 3 of the matcher's best, each by its own GPS
+  (`gps 12 s`: its fix's age) or by its `times`, and `fits` (it takes you on), `elsewhere` (it doesn't) or `stops ?`
+  (its stops couldn't be had); then the call.
+- The holds: `held by standing`, `held by walking or cycling (motion)`, `held by not at bus speed for 30 s yet`,
+  `held by no bus or train fits your gps`, `held by seen 1 of 2 looks`, `held by its stops not known yet`,
+  `held by not your way` (`(told)` once the alert went).
+- `wait · moving … · wrong bus bus 154·0855`, then `wait · wrong bus · on bus 154·0855 to Schijndel, planned 305 · Get off at the
+  next stop, and plan again from there`: sure of one that doesn't take you on (its own GPS with you 75 s), told once.
+- `wait · bus 305·2718 · got on at its stop 2 of 18, 1040 m from where the way had it`: the leg starts at the stop you got on
+  at, not the planned one (or "On board" where it found you). During a ride (a vehicle found after "I'm on it"):
+  `ride board · bus 305·2718 got on at its stop 2 of 18, 1040 m from where the leg was planned from`.
+- `wait · bus 305·2718 · not started: no way on from it` (or `a long way round`, `its stop is where you are`): it would have
+  started, but couldn't plan on from it.
+- In the ride log: `ride wait · watching on · its look at what you get on runs (in front)` (`again`, `behind the
+  screen`) and `ride wait · watching off · closed` (`you're there`, `the trip you waited for has gone`, `after 3 hours`):
+  the look runs from one to the other whatever is on screen, and with the phone locked.
+- `ride platform · 08:02 Intercity to Breda at Eindhoven: 7 (was 5)` (or `: cancelled`): a watched train of your trip
+  (any train of it, `PlatformWatch`) changed platform against the plan or was cancelled; told at once (quietly while
+  you're asleep on the ride). Unchanged platforms aren't logged.
+- `ride check-out reminder in 60 s …` no longer comes unless the check-out reminder is turned on again (Settings › Trips
+  & alarm): 0.42.4 turns it off for everyone, once.
 
 ### False "You'll miss", short legs, the planned train at a change, OVapi keys (0.42.3)
 

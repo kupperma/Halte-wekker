@@ -149,6 +149,9 @@ object RideCacheStore {
         RideCache.encode(s)?.let { text -> try { file(c).writeText(text) } catch (_: Exception) {} }
     }
 
+    /** (0.10.1) The saved copy of a ride as it is (the live link's stops and road). */
+    fun saved(tripId: String, trip: Double?, now: Double): SavedRide? = RideCache.ride(tripId, saved, trip, now)
+
     /** The saved copy of a ride, as a trip answer. */
     fun live(tripId: String, trip: Double?, now: Double): nl.haltewekker.data.TransitParse.LiveTrip? {
         val r = RideCache.ride(tripId, saved, trip, now) ?: return null

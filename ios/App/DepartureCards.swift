@@ -320,7 +320,7 @@ struct DepartureDetailSheet: View {
         }
         .tint(DS.accentText)
         .sheet(item: $liveTrack) { LiveBusSheet(target: $0, newLook: true).presentationDetents([.large]) }
-        .sheet(item: $walkTo) { WalkMapSheetNew(target: $0).presentationDetents([.large]) }
+        .fullScreenCover(item: $walkTo) { WalkGuideView(target: $0) { _ in walkTo = nil } }      // (0.42.4) Walk there: the arrows at once
     }
 
     /// The rest of the old train and bus pages (0.20): your ride, how steady the line is, its speed rank, and for a

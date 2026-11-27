@@ -54,8 +54,10 @@ data class Settings(
     val wake: nl.haltewekker.ride.WakeSettings = nl.haltewekker.ride.WakeSettings(),
     /** (A6, iOS 0.33) "Use motion to notice rides faster" (off by default; Android: the step detector, see plan A6). */
     val motion: Boolean = false,
-    /** (A6, iOS 0.36) "Did you check out?" after getting off. */
-    val checkOut: Boolean = true,
+    /** (A6, iOS 0.36) "Did you check out?" after getting off. (0.10.1) Off by default: turned on again in Settings › Trips & alarm. */
+    val checkOut: Boolean = false,
+    /** (0.10.1) The check-out reminder was turned off once for everyone (`Settings.migrated`). */
+    val checkOutOffOnce: Boolean = false,
     /** (A6, iOS 0.36) Money back for a late train. */
     val delayClaim: Boolean = true,
     /** (A6, iOS 0.36) Works and disruptions on your routes. */
@@ -72,6 +74,9 @@ data class Settings(
     val busPosition: String = "real",
 )
 
+/** (0.10.1) Settings as read: the check-out reminder turned off once for everyone (it can be turned on again after). */
+fun Settings.migrated(): Settings = if (checkOutOffOnce) this else copy(checkOut = false, checkOutOffOnce = true)
+
 /** The profile and settings, in SharedPreferences, as state the screens follow. */
 class Store(context: Context) {
     val prefs: android.content.SharedPreferences = context.getSharedPreferences("haltewekker", Context.MODE_PRIVATE)
@@ -79,14 +84,15 @@ class Store(context: Context) {
 
     private val _profile = MutableStateFlow(read(KEY_PROFILE) ?: Profile())
     val profile: StateFlow<Profile> = _profile
-    private val _settings = MutableStateFlow(read(KEY_SETTINGS) ?: Settings())
+    private val _settings = MutableStateFlow((read(KEY_SETTINGS) ?: Settings()).let { s -> s.migrated().also { if (it != s) save(it) } })
     val settings: StateFlow<Settings> = _settings
 
     private inline fun <reified T> read(key: String): T? =
         prefs.getString(key, null)?.let { try { json.decodeFromString<T>(it) } catch (_: Exception) { null } }
 
     fun setProfile(p: Profile) { _profile.value = p; prefs.edit().putString(KEY_PROFILE, json.encodeToString(p)).apply() }
-    fun setSettings(s: Settings) { _settings.value = s; prefs.edit().putString(KEY_SETTINGS, json.encodeToString(s)).apply() }
+    fun setSettings(s: Settings) { _settings.value = s; save(s) }
+    private fun save(s: Settings) { prefs.edit().putString(KEY_SETTINGS, json.encodeToString(s)).apply() }
     fun updateSettings(f: (Settings) -> Settings) = setSettings(f(_settings.value))
 
     fun updateProfile(f: (Profile) -> Profile) = setProfile(f(_profile.value))
@@ -98,7 +104,7 @@ class Store(context: Context) {
     /** Read the profile and settings again (after the setup backup was put back). */
     fun reload() {
         _profile.value = read(KEY_PROFILE) ?: Profile()
-        _settings.value = read(KEY_SETTINGS) ?: Settings()
+        _settings.value = (read(KEY_SETTINGS) ?: Settings()).migrated()
     }
 
     companion object {

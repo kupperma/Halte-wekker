@@ -19,6 +19,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import nl.haltewekker.ride.Notifications
 import nl.haltewekker.ride.Phase
 import nl.haltewekker.ride.RideState
 import nl.haltewekker.ride.RideStore
@@ -32,13 +33,13 @@ import java.util.concurrent.TimeUnit
 /** The relay's live-link routes (relay/live.js): no account, JSON, one try each. */
 class LiveRelay(private val base: String = LiveCrypto.RELAY, private val userAgent: String = "Haltewekker-Android") {
     sealed class Answer {
-        data class Ok(val exp: Long?) : Answer()
+        data class Ok(val exp: Long?, val mseq: Int = 0, val seq: Int = 0) : Answer()
         data object Ended : Answer()
         data object Slow : Answer()
         data class Failed(val status: Int) : Answer()
     }
 
-    data class Got(val data: String, val at: Long?, val exp: Long?)
+    data class Got(val data: String, val at: Long?, val exp: Long?, val seen: Int = 0, val replies: List<Triple<Int, Double, String>> = emptyList())
 
     private suspend fun call(path: String, body: JsonObject): Pair<Int, String> = withContext(Dispatchers.IO) {
         val req = Request.Builder().url(base + path).post(FriendJson.write(body).toByteArray().toRequestBody("application/json".toMediaType()))
@@ -47,7 +48,10 @@ class LiveRelay(private val base: String = LiveCrypto.RELAY, private val userAge
     }
 
     private fun answer(st: Int, text: String): Answer = when (st) {
-        200 -> Answer.Ok(((FriendJson.parse(text.toByteArray()) as? JsonObject)?.get("exp") as? JsonPrimitive)?.content?.toDoubleOrNull()?.toLong())
+        200 -> (FriendJson.parse(text.toByteArray()) as? JsonObject).let { o ->
+            fun n(k: String) = (o?.get(k) as? JsonPrimitive)?.content?.toDoubleOrNull()
+            Answer.Ok(n("exp")?.toLong(), n("mseq")?.toInt() ?: 0, n("seq")?.toInt() ?: 0)
+        }
         410 -> Answer.Ended
         429 -> Answer.Slow
         else -> Answer.Failed(st)
@@ -65,6 +69,30 @@ class LiveRelay(private val base: String = LiveCrypto.RELAY, private val userAge
         return answer(st, text)
     }
 
+    /** (relay 2026-11-27) The messages to this link after `after` (the sharer's phone, with its secret): status and answer. */
+    suspend fun inbox(keys: LiveKeys, after: Int): Pair<Int, JsonObject?> {
+        val (st, text) = call("/live/v1/inbox", buildJsonObject { put("secret", B64u.encode(keys.secretBytes)); put("after", after) })
+        return st to (if (st == 200) FriendJson.parse(text.toByteArray()) as? JsonObject else null)
+    }
+
+    /** Seen up to `seq` (the pages say "Seen"). */
+    suspend fun ack(keys: LiveKeys, seq: Int): Answer {
+        val (st, text) = call("/live/v1/ack", buildJsonObject { put("secret", B64u.encode(keys.secretBytes)); put("seq", seq) })
+        return answer(st, text)
+    }
+
+    /** The sharer's answer, locked (`LiveMessages.sealReply`). */
+    suspend fun reply(keys: LiveKeys, data: ByteArray): Answer {
+        val (st, text) = call("/live/v1/reply", buildJsonObject { put("secret", B64u.encode(keys.secretBytes)); put("data", B64u.encode(data)) })
+        return answer(st, text)
+    }
+
+    /** A message to a link's sharer, from this app as a viewer (locked, `LiveMessages.seal`). */
+    suspend fun msg(token: String, data: ByteArray): Answer {
+        val (st, text) = call("/live/v1/msg?t=$token", buildJsonObject { put("data", B64u.encode(data)) })
+        return answer(st, text)
+    }
+
     /** What the page reads (`GET /live/v1/get?t=`): the locked data, or the status (404 gone, 410 ended). */
     suspend fun get(token: String): Pair<Int, Got?> = withContext(Dispatchers.IO) {
         val req = Request.Builder().url("$base/live/v1/get?t=$token").header("User-Agent", userAgent).get().build()
@@ -72,7 +100,10 @@ class LiveRelay(private val base: String = LiveCrypto.RELAY, private val userAge
             client.newCall(req).execute().use { r ->
                 val o = FriendJson.parse((r.body?.string() ?: "").toByteArray()) as? JsonObject
                 fun s(k: String) = (o?.get(k) as? JsonPrimitive)?.content
-                r.code to (if (r.code == 200) s("data")?.let { Got(it, s("at")?.toDoubleOrNull()?.toLong(), s("exp")?.toDoubleOrNull()?.toLong()) } else null)
+                r.code to (if (r.code == 200) s("data")?.let {
+                    Got(it, s("at")?.toDoubleOrNull()?.toLong(), s("exp")?.toDoubleOrNull()?.toLong(), s("seen")?.toDoubleOrNull()?.toInt() ?: 0,
+                        LiveMessages.inbox(buildJsonObject { o?.get("replies")?.let { r -> put("msgs", r) } }))
+                } else null)
             }
         } catch (_: Exception) { -1 to null }
     }
@@ -103,7 +134,18 @@ object LiveLinkStore {
         val last: LiveState? = null,
         val arrived: Boolean = false,
         val exp: Double? = null,
-    )
+        /** (relay 2026-11-27) Messages from the link's viewers (the newest 50), the newest one read, and seen up to. */
+        val msgs: List<Msg> = emptyList(),
+        val lastSeq: Int = 0,
+        val seen: Int = 0,
+        /** Your answers. */
+        val replies: List<LiveReply> = emptyList(),
+    ) {
+        val unread: Int get() = msgs.count { it.seq > seen }
+    }
+
+    @Serializable
+    data class Msg(val seq: Int, val at: Double, val from: String, val fromKind: String = "web", val friendId: String? = null, val text: String)
 
     @Serializable private data class Saved(val link: Link? = null, val endPending: LiveKeys? = null)
 
@@ -118,6 +160,7 @@ object LiveLinkStore {
     private var putQueued = false
     private var attached = false
     private val relay = LiveRelay()
+    private var asking = false
     private const val NAME_KEY = "live.name"
 
     private val file: File get() = File(FriendStore.folder(ctx), "live.json")
@@ -155,8 +198,7 @@ object LiveLinkStore {
 
     /** The name the page says: your friends name, else the one you typed last time. */
     val defaultName: String
-        get() = FriendStore.book.value?.myName?.takeIf { it.isNotEmpty() }
-            ?: ctx.getSharedPreferences("friends", Context.MODE_PRIVATE).getString(NAME_KEY, "") ?: ""
+        get() = LiveNames.sender(FriendStore.book.value?.myName, ctx.getSharedPreferences("friends", Context.MODE_PRIVATE).getString(NAME_KEY, ""))
 
     private fun phaseChanged() {
         val s = RideStore.state.value
@@ -174,6 +216,7 @@ object LiveLinkStore {
         val l = saved.link ?: return
         if (l.arrived) {
             if (now() >= (l.exp ?: (l.created + LiveRules.MAX_AGE))) { saved = saved.copy(link = null); save() }
+            else enqueue { inbox() }
             return
         }
         if (!running(RideStore.state.value)) enqueue { endNow() }
@@ -213,7 +256,19 @@ object LiveLinkStore {
         } else if (s.eta != null) {
             late = LiveRules.late(s.eta, leg.scheduledArrival)
         }
-        return LiveRules.state(tr, l.name, dep, late, now)
+        val base = LiveRules.state(tr, l.name, dep, late, now)
+        // (v2, relay 2026-11-27) the whole trip: its legs, the leg you're on (its stops and road), the vehicle's own GPS
+        return try {
+            val tripId = s.vehicleTripId ?: leg.tripId
+            val saved = nl.haltewekker.ride.RideCacheStore.saved(tripId, s.startedAt, now)
+            val num = leg.num.ifEmpty { FriendTravelShare.numbers[tripId] ?: "" }
+            val fix = if (s.vehicleTripId == null) null else nl.haltewekker.live.RealPositions.usable(nl.haltewekker.live.LiveFeeds.buses.fixes, tripId, now)
+                ?: num.toIntOrNull()?.let { nl.haltewekker.live.LiveFeeds.trains[it] }?.let { nl.haltewekker.live.RealPositions.usable(it, tripId, now) }
+            val coach = FriendTravelShare.coachTrip.value?.let { id -> FriendTravelShare.coach.value?.let { id to it } }
+            val trip = LiveTripV2.fromRide(s.trip, s.index, s.destination, s.legArrival, saved, fix?.let { LiveTripV2.Vehicle(it.lat, it.lon, it.at) },
+                coach, LiveTripV2.face(FriendStore.myAccount), now)
+            LiveTripV2.build(base, trip, now)
+        } catch (_: Exception) { base }
     }
 
     /** Makes a link for this trip and posts its first state; null: no trip runs, or the relay couldn't be reached. */
@@ -275,6 +330,59 @@ object LiveLinkStore {
         save()
     }
 
+    // MARK: messages (relay 2026-11-27): read with the link's secret, opened with its key; never logged, only counted
+
+    /** The new messages: each one a notification ("💬 Kim: On my way"), kept on the link card. */
+    private suspend fun inbox() {
+        if (asking) return
+        val l = saved.link ?: return
+        asking = true
+        try {
+            val (st, o) = relay.inbox(l.keys, l.lastSeq)
+            if (st != 200) return
+            val got = LiveMessages.inbox(o).mapNotNull { (seq, at, data) ->
+                val d = B64u.decode(data) ?: return@mapNotNull null
+                LiveMessages.open(d, l.keys.keyBytes, l.keys.token)?.let { m -> Msg(seq, at.takeIf { it > 0 } ?: m.at, m.from, m.fromKind, m.friendId, m.text) }
+            }
+            val top = LiveMessages.inbox(o).maxOfOrNull { it.first } ?: l.lastSeq
+            val cur = saved.link ?: return
+            if (cur.keys != l.keys) return
+            saved = saved.copy(link = cur.copy(msgs = (cur.msgs + got).distinctBy { it.seq }.takeLast(50), lastSeq = maxOf(cur.lastSeq, top)))
+            save()
+            for (m in got) {
+                val lm = LiveMessage(m.from, m.fromKind, m.friendId, m.text, m.at)
+                Notifications.liveMessage(ctx, m.seq, "💬 " + LiveMessages.sender(lm, ::friendName), m.text)
+            }
+            if (got.isNotEmpty()) nl.haltewekker.logs.FieldLog.ride("live link: ${got.size} new message" + if (got.size == 1) "" else "s")
+        } finally { asking = false }
+    }
+
+    /** The name of a friend by account (an app's message carries it), or null. */
+    fun friendName(account: String): String? = FriendStore.book.value?.friends?.firstOrNull { it.id == account }?.name
+
+    /** You looked at them (the card, or a notification opened): the pages say "Seen". */
+    fun markSeen() {
+        val l = saved.link ?: return
+        if (l.unread == 0) return
+        val top = l.msgs.maxOf { it.seq }
+        saved = saved.copy(link = l.copy(seen = top))
+        save()
+        for (m in l.msgs) if (m.seq > l.seen) Notifications.cancelTag(ctx, "livemsg-${m.seq}", Notifications.NEWS_ID + 4)
+        enqueue { relay.ack(l.keys, top) }
+    }
+
+    /** "Reply": every page of the link shows it under the messages. */
+    suspend fun reply(text: String): Boolean {
+        val l = saved.link ?: return false
+        val t = LiveTripV2.clean(text, LiveMessages.MAX_TEXT)
+        if (t.isEmpty()) return false
+        val r = LiveReply(t, Math.floor(now()), l.msgs.lastOrNull()?.seq)
+        val a = lane.withLock { relay.reply(l.keys, LiveMessages.sealReply(r, l.keys.keyBytes, l.keys.token)) }
+        if (a !is LiveRelay.Answer.Ok) return false
+        saved.link?.takeIf { it.keys == l.keys }?.let { saved = saved.copy(link = it.copy(replies = (it.replies + r).takeLast(10))); save() }
+        return true
+    }
+
     private suspend fun put(s: LiveState, arrived: Boolean): Boolean {
         val l = saved.link ?: return false
         val data = try { LiveCrypto.lock(s, l.keys) } catch (_: Exception) { return false }
@@ -287,6 +395,8 @@ object LiveLinkStore {
                 saved = saved.copy(link = cur.copy(lastSent = now, lastKey = LiveRules.key(s), last = s, exp = a.exp?.toDouble()))
                 problem.value = null
                 save()
+                // (relay 2026-11-27) a message came: read it now (the put said there's one)
+                if (a.mseq > cur.lastSeq) inbox()
                 true
             }
             LiveRelay.Answer.Ended -> { saved = saved.copy(link = null); save(); false }

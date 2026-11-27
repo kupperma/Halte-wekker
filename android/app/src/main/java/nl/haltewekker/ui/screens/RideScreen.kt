@@ -141,8 +141,10 @@ fun RideScreen(s: RideState, onBack: () -> Unit) {
             TripNotes(nl.haltewekker.data.DoorTrip(s.trip.rides.drop(s.index), leg.departure, s.trip.end), emptyList(), now)
         }
         // (A8, iOS 0.39) the change ahead: platforms, walk, minutes; a miss with the one you make instead
-        if (s.changeLine != null || s.changeMiss != null) Card {
+        if (s.changeLine != null || s.changeMiss != null || s.platformNote != null) Card {
             Header("Your change")
+            // (0.10.1) a train of the trip got another platform, or is cancelled
+            s.platformNote?.let { Text(it, color = DS.t.warning, fontWeight = FontWeight.SemiBold) }
             s.changeMiss?.let { Text(it, color = DS.t.warning, fontWeight = FontWeight.SemiBold) }
             s.changeLine?.let { Text(it, color = DS.t.text) }
             if (s.changeSwitch != null) QuietButton("Switch to that one") { RideService.send(context, RideService.ACTION_SWITCH_CHANGE) }

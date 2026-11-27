@@ -36,7 +36,7 @@ object FriendTravelShare {
     private var sending = false
     private var again = false
     private var clearAfter = false
-    private val numbers = HashMap<String, String>()
+    internal val numbers = HashMap<String, String>()
     private var attached = false
 
     private fun now() = System.currentTimeMillis() / 1000.0

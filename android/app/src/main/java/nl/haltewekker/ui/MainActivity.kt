@@ -69,6 +69,9 @@ class MainActivity : ComponentActivity() {
         // A3: a friend link (haltewekker://friend?…, the https /add page) or a Friends notification
         val link = i.dataString
         if (link != null && nl.haltewekker.friends.FriendStore.handle(link)) asked.value = SCREEN_FRIENDS
+        // (relay 2026-11-27) someone's live link: the page's "Open in Haltewekker", the link itself, or shared as text
+        if (link != null) nl.haltewekker.friends.LiveView.open(link)
+        if (i.action == Intent.ACTION_SEND) nl.haltewekker.friends.LiveView.find(i.getStringExtra(Intent.EXTRA_TEXT))?.let { nl.haltewekker.friends.LiveView.open(it) }
         // (A6) the widget's tap (haltewekker://stop?…) and the app shortcuts
         if (link != null) (nl.haltewekker.widget.IntentActions.action(link) as? nl.haltewekker.widget.IntentActions.Action.ShowStop)?.let { stop.value = it.stop }
         if (i.action == nl.haltewekker.ui.Shortcuts.ACTION) shortcut.value = i.getStringExtra(nl.haltewekker.ui.Shortcuts.EXTRA)
@@ -130,6 +133,10 @@ private fun Root() {
         RideService.start(context, t, to, index, resumed)
         screen = Screen.RIDE
     }
+
+    // (relay 2026-11-27) a live link someone sent you, opened here
+    val liveView by nl.haltewekker.friends.LiveView.view.collectAsState()
+    if (liveView != null) { nl.haltewekker.ui.friends.LiveViewScreen(onClose = { nl.haltewekker.friends.LiveView.close() }); return }
 
     if (screen == Screen.TEST_SETUP) {
         SetupScreen(test = true, onDone = { screen = Screen.HOME }, onCancel = { TestSetup.cancel(context); screen = Screen.SETTINGS })

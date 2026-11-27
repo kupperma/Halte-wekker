@@ -50,16 +50,19 @@ struct GoViewNew: View {
                     bottom
                 }
                 // (0.42) Fastest trip, zoomed out: every stop around you first; "Your trip" shows the cards below
-                if overview && NearbyOverview.canOpen(go) {
+                // (0.42.4: not while you ride: it planned the stops around you again every 250 m, and its requests
+                // queued in front of the look at what you got on)
+                if overview && NearbyOverview.canOpen(go) && !go.atVehicleSpeed && !go.movingUnknown {
                     NearbyOverview { withAnimation(.easeInOut(duration: 0.3)) { overview = false } }
                         .transition(.opacity)
                 }
             }
         }
         .onAppear { if !NearbyOverview.opensOn(go) { overview = false } }
+        .onChange(of: go.atVehicleSpeed) { _, fast in if fast { overview = false } }
         .background(DS.page.ignoresSafeArea())
         .dynamicTypeSize(...DynamicTypeSize.accessibility2)
-        .sheet(item: $walkTo) { WalkMapSheetNew(target: $0).presentationDetents([.large]) }
+        .fullScreenCover(item: $walkTo) { WalkGuideView(target: $0) { _ in walkTo = nil } }      // (0.42.4) Walk there: the arrows at once
         .sheet(item: $liveTrack) { LiveBusSheet(target: $0, newLook: true).presentationDetents([.large]) }
         .sheet(isPresented: $showSteady) { SteadySheetNew().presentationDetents([.large]) }
         .sheet(isPresented: $choosing) {

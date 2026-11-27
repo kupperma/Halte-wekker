@@ -38,8 +38,18 @@ data class LiveState(
     val late: Int? = null,
     val pos: Position? = null,
     val t: Double,
+    // (v2, relay 2026-11-27: `LiveTripV2`) the whole trip; a page before it, and 0.30's readers, ignore these
+    val face: String? = null,
+    val inbox: Boolean? = null,
+    val leg: Int? = null,
+    val legs: List<LiveLeg>? = null,
+    val music: LiveMusic? = null,
+    val next: Int? = null,
+    val shape: String? = null,
+    val stops: List<LiveStop>? = null,
 ) {
-    @Serializable data class Position(val lat: Double, val lon: Double, val at: Double)
+    /** `src` (v2): "gps" the vehicle's own position from the open feeds, "phone" this phone's. */
+    @Serializable data class Position(val lat: Double, val lon: Double, val at: Double, val src: String? = null)
 
     enum class Stage { WAITING, RIDING, CHANGE, ARRIVED }
 
@@ -65,6 +75,8 @@ class LiveCryptoException : Exception("can't open")
 object LiveCrypto {
     const val RELAY = "https://haltewekker-relay.tsfaw1.workers.dev"
     const val VERSION: Byte = 1
+    /** (relay 2026-11-27) The app's own address for a live link, `haltewekker://live/<token>#k=<key>` (the page's "Open in Haltewekker"). */
+    const val SCHEME = "haltewekker://live"
 
     fun token(secret: ByteArray): String {
         val h = MessageDigest.getInstance("SHA-256").digest("hw-live-token-v1".toByteArray() + secret)
@@ -76,14 +88,15 @@ object LiveCrypto {
 
     /** A link back into its token and key, `#k=<key>` or 0.30's `#<key>` (null: not a live link of this relay, or no key). */
     fun parse(s: String): Pair<String, ByteArray>? {
-        val prefix = "$RELAY/live/"
-        if (!s.startsWith(prefix)) return null
-        val parts = s.removePrefix(prefix).split("#", limit = 2)
-        if (parts.size != 2 || parts[0].length != 22) return null
+        val t = s.trim()
+        val prefix = listOf("$RELAY/live/", "$SCHEME/").firstOrNull { t.startsWith(it) } ?: return null
+        val parts = t.removePrefix(prefix).split("#", limit = 2)
+        val token = parts[0].removeSuffix("/")
+        if (parts.size != 2 || token.length != 22 || !token.all { it.isLetterOrDigit() && it.code < 128 || it == '-' || it == '_' }) return null
         val k = Regex("(?:^|[&;?])k=([^&;]*)").find(parts[1])?.groupValues?.get(1) ?: parts[1]
         val key = B64u.decode(k) ?: return null
         if (key.size != 32) return null
-        return parts[0] to key
+        return token to key
     }
 
     fun aad(token: String) = "hw-live-v1\n$token".toByteArray(Charsets.UTF_8)
@@ -107,6 +120,26 @@ object LiveCrypto {
 
     /** A state as it goes: its JSON (sorted keys, plain numbers), locked. */
     fun lock(s: LiveState, keys: LiveKeys): ByteArray = seal(FriendJson.encode(LiveState.serializer(), s), keys.keyBytes, keys.token)
+
+    /** (relay 2026-11-27) The other two kinds, each with its own AAD: a message to the sharer, and the sharer's answer. */
+    fun aad(token: String, kind: String) = "$kind\n$token".toByteArray(Charsets.UTF_8)
+
+    fun sealAs(kind: String, plain: ByteArray, key: ByteArray, token: String, nonce: ByteArray = FriendCrypto.randomBytes(12)): ByteArray {
+        val c = Cipher.getInstance("AES/GCM/NoPadding")
+        c.init(Cipher.ENCRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(128, nonce))
+        c.updateAAD(aad(token, kind))
+        return byteArrayOf(VERSION) + nonce + c.doFinal(plain)
+    }
+
+    fun openAs(kind: String, data: ByteArray, key: ByteArray, token: String): ByteArray {
+        if (data.size < 1 + 12 + 16 || data[0] != VERSION) throw LiveCryptoException()
+        return try {
+            val c = Cipher.getInstance("AES/GCM/NoPadding")
+            c.init(Cipher.DECRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(128, data.copyOfRange(1, 13)))
+            c.updateAAD(aad(token, kind))
+            c.doFinal(data.copyOfRange(13, data.size))
+        } catch (_: Exception) { throw LiveCryptoException() }
+    }
 }
 
 object LiveRules {

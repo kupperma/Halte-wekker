@@ -81,6 +81,8 @@ data class RideState(
     val changeLine: String? = null,
     val changeMiss: String? = null,
     val changeSwitch: String? = null,
+    /** (0.10.1) "Platform 7 now (was 5): your 08:02 Intercity" after a platform change, or a cancelled train. */
+    val platformNote: String? = null,
     /** (0.9.1, iOS 0.42.3 `ShortLeg`) awake without the alarm (a short leg, or one started inside its wake distance), and
      *  how far from its stop this leg started (its first good fix). */
     val quietLeg: Boolean = false,

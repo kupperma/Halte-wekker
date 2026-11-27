@@ -312,6 +312,8 @@ object TravelNotes {
             kotlinx.coroutines.delay((CheckOut.AFTER * 1000).toLong())
             val v = synchronized(speeds) { speeds.filter { it.first >= from }.map { it.second } }
             if (CheckOut.stillAboard(v, sameVehicle())) return@launch
+            // (0.10.1) turned off meanwhile: nothing
+            if ((c.applicationContext as? nl.haltewekker.App)?.store?.settings?.value?.checkOut != true) return@launch
             val (t, b) = CheckOut.text(stop, change)
             Notifications.news(c.applicationContext, "checkout", t, b)
         }

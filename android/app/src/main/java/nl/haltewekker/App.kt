@@ -39,6 +39,8 @@ class App : Application() {
         Works.update(this)
         Regions.update(this)
         Notifications.sweep(this)
+        // (0.10.1) the check-out reminder is off unless turned on again: none left from before
+        if (!store.settings.value.checkOut) Notifications.cancelTag(this, "checkout", Notifications.NEWS_ID + 1)
         // A3: Friends (what's on this phone; the relay only at the app's checks)
         nl.haltewekker.friends.FriendStore.init(this)
         nl.haltewekker.friends.FriendTravelShare.attach(this)

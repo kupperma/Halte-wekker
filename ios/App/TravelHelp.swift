@@ -19,6 +19,18 @@ enum CheckOut {
 
     /// The notification comes this long after you got off.
     static let after: TimeInterval = 60
+
+    /// (0.42.4) The setting, and the one-time move of everyone to off ("Stop giving the 'Did you check out?'
+    /// notification, it's useless"): off unless you turn it on again in Settings › Trips & alarm.
+    static let settingKey = "notes.checkOut"
+    static let movedOffKey = "notes.checkOut.off-0.42.4"
+
+    /// The setting at launch: `stored` (nil: never set) and whether the move to off was done. Not done yet: off, and do
+    /// it now (`moveOff`). Done: what's stored, off when nothing is.
+    static func atLaunch(stored: Bool?, movedOff: Bool) -> (on: Bool, moveOff: Bool) {
+        guard movedOff else { return (false, true) }
+        return (stored ?? false, false)
+    }
     /// Faster than this in that minute (m/s, two fixes) and it thinks you're still on board: no reminder.
     static let aboardSpeed = 7.0
 

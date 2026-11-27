@@ -97,7 +97,7 @@ struct TravelHelpTripRows: View {
             Toggle("Money back for a late train", isOn: $notes.delayClaim)
                 .settingsAnchor("trips.delayClaim")
         } header: { Text("OV-chipkaart") } footer: {
-            Text("With a student travel product, plans and the Go card say when a train or bus is free for you, and what it costs otherwise (NS’s price, less your discount). The check-out reminder comes a minute after you get off at the end of a trip, and where you change between bus and train or train companies — the app can’t see your card, it only reminds you. With a train 30 minutes late or more, it tells you after the trip that you can claim money back from NS.")
+            Text("With a student travel product, plans and the Go card say when a train or bus is free for you, and what it costs otherwise (NS’s price, less your discount). The check-out reminder (off unless you turn it on) comes a minute after you get off at the end of a trip, and where you change between bus and train or train companies — the app can’t see your card, it only reminds you. With a train 30 minutes late or more, it tells you after the trip that you can claim money back from NS.")
         }
     }
 }

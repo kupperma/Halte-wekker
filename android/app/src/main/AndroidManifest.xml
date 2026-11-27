@@ -72,6 +72,26 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="https" android:host="haltewekker-relay.tsfaw1.workers.dev" android:path="/add" />
             </intent-filter>
+            <!-- (relay 2026-11-27) someone's live link: haltewekker://live/<token>#k=…, the page's "Open in Haltewekker" -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="haltewekker" android:host="live" />
+            </intent-filter>
+            <!-- and the https link itself, for phones where you let the app open it (not verified: the page works too) -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="haltewekker-relay.tsfaw1.workers.dev" android:pathPrefix="/live/" />
+            </intent-filter>
+            <!-- a live link shared to the app as text -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
             <!-- (A6) the widget's tap: haltewekker://stop?id=…&name=…&lat=…&lon=…&rail=1 -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
