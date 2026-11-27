@@ -57,10 +57,12 @@ object TransitParse {
             val arr = l.t("endTime") ?: continue
             val short = l.s("routeShortName") ?: l.s("displayName") ?: "?"
             var walk = 0
+            var walkM: Double? = null
             if (i > 0 && legs[i - 1].s("mode") == "WALK") {
                 val a = legs[i - 1].t("startTime")
                 val b = legs[i - 1].t("endTime")
                 if (a != null && b != null) walk = mins(b - a)
+                walkM = legs[i - 1].d("distance")
             }
             rides.add(
                 Ride(
@@ -75,7 +77,7 @@ object TransitParse {
                     num = l["tripShortName"].text, headsign = l.s("headsign") ?: "",
                     plannedPlatform = from.s("scheduledTrack") ?: from.s("track"),
                     fromLat = from.d("lat"), fromLon = from.d("lon"), toLat = to.d("lat"), toLon = to.d("lon"),
-                    mode = mode, agency = l.s("agencyName"),
+                    mode = mode, agency = l.s("agencyName"), walkMetres = walkM,
                 ),
             )
         }
@@ -99,9 +101,14 @@ object TransitParse {
      * The trips worth showing, soonest first: nothing that has left, none a later trip beats (leaves no earlier and
      * arrives sooner), at most `keep` (iOS `keepUseful` / `nextTrips`).
      */
-    fun keepUseful(all: List<DoorTrip>, now: Double, keep: Int): List<DoorTrip> {
+    fun keepUseful(all: List<DoorTrip>, now: Double, keep: Int, here: nl.haltewekker.core.GeoPoint? = null, speed: Double = WalkFirst.PLANNER_SPEED,
+                   log: ((String) -> Unit)? = null): List<DoorTrip> {
         val seen = HashSet<String>()
-        val sorted = all.filter { it.first.departure >= now - 60 && it.start >= now - 90 && seen.add(it.id) }
+        // (iOS 0.42.7) walks by their distance, a short first hop swapped for the walk; kept by the live departure
+        var note: String? = null
+        val fixed = if (here == null) all else all.map { t -> WalkFirst.fixed(t, here, now, speed).also { if (note == null) note = it.second }.first }
+        note?.let { n -> log?.invoke(n) }
+        val sorted = fixed.filter { LiveKeep.keep(LiveKeep.Way(it.first.departure, it.first.scheduledDeparture, it.start, it.first.cancelled), now) && seen.add(it.id) }
             .sortedBy { it.first.departure }
         val kept = sorted.filter { t -> sorted.none { it.id != t.id && it.first.departure >= t.first.departure && it.end < t.end } }
         return kept.take(keep)

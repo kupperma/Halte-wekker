@@ -36,6 +36,8 @@ data class Ride(
     val mode: String = "",
     /** (A7) Transitous's `agencyName` (NS, Arriva, Qbuzz…): two trains of two companies are two check-outs. */
     val agency: String? = null,
+    /** (iOS 0.42.7) The planner's walking distance to this ride (its foot route, metres), when it said. */
+    val walkMetres: Double? = null,
 ) {
     val id: String get() = "$tripId|${departure.toLong()}"
     val delay: Int get() = if (live) mins(departure - scheduledDeparture) else 0
