@@ -29,8 +29,9 @@ class PlatformWatchTest {
         assertEquals(listOf(1 to "EHV", 2 to "BD"), PlatformWatch.legs(trip, 1, boarded = false, now = now, code = code))
         // on it: only the ones after it
         assertEquals(listOf(2 to "BD"), PlatformWatch.legs(trip, 1, boarded = true, now = now, code = code))
-        // a train that left more than 20 minutes ago: no more
-        assertEquals(listOf(2 to "BD"), PlatformWatch.legs(trip, 1, boarded = false, now = now + 900 + 21 * 60, code = code))
+        // a train that left more than 10 minutes ago: no more (up to 10: a late one is still to come)
+        assertEquals(listOf(1 to "EHV", 2 to "BD"), PlatformWatch.legs(trip, 1, boarded = false, now = now + 900 + 9 * 60, code = code))
+        assertEquals(listOf(2 to "BD"), PlatformWatch.legs(trip, 1, boarded = false, now = now + 900 + 11 * 60, code = code))
         // later on, the far one comes within 3 hours
         assertEquals(listOf(3 to "RTD"), PlatformWatch.legs(trip, 3, boarded = false, now = now + 2 * 3600, code = code))
         // not an NS station: not watched
@@ -62,11 +63,17 @@ class PlatformWatchTest {
         assertTrue(c!!.cancelled)
         assertEquals("Your 09:15 Intercity to Breda from Eindhoven Centraal has been cancelled.", c.body)
         assertNull(PlatformWatch.look(w3, dep("7", cancelled = true)).second)
-        // no platform to start from: the first answer fills it silently
+        // "5" and "5b" are the same platform (the plan often leaves the part out)
+        assertNull(PlatformWatch.look(w, dep("5b")).second)
+        assertTrue(PlatformWatch.same("5", "5B"))
+        assertTrue(!PlatformWatch.same("5a", "5b") && !PlatformWatch.same("5", "15"))
+        // no platform to start from: NS's own planned one is what it was
         val empty = w.copy(track = "")
-        val (w4, none) = PlatformWatch.look(empty, dep("8"))
+        val (w4, none) = PlatformWatch.look(empty, PlatformWatch.Dep("3512", now + 900, "", "8", false))
         assertNull(none)
         assertEquals("8", w4.track)
+        val moved = PlatformWatch.look(empty, PlatformWatch.Dep("3512", now + 900, "5", "8", false)).second
+        assertEquals("Your 09:15 Intercity to Breda now leaves Eindhoven Centraal from platform 8 instead of 5.", moved!!.body)
         // on the trip: the leg gets it
         assertEquals("7", PlatformWatch.applied(trip, a).rides[1].platform)
         assertTrue(PlatformWatch.applied(trip, c).rides[1].cancelled)

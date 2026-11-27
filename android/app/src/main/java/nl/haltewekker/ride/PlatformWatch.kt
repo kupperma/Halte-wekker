@@ -22,6 +22,8 @@ import java.time.format.DateTimeFormatter
 object PlatformWatch {
     const val AHEAD = 3 * 3600.0
     const val EVERY = 55.0
+    /** …and up to this long after its planned time (a late one is still to come), as iOS 0.42.4. */
+    const val BEHIND = 10 * 60.0
 
     @Serializable
     data class Watch(val key: String, val code: String, val num: String, val planned: Double, val label: String, val from: String,
@@ -35,12 +37,12 @@ object PlatformWatch {
 
     /**
      * Which legs to watch: every train ride from the one you're on or waiting for, not boarded yet (`boarded`: the
-     * current leg's vehicle is found), leaving within 3 hours and not more than 20 minutes ago, from an NS station.
+     * current leg's vehicle is found), leaving within 3 hours and not more than 10 minutes ago, from an NS station.
      */
     fun legs(trip: DoorTrip, index: Int, boarded: Boolean, now: Double, code: (Ride) -> String?): List<Pair<Int, String>> =
         trip.rides.withIndex().mapNotNull { (k, r) ->
             if (!r.isTrain || k < index || (k == index && boarded)) return@mapNotNull null
-            if (r.departure - now > AHEAD || now - r.departure > 20 * 60) return@mapNotNull null
+            if (r.departure - now > AHEAD || now - r.departure > BEHIND) return@mapNotNull null
             code(r)?.let { k to it }
         }
 
@@ -66,9 +68,26 @@ object PlatformWatch {
         }
         val tr = d.actualTrack.ifEmpty { d.plannedTrack }.trim()
         if (tr.isEmpty() || d.cancelled) return w to null
-        if (w.track.isEmpty()) return w.copy(track = tr) to null
-        if (tr == w.track) return w to null
-        return w.copy(track = tr) to Alert(w.key, false, "Platform $tr", "Your ${w.label} now leaves ${w.from} from platform $tr instead of ${w.track}.", w.leg, tr)
+        var was = w.track.trim()
+        if (was.isEmpty()) {
+            // no platform yet: NS's own planned one is what it was (moved when the live one differs)
+            val p = d.plannedTrack.trim()
+            if (p.isEmpty() || same(p, tr)) return w.copy(track = tr) to null
+            was = p
+        }
+        if (same(was, tr)) return w to null
+        return w.copy(track = tr) to Alert(w.key, false, "Platform $tr", "Your ${w.label} now leaves ${w.from} from platform $tr instead of $was.", w.leg, tr)
+    }
+
+    /** The same platform: equal, or the same number where one has no part letter ("5" and "5b": the plan often leaves it out). */
+    fun same(a: String, b: String): Boolean {
+        val x = a.trim().lowercase()
+        val y = b.trim().lowercase()
+        if (x == y) return true
+        val dx = x.takeWhile { it.isDigit() }
+        val dy = y.takeWhile { it.isDigit() }
+        if (dx.isEmpty() || dx != dy) return false
+        return x == dx || y == dy
     }
 
     private val nsTime = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ssZ")
