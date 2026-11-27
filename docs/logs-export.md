@@ -215,10 +215,10 @@ The same switches, words and rules, so the relay and the replay treat both alike
   conditions as the lines (after a trip, else hourly; not during a trip, on a metered/Low Data network or in battery
   saver). Drop the sent points from the queue only after a 200; switching off clears the queue.
 
-### Less battery and data on long rides (0.42.9)
+### Less battery and data on long rides (0.42.10)
 
-What's new in 0.42.9 (`ios/App/RideSaver.swift`, tests `RideSaverTests` against `docs/battery-vectors.json`; Android
-0.10.7 `ride/RideSaver.kt`, `RideSaverTest`, the same vectors). New lines in the ride log:
+What's new in 0.42.10 (`ios/App/RideSaver.swift`, tests `RideSaverTests` against `docs/battery-vectors.json`; Android
+0.10.9 `ride/RideSaver.kt`, `RideSaverTest`, the same vectors). New lines in the ride log:
 
 - `gps · rough on a long ride, the vehicle confirmed: 100 m, every 300 m (31.2 km from the stop · 24 min)`: the rough
   tier is on (`RideAccuracy`): two "still the same one?" looks in a row passed in the last 10 minutes, the nearest you
@@ -245,6 +245,27 @@ everything every 20 s in the last 5 minutes (`ActivityCadence`); `/v5/plan` aske
 shapes: about half the bytes; Android only for the ride's own plans, the home map draws them); behind the screen the
 arrival re-check asks 3 ways, the list at a change 5 from just before you got there; the home screen's own looks pause
 while a ride runs.
+### Staying on, the best stop to get off, every ring on the lock screen (0.42.9)
+
+What's new in 0.42.9 (`ios/App/TrainRules.swift` `stayOn`/`headline`, `ios/App/BetterStop.swift`, `ios/App/AlarmStop.swift`
+`RingShow`; tests `TrainRulesTests`, `BetterStopTests`, `AlarmStopTests`; Android 0.10.7 in
+[android-todo.md](android-todo.md) › iOS 0.42.9). New and changed lines in the ride log:
+
+- `stay on · IC 3529 also reaches Eindhoven 15:44 (plan changed at Tilburg 15:05 → IC 3631 15:12)`: the vehicle you're
+  on calls, by its own stop list, where a later leg gets off (or where the ride after it gets on) no later than the
+  planned ride (+2 min): the legs are merged, no ring at the skipped station. `stay on · IC 3529 is the next leg's
+  train too: on to Eindhoven (plan split it at Tilburg)`: the plan had split one train (the same number or trip).
+  Replaces 0.34's `stay on · … to X · no change at Y`.
+- `better stop · stay on to 's-Hertogenbosch · home 15:52 (−9 min)`: a later stop of the one you're on, planned
+  from, gets you there at least 3 min sooner (or as soon with fewer changes): offered, not taken. `… · taken` after
+  "Do this"; `better stop · kept the plan (not at 's-Hertogenbosch)` after "Keep my plan".
+- `ride ring · … , phone in use: one chime, ringing on the lock screen` / `…, no headphones: vibration only, ringing on
+  the lock screen` / `…, ringing on the lock screen`: every ring now rings the same way (the lock screen's ringing
+  state with Stop, the alarm's own notification, the alarm card in the app). Before, in use, it was
+  `…, phone in use: a notification` with nothing to stop on the lock screen.
+- Without headphones the alarm no longer goes out loud after a minute (only with Settings › Trips & alarm › "Out loud
+  if I don't stop it (after 1 min)", off for everyone).
+
 ### Live times on the stops around you, late trains kept, walks by their distance (0.42.8)
 
 What's new in 0.42.8 (`ios/App/NearbyLive.swift`, `ios/App/PlanFix.swift`; tests `NearbyLiveTests`, `PlanFixTests`;

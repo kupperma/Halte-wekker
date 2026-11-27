@@ -1,6 +1,6 @@
 import XCTest
 
-/// 0.42.9's battery and data rules (`RideSaver.swift`) against docs/battery-vectors.json (Android checks the same
+/// 0.42.10's battery and data rules (`RideSaver.swift`) against docs/battery-vectors.json (Android checks the same
 /// vectors), and synthetic rides of the usual shapes (a 20 km bus, a 50 km train, a half-hour wait at a change):
 /// the rough GPS covers most of the far part, and the best is always back before the wake point.
 final class RideSaverTests: XCTestCase {

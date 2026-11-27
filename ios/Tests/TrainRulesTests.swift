@@ -129,29 +129,109 @@ final class TrainRulesTests: XCTestCase {
 
     private func p(_ m: Double) -> GeoPoint { Fx.east(m) }
 
-    /// Planned: IC to Tilburg (leg 0), Sprinter Tilburg → Den Bosch (leg 1, the last). You're on the through Intercity,
-    /// which calls at Den Bosch: stay on, no change at Tilburg.
-    func test_stayOnToTheEndOfTheLastLeg() {
-        let ends = [p(3000), p(6000)]
-        let deps: [Date?] = [t0, t0.addingTimeInterval(900)]
-        let calls = [(p: p(0), arrival: Optional(t0)), (p: p(3000), arrival: Optional(t0.addingTimeInterval(600))),
-                     (p: p(6000), arrival: Optional(t0.addingTimeInterval(1200)))]
-        let s = TrainRules.stayOn(index: 0, ends: ends, departures: deps, calls: calls, now: t0.addingTimeInterval(60))
-        XCTAssertEqual(s?.leg, 1)
-        XCTAssertEqual(s?.call, 2)
-        // it doesn't go there: nothing
-        XCTAssertNil(TrainRules.stayOn(index: 0, ends: ends, departures: deps, calls: Array(calls.prefix(2)), now: t0.addingTimeInterval(60)))
+    private func at(_ s: Double) -> Date { t0.addingTimeInterval(s) }
+
+    /// Breda (0) → Tilburg (20 km) → Eindhoven (50 km) by train, then a bus from the station's bus bay (300 m on) to
+    /// the end (70 km). The plan: IC 3529 to Tilburg (there 15:05, `at(1500)`), IC 3631 from Tilburg 15:12
+    /// (`at(1920)`) to Eindhoven 15:45 (`at(3900)`), the bus at 15:50 (`at(4200)`).
+    private var through: [TrainRules.StayLeg] {
+        [TrainRules.StayLeg(from: p(0), to: p(20_000), fromName: "Breda", toName: "Tilburg", departure: at(0), arrival: at(1500), tripId: "t3529", num: "3529"),
+         TrainRules.StayLeg(from: p(20_000), to: p(50_000), fromName: "Tilburg", toName: "Eindhoven Centraal", departure: at(1920), arrival: at(3900), tripId: "t3631", num: "3631"),
+         TrainRules.StayLeg(from: p(50_300), to: p(70_000), fromName: "Eindhoven, Station", toName: "Veghel, Centrum", departure: at(4200), arrival: at(6000), tripId: "b305", num: "")]
     }
 
-    /// A change after it: only in time for the ride after (2 minutes' room).
-    func test_stayOnInTimeForTheRideAfter() {
-        let ends = [p(3000), p(6000), p(9000)]
-        let calls = [(p: p(3000), arrival: Optional(t0.addingTimeInterval(600))), (p: p(6000), arrival: Optional(t0.addingTimeInterval(1200)))]
-        let ok = TrainRules.stayOn(index: 0, ends: ends, departures: [t0, t0.addingTimeInterval(700), t0.addingTimeInterval(1500)],
-                                   calls: calls, now: t0)
-        XCTAssertEqual(ok?.leg, 1)
-        let late = TrainRules.stayOn(index: 0, ends: ends, departures: [t0, t0.addingTimeInterval(700), t0.addingTimeInterval(1250)],
-                                     calls: calls, now: t0)
-        XCTAssertNil(late)
+    /// The IC you're on: Breda, Tilburg, then on to Eindhoven (arriving `eindhoven`), and further.
+    private func calls(eindhoven: Double) -> [TrainRules.StayCall] {
+        [TrainRules.StayCall(name: "Breda", p: p(0), arrival: at(0)),
+         TrainRules.StayCall(name: "Tilburg", p: p(20_000), arrival: at(1500)),
+         TrainRules.StayCall(name: "Eindhoven", p: p(50_050), arrival: at(eindhoven)),
+         TrainRules.StayCall(name: "Helmond", p: p(62_000), arrival: at(eindhoven + 600))]
+    }
+
+    /// The through train reaches Eindhoven before the planned change does: one leg less, no stop at Tilburg.
+    func test_throughTrainReachingTheNextChangeInTimeIsMerged() {
+        let s = TrainRules.stayOn(index: 0, legs: through, tripId: "t3529", num: "3529", calls: calls(eindhoven: 3840), now: at(60))
+        XCTAssertEqual(s, TrainRules.StayHit(leg: 1, call: 2, sameTrain: false))
+        // a minute after the planned one is still fine (+2 min)
+        XCTAssertEqual(TrainRules.stayOn(index: 0, legs: through, tripId: "t3529", num: "3529", calls: calls(eindhoven: 3990), now: at(60))?.leg, 1)
+    }
+
+    /// Slower than the planned change (more than 2 minutes after it), or too late for the bus: the change stays.
+    func test_slowerThroughTrainIsNotMerged() {
+        XCTAssertNil(TrainRules.stayOn(index: 0, legs: through, tripId: "t3529", num: "3529", calls: calls(eindhoven: 4080), now: at(60)))
+        var tight = through
+        tight[2].departure = at(3930)
+        XCTAssertNil(TrainRules.stayOn(index: 0, legs: tight, tripId: "t3529", num: "3529", calls: calls(eindhoven: 3900), now: at(60)),
+                     "it must still leave a minute for the bus")
+        // it doesn't go to Eindhoven at all
+        let short = Array(calls(eindhoven: 3840).prefix(2))
+        XCTAssertNil(TrainRules.stayOn(index: 0, legs: through, tripId: "t3529", num: "3529", calls: short, now: at(60)))
+        // already past Eindhoven: a call behind you doesn't count
+        XCTAssertNil(TrainRules.stayOn(index: 0, legs: through, tripId: "t3529", num: "3529", calls: calls(eindhoven: 3840), now: at(3850)))
+    }
+
+    /// The plan split one train in two legs (the same number, or the same trip): always one leg.
+    func test_sameTrainNumberAcrossLegsIsMerged() {
+        var split = through
+        split[1].tripId = "other-id"; split[1].num = "IC 3529"
+        // even with no stop list at all, and even when its times say it's later
+        XCTAssertEqual(TrainRules.stayOn(index: 0, legs: split, tripId: "t3529", num: "3529", calls: [], now: at(60)),
+                       TrainRules.StayHit(leg: 1, call: nil, sameTrain: true))
+        var byTrip = through
+        byTrip[1].tripId = "t3529"; byTrip[1].num = ""
+        XCTAssertEqual(TrainRules.stayOn(index: 0, legs: byTrip, tripId: "t3529", num: "", calls: calls(eindhoven: 4500), now: at(60)),
+                       TrainRules.StayHit(leg: 1, call: 2, sameTrain: true))
+        XCTAssertNil(TrainRules.stayOn(index: 0, legs: through, tripId: "t3529", num: "3529", calls: [], now: at(60)), "another number: not the same train")
+    }
+
+    /// The next ride's boarding stop counts too (the bus bay by the station), as does the station by its name.
+    func test_stayOnByTheRideAftersStopOrTheStationName() {
+        var legs = through
+        legs[1].to = p(51_000)            // the leg's own stop placed 950 m off: by its name ("Eindhoven Centraal")
+        XCTAssertEqual(TrainRules.stayOn(index: 0, legs: legs, tripId: "t3529", num: "3529", calls: calls(eindhoven: 3840), now: at(60))?.call, 2)
+        legs[1].toName = "Somewhere else"
+        legs[2].from = p(50_200)          // …or the bus bay right by where it calls
+        XCTAssertEqual(TrainRules.stayOn(index: 0, legs: legs, tripId: "t3529", num: "3529", calls: calls(eindhoven: 3840), now: at(60))?.call, 2)
+        legs[2].from = p(53_000); legs[2].fromName = "Elsewhere"
+        XCTAssertNil(TrainRules.stayOn(index: 0, legs: legs, tripId: "t3529", num: "3529", calls: calls(eindhoven: 3840), now: at(60)))
+    }
+
+    /// Planned: IC to Tilburg (leg 0), Sprinter Tilburg → Den Bosch (leg 1, the last, no planned arrival). You're on
+    /// the through Intercity, which calls there: stay on to the end.
+    func test_stayOnToTheEndOfTheLastLeg() {
+        let legs = [TrainRules.StayLeg(from: p(0), to: p(3000), departure: t0),
+                    TrainRules.StayLeg(from: p(3000), to: p(6000), departure: at(900))]
+        let c = [TrainRules.StayCall(name: "", p: p(0), arrival: t0), TrainRules.StayCall(name: "", p: p(3000), arrival: at(600)),
+                 TrainRules.StayCall(name: "", p: p(6000), arrival: at(1200))]
+        XCTAssertEqual(TrainRules.stayOn(index: 0, legs: legs, tripId: "x", num: "", calls: c, now: at(60)), TrainRules.StayHit(leg: 1, call: 2, sameTrain: false))
+        XCTAssertNil(TrainRules.stayOn(index: 0, legs: legs, tripId: "x", num: "", calls: Array(c.prefix(2)), now: at(60)))
+        XCTAssertNil(TrainRules.stayOn(index: 1, legs: legs, tripId: "x", num: "", calls: c, now: at(60)), "the last leg: nothing to merge")
+    }
+
+    func test_stayLog() {
+        XCTAssertEqual(TrainRules.stayLog(vehicle: "IC 3529", reaches: "Eindhoven", at: "15:44", changeAt: "Tilburg", changeTime: "15:05",
+                                          next: "IC 3631", nextTime: "15:12", sameTrain: false),
+                       "stay on · IC 3529 also reaches Eindhoven 15:44 (plan changed at Tilburg 15:05 → IC 3631 15:12)")
+        XCTAssertEqual(TrainRules.stayLog(vehicle: "IC 3529", reaches: "Eindhoven", at: "", changeAt: "Tilburg", changeTime: "",
+                                          next: "", nextTime: "", sameTrain: true),
+                       "stay on · IC 3529 is the next leg's train too: on to Eindhoven (plan split it at Tilburg)")
+    }
+
+    /// The headline goes by where the vehicle really goes, never "Intercity to <your stop>".
+    func test_headlineUsesTheHeadsign() {
+        let h = TrainRules.headline(vehicle: "Intercity", headsign: "Zwolle", legEnd: "Tilburg", stayOnTo: nil)
+        XCTAssertEqual(h.title, "Intercity to Zwolle")
+        XCTAssertEqual(h.detail, "Get off at Tilburg")
+        XCTAssertEqual(TrainRules.headline(vehicle: "Intercity", headsign: "Zwolle", legEnd: "Eindhoven", stayOnTo: "Eindhoven").title, "Stay on to Eindhoven")
+        XCTAssertEqual(TrainRules.headline(vehicle: "Intercity", headsign: "Zwolle", legEnd: "Eindhoven", stayOnTo: "Eindhoven").detail, "Intercity to Zwolle")
+        // it ends where you get off: just that
+        let end = TrainRules.headline(vehicle: "Bus 305", headsign: "Eindhoven, Station", legEnd: "Eindhoven Centraal", stayOnTo: nil)
+        XCTAssertEqual(end.title, "Bus 305 to Eindhoven, Station")
+        XCTAssertNil(end.detail)
+        // no headsign known: the vehicle alone, and where you get off
+        XCTAssertEqual(TrainRules.headline(vehicle: "Sprinter", headsign: "", legEnd: "Tilburg", stayOnTo: nil).title, "Sprinter")
+        XCTAssertEqual(TrainRules.lockHeadline(vehicle: "Intercity", headsign: "Zwolle", legEnd: "Tilburg", stayOnTo: nil),
+                       "Intercity to Zwolle · get off at Tilburg")
+        XCTAssertEqual(TrainRules.lockHeadline(vehicle: "Intercity", headsign: "Zwolle", legEnd: "Eindhoven", stayOnTo: "Eindhoven"), "Stay on to Eindhoven")
     }
 }

@@ -20,7 +20,7 @@ import org.junit.Test
 import java.io.File
 
 /**
- * iOS 0.42.9's battery and data rules (`ride/RideSaver.kt`) against docs/battery-vectors.json (iOS checks the same
+ * iOS 0.42.10's battery and data rules (`ride/RideSaver.kt`) against docs/battery-vectors.json (iOS checks the same
  * vectors), and synthetic legs of the usual shapes: rough for most of them, the best always back before the wake
  * point.
  */

@@ -70,7 +70,7 @@ class OnBoardLook {
                 if (f != null) t.copy(gps = VehicleGPS(f)) else t
             }
         }
-        // (0.10.7, iOS 0.42.9 `CandidatePrefilter`) coaches, a route never within 1 km of you, or their own GPS 3 km (a
+        // (0.10.9, iOS 0.42.10 `CandidatePrefilter`) coaches, a route never within 1 km of you, or their own GPS 3 km (a
         // bus) or 10 km (a train) away: left out before they're judged; how many, in the field log once a minute
         val you = fixes.sortedBy { it.t }.takeLast(8).map { it.p }
         val asked = tracks.size

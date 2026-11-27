@@ -373,7 +373,7 @@ enum Transit {
                                  .init(name: "numItineraries", value: String(count)), .init(name: "maxTransfers", value: String(maxTransfers)),
                                  .init(name: "time", value: iso.string(from: at)),
                                  .init(name: "detailedTransfers", value: "false"),          // a third smaller: no turn-by-turn for changes
-                                 .init(name: "detailedLegs", value: "false")]               // (0.42.9) half again: no leg shapes (never read)
+                                 .init(name: "detailedLegs", value: "false")]               // (0.42.10) half again: no leg shapes (never read)
         if arriveBy { q.append(.init(name: "arriveBy", value: "true")) }       // `at` is when you want to be there
         // (0.34) the walks at your own walking speed, once it's learned from your walks (`HabitStore`)
         if let v = HabitStore.pedestrianSpeed() { q.append(.init(name: "pedestrianSpeed", value: String(format: "%.1f", v))) }
@@ -406,7 +406,7 @@ enum Transit {
                                  .init(name: "numItineraries", value: String(count)), .init(name: "maxTransfers", value: String(maxTransfers)),
                                  .init(name: "time", value: iso.string(from: PlanMemo.minute(at))),
                                  .init(name: "detailedTransfers", value: "false"),
-                                 .init(name: "detailedLegs", value: "false")]               // (0.42.9: no leg shapes, never read)
+                                 .init(name: "detailedLegs", value: "false")]               // (0.42.10: no leg shapes, never read)
         if let p = preTransit { q.append(.init(name: "maxPreTransitTime", value: String(p))) }
         if let w = window { q.append(.init(name: "searchWindow", value: String(w))) }
         if let m = most { q.append(.init(name: "maxItineraries", value: String(m))) }      // (the answer's size: 20–35 KB a way)

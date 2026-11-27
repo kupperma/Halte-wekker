@@ -52,7 +52,7 @@ object Transit {
     private class Kept(val at: Double, val trips: List<DoorTrip>)
     private val plans = ConcurrentHashMap<String, Kept>()
 
-    /** `detailed` false (0.10.7, iOS 0.42.9): without the legs' shapes (`detailedLegs=false`, half the bytes), for a ride's
+    /** `detailed` false (0.10.9, iOS 0.42.10): without the legs' shapes (`detailedLegs=false`, half the bytes), for a ride's
      *  own plans that never draw them. */
     suspend fun plan(from: String, to: String, at: Double, count: Int = 5, maxTransfers: Int = 4, arriveBy: Boolean = false, detailed: Boolean = true): List<DoorTrip> =
         withContext(Dispatchers.Default) { planHere(from, to, at, count, maxTransfers, arriveBy, detailed) }

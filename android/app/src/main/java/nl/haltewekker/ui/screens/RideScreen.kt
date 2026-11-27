@@ -71,7 +71,7 @@ fun RideScreen(s: RideState, onBack: () -> Unit) {
                 Card {
                     Text("Wake up", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = DS.t.warning)
                     Text("${leg?.toStop ?: "Your stop"} in about ${Fmt.metres(s.distance ?: s.wakeMetres)}.", color = DS.t.text)
-                    if (s.quiet) Text("No headphones: it only vibrates, and rings out loud after a minute.", color = DS.t.secondary, style = MaterialTheme.typography.bodySmall)
+                    if (s.quiet) Text("No headphones: it only vibrates, until you stop it.", color = DS.t.secondary, style = MaterialTheme.typography.bodySmall)
                     BigButton("Stop alarm") { RideService.send(context, RideService.ACTION_STOP_ALARM) }
                 }
             }
@@ -88,6 +88,15 @@ fun RideScreen(s: RideState, onBack: () -> Unit) {
             Text(q.body, color = DS.t.secondary, style = MaterialTheme.typography.bodySmall)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 q.ids.forEachIndexed { k, id -> QuietButton(q.answers.getOrElse(k) { "This one" }) { RideService.send(context, RideService.ACTION_ANSWER, trip = id) } }
+            }
+        } }
+        // (0.10.7, iOS 0.42.9) a later stop of the one you're on gets you there sooner
+        s.better?.let { b -> Card {
+            Text("A faster way: stay on", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = DS.t.text)
+            Text(b.text, color = DS.t.text)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                QuietButton("Do this") { RideService.send(context, RideService.ACTION_BETTER_TAKE) }
+                QuietButton("Keep my plan") { RideService.send(context, RideService.ACTION_BETTER_KEEP) }
             }
         } }
         // (A7, iOS 0.39.1) the wrong bus, and another line's bus at your stop
@@ -108,10 +117,13 @@ fun RideScreen(s: RideState, onBack: () -> Unit) {
         } }
         if (leg != null && s.phase != Phase.FINISHED) Card {
             Header(if (s.trip.rides.size > 1) "Leg ${s.index + 1} of ${s.trip.rides.size}" else "Your ride", s.legArrival?.let { "there ${Fmt.time(it)}" })
+            // (0.10.7, iOS 0.42.9) by where it really goes ("Intercity to Zwolle"), and where you get off
+            val head = s.headline
             Row(verticalAlignment = Alignment.CenterVertically) {
                 LinePill(s.vehicleLine ?: leg.line, leg.kind); Spacer(Modifier.width(8.dp))
-                Text("to ${leg.toStop}", color = DS.t.text, fontWeight = FontWeight.SemiBold)
+                Text(head?.first ?: "to ${leg.toStop}", color = DS.t.text, fontWeight = FontWeight.SemiBold)
             }
+            head?.second?.let { Text(it, color = DS.t.secondary, style = MaterialTheme.typography.bodySmall) }
             // (0.10.6) which side you get out at your stop
             s.doorSide?.let { Text(it, color = DS.t.accentText, fontWeight = FontWeight.SemiBold) }
             val d = s.distance

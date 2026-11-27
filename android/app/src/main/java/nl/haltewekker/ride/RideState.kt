@@ -33,7 +33,7 @@ data class RideState(
     val lastFixAt: Double? = null,
     val quiet: Boolean = false,
     val roughGPS: Boolean = false,
-    /** (0.10.7, iOS 0.42.9) The rough tier of a long ride (network location), and of a wait at a change. */
+    /** (0.10.9, iOS 0.42.10) The rough tier of a long ride (network location), and of a wait at a change. */
     val reducedGPS: Boolean = false,
     val changeLowGPS: Boolean = false,
     val note: String? = null,
@@ -90,17 +90,46 @@ data class RideState(
      *  how far from its stop this leg started (its first good fix). */
     val quietLeg: Boolean = false,
     val legStartMetres: Double? = null,
+    /** (0.10.7, iOS 0.42.9) where the vehicle you're on really goes (the headline), and this leg staying on it past a
+     *  planned change ("Stay on to Eindhoven"); a faster way from a later stop of it, offered. */
+    val headsign: String? = null,
+    val stayOnTo: String? = null,
+    val better: BetterCard? = null,
     /** (0.10.6) which side you get out at this leg's stop ("Exit on the left · platform 4", `DoorSide`), and what was
      *  asked for it (the station, platform and stop before: asked again only when that changes). */
     val doorSide: String? = null,
     val doorKey: String? = null,
 ) {
     val leg: Ride? get() = trip.rides.getOrNull(index)
+    /** "Intercity", "Sprinter", "Bus 305": the vehicle you're on (else the planned one). */
+    val vehicleTitle: String? get() {
+        val l = leg ?: return null
+        val line = vehicleLine ?: l.line
+        return if (l.isTrain) (when (line) { "IC" -> "Intercity"; "SPR" -> "Sprinter"; else -> line }) else "Bus $line"
+    }
+    /** Where the vehicle goes: its own trip's headsign, else the planned ride's when it's that one. */
+    private val sign: String get() = headsign ?: leg?.let { l -> l.headsign.takeIf { vehicleTripId == null || vehicleTripId == l.tripId } }.orEmpty()
+    /** (iOS 0.42.9 `TrainRules.headline`) "Intercity to Zwolle" / "Get off at Tilburg"; "Stay on to Eindhoven". */
+    val headline: Pair<String, String?>? get() {
+        val l = leg ?: return null
+        val v = vehicleTitle ?: return null
+        return nl.haltewekker.match.TrainRules.headline(v, sign, l.toStop, stayOnTo)
+    }
+    /** The same on one line, for the ride's notification: "Intercity to Zwolle · get off at Tilburg". */
+    val lockTitle: String? get() {
+        val l = leg ?: return null
+        val v = vehicleTitle ?: return null
+        return nl.haltewekker.match.TrainRules.lockHeadline(v, sign, l.toStop, stayOnTo)
+    }
     val wakeMetres: Double get() = (wakeKm.getOrNull(index) ?: WakeRules.BUS_KM) * 1000
     val finished: Boolean get() = phase == Phase.FINISHED
     /** When this leg gets you to your stop: live once it's known, else the plan's. */
     val legArrival: Double? get() = eta ?: leg?.arrival
 }
+
+/** (0.10.7, iOS 0.42.9 `BetterOffer`) getting off at `stop` (the vehicle there at `reachesAt`), then `trip` from there. */
+@Serializable
+data class BetterCard(val stop: String, val lat: Double, val lon: Double, val reachesAt: Double, val trip: DoorTrip, val text: String, val log: String)
 
 @Serializable
 data class AskCard(val title: String, val body: String, val ids: List<String>, val answers: List<String>, val lines: List<String>, val train: Boolean)
