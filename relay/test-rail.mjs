@@ -178,10 +178,10 @@ async function route() {
   assert.deepEqual(await b.json(), { side: "right", confidence: "high", platformRef: "3" });
   assert.equal(a.headers.get("Cache-Control"), "max-age=86400");
   assert.equal(asked.length, 1);
-  assert.equal(asked[0].u, "https://overpass-api.de/api/interpreter");
-  assert.equal(asked[0].init.method, "POST");
+  assert.ok(asked[0].u.startsWith("https://overpass-api.de/api/interpreter?data=%5Bout%3Ajson%5D"));
+  assert.equal(asked[0].init.method, "GET");
   assert.equal(asked[0].init.headers["User-Agent"], USER_AGENT);
-  assert.ok(decodeURIComponent(asked[0].init.body).includes('way["railway"="rail"];);out tags geom;'));
+  assert.ok(decodeURIComponent(asked[0].u).includes('way["railway"="rail"];);out tags geom;'));
   assert.equal((await (await go(q("8", FROM.ettenLeur))).json()).side, "right");
   assert.equal(asked.length, 1);
   // 30 days later: asked again
@@ -198,21 +198,22 @@ async function route() {
   assert.equal(j.side, "unknown");
   assert.equal(j.why, "osm_busy");
   assert.equal(j.retryAfter, 1800);
-  assert.equal(j.osm, "429,429");
-  assert.equal(asked[3].u, "https://overpass.private.coffee/api/interpreter");
+  assert.equal(j.osm, "429,429,429");
+  assert.ok(asked[3].u.startsWith("https://maps.mail.ru/osm/tools/overpass/api/interpreter?data="));
+  assert.ok(asked[4].u.startsWith("https://overpass.private.coffee/api/interpreter?data="));
   await go(other("HT"));
-  assert.equal(asked.length, 4);
+  assert.equal(asked.length, 5);
   clock += 31 * 60_000;
   answer = { status: 200, body: JSON.stringify(fixture("s-hertogenbosch")) };
   r = await go(other("HT"));
   assert.equal(r.status, 200);
-  assert.equal(asked.length, 5);
+  assert.equal(asked.length, 6);
   // nothing in OSM: kept too (unknown), not asked again
   answer = { status: 200, body: '{"elements":[]}' };
   r = await go(other("XYZ"));
   assert.equal((await r.json()).side, "unknown");
   await go(other("XYZ"));
-  assert.equal(asked.length, 6);
+  assert.equal(asked.length, 7);
 }
 
 async function live() {

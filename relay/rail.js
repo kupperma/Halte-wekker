@@ -18,12 +18,14 @@
 //  track is which: skipped. Platforms on both sides: "both". Nothing found or nothing sure: "unknown" (the app shows
 //  nothing). "low": the line bends between the two stops, or the match was loose.
 //
-// OSM data: one Overpass request per station on a miss (a second instance only when the first can't answer; a descriptive User-Agent, 25 s, nothing personal), trimmed to
+// OSM data: one Overpass request per station on a miss (the next instance only when one can't answer; a descriptive
+// User-Agent, 20 s each, nothing personal), trimmed to
 // the platforms and rails in a box 400 m around it and kept 30 days in a Durable Object ("Rail", one per station); a busy Overpass
 // (429/504/no answer) is asked again only after 10 minutes. Map data © OpenStreetMap contributors, ODbL.
 
 export const OVERPASS = "https://overpass-api.de/api/interpreter";
-export const OVERPASS_2 = "https://overpass.private.coffee/api/interpreter";   // only when the first can't answer
+/** Asked in turn only while the one before can't answer (at most these three for a station's miss). */
+export const OVERPASS_ALL = [OVERPASS, "https://maps.mail.ru/osm/tools/overpass/api/interpreter", "https://overpass.private.coffee/api/interpreter"];
 export const USER_AGENT = "Haltewekker-relay/1.0 (+https://github.com/kupperma/Halte-wekker)";
 export const RADIUS = 400;                      // m around the station
 export const KEEP_MS = 30 * 24 * 3600 * 1000;   // a station's OSM data
@@ -277,28 +279,29 @@ export class RailCore {
   /** One Overpass instance: its answer, or why there was none. */
   async askOne(endpoint, at) {
     const ctl = new AbortController();
-    const timer = setTimeout(() => ctl.abort(), 25000);
+    const timer = setTimeout(() => ctl.abort(), 20000);
+    const t0 = Date.now();
     try {
-      const r = await this.fetchImpl(endpoint, {
-        method: "POST", signal: ctl.signal,
-        headers: { "User-Agent": USER_AGENT, "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
-        body: "data=" + encodeURIComponent(overpassQuery(at)),
+      const r = await this.fetchImpl(`${endpoint}?data=${encodeURIComponent(overpassQuery(at))}`, {
+        method: "GET", signal: ctl.signal, headers: { "User-Agent": USER_AGENT, Accept: "application/json" },
       });
       return { r, osm: String(r.status) };
     } catch (e) {
-      return { r: null, osm: e && e.name === "AbortError" ? "timeout" : "no_answer" };
+      return { r: null, osm: (e && e.name === "AbortError" ? "timeout" : "no_answer") + "@" + (Date.now() - t0) };
     } finally { clearTimeout(timer); }
   }
 
   async ask(at) {
     const t = this.now();
-    // the main instance; only when it can't answer, once the other one
-    let { r, osm } = await this.askOne(OVERPASS, at);
-    if (!r || r.status !== 200) {
-      const second = await this.askOne(OVERPASS_2, at);
-      osm += "," + second.osm;
-      if (second.r && second.r.status === 200) r = second.r;
+    // the main instance; only when it can't answer, the next one
+    let r = null;
+    const seen = [];
+    for (const endpoint of OVERPASS_ALL) {
+      const one = await this.askOne(endpoint, at);
+      seen.push(one.osm);
+      if (one.r && one.r.status === 200) { r = one.r; break; }
     }
+    const osm = seen.join(",");
     if (!r || r.status !== 200) {
       const wait = osm.includes("429") ? 3 * RETRY_MS : RETRY_MS;
       await this.store.put("d", { retryAt: t + wait, osm });
