@@ -511,7 +511,7 @@ enum BatteryReport {
         return parts.isEmpty ? "GPS off" : "GPS " + parts.joined(separator: " / ")
     }
 
-    /// (0.42.8) A ride's GPS, the best against the rough tiers (10 m and 100 m): "GPS best 6 min · reduced 18 min (75%)".
+    /// (0.42.9) A ride's GPS, the best against the rough tiers (10 m and 100 m): "GPS best 6 min · reduced 18 min (75%)".
     /// Nil: GPS was off (or on under 30 s).
     static func gpsSplit(_ r: RideCost) -> String? {
         let best = r.gps[GPSMode.best.rawValue] ?? 0
@@ -542,7 +542,7 @@ enum BatteryReport {
             + reducedShare(r)
     }
 
-    /// " · GPS reduced 75%" (0.42.8), for the field log's ride line; "" with GPS off.
+    /// " · GPS reduced 75%" (0.42.9), for the field log's ride line; "" with GPS off.
     static func reducedShare(_ r: RideCost) -> String {
         let best = r.gps[GPSMode.best.rawValue] ?? 0
         let reduced = (r.gps[GPSMode.tenMetres.rawValue] ?? 0) + (r.gps[GPSMode.hundredMetres.rawValue] ?? 0)

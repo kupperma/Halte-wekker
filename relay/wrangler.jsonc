@@ -9,16 +9,19 @@
   // Friends (0.25): one Durable Object per account, with SQLite storage (works on the free plan, nothing to set up).
   // Shared ride logs (0.28.1): one more, "Logs", that keeps the uploads 60 days.
   // Live links (0.30): "Live", one per link, gone when the link ends (at most 4 hours).
+  // Exit side (2026-11-27): "Rail", one per station, its OpenStreetMap platforms and rails kept 30 days.
   "durable_objects": {
     "bindings": [
       { "name": "FRIENDS", "class_name": "Friends" },
       { "name": "LOGS", "class_name": "Logs" },
-      { "name": "LIVE", "class_name": "Live" }
+      { "name": "LIVE", "class_name": "Live" },
+      { "name": "RAIL", "class_name": "Rail" }
     ]
   },
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["Friends"] },
     { "tag": "v2", "new_sqlite_classes": ["Logs"] },
-    { "tag": "v3", "new_sqlite_classes": ["Live"] }
+    { "tag": "v3", "new_sqlite_classes": ["Live"] },
+    { "tag": "v4", "new_sqlite_classes": ["Rail"] }
   ]
 }

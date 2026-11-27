@@ -127,7 +127,7 @@ class RideService : Service() {
     private var tick: Job? = null
     private var lastNotify = 0.0
     private var lastPhase: Phase? = null
-    // (0.10.5, iOS 0.42.8 `RideSaver`) the notification's cadence: what it said, its meaningful part, the distance
+    // (0.10.6, iOS 0.42.9 `RideSaver`) the notification's cadence: what it said, its meaningful part, the distance
     private var shownSay = ""
     private var shownKey = ""
     private var shownLook = ""
@@ -292,7 +292,7 @@ class RideService : Service() {
         if (!hasLocation() || ms == intervalMs) return
         intervalMs = ms
         lm.removeUpdates(listener)
-        // (0.10.5, iOS 0.42.8 `RideAccuracy`) the rough tier: the network provider every 20 s (300 m), and the fixes
+        // (0.10.6, iOS 0.42.9 `RideAccuracy`) the rough tier: the network provider every 20 s (300 m), and the fixes
         // others ask for; the GPS chip only when there's no network provider (then once a minute)
         val reduced = ms == RideAccuracy.REDUCED_MS
         val minMetres = if (reduced) RideAccuracy.REDUCED_FILTER.toFloat() else if (ms > 5000) 75f else 0f
@@ -378,7 +378,7 @@ class RideService : Service() {
         notifyRide(force = false)
     }
 
-    /** (0.10.5, iOS 0.42.8) Where you stand, waiting for the next ride: a new spot once you move (iOS `TransferPolicy.update`). */
+    /** (0.10.6, iOS 0.42.9) Where you stand, waiting for the next ride: a new spot once you move (iOS `TransferPolicy.update`). */
     private fun noteWaitAnchor(f: Fix) {
         if (!f.accuracy.isFinite() || f.accuracy < 0 || f.accuracy >= 150) return
         val a = waitAnchor
@@ -482,7 +482,7 @@ class RideService : Service() {
                 // (A7, iOS 0.39.1) on another line than planned: is its own GPS with you (the wrong bus)?
                 wrongBusLook(now)
                 val v = RideStore.state.value?.vehicleTripId ?: leg.tripId
-                // (0.10.5, iOS 0.42.8 `RideNet`) its live times every 2 minutes far from the stop, every 45 s near it
+                // (0.10.6, iOS 0.42.9 `RideNet`) its live times every 2 minutes far from the stop, every 45 s near it
                 val tripEvery = RideStore.state.value?.let { cur ->
                     RideNet.tripEvery(RideNet.near(cur.legArrival?.let { it - now }, cur.distance,
                         WakeRule.gpsWakeMetres(cur.wakeMetres, WakeBookStore.effective(app.store.settings.value.wake), leg.isTrain), cur.phase != Phase.SLEEPING))
@@ -511,7 +511,7 @@ class RideService : Service() {
                     scope.launch { platformLook(now) }
                     scheduleBackup()
                 }
-                gpsTier(now)                    // (0.10.5: time brings the stop, or the next ride, near without a fix)
+                gpsTier(now)                    // (0.10.6: time brings the stop, or the next ride, near without a fix)
                 notifyRide(force = false)
                 // (A3) the ride's network tick: friends get your trip (and their trips and lines come in), no loop of its own
                 nl.haltewekker.friends.FriendTravelShare.tick(applicationContext)
@@ -609,7 +609,7 @@ class RideService : Service() {
                     ringMinutes = null, reckoning = false, changeArrived = now, changeFromVehicle = s.vehicleTripId, quietLeg = false, legStartMetres = null)
             }
             requestLocation(RideGPS.intervalMs(false))
-            waitAnchor = null                   // (0.10.5) standing at the change counts from here
+            waitAnchor = null                   // (0.10.6) standing at the change counts from here
             scheduleBackup()
         } else {
             RideStore.update(this) { it.copy(phase = Phase.FINISHED) }
@@ -692,7 +692,7 @@ class RideService : Service() {
     }
 
     /**
-     * The ongoing notification, again (0.10.5, iOS 0.42.8 `ActivityCadence`): what it says (the phase, the change
+     * The ongoing notification, again (0.10.6, iOS 0.42.9 `ActivityCadence`): what it says (the phase, the change
      * miss) at once; a meaningful change (the arrival minute, the next stop, the delay, the vehicle, the change line)
      * at most once a minute far from the stop; the distance alone every 3 minutes; anything every 20 s in the last 5
      * minutes. A change held back goes later by itself.

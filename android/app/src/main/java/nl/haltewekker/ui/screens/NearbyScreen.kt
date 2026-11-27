@@ -61,6 +61,7 @@ import nl.haltewekker.data.DoorTrip
 import nl.haltewekker.live.LiveFeeds
 import nl.haltewekker.live.RealPositions
 import nl.haltewekker.travel.Nearby
+import nl.haltewekker.travel.NearbyLive
 import nl.haltewekker.travel.NearbyStore
 import nl.haltewekker.travel.TripTimeline
 import nl.haltewekker.ui.BigButton
@@ -139,6 +140,8 @@ fun NearbyView(destId: String, destName: String, seed: List<DoorTrip>, onTrip: (
                 at = here; askedAt = Iso.now()
             }
             now = Iso.now()
+            // (iOS 0.42.8) what a stop's board freshened (live times by trip id)
+            store.result?.let { if (it !== result) result = it }
             delay(15_000)
         }
     }
@@ -222,7 +225,8 @@ private fun tagColor(t: Nearby.Tag) = when (t) { Nearby.Tag.FASTEST -> Color(0xF
 
 @Composable
 private fun TagChip(t: Nearby.Tag) {
-    Text(t.title, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold,
+    // (iOS 0.42.8) never "Fastes / t": one line, the row's other text gives way
+    Text(t.title, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false,
         modifier = Modifier.background(tagColor(t), RoundedCornerShape(6.dp)).padding(horizontal = 6.dp, vertical = 2.dp))
 }
 
@@ -234,13 +238,16 @@ private fun OptionRow(s: Shown, o: Nearby.Option, tags: List<Nearby.Tag>, colour
             Box(Modifier.width(12.dp).height(12.dp).background(Color(0xFF000000 or colour.toLong()), RoundedCornerShape(6.dp)))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(s.group.name, fontWeight = FontWeight.SemiBold, color = DS.t.text, maxLines = 1)
+                    Text(s.group.name, fontWeight = FontWeight.SemiBold, color = DS.t.text, maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
                     tags.forEach { TagChip(it) }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("🚶 ${t.first.walkBefore} min", color = DS.t.secondary, style = MaterialTheme.typography.bodySmall)
                     t.rides.take(3).forEach { RidePill(it) }
-                    Text("leaves ${Fmt.time(t.first.departure)}", color = DS.t.secondary, style = MaterialTheme.typography.bodySmall)
+                    val sh = NearbyLive.shown(t.first.departure, t.first.scheduledDeparture, t.first.live, t.first.cancelled)
+                    Text("leaves ${Fmt.time(sh.time)}" + if (sh.late) " ${sh.word}" else "", color = if (sh.late) DS.t.warning else DS.t.secondary,
+                        style = MaterialTheme.typography.bodySmall, maxLines = 1)
                 }
                 if (!o.ranked) Text("later" + (Nearby.dayWord(t.first.departure, now, ZONE)?.let { " · $it" } ?: ""), color = DS.t.secondary, style = MaterialTheme.typography.bodySmall)
                 o.sure?.let { Text(Nearby.sureWords(it), color = DS.t.secondary, style = MaterialTheme.typography.bodySmall) }
@@ -262,7 +269,8 @@ private fun StopSheet(s: Shown, store: NearbyStore, w: Nearby.Window, now: Doubl
         info = null
         info = try { store.stop(s.group, s.trips, w.leave + walk * 60.0) } catch (_: Exception) { NearbyStore.StopInfo(s.trips, emptyList(), true) }
     }
-    val trips = (if (s.trips.isEmpty()) info?.trips ?: emptyList() else s.trips)
+    // (iOS 0.42.8) the stop's board freshened its departures: those, in the same order
+    val trips = info?.trips?.takeIf { it.isNotEmpty() && (s.trips.isEmpty() || it.size == s.trips.size) } ?: s.trips
     val deps = trips.map(store::dep)
     val idx = Nearby.shown(deps, w)
     val (normal, late) = Nearby.split(deps, w).let { (a, b) -> idx.filter { it in a } to idx.filter { it in b } }
@@ -347,16 +355,16 @@ private fun StopSheet(s: Shown, store: NearbyStore, w: Nearby.Window, now: Doubl
 @Composable
 private fun TimeRow(t: DoorTrip, now: Double) {
     val f = t.first
-    val state = when {
-        f.cancelled -> "cancelled"
-        !f.live -> "timetable"
-        f.delay >= 1 -> "+${f.delay}"
-        else -> "live"
-    }
+    // (iOS 0.42.8) the live time ("14:41 +3", the planned one struck through); "live" only with live times
+    val sh = NearbyLive.shown(f.departure, f.scheduledDeparture, f.live, f.cancelled)
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         t.rides.take(3).forEach { RidePill(it) }
-        Text("${Fmt.time(f.departure)} · $state", color = if (f.cancelled) Color(0xFFE86F5A) else DS.t.text, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-        Text("arrive ${Fmt.time(t.end)}", color = DS.t.secondary, style = MaterialTheme.typography.bodySmall)
+        Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+            sh.planned?.let { Text(Fmt.time(it), color = DS.t.secondary, style = MaterialTheme.typography.bodySmall,
+                textDecoration = androidx.compose.ui.text.style.TextDecoration.LineThrough, maxLines = 1) }
+            Text("${Fmt.time(sh.time)} · ${sh.word}", color = if (sh.late) Color(0xFFE86F5A) else DS.t.text, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
+        }
+        Text("arrive ${Fmt.time(t.end)}", color = DS.t.secondary, style = MaterialTheme.typography.bodySmall, maxLines = 1)
     }
 }
 

@@ -17,12 +17,15 @@
 // 10. (0.37) How many OV-fiets are left at a station: /ns/ovfiets?station=BD (see ns-extra.js).
 // 11. (2026-11-27) "Listening now" from Last.fm: /music/v1/now?user=<last.fm user>[&app=spotify] (see music.js).
 //    Needs a free Last.fm API key saved as the secret LASTFM_API_KEY; without it the route answers 503 not_configured.
+// 12. (2026-11-27) Which side you get out of the train, from OpenStreetMap (Overpass), kept 30 days per station in the
+//    Durable Object "Rail": /rail/v1/side?station=BD&track=4&from=<lat,lon>&at=<lat,lon> (see rail.js).
 import { DurableObject } from "cloudflare:workers";
 import { friends, FriendsCore } from "./friends.js";
 import { logs, LogsCore } from "./logs.js";
 import { live, LiveCore } from "./live.js";
 import { nsExtra } from "./ns-extra.js";
 import { music } from "./music.js";
+import { rail, RailCore } from "./rail.js";
 
 export class Friends extends DurableObject {
   constructor(ctx, env) {
@@ -51,6 +54,14 @@ export class Live extends DurableObject {
   alarm() { return this.core.alarm(); }
 }
 
+export class Rail extends DurableObject {
+  constructor(ctx, env) {
+    super(ctx, env);
+    this.core = new RailCore(ctx, env);
+  }
+  fetch(request) { return this.core.fetch(request); }
+}
+
 export default {
   async fetch(request, env) {
     const cors = {
@@ -72,6 +83,9 @@ export default {
         if (r) return r;
       } catch (e) { return new Response("relay error", { status: 500, headers: cors }); }
       return new Response("Not found", { status: 404, headers: cors });
+    }
+    if (url.pathname.startsWith("/rail/")) {
+      try { return await rail(request, env, url, cors); } catch (e) { return new Response("relay error", { status: 500, headers: cors }); }
     }
     // The key may be saved as NS_KEY or NS-KEY.
     const NS_KEY = env.NS_KEY || env["NS-KEY"];

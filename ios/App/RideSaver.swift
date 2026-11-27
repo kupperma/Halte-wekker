@@ -1,6 +1,6 @@
 import Foundation
 
-// 0.42.8: a long ride for less battery and data. Field logs of long rides showed the best GPS for almost all of them
+// 0.42.9: a long ride for less battery and data. Field logs of long rides showed the best GPS for almost all of them
 // (also on long train legs far from the stop and through long waits at a change), a Live Activity update about once a
 // minute, and long-distance coaches tens of kilometres away judged on every look. Plain numbers, so every rule is
 // tested without CoreLocation, ActivityKit or the network; Android has the same rules (`ride/RideSaver.kt`) and both
@@ -11,7 +11,7 @@ import Foundation
 // beyond the wake distance plus 2 km plus what it can cover until the next look (`RideAccuracy.lookEvery`), and while
 // its arrival is more than 6 minutes off: so the best GPS is back, at the latest, 2 km before the wake point.
 
-/// The GPS of a ride far from its stop (0.42.8): rough (100 m, a fix every 300 m) while the vehicle you're on is
+/// The GPS of a ride far from its stop (0.42.9): rough (100 m, a fix every 300 m) while the vehicle you're on is
 /// confirmed and the stop is far by distance and by time; the best again near the stop, on doubt, while boarding, and
 /// whenever a fix is too old or too rough to say where you are.
 enum RideAccuracy {
@@ -113,7 +113,7 @@ enum RideAccuracy {
     }
 }
 
-/// Waiting at a change (0.42.8): rough GPS (100 m, a fix every 100 m) once you've stood there 3 minutes, until 3
+/// Waiting at a change (0.42.9): rough GPS (100 m, a fix every 100 m) once you've stood there 3 minutes, until 3
 /// minutes before the next ride leaves (its live time) or you start moving; the best again at once then. Without a
 /// known next departure: the best, as before.
 enum ChangeWait {
@@ -131,7 +131,7 @@ enum ChangeWait {
     }
 }
 
-/// How often the Live Activity is updated (0.42.8): what it says you should do (waking, ringing, the change, arriving)
+/// How often the Live Activity is updated (0.42.9): what it says you should do (waking, ringing, the change, arriving)
 /// goes at once; a meaningful change (a stop passed, the delay or the arrival minute, the vehicle, the next ride, the
 /// platform, the song) at most once a minute far from the stop, every 20 s in the last 5 minutes; only the distance or
 /// the bar moving: every 3 minutes far away, every 20 s near. (The countdown is a timer text: it runs by itself.)
@@ -192,7 +192,7 @@ enum ActivityCadence {
     }
 }
 
-/// A ride's network (0.42.8): the ridden trip's live times every 2 minutes far from the stop, every 45 s near it;
+/// A ride's network (0.42.9): the ridden trip's live times every 2 minutes far from the stop, every 45 s near it;
 /// fewer ways in a re-check from behind the screen; nothing for the home screen while a ride runs.
 enum RideNet {
     static let tripFar: TimeInterval = 120
@@ -233,7 +233,7 @@ enum RideNet {
     static func homeLooks(riding: Bool) -> Bool { !riding }
 }
 
-/// Before the matcher judges anyone (0.42.8): the ones that can't be the one you're on are left out, so they aren't
+/// Before the matcher judges anyone (0.42.9): the ones that can't be the one you're on are left out, so they aren't
 /// fetched for (a train's number), judged or logged: long-distance coaches (FlixBus and the like) unless planned, a
 /// route that never comes within 1 km of your fixes, or its own GPS further than 3 km (a bus) or 10 km (a train) from
 /// you (plus what it can have gone since that fix). The planned one is never left out.

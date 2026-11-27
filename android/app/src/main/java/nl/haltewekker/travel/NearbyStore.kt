@@ -32,6 +32,28 @@ class NearbyStore(val destId: String, private val seed: List<DoorTrip>) {
                       val plans: Int, val pages: Int, val failed: Int, val bytes: Int, val askedAt: Double)
 
     private val gate = Semaphore(Nearby.MAX_CONCURRENT)
+    // (iOS 0.42.8) newer live times of the trips (the stops' boards), and when each departure's own answer came
+    @Volatile private var updates: Map<String, NearbyLive.Update> = emptyMap()
+    private val answeredAt = java.util.concurrent.ConcurrentHashMap<String, Double>()
+
+    private fun leg(r: nl.haltewekker.data.Ride) = NearbyLive.Leg(r.tripId, r.departure, r.scheduledDeparture, r.arrival, r.scheduledArrival, r.live, r.toStop)
+
+    /** A way with the live times known now (its first and last leg move the door and the arrival). */
+    fun fresh(t: DoorTrip): DoorTrip {
+        val u = updates
+        if (t.rides.isEmpty() || t.rides.none { it.tripId in u }) return t
+        val r = NearbyLive.trip(t.start, t.end, t.rides.map(::leg), u, answeredAt[t.first.tripId])
+        val rides = t.rides.zip(r.legs) { a, b -> if (a.departure == b.departure && a.arrival == b.arrival && a.live == b.live) a else a.copy(departure = b.departure, arrival = b.arrival, live = b.live) }
+        return t.copy(rides = rides, start = r.start, end = r.end)
+    }
+
+    /** Newer live times: the ways kept are freshened (the list, the colours, Fastest and Surest follow). */
+    fun freshen(more: List<NearbyLive.Update>) {
+        val m = NearbyLive.merge(updates, more)
+        if (m == updates) return
+        updates = m
+        result = result?.let { r -> r.copy(ways = r.ways.mapValues { e -> e.value.map(::fresh) }) }
+    }
     @Volatile var result: Result? = null; private set
     private var stopsKept: Pair<Double, List<Nearby.Stop>>? = null
 
@@ -48,8 +70,11 @@ class NearbyStore(val destId: String, private val seed: List<DoorTrip>) {
     fun place(here: GeoPoint, groups: List<Nearby.Group>, trips: List<DoorTrip>, ways: Map<String, List<DoorTrip>>): Pair<List<Nearby.Group>, Map<String, List<DoorTrip>>> {
         val gs = groups.toMutableList()
         val w = ways.mapValues { it.value.toMutableList() }.toMutableMap()
-        for (t in trips) {
-            if (t.rides.isEmpty()) continue
+        val speed = HabitStore.pedestrianSpeed() ?: nl.haltewekker.data.WalkFirst.PLANNER_SPEED
+        for (t0 in trips) {
+            if (t0.rides.isEmpty()) continue
+            // (iOS 0.42.8) the walk by its distance, a short first hop swapped for the walk to the next stop
+            val t = nl.haltewekker.data.WalkFirst.fixed(t0, here, Iso.now(), speed).first
             val b = boarding(t)
             var i = Nearby.groupIndex(b, gs)
             if (i == null) {
@@ -104,12 +129,12 @@ class NearbyStore(val destId: String, private val seed: List<DoorTrip>) {
             if (page.failed) { failed++; lastFailed = true; continue }
             answered = true; lastFailed = false
             cursor = page.cursor
-            for (t in page.trips) if (trips.none { it.id == t.id }) trips.add(t)
+            for (t in page.trips) if (trips.none { it.id == t.id }) { trips.add(t); answeredAt[t.first.tripId] = Iso.now() }
         }
         val stops = stopsJob.await()
         val (gs0, ws0) = place(here, Nearby.groups(stops ?: emptyList(), Nearby.DOTS_RADIUS), trips + seed, emptyMap())
         // what was in before stays when this one got nothing
-        val keep = if (!answered && prior != null) prior.ways else ws0
+        val keep = (if (!answered && prior != null) prior.ways else ws0).mapValues { e -> e.value.map(::fresh) }
         val res = Result(here, if (!answered && prior != null) prior.groups else gs0, keep, radius, answered || prior?.answered == true,
             !answered, stops == null, false, cursor, plans, pages, failed, bytes, Iso.now())
         result = res
@@ -128,6 +153,7 @@ class NearbyStore(val destId: String, private val seed: List<DoorTrip>) {
         val began = Iso.now()
         val rad = Nearby.SEARCH_RADII.getOrElse(done) { Nearby.SEARCH_RADII.last() }
         val page = bg { Transit.planPage("${r.here.lat},${r.here.lon}", destId, Nearby.planAt(w, 0, began), Nearby.preTransit(rad), r.cursor) }
+        if (!page.failed) for (t in page.trips) answeredAt[t.first.tripId] = Iso.now()
         val (gs, ws) = if (page.failed) r.groups to r.ways else place(r.here, r.groups, page.trips, r.ways)
         val res = r.copy(groups = gs, ways = ws, radius = rad, cursor = page.cursor ?: r.cursor, pages = r.pages + 1,
             failed = r.failed + if (page.failed) 1 else 0, bytes = r.bytes + page.bytes, answered = r.answered || !page.failed)
@@ -160,9 +186,14 @@ class NearbyStore(val destId: String, private val seed: List<DoorTrip>) {
             bytes += page.bytes
             failed = page.failed
             trips = page.trips
+            for (t in trips) answeredAt[t.first.tripId] = Iso.now()
         }
         val lines = trips.map { it.first.line to it.first.headsign }.toSet()
         val board = if (Transit.cooling) emptyList() else bg { Transit.board(listOf(g.ids.first()), n = 16) }
+        // (iOS 0.42.8) the board's live times freshen the stop's own departures too (by trip id), not only the others
+        val asOf = Iso.now()
+        freshen(board.map { NearbyLive.update(board = it.tripId, time = it.time, scheduled = it.scheduled, live = it.live, asOf = asOf) })
+        trips = trips.map(::fresh)
         val also = board.filter { (it.line to it.headsign) in lines || it.line in lines.map { l -> l.first } }.filter { it.time >= canBeThere - 30 && !it.cancelled }
         val info = StopInfo(trips, also, failed)
         if (!failed) stopKept[g.id] = now to info

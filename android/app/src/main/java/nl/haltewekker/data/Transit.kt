@@ -52,7 +52,7 @@ object Transit {
     private class Kept(val at: Double, val trips: List<DoorTrip>)
     private val plans = ConcurrentHashMap<String, Kept>()
 
-    /** `detailed` false (0.10.5, iOS 0.42.8): without the legs' shapes (`detailedLegs=false`, half the bytes), for a ride's
+    /** `detailed` false (0.10.6, iOS 0.42.9): without the legs' shapes (`detailedLegs=false`, half the bytes), for a ride's
      *  own plans that never draw them. */
     suspend fun plan(from: String, to: String, at: Double, count: Int = 5, maxTransfers: Int = 4, arriveBy: Boolean = false, detailed: Boolean = true): List<DoorTrip> =
         withContext(Dispatchers.Default) { planHere(from, to, at, count, maxTransfers, arriveBy, detailed) }
@@ -102,8 +102,10 @@ object Transit {
     /** Trips from a spot to a place, soonest first, without the ones a later trip beats. */
     suspend fun tripsFrom(here: GeoPoint, to: String, keep: Int = 5): List<DoorTrip> {
         val now = Iso.now()
-        val all = plan("${here.lat},${here.lon}", to, now - 120, count = 5)
-        return TransitParse.keepUseful(all, now, keep)
+        // (iOS 0.42.8) from 15 minutes back: a late train or bus whose timetable time has passed is in the answer
+        val all = plan("${here.lat},${here.lon}", to, LiveKeep.askAt(now, true), count = LiveKeep.count(5, true))
+        val speed = nl.haltewekker.travel.HabitStore.pedestrianSpeed() ?: WalkFirst.PLANNER_SPEED
+        return TransitParse.keepUseful(all, now, keep, here, speed) { nl.haltewekker.logs.FieldLog.add(nl.haltewekker.logs.FieldEntry.Kind.NET, it) }
     }
 
     suspend fun findPlaces(text: String, near: GeoPoint?): List<PlaceHit> {

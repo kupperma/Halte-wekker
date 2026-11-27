@@ -107,7 +107,7 @@ fun PlanScreen(start: Direction?, canStart: Boolean, onBack: () -> Unit, onStart
                 if (nl.haltewekker.ride.WaitStore.atVehicleSpeed.value && here != null) { delay(10_000); continue }
                 loading = true
                 val n = Iso.now()
-                val got = TransitParse.keepUseful(Transit.plan("${from.lat},${from.lon}", d.planId, n - 120, count = 6), n, 6)
+                val got = TransitParse.keepUseful(Transit.plan("${from.lat},${from.lon}", d.planId, nl.haltewekker.data.LiveKeep.askAt(n, true), count = 9), n, 6)
                 loading = false; asked = true; now = Iso.now()
                 // (0.10.0) a way taken from the stops around ("Go") stays first until it has left
                 val kept = goTrip?.takeIf { g -> g.first.departure > n - 60 && got.none { it.id == g.id } }

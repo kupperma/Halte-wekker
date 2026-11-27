@@ -215,10 +215,10 @@ The same switches, words and rules, so the relay and the replay treat both alike
   conditions as the lines (after a trip, else hourly; not during a trip, on a metered/Low Data network or in battery
   saver). Drop the sent points from the queue only after a 200; switching off clears the queue.
 
-### Less battery and data on long rides (0.42.8)
+### Less battery and data on long rides (0.42.9)
 
-What's new in 0.42.8 (`ios/App/RideSaver.swift`, tests `RideSaverTests` against `docs/battery-vectors.json`; Android
-0.10.5 `ride/RideSaver.kt`, `RideSaverTest`, the same vectors). New lines in the ride log:
+What's new in 0.42.9 (`ios/App/RideSaver.swift`, tests `RideSaverTests` against `docs/battery-vectors.json`; Android
+0.10.6 `ride/RideSaver.kt`, `RideSaverTest`, the same vectors). New lines in the ride log:
 
 - `gps · rough on a long ride, the vehicle confirmed: 100 m, every 300 m (31.2 km from the stop · 24 min)`: the rough
   tier is on (`RideAccuracy`): two "still the same one?" looks in a row passed in the last 10 minutes, the nearest you
@@ -245,6 +245,14 @@ everything every 20 s in the last 5 minutes (`ActivityCadence`); `/v5/plan` aske
 shapes: about half the bytes; Android only for the ride's own plans, the home map draws them); behind the screen the
 arrival re-check asks 3 ways, the list at a change 5 from just before you got there; the home screen's own looks pause
 while a ride runs.
+### Live times on the stops around you, late trains kept, walks by their distance (0.42.8)
+
+What's new in 0.42.8 (`ios/App/NearbyLive.swift`, `ios/App/PlanFix.swift`; tests `NearbyLiveTests`, `PlanFixTests`;
+Android parity in [android-todo.md](android-todo.md) › iOS 0.42.8). New lines in the net log:
+
+- `walk · planner 10 min (780 m) · yours 4 min (1.35 m/s) · used yours` (or `used the planner's`): once per plan, the
+  first way's walk to its first stop as the planner timed it and by its distance.
+- `walk · straight to Veghel, Busstation (7 min) instead of the 1 there`: a short first hop swapped for the walk.
 
 ### The school wake-up when you're already going, and "Be there at …" per day (0.42.6)
 
