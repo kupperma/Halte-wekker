@@ -1,0 +1,29 @@
+{
+  "about": "Which side you get out of the train (relay 2026-11-27, iOS 0.42.8, Android 0.10.5). The relay's /rail/v1/side answers from OpenStreetMap data (map data © OpenStreetMap contributors, ODbL; see relay/rail.js); the apps ask it once a train leg knows its arrival platform (again when that platform changes, never while the alarm rings) and say it on the ride screen, the change card, the lock screen, the wake alarm and the get-ready notice. `relay`: questions and the relay's answers on the trimmed OSM data in relay/test-rail/ (checked by relay/test-rail.mjs). `query`: how an app asks (coordinates to 4 decimals). `answers`: an answer body, the platform the app asked for, and the line the app shows (null: nothing). Checked by ios/Tests/DoorSideTests.swift and android/app/src/test/java/nl/haltewekker/DoorSideTest.kt.",
+  "relay": [
+    { "fixture": "breda", "station": "BD", "track": "4", "from": "51.5458,4.9339", "at": "51.5955,4.7799", "side": "left", "confidence": "high" },
+    { "fixture": "breda", "station": "BD", "track": "3", "from": "51.5458,4.9339", "at": "51.5955,4.7799", "side": "right", "confidence": "high" },
+    { "fixture": "s-hertogenbosch", "station": "HT", "track": "1", "from": "51.6614,5.2903", "at": "51.6906,5.2936", "side": "right", "confidence": "high" },
+    { "fixture": "s-hertogenbosch", "station": "HT", "track": "3", "from": "51.6614,5.2903", "at": "51.6906,5.2936", "side": "left", "confidence": "low" },
+    { "fixture": "eindhoven", "station": "EHV", "track": "1", "from": "51.5089,5.3896", "at": "51.4433,5.4813", "side": "left", "confidence": "low" },
+    { "fixture": "tilburg", "station": "TB", "track": "3", "from": "51.5795,5.1953", "at": "51.5605,5.0838", "side": "left", "confidence": "high" },
+    { "fixture": "tilburg", "station": "TB", "track": "9", "from": "51.5795,5.1953", "at": "51.5605,5.0838", "side": "unknown", "confidence": null }
+  ],
+  "query": [
+    { "station": "BD", "track": "4", "from": [51.545812, 4.933911], "at": [51.59551, 4.77992], "query": "station=BD&track=4&from=51.5458,4.9339&at=51.5955,4.7799" },
+    { "station": "HT", "track": " 3b ", "from": [51.66137, 5.29031], "at": [51.69056, 5.29361], "query": "station=HT&track=3b&from=51.6614,5.2903&at=51.6906,5.2936" }
+  ],
+  "answers": [
+    { "body": "{\"side\":\"left\",\"confidence\":\"high\",\"platformRef\":\"4\"}", "track": "4", "line": "Exit on the left · platform 4" },
+    { "body": "{\"side\":\"right\",\"confidence\":\"high\",\"platformRef\":\"7b\"}", "track": "7b", "line": "Exit on the right · platform 7b" },
+    { "body": "{\"side\":\"right\",\"confidence\":\"low\",\"platformRef\":\"3\"}", "track": "3", "line": "Exit on the right · platform 3 (estimate)" },
+    { "body": "{\"side\":\"both\",\"confidence\":\"high\",\"platformRef\":\"2\"}", "track": "2", "line": "Exit on both sides · platform 2" },
+    { "body": "{\"side\":\"LEFT\",\"confidence\":\"high\"}", "track": "", "line": "Exit on the left" },
+    { "body": "{\"side\":\"left\"}", "track": "5", "line": "Exit on the left · platform 5 (estimate)" },
+    { "body": "{\"side\":\"unknown\",\"confidence\":null,\"platformRef\":null,\"why\":\"ambiguous\"}", "track": "4", "line": null },
+    { "body": "{\"side\":\"up\",\"confidence\":\"high\"}", "track": "4", "line": null },
+    { "body": "{\"side\":\"unknown\",\"why\":\"osm_busy\",\"retryAfter\":600}", "track": "4", "line": null },
+    { "body": "not json", "track": "4", "line": null },
+    { "body": "[]", "track": "4", "line": null }
+  ]
+}
