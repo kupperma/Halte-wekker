@@ -256,6 +256,7 @@ export const APP_JS = String.raw`(function () {
     var here = st === "arrived" || !pos ? null : [pos.lon, pos.lat];
     m.pic = num(s.pic) !== null && s.pic >= 1 ? Math.floor(s.pic) : 0;
     m.map = route(legs, cur, road, st, here && phone && still ? here : null);
+    shape = m.map.road === road ? shape : m.map.road;
     m.map.pos = here && !(phone && still) ? here : null;
     m.map.person = here && phone && still ? { pos: here, letter: m.face.letter, color: m.face.color } : null;
     m.map.old = !!pos && num(pos.at) !== null && now - pos.at > 120;
@@ -269,35 +270,39 @@ export const APP_JS = String.raw`(function () {
     return m;
   }
 
-  /// The rest of the trip on the map (pure): the current ride's road, each later ride's own "shape" when the payload has
-  /// it (else a dashed straight line across it, from the last known point to the next), the walks between them dotted,
-  /// the change points as rings and the end of the last known ride as the destination. person: the sharer's phone
-  /// while waiting or at a change (the walk to the stop starts there).
+  /// The rest of the trip on the map (pure): the current ride's road (the state's "shape" or stops, else its leg's own),
+  /// each later leg's own "shape" when the payload has it (a ride's in its colour, dashed when it's only a straight line
+  /// of two points; a walk's as grey dots), the gaps between them dotted (or dashed across a ride with no road), the
+  /// change points as rings and the end of the last known leg as the destination. person: the sharer's phone while
+  /// waiting or at a change (the walk to the stop starts there).
   function route(legs, cur, road, st, person) {
     var still = st === "waiting" || st === "change";
     var out = { road: road, later: [], walks: [], rings: [], dest: null, all: [] };
     if (st === "arrived") { out.all = road.slice(); return out; }
-    var end = null, gap = null, lastRide = -1;
+    var end = null, gap = null, last = -1;
     function add(c) { for (var i = 0; i < c.length; i++) out.all.push(c[i]); }
     function apart(p, q) { return Math.abs(p[0] - q[0]) > 1e-5 || Math.abs(p[1] - q[1]) > 1e-5; }
     if (person) { add([person]); end = person; }
-    for (var i = cur; i < legs.length; i++) {
-      var g = legs[i];
-      if (!isRide(g)) continue;
-      var geo = i === cur ? road : decode(g.shape);
-      if (geo.length < 2) { if (!gap) gap = g; continue; }
+    // (waiting or at a change: the walk there first, while it's still to come)
+    var first = still && cur > 0 && legs[cur - 1].mode === "walk" && !person ? cur - 1 : cur;
+    for (var i = first; i < legs.length; i++) {
+      var g = legs[i], ride = isRide(g);
+      if (!ride && g.mode !== "walk") continue;
+      var geo = i === cur && road.length > 1 ? road : decode(g.shape);
+      if (i === cur && geo.length > 1) out.road = road = geo;
+      if (geo.length < 2) { if (ride && !gap) gap = g; continue; }
       var a = geo[0];
       if (end && apart(end, a)) {
         if (gap) out.later.push({ coords: [end, a], color: colour(gap), dashed: true });
         else out.walks.push([end, a]);
       }
-      // (where it gets on: a change, or the stop the sharer walks or waits at)
-      if (i > cur || still) out.rings.push(a);
-      if (i > cur) out.later.push({ coords: geo, color: colour(g), dashed: false });
+      if (ride && (i > cur || still)) out.rings.push(a);
+      if (!ride) out.walks.push(geo);
+      else if (i > cur) out.later.push({ coords: geo, color: colour(g), dashed: geo.length === 2 });
       add(geo);
-      end = geo[geo.length - 1]; gap = null; lastRide = i;
+      end = geo[geo.length - 1]; gap = null; last = i;
     }
-    if (lastRide >= 0) out.dest = { lon: end[0], lat: end[1], name: str(legs[lastRide].to) };
+    if (last >= 0) out.dest = { lon: end[0], lat: end[1], name: str(legs[last].to) };
     return out;
   }
 

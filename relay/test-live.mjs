@@ -515,6 +515,19 @@ if (!LIVE) {
   assert.equal(v.map.later[0].color, "#E0632E");
   assert.deepEqual(v.map.later[0].coords, [[4.78, 51.5955], [4.9, 51.6]]);
   assert.equal(v.map.dest.name, "Campus");
+  // each leg's own "shape" (the apps send them from 0.42.8 / 0.10.5): at a change with no stops, the next ride's road
+  // from its leg; a walk's as dots; a ride known only from where to where as a dashed straight line; the end of the walk
+  const pl = trip().legs.map((l) => ({ ...l }));
+  pl[1].shape = enc([[5.47901, 51.44306], [5.4795, 51.4428]]);
+  pl[2].shape = enc([[5.4795, 51.4428], [5.0836, 51.5606], [4.78, 51.5955]]);
+  pl[3].shape = enc([[4.781, 51.595], [4.8, 51.57]]);
+  pl[4].shape = enc([[4.8, 51.57], [4.802, 51.5695]]);
+  v = Vw(trip({ ...at, legs: pl, stops: undefined, shape: undefined, pos: undefined }), now + 1300, now + 1300);
+  assert.equal(v.map.road.length, 3, "the IC's road from its leg");
+  assert.deepEqual(v.map.walks[0], [[5.47901, 51.44306], [5.4795, 51.4428]], "the walk to the platform, still to come");
+  assert.deepEqual(v.map.rings[0], [5.4795, 51.4428]);
+  assert.deepEqual(v.map.later.map((x) => x.dashed), [true]);
+  assert.deepEqual(v.map.dest, { lon: 4.802, lat: 51.5695, name: "Campus" });
   // riding: the phone's fix is inside the vehicle (its pill), no person dot
   v = Vw(trip({ pos: { lat: 51.55, lon: 5.45, at: now - 12, src: "phone" } }), now, now);
   assert.equal(v.map.person, null);
