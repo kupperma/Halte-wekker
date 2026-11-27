@@ -227,6 +227,8 @@ final class LiveLinkStore: ObservableObject {
             trip.vehicle = LiveTripV2.Vehicle(lat: f.lat, lon: f.lon, at: f.at.timeIntervalSince1970)
         }
         trip.face = LiveTripV2.face(FriendStore.shared.account)
+        // (listening now) the song, when you share it with live links
+        trip.music = MusicShareStore.shared.forLink(travelling: FriendTravelShare.running(t) && !t.demo)
         return trip
     }
 

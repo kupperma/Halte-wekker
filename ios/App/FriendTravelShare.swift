@@ -98,12 +98,16 @@ final class FriendTravelShare: ObservableObject {
         LiveLinkStore.shared.tick()
         let s = signals(t)
         confirmed = s.running ? TravelShareRules.confirmed(before: confirmed, s) : false
+        // (listening now) the trip ended: the song is forgotten
+        if !s.running { MusicShareStore.shared.stop() }
         if coachTrip != nil, coachTrip != t.vehicle?.tripId { coach = nil; coachTrip = nil }
         evaluate(force: key(t) != lastKey)
     }
 
     /// The ride's network tick (every 30 s on a trip): the next state when a minute has gone by, and friends' states.
     private func tick() {
+        // (listening now) a look at what you listen to, when sharing it is on and one is due (every 30 s at most)
+        if let t = trip { MusicShareStore.shared.tick(travelling: Self.running(t) && !t.demo) }
         evaluate(force: false)
         // (0.30) the live link's next state, and the ride history (friends on this bus or train with you)
         LiveLinkStore.shared.tick()
@@ -220,6 +224,8 @@ final class FriendTravelShare: ObservableObject {
             s.pos = TravelState.Position(lat: Self.rounded(f.coordinate.latitude), lon: Self.rounded(f.coordinate.longitude),
                                          acc: f.horizontalAccuracy.rounded(), at: f.timestamp)
         }
+        // (listening now) the song, when you share it with friends
+        s.music = MusicShareStore.shared.forFriends(travelling: Self.running(t) && !t.demo)
         return s
     }
 

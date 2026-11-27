@@ -167,6 +167,8 @@ struct FriendDetailView: View {
                 Text(age).font(DS.footnote).monospacedDigit().foregroundStyle(DS.warning).fixedSize(horizontal: false, vertical: true)
             }
             details(s)
+            // (listening now) their song, while it's fresh
+            if let m = FriendListeningStrip.fresh(s.music, now: now) { FriendListeningStrip(friendId: f.id, name: f.name, music: m) }
             if s.isTrain, let trip = s.trip, s.stage != .change {
                 TrainSeatPicker(tripId: trip, num: s.num, station: station(s), line: s.line, towards: s.dest?.name ?? s.to.name,
                                 friends: s.coach.map { [SeatMark(id: f.id, name: f.name, coach: $0)] } ?? [],
