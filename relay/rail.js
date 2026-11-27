@@ -18,11 +18,12 @@
 //  track is which: skipped. Platforms on both sides: "both". Nothing found or nothing sure: "unknown" (the app shows
 //  nothing). "low": the line bends between the two stops, or the match was loose.
 //
-// OSM data: one Overpass request per station on a miss (a descriptive User-Agent, 25 s, nothing personal), trimmed to
+// OSM data: one Overpass request per station on a miss (a second instance only when the first can't answer; a descriptive User-Agent, 25 s, nothing personal), trimmed to
 // the platforms and rails within 400 m and kept 30 days in a Durable Object ("Rail", one per station); a busy Overpass
 // (429/504/no answer) is asked again only after 10 minutes. Map data © OpenStreetMap contributors, ODbL.
 
 export const OVERPASS = "https://overpass-api.de/api/interpreter";
+export const OVERPASS_2 = "https://overpass.private.coffee/api/interpreter";   // only when the first can't answer
 export const USER_AGENT = "Haltewekker-relay/1.0 (+https://github.com/kupperma/Halte-wekker)";
 export const RADIUS = 400;                      // m around the station
 export const KEEP_MS = 30 * 24 * 3600 * 1000;   // a station's OSM data
@@ -242,7 +243,7 @@ export async function rail(request, env, url, cors) {
   const stub = env.RAIL.get(env.RAIL.idFromName(key));
   const r = await stub.fetch("https://rail.internal/data", { method: "POST", body: JSON.stringify({ lat: at.lat, lon: at.lon }) });
   const got = await r.json();
-  if (!got.data) return reply({ side: "unknown", confidence: null, platformRef: null, why: "osm_busy", retryAfter: got.retryAfter || 600 }, 503, cors);
+  if (!got.data) return reply({ side: "unknown", confidence: null, platformRef: null, why: "osm_busy", retryAfter: got.retryAfter || 600, osm: got.osm || null }, 503, cors);
   const ans = sideOf(got.data, track, from, at);
   return reply(ans, 200, cors, 86400);
 }
@@ -264,7 +265,7 @@ export class RailCore {
       const kept = await this.store.get("d");
       const t = this.now();
       if (kept && kept.data && kept.exp > t) return reply({ data: kept.data }, 200, {});
-      if (kept && kept.retryAt > t) return reply({ retryAfter: Math.ceil((kept.retryAt - t) / 1000) }, 200, {});
+      if (kept && kept.retryAt > t) return reply({ retryAfter: Math.ceil((kept.retryAt - t) / 1000), osm: kept.osm }, 200, {});
       if (!this.pending) this.pending = this.ask(at).finally(() => { this.pending = null; });
       return reply(await this.pending, 200, {});
     } catch (e) {
@@ -272,24 +273,35 @@ export class RailCore {
     }
   }
 
+  /** One Overpass instance: its answer, or why there was none. */
+  async askOne(endpoint, at) {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 25000);
+    try {
+      const r = await this.fetchImpl(endpoint, {
+        method: "POST", signal: ctl.signal,
+        headers: { "User-Agent": USER_AGENT, "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
+        body: "data=" + encodeURIComponent(overpassQuery(at)),
+      });
+      return { r, osm: String(r.status) };
+    } catch (e) {
+      return { r: null, osm: e && e.name === "AbortError" ? "timeout" : "no_answer" };
+    } finally { clearTimeout(timer); }
+  }
+
   async ask(at) {
     const t = this.now();
-    let r = null;
-    try {
-      const ctl = new AbortController();
-      const timer = setTimeout(() => ctl.abort(), 25000);
-      try {
-        r = await this.fetchImpl(OVERPASS, {
-          method: "POST", signal: ctl.signal,
-          headers: { "User-Agent": USER_AGENT, "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
-          body: "data=" + encodeURIComponent(overpassQuery(at)),
-        });
-      } finally { clearTimeout(timer); }
-    } catch (e) { r = null; }
+    // the main instance; only when it can't answer, once the other one
+    let { r, osm } = await this.askOne(OVERPASS, at);
     if (!r || r.status !== 200) {
-      const wait = r && r.status === 429 ? 3 * RETRY_MS : RETRY_MS;
-      await this.store.put("d", { retryAt: t + wait });
-      return { retryAfter: Math.ceil(wait / 1000) };
+      const second = await this.askOne(OVERPASS_2, at);
+      osm += "," + second.osm;
+      if (second.r && second.r.status === 200) r = second.r;
+    }
+    if (!r || r.status !== 200) {
+      const wait = osm.includes("429") ? 3 * RETRY_MS : RETRY_MS;
+      await this.store.put("d", { retryAt: t + wait, osm });
+      return { retryAfter: Math.ceil(wait / 1000), osm };
     }
     let data;
     try { data = trim(await r.json()); } catch (e) {
