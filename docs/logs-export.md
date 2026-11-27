@@ -215,6 +215,36 @@ The same switches, words and rules, so the relay and the replay treat both alike
   conditions as the lines (after a trip, else hourly; not during a trip, on a metered/Low Data network or in battery
   saver). Drop the sent points from the queue only after a 200; switching off clears the queue.
 
+### Less battery and data on long rides (0.42.12)
+
+What's new in 0.42.12 (`ios/App/RideSaver.swift`, tests `RideSaverTests` against `docs/battery-vectors.json`; Android
+0.10.9 `ride/RideSaver.kt`, `RideSaverTest`, the same vectors). New lines in the ride log:
+
+- `gps · rough on a long ride, the vehicle confirmed: 100 m, every 300 m (31.2 km from the stop · 24 min)`: the rough
+  tier is on (`RideAccuracy`): two "still the same one?" looks in a row passed in the last 10 minutes, the nearest you
+  can be to the stop (the fix's distance less its accuracy, less how far the vehicle can have gone since at 90 km/h for
+  a bus, 160 km/h for a train) beyond the wake distance + 2 km + 30 s at that speed (a bus: at least 3 km) and a
+  kilometre more, at least 8 km, the stop more than 8 minutes off, the leg older than 2 minutes. Android:
+  `… network location, every 300 m (31200 m from the stop)`.
+- `gps · rough off: the best again (8.3 km from the stop · 6 min)`: inside that line, the stop 6 minutes off or less,
+  a look in doubt (or none passed for 10 minutes), the backstop region, awake.
+- `gps · waiting at a change: 100 m, every 100 m, until 3 min before the next one` / `gps · the best again at the
+  change` (`ChangeWait`): stood 3 minutes at a change, the next ride (its live time) more than 3 minutes off; moving or
+  Motion & Fitness "automotive" brings the best back at once.
+- `match prefilter · board · 7 of 18 left out (3 coaches, 4 off their route, 0 far by their GPS)` (at most once a
+  minute per look; Android `on board`): before the matcher judges anyone, long-distance coaches (FlixBus, BlaBlaCar
+  Bus, …) unless planned, a route never within 1 km of your last fixes, and (once their own GPS is in) a bus more than
+  3 km or a train more than 10 km from you (plus 25 / 45 m/s times its fix's age) are left out. The planned one never.
+- The ride cost line ends with ` · GPS reduced 62%`: the share of the ride's GPS time on the rough tiers (10 m and
+  100 m). Battery & data shows it per ride: `GPS best 31 min · reduced 52 min (62%)`.
+
+Also: the ridden trip's live times every 2 minutes far from the stop, every 45 s within 10 minutes or the wake distance
++ 5 km (`RideNet`); the same-bus look every minute on the rough tier; the Live Activity (Android: the ride
+notification) at most once a minute far from the stop for a meaningful change, the distance alone every 3 minutes,
+everything every 20 s in the last 5 minutes (`ActivityCadence`); `/v5/plan` asked with `detailedLegs=false` (no leg
+shapes: about half the bytes; Android only for the ride's own plans, the home map draws them); behind the screen the
+arrival re-check asks 3 ways, the list at a change 5 from just before you got there; the home screen's own looks pause
+while a ride runs.
 ### Staying on, the best stop to get off, every ring on the lock screen (0.42.9)
 
 What's new in 0.42.9 (`ios/App/TrainRules.swift` `stayOn`/`headline`, `ios/App/BetterStop.swift`, `ios/App/AlarmStop.swift`

@@ -130,6 +130,15 @@ class RideService : Service() {
     private var tick: Job? = null
     private var lastNotify = 0.0
     private var lastPhase: Phase? = null
+    // (0.10.9, iOS 0.42.12 `RideSaver`) the notification's cadence: what it said, its meaningful part, the distance
+    private var shownSay = ""
+    private var shownKey = ""
+    private var shownLook = ""
+    private var notifyLater: Job? = null
+    /** Where you've stood since when, waiting for the next ride (iOS `TransferPolicy.Anchor`). */
+    private var waitAnchor: Pair<GeoPoint, Double>? = null
+    private var foundTrip: String? = null
+    private var foundAt = 0.0
     private var backupScheduledFor: Double? = null
     private var etaAt = 0.0
 
@@ -288,12 +297,17 @@ class RideService : Service() {
         if (!hasLocation() || ms == intervalMs) return
         intervalMs = ms
         lm.removeUpdates(listener)
-        val minMetres = if (ms > 5000) 75f else 0f
+        // (0.10.9, iOS 0.42.12 `RideAccuracy`) the rough tier: the network provider every 20 s (300 m), and the fixes
+        // others ask for; the GPS chip only when there's no network provider (then once a minute)
+        val reduced = ms == RideAccuracy.REDUCED_MS
+        val minMetres = if (reduced) RideAccuracy.REDUCED_FILTER.toFloat() else if (ms > 5000) 75f else 0f
         try {
-            if (lm.isProviderEnabled(LocationManager.GPS_PROVIDER))
+            val network = lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+            if (lm.isProviderEnabled(LocationManager.GPS_PROVIDER) && (!reduced || !network))
                 lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, ms, minMetres, listener, Looper.getMainLooper())
-            if (lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER))
-                lm.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, maxOf(ms, 10_000L), minMetres, listener, Looper.getMainLooper())
+            if (network)
+                lm.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, if (reduced) 20_000L else maxOf(ms, 10_000L), minMetres, listener, Looper.getMainLooper())
+            if (reduced) lm.requestLocationUpdates(LocationManager.PASSIVE_PROVIDER, 10_000L, 0f, listener, Looper.getMainLooper())
         } catch (_: Exception) {}
     }
 
@@ -364,18 +378,60 @@ class RideService : Service() {
         nl.haltewekker.logs.LogShareStore.heard(fix.t, fix.p.lat, fix.p.lon, fix.accuracy, fix.speed, fix.course,
             nl.haltewekker.logs.GPSShareRules.leg(s.index, s.trip.rides.size), vehicleText(s))
         if (s.vehicleTripId != null) startReckon()
-        // rough GPS far from the stop on a confirmed vehicle (iOS RideGPS)
+        noteWaitAnchor(fix)
+        gpsTier(now)
+        notifyRide(force = false)
+    }
+
+    /** (0.10.9, iOS 0.42.12) Where you stand, waiting for the next ride: a new spot once you move (iOS `TransferPolicy.update`). */
+    private fun noteWaitAnchor(f: Fix) {
+        if (!f.accuracy.isFinite() || f.accuracy < 0 || f.accuracy >= 150) return
+        val a = waitAnchor
+        val moving = f.speed.isFinite() && f.speed > 2.0 / 3.6
+        if (a == null || moving || Geo.metres(a.first, f.p) > 60 + maxOf(0.0, f.accuracy - 50)) waitAnchor = f.p to f.t
+    }
+
+    /**
+     * The GPS the ride asks for now, on each fix and on the ride's tick: rough far from the stop on a confirmed vehicle
+     * (`RideAccuracy`: the network provider; else iOS RideGPS's fix every 25 s), or waiting for the next ride at a
+     * change (`ChangeWait`); the best otherwise, at once.
+     */
+    private fun gpsTier(now: Double) {
         val cur = RideStore.state.value ?: return
-        val far = RideGPS.far(RideGPS.Input(
-            enabled = app.store.settings.value.roughGPSOnLongRides, asleep = cur.phase == Phase.SLEEPING,
-            confirmed = cur.vehicleSource == VehicleSource.BY_GPS || cur.vehicleSource == VehicleSource.BY_HAND,
+        val leg = cur.leg ?: return
+        val to = leg.to ?: return
+        val fix = fixes.lastOrNull() ?: return
+        val d = Geo.metres(fix.p, to)
+        val st = app.store.settings.value
+        val wakeMetres = WakeRule.gpsWakeMetres(cur.wakeMetres, WakeBookStore.effective(st.wake), leg.isTrain)
+        val asleep = cur.phase == Phase.SLEEPING
+        val byGPS = cur.vehicleSource == VehicleSource.BY_GPS
+        // (the leg's age for the rough tier: from when the vehicle was found, so getting on keeps the best 2 minutes)
+        if (cur.vehicleTripId != foundTrip) { foundTrip = cur.vehicleTripId; foundAt = now }
+        val boardedAt = maxOf(cur.legStart, foundAt)
+        val reduced = RideAccuracy.tier(RideAccuracy.Input(
+            enabled = st.roughGPSOnLongRides, asleep = asleep, confirmed = byGPS && cur.choosing.isEmpty() && cur.wrongBus == null,
+            // (Android has no "still the same one?" look that passes again and again: found by GPS counts as fresh)
+            confirmedAge = if (byGPS) 0.0 else null, isTrain = leg.isTrain, metresToStop = d, accuracy = fix.accuracy,
+            fixAge = now - fix.t, speed = fix.speed.takeIf { it >= 0 }, wakeMetres = wakeMetres,
+            secondsToStop = cur.legArrival?.let { it - now }, legAge = now - boardedAt, wasReduced = cur.reducedGPS)) == RideAccuracy.Tier.REDUCED
+        val far = !reduced && fix.accuracy >= 0 && fix.accuracy < RideGPS.GOOD_ACCURACY && RideGPS.far(RideGPS.Input(
+            enabled = st.roughGPSOnLongRides, asleep = asleep,
+            confirmed = byGPS || cur.vehicleSource == VehicleSource.BY_HAND,
             metresToStop = d, accuracy = fix.accuracy, fixAge = now - fix.t,
             // (A6) by time, the far tier keeps clear of the time rule's reach
-            wakeMetres = WakeRule.gpsWakeMetres(cur.wakeMetres, WakeBookStore.effective(app.store.settings.value.wake), leg.isTrain), isTrain = leg.isTrain,
+            wakeMetres = wakeMetres, isTrain = leg.isTrain,
             speed = fix.speed.takeIf { it >= 0 }, secondsToStop = cur.legArrival?.let { it - now }, wasFar = cur.roughGPS))
-        if (far != cur.roughGPS) RideStore.update(this) { it.copy(roughGPS = far) }
-        requestLocation(RideGPS.intervalMs(far))
-        notifyRide(force = false)
+        // waiting at a change for the next ride (no vehicle yet, after a leg): rough once you've stood 3 minutes
+        val atChange = st.roughGPSOnLongRides && cur.index > (cur.firstLeg ?: 0) && cur.vehicleTripId == null && asleep
+        val low = atChange && ChangeWait.low(waitAnchor?.let { now - it.second }, leg.departure - now,
+            moving = fix.speed >= 2.0 && fix.accuracy in 0.0..150.0, inVehicle = false)
+        if (reduced != cur.reducedGPS) FieldLog.ride(if (reduced) "gps · rough on a long ride, the vehicle confirmed: network location, every 300 m (${Math.round(d)} m from the stop)"
+            else "gps · rough off: the best again (${Math.round(d)} m from the stop)")
+        if (low != cur.changeLowGPS) FieldLog.ride(if (low) "gps · waiting at a change: network location until 3 min before the next one" else "gps · the best again at the change")
+        if (far != cur.roughGPS || reduced != cur.reducedGPS || low != cur.changeLowGPS)
+            RideStore.update(this) { it.copy(roughGPS = far, reducedGPS = reduced, changeLowGPS = low) }
+        requestLocation(if (reduced || low) RideAccuracy.REDUCED_MS else RideGPS.intervalMs(far))
     }
 
     /** The ride's network on one clock: a look for the vehicle while it isn't known, the arrival once it is. */
@@ -431,7 +487,12 @@ class RideService : Service() {
                 // (A7, iOS 0.39.1) on another line than planned: is its own GPS with you (the wrong bus)?
                 wrongBusLook(now)
                 val v = RideStore.state.value?.vehicleTripId ?: leg.tripId
-                if (now - etaAt >= 60 && leg.to != null) {
+                // (0.10.9, iOS 0.42.12 `RideNet`) its live times every 2 minutes far from the stop, every 45 s near it
+                val tripEvery = RideStore.state.value?.let { cur ->
+                    RideNet.tripEvery(RideNet.near(cur.legArrival?.let { it - now }, cur.distance,
+                        WakeRule.gpsWakeMetres(cur.wakeMetres, WakeBookStore.effective(app.store.settings.value.wake), leg.isTrain), cur.phase != Phase.SLEEPING))
+                } ?: 60.0
+                if (now - etaAt >= tripEvery && leg.to != null) {
                     etaAt = now
                     // (0.10.7, iOS 0.42.9) a new answer of its stops: on past the change after all? a faster stop further on?
                     RideStore.state.value?.vehicleTripId?.let { id -> scope.launch { try { stayOnIfItGoes(id); betterStopLook(id) } catch (_: Exception) {} } }
@@ -458,6 +519,7 @@ class RideService : Service() {
                     scope.launch { platformLook(now) }
                     scheduleBackup()
                 }
+                gpsTier(now)                    // (0.10.9: time brings the stop, or the next ride, near without a fix)
                 notifyRide(force = false)
                 // (A3) the ride's network tick: friends get your trip (and their trips and lines come in), no loop of its own
                 nl.haltewekker.friends.FriendTravelShare.tick(applicationContext)
@@ -474,7 +536,7 @@ class RideService : Service() {
         val leg = s.leg
         FieldLog.ride(FieldFormat.rideRing(why, s.distance, Iso.now() - s.legStart, s.legStartMetres ?: startMetres(s)))
         val minutes = (fire as? WakeRule.Fire.Time)?.minutes
-        RideStore.update(this) { it.copy(phase = Phase.ALARM, quiet = quiet, note = null, roughGPS = false, ringMinutes = minutes, rangAt = Iso.now(), againSent = false, wakeNoted = false) }
+        RideStore.update(this) { it.copy(phase = Phase.ALARM, quiet = quiet, note = null, roughGPS = false, reducedGPS = false, changeLowGPS = false, ringMinutes = minutes, rangAt = Iso.now(), againSent = false, wakeNoted = false) }
         stopReckon()
         cancelBackup()
         requestLocation(RideGPS.intervalMs(false))
@@ -555,11 +617,12 @@ class RideService : Service() {
         if (s.index + 1 < s.trip.rides.size) {
             RideStore.update(this) {
                 it.copy(index = it.index + 1, phase = Phase.SLEEPING, legStart = now, vehicleTripId = null, vehicleLine = null,
-                    vehicleSource = VehicleSource.NONE, eta = null, distance = null, quiet = false, note = null, roughGPS = false,
+                    vehicleSource = VehicleSource.NONE, eta = null, distance = null, quiet = false, note = null, roughGPS = false, reducedGPS = false, changeLowGPS = false,
                     ringMinutes = null, reckoning = false, changeArrived = now, changeFromVehicle = s.vehicleTripId, quietLeg = false, legStartMetres = null,
                     headsign = null, stayOnTo = null, better = null)
             }
             requestLocation(RideGPS.intervalMs(false))
+            waitAnchor = null                   // (0.10.9) standing at the change counts from here
             scheduleBackup()
         } else {
             RideStore.update(this) { it.copy(phase = Phase.FINISHED) }
@@ -641,11 +704,29 @@ class RideService : Service() {
         }
     }
 
+    /**
+     * The ongoing notification, again (0.10.9, iOS 0.42.12 `ActivityCadence`): what it says (the phase, the change
+     * miss) at once; a meaningful change (the arrival minute, the next stop, the delay, the vehicle, the change line)
+     * at most once a minute far from the stop; the distance alone every 3 minutes; anything every 20 s in the last 5
+     * minutes. A change held back goes later by itself.
+     */
     private fun notifyRide(force: Boolean) {
         val s = RideStore.state.value
         val now = Iso.now()
-        if (!force && s?.phase == lastPhase && now - lastNotify < 15) return
-        lastNotify = now; lastPhase = s?.phase
+        val say = "${s?.phase}|${s?.index}|${s?.changeMiss}|${s?.platformNote}"
+        val key = "${ActivityCadence.minute(s?.legArrival)}|${s?.nextStop}|${s?.delayMin}|${s?.vehicleLine}|${s?.changeLine}|${s?.offline}|${s?.reckoning}|${s?.changeSwitch != null}"
+        val look = "${s?.distance?.let { WakeRules.distanceText(it) }}"
+        val near = ActivityCadence.near(s?.legArrival?.let { it - now }, s?.phase != Phase.SLEEPING)
+        val change = if (force || s?.phase != lastPhase) ActivityCadence.Change.SAY
+            else ActivityCadence.change(say != shownSay, key != shownKey, look != shownLook)
+        if (!ActivityCadence.send(change, near, now - lastNotify)) {
+            ActivityCadence.later(change, near, now - lastNotify)?.let { after ->
+                if (notifyLater?.isActive != true) notifyLater = scope.launch { delay((after * 1000).toLong()); notifyLater = null; notifyRide(force = false) }
+            }
+            return
+        }
+        notifyLater?.cancel(); notifyLater = null
+        lastNotify = now; lastPhase = s?.phase; shownSay = say; shownKey = key; shownLook = look
         Notifications.post(this, Notifications.RIDE_ID, Notifications.ride(this, s))
     }
 
@@ -1078,7 +1159,7 @@ class RideService : Service() {
         val next = s.trip.rides.getOrNull(k) ?: return
         val from = next.from ?: return
         val end = s.trip.last.to ?: return
-        val plans = try { Transit.plan("${from.lat},${from.lon}", "${end.lat},${end.lon}", instead.departure - 60, count = 5) } catch (_: Exception) { emptyList() }
+        val plans = try { Transit.plan("${from.lat},${from.lon}", "${end.lat},${end.lon}", instead.departure - 60, count = 5, detailed = false) } catch (_: Exception) { emptyList() }
         val firsts = plans.map { p -> (p.rides.firstOrNull()?.tripId ?: "") to (p.rides.firstOrNull()?.departure ?: 0.0) }
         val i = ChangeGuide.pickPlan(firsts, instead) ?: run { Notifications.news(this, "switch-none", "No new plan yet", "Couldn't plan again from ${next.fromStop}: try again in a moment."); return }
         val p = plans[i]
@@ -1268,7 +1349,7 @@ class RideService : Service() {
     private suspend fun wrongBusFix(t: TransitParse.LiveTrip, nextStop: String?): String {
         val here = fixes.lastOrNull()?.p ?: return WrongBus.NO_FIX
         val end = RideStore.state.value?.trip?.last?.to ?: return WrongBus.NO_FIX
-        val plans = try { Transit.plan("${here.lat},${here.lon}", "${end.lat},${end.lon}", Iso.now(), count = 5) } catch (_: Exception) { emptyList() }
+        val plans = try { Transit.plan("${here.lat},${here.lon}", "${end.lat},${end.lon}", Iso.now(), count = 5, detailed = false) } catch (_: Exception) { emptyList() }
         val mine = RideStore.state.value?.vehicleTripId
         val p = plans.firstOrNull { it.rides.firstOrNull()?.tripId == mine } ?: plans.firstOrNull() ?: return WrongBus.NO_FIX
         val stop = nl.haltewekker.ui.Fmt.place(p.first.toStop)
@@ -1559,7 +1640,7 @@ class RideService : Service() {
         val tries = listOfNotNull(spec?.let { "${it.lat},${it.lon}" to lookFrom - 15 * 60 }, here?.let { "${it.lat},${it.lon}" to Iso.now() - 5 * 60 })
         val now = Iso.now()
         for ((from, at) in tries) {
-            for (t in Transit.plan(from, dest.planId, at, count = 6)) {
+            for (t in Transit.plan(from, dest.planId, at, count = 6, detailed = false)) {
                 val i = t.rides.indexOfFirst { it.tripId == f.tripId }
                 if (i < 0 || t.end < now) continue
                 val trip = if (i == 0) t else DoorTrip(t.rides.drop(i), t.rides[i].departure, t.end)
@@ -1720,7 +1801,7 @@ class RideService : Service() {
         }
         tries.add("${here.lat},${here.lon}" to now - 5 * 60)
         for ((from, at) in tries) {
-            val plans = try { Transit.plan(from, r.destId, at, count = 6) } catch (_: Exception) { emptyList() }
+            val plans = try { Transit.plan(from, r.destId, at, count = 6, detailed = false) } catch (_: Exception) { emptyList() }
             for (p in plans) {
                 val i = p.rides.indexOfFirst { it.tripId == id }
                 if (i < 0 || p.end < now) continue

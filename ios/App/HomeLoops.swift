@@ -34,6 +34,7 @@ struct HomeLoops: ViewModifier {
             .onChange(of: live.onBoardLooks) { _, _ in HomeActions.autoStartOnBoard(live: live, trip: trip, goStore: goStore) }
             .task(id: trip.direction) {
                 await everyHalfMinute {
+                    guard RideNet.homeLooks(riding: trip.phase != .idle) else { return }     // (0.42.12: the ride has its own)
                     Watchdog.shared.mark("finding where you are")
                     near.locate(ask: true)
                     Watchdog.shared.mark("loading the live times")
@@ -44,6 +45,7 @@ struct HomeLoops: ViewModifier {
             }
             .task(id: trip.direction) {
                 await everyHalfMinute(after: 1.5) {
+                    guard RideNet.homeLooks(riding: trip.phase != .idle) else { return }     // (0.42.12)
                     Watchdog.shared.mark("planning your planned trips")
                     await planner.refresh()
                     HomeActions.autoGo(trip: trip, planner: planner, goStore: goStore, near: near)

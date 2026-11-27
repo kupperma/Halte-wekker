@@ -835,7 +835,7 @@ private struct BatterySettingsRows: View {
             SettingsSwitch(title: "Save battery on long rides", isOn: $longRides)
                 .settingsAnchor("battery.longRides")
         } footer: {
-            Text("Uses less precise GPS far from your stop; switches back well before it wakes you.")
+            Text("Uses less precise GPS far from your stop and while you wait at a change; switches back well before it wakes you and before the next one leaves.")
         }
     }
 }

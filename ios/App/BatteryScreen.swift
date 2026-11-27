@@ -50,7 +50,7 @@ struct BatteryDataScreen: View {
                     }
                 }
             }
-            Section("Last rides") {
+            Section {
                 if let r = saved.ride {
                     Text("A ride on now, since \(Fmt.hhmm(r.start))").font(DS.sub).foregroundStyle(DS.secondary)
                 }
@@ -58,8 +58,17 @@ struct BatteryDataScreen: View {
                     Text("No rides yet.").font(DS.sub).foregroundStyle(DS.secondary)
                 }
                 ForEach(Array(saved.rides.reversed().prefix(12).enumerated()), id: \.offset) { _, r in
-                    Text(BatteryReport.rideLine(r)).font(DS.footnote).foregroundStyle(DS.text).monospacedDigit()
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(BatteryReport.rideLine(r)).font(DS.footnote).foregroundStyle(DS.text).monospacedDigit()
+                        // (0.42.12) the best GPS against the rough tiers of long rides and waits at a change
+                        if let split = BatteryReport.gpsSplit(r) {
+                            Text(split).font(DS.footnote).foregroundStyle(DS.secondary).monospacedDigit()
+                        }
+                    }
+                    .accessibilityElement(children: .combine)
                 }
+            } header: { Text("Last rides") } footer: {
+                Text("Reduced: the rough GPS of a long ride far from the stop with the vehicle confirmed, and of a wait at a change. The best comes back near the stop, on any doubt, and before the alarm.")
             }
             Section {
                 Button(copied ? "Copied: paste it in the chat" : "Copy as text") {

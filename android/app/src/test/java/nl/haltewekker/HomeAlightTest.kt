@@ -11,7 +11,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 
-/** iOS 0.42.11 `HomeAlightTests`, the same vectors. */
+/** iOS 0.42.13 `HomeAlightTests`, the same vectors. */
 class HomeAlightTest {
     private val base = 1_795_737_600.0
     private fun hm(h: Int, m: Int) = base + (h * 60.0 + m) * 60

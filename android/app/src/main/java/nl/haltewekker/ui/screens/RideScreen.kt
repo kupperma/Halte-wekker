@@ -173,8 +173,11 @@ fun RideScreen(s: RideState, onBack: () -> Unit) {
         if (s.offline) Note("No network: going by the stops and times saved on your phone.")
         s.nextStop?.let { n -> if (s.phase == Phase.SLEEPING) Text("Next: $n" + (s.delayMin?.let { d -> " · " + if (d >= 1) "$d min late" else if (d <= -1) "${-d} min early" else "on time" } ?: ""),
             color = DS.t.secondary, style = MaterialTheme.typography.bodySmall) }
-        if (s.roughGPS) Text("Long way to go: GPS every 25 s to save battery, the best again well before your stop.",
-            color = DS.t.secondary, style = MaterialTheme.typography.bodySmall)
+        if (s.roughGPS || s.reducedGPS || s.changeLowGPS) Text(when {
+                s.reducedGPS -> "Long way to go: rough location to save battery, the best GPS again well before your stop."
+                s.changeLowGPS -> "Waiting for the next one: rough location to save battery, the best GPS again before it leaves."
+                else -> "Long way to go: GPS every 25 s to save battery, the best again well before your stop."
+            }, color = DS.t.secondary, style = MaterialTheme.typography.bodySmall)
         if (s.index + 1 < s.trip.rides.size) Card {
             Header("After this")
             s.trip.rides.drop(s.index + 1).forEach { LegRow(it) }

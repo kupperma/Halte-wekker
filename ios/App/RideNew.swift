@@ -12,6 +12,7 @@ struct RideViewNew: View {
     @EnvironmentObject var ns: NSStore
     @EnvironmentObject var planner: Planner
     @EnvironmentObject var lines: LineWatchStore
+    @ObservedObject private var door = DoorSideStore.shared     // (0.42.11) which side you get out
     @Environment(\.scenePhase) private var scene
     @State private var earlier = false
     @State private var walkTo: WalkTarget?
@@ -223,11 +224,11 @@ struct RideViewNew: View {
         let eta = trip.legArrival ?? trip.legTo
         if let w = trip.wrongBus { WrongBusCard(alert: w) }        // (0.39.1)
         if let s = trip.stillOnAsk { StillOnCard(v: s) }
-        if let b = trip.betterOffer { BetterStopCard(offer: b) }      // (0.42.9)
+        if let b = trip.betterOffer { BetterStopCard(offer: b) }      // (0.42.11)
         if trip.whichTrain.count == 2 { WhichTrainCard(trains: trip.whichTrain, to: trip.whichTrainTo) }
         VStack(alignment: .leading, spacing: 6) {
             Text(rideKicker).font(DS.subStrong).foregroundStyle(DS.secondary)
-            // (0.42.9) by where it really goes ("Intercity to Zwolle"), and where you get off; never "… to <your stop>"
+            // (0.42.11) by where it really goes ("Intercity to Zwolle"), and where you get off; never "… to <your stop>"
             let head = v.map { TrainRules.headline(vehicle: $0.title, headsign: trip.headsign, legEnd: to, stayOnTo: trip.stayOnTo) }
             HStack(spacing: 10) {
                 if let v { DSLinePill(line: v.isTrain ? Transit.trainLabel(v.line) : v.line, train: v.isTrain) }
@@ -380,6 +381,11 @@ struct RideViewNew: View {
                     stopRow(marks[i].name, marks[i].time, next: k == 0 && next == nil, yours: false)
                 }
                 stopRow(trip.leg?.to.short ?? "Your stop", trip.legTo, next: false, yours: true)
+                // (0.42.11) "Exit on the left · platform 4"
+                if let d = door.line(for: trip.leg?.to.name) {
+                    Label(d, systemImage: "door.left.hand.open").font(DS.footnoteStrong).foregroundStyle(DS.accentText)
+                        .padding(.leading, 22).fixedSize(horizontal: false, vertical: true)
+                }
             }
             .dsPanel()
         }
@@ -422,6 +428,11 @@ struct RideViewNew: View {
                     Spacer(minLength: 0)
                 }
                 .accessibilityElement(children: .combine)
+                // (0.42.11) getting off for it: which side
+                if let d = door.line(for: trip.leg?.to.name) {
+                    Label("Get off at \(trip.leg?.to.short ?? at): \(d.prefix(1).lowercased())\(d.dropFirst())", systemImage: "door.left.hand.open")
+                        .font(DS.sub).foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
+                }
                 if let g = trip.changeGuide {
                     // (0.39) the platforms, the walk, the minutes; missed: the one you make instead, one tap to switch
                     ChangeGuideRows(guide: g, at: at)
@@ -570,6 +581,7 @@ struct DSTripRow: View {
 /// Wake up / get off now: the stop, how far, and one thing to do, hold to stop the alarm.
 struct AlarmViewNew: View {
     @EnvironmentObject var trip: TripManager
+    @ObservedObject private var door = DoorSideStore.shared     // (0.42.11)
     @ScaledMetric(relativeTo: .largeTitle) private var big: CGFloat = 64
     var approach: Bool { if case .alarm(let a) = trip.phase { return a }; return true }
     /// The warning colour as a fill, the same in light and dark (white text on it 5.9:1).
@@ -592,6 +604,10 @@ struct AlarmViewNew: View {
                     Text(approach ? "\(Fmt.distance(trip.distance ?? 0)) to go. Get ready to get off." : "You’re at \(trip.leg?.to.short ?? "your stop").")
                         .font(DS.body).monospacedDigit().foregroundStyle(.white.opacity(0.92)).fixedSize(horizontal: false, vertical: true)
                     if let n = trip.nextText { Text(n).font(DS.callout).monospacedDigit().foregroundStyle(.white.opacity(0.92)).fixedSize(horizontal: false, vertical: true) }
+                    // (0.42.11) which side you get out (asked before: nothing is asked while it rings)
+                    if let d = door.line(for: trip.leg?.to.name) {
+                        Text(d).font(DS.bodyStrong).foregroundStyle(.white).fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             }
             .padding(.horizontal, DS.s20).padding(.bottom, DS.s16)

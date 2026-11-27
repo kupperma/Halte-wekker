@@ -220,7 +220,7 @@ private fun TopicPage(t: SettingsTopic, onBack: () -> Unit, onSetup: () -> Unit,
             }
             SettingsTopic.BATTERY -> {
                 Card {
-                    Toggle("Save battery on long rides", "Far from your stop on a known bus or train: a fix every 25 s instead of every 2 s.", s.roughGPSOnLongRides) { v -> set { it.copy(roughGPSOnLongRides = v) } }
+                    Toggle("Save battery on long rides", "Far from your stop on a known bus or train, and waiting at a change: rough location instead of GPS. The best GPS is back well before your stop and before the next one leaves.", s.roughGPSOnLongRides) { v -> set { it.copy(roughGPSOnLongRides = v) } }
                 }
                 PermissionsCard(showExtras = true)
             }
