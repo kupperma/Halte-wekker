@@ -143,7 +143,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     private var lastActivity = Date.distantPast
     private var lastActivityKey = ""
     private var lastActivitySay = ""                       // what the lock screen said you should do (title, awake, ringing, kicker)
-    private var lastActivityLook = ""                      // (0.42.10) the distance and the bar it showed
+    private var lastActivityLook = ""                      // (0.42.12) the distance and the bar it showed
     private var endedActivity: Activity<TripAttributes>?   // after the last stop: ended, still on the lock screen for a while
     private var samples: [CLLocation] = []
     private var detectTask: Task<Void, Never>?
@@ -189,7 +189,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     private var activityLater: Task<Void, Never>?          // a Live Activity change held back for the 30 s
     private var gpsWhy: GPSReason?                         // why GPS is on, as the battery log has it
     private var sameOK: (tripId: String, looks: Int)?      // "still the same bus?" looks in a row that passed, for this one
-    // 0.42.10 (`RideSaver`): the rough GPS of a long ride and of a wait at a change, and when a look last passed
+    // 0.42.12 (`RideSaver`): the rough GPS of a long ride and of a wait at a change, and when a look last passed
     private var rideReducedOn = false
     private var changeLowOn = false
     private var sameOKAt: Date?
@@ -574,6 +574,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         whichTrain = []; whichTrainTo = [:]; whichTrainAsked = false; trainSeen = [:]; rivalLookAt = Date().addingTimeInterval(60)
         lastGood = nil; reckonFrom = nil; reckoning = false
         readyTold = false; ringNote = nil; arrivePlatform = nil; legDelay = nil; changeGuide = nil; nextOptions = []; usingSaved = false
+        DoorSideStore.shared.reset()                      // (0.42.11) the exit side is asked for this leg's stop
         missHold = MissCall.Hold(); quietLeg = false; ringInUse = false; headsign = ""; stayOnTo = nil
         betterOffer = nil; betterTask?.cancel(); betterTask = nil; betterAt = .distantPast
         meant = route?.planned?[safe: index]; meantTo = leg?.to; wrongBus = nil; otherAtStop = nil      // (0.39.1)
@@ -1050,7 +1051,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         return RideGPS.far(input)
     }
 
-    /// (0.42.10) The vehicle you're on fits, for the rough tier: two "still the same one?" looks in a row passed for it
+    /// (0.42.12) The vehicle you're on fits, for the rough tier: two "still the same one?" looks in a row passed for it
     /// (by your GPS or its own position: also one taken by its timetable), nothing to choose between, on its road, near
     /// its times, not picked by hand during the ride.
     private var rideFits: Bool {
@@ -1058,7 +1059,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         return cands.isEmpty && choosing.isEmpty && offRoad == 0 && farLooks == 0 && handLock == nil && stillOnAsk == nil && !demo
     }
 
-    /// (0.42.10) How often the ridden trip's live times are asked for: every 2 minutes far from the stop, 45 s near it
+    /// (0.42.12) How often the ridden trip's live times are asked for: every 2 minutes far from the stop, 45 s near it
     /// (`RideNet`). (Its arrival for the time rule comes with them.)
     private var rideTripEvery: TimeInterval {
         let near = RideNet.near(secondsToStop: (legArrival ?? legTo).map { $0.timeIntervalSinceNow }, metresToStop: distance ?? metresToLegStop,
@@ -1066,7 +1067,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         return RideNet.tripEvery(near: near)
     }
 
-    /// (0.42.10) The rough tier of a long ride now (`RideAccuracy`): 100 m, a fix every 300 m.
+    /// (0.42.12) The rough tier of a long ride now (`RideAccuracy`): 100 m, a fix every 300 m.
     private func rideReducedNow() -> Bool {
         guard gpsPhase == .riding, phase == .sleeping, !demo, leg != nil else { return false }
         let f = lastFix
@@ -1088,7 +1089,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         return RideAccuracy.tier(i) == .reduced
     }
 
-    /// (0.42.10) Rough GPS while you wait at a change (`ChangeWait`): stood 3 minutes, the next one more than 3 minutes off.
+    /// (0.42.12) Rough GPS while you wait at a change (`ChangeWait`): stood 3 minutes, the next one more than 3 minutes off.
     private func changeLowNow() -> Bool {
         guard phase == .transfer, !demo, RideGPS.enabled() else { return false }
         let now = Date()
@@ -1101,7 +1102,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
                               inVehicle: MotionRules.inVehicle(Motion.shared.now()))
     }
 
-    /// (0.42.10) The rough tiers' lines in the ride log, and a look every 30 s besides the fixes while far, rough or at
+    /// (0.42.12) The rough tiers' lines in the ride log, and a look every 30 s besides the fixes while far, rough or at
     /// a change (time brings the stop, or the next departure, near without a new fix).
     private func noteSaverTiers(reduced: Bool, changeLow: Bool) {
         if reduced != rideReducedOn {
@@ -1345,7 +1346,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             if tick { Task { await loadUpcoming() }; refreshPlannedNext(); updateChangeGuide(); checkOtherAtStop(); pushActivity(force: false) }
             // (0.42.4) the next train's platform at a change too (`WatchStore.check` asks at most once a minute)
             if tick { Task { await WatchStore.shared.check() } }
-            applyGPS()                                    // (0.42.10: rough while you stand, the best when you move)
+            applyGPS()                                    // (0.42.12: rough while you stand, the best when you move)
         }
         // Fastest trip: rough GPS while you stand with long to go, the best as soon as you move (`GoGPS`)
         if phase == .idle, going { applyGPS() }
@@ -1374,7 +1375,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         // (choosing between buses is doubt: on its own 12 s clock)
         if vehicle != nil, !cands.isEmpty, Date() >= candCheckAt { candCheckAt = Date().addingTimeInterval(12); Task { await resolveCandidates() } }
         else if vehicle != nil, cands.isEmpty, tick, now >= sameCheckAt.addingTimeInterval(-1) {
-            sameCheckAt = now.addingTimeInterval(rideReducedOn ? 60 : 30)          // (0.42.10: a minute on the rough tier)
+            sameCheckAt = now.addingTimeInterval(rideReducedOn ? 60 : 30)          // (0.42.12: a minute on the rough tier)
             Task { await checkSameBus() }
         }
         let d = loc.distance(from: CLLocation(latitude: leg.to.coordinate.latitude, longitude: leg.to.coordinate.longitude))
@@ -1520,7 +1521,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         let t = WristNotice.ring(approach: approach, stop: leg?.to.short, soon: soonText(secs), inUse: inUse)
         let c = UNMutableNotificationContent()
         c.title = t.title
-        c.body = t.body
+        c.body = DoorSide.withLine(t.body, doorLine)      // (0.42.11) "Exit on the left · platform 4"
         c.sound = sound.quietNow ? nil : .default         // no headphones: it buzzes instead
         c.interruptionLevel = .timeSensitive
         c.userInfo = ["kind": "go"]
@@ -2029,7 +2030,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         var tracks = all.filter { v in
             !excluding.contains(v.tripId) && (mode.map { ($0 == .train) == v.isTrain } ?? true)
         }
-        // (0.42.10) the ones that can't be yours left out before anything is asked or judged for them: coaches, a route
+        // (0.42.12) the ones that can't be yours left out before anything is asked or judged for them: coaches, a route
         // never within 1 km of you; after their own GPS is in, one 3 km (a bus) or 10 km (a train) away (`CandidatePrefilter`)
         let youNow: [GeoPoint] = recentFixes.suffix(8).map(\.p)
         let asked = tracks.count
@@ -2079,13 +2080,13 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         }
     }
 
-    /// (0.42.10) A track as the prefilter sees it: its pieces' paths, its own GPS fix and how old that is.
+    /// (0.42.12) A track as the prefilter sees it: its pieces' paths, its own GPS fix and how old that is.
     private static func prefilterCandidate(_ t: VehicleTrack, now: Date) -> CandidatePrefilter.Candidate {
         CandidatePrefilter.Candidate(tripId: t.tripId, line: t.line, isTrain: t.isTrain, paths: t.pieces.map(\.path),
                                      gps: t.gps?.fix.point, gpsAge: t.gps.map { now.timeIntervalSince($0.fix.at) })
     }
 
-    /// (0.42.10) How many the prefilter left out: a line in the field log, at most once a minute per place.
+    /// (0.42.12) How many the prefilter left out: a line in the field log, at most once a minute per place.
     private func notePrefilter(_ place: String, dropped: CandidatePrefilter.Counts, of total: Int) {
         guard dropped.total > 0, Date().timeIntervalSince(prefilterLogged[place] ?? .distantPast) >= 60 else { return }
         prefilterLogged[place] = Date()
@@ -3035,12 +3036,25 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         let s = t.stops[i]
         let track: String? = s.track?.trimmingCharacters(in: .whitespaces)
         arrivePlatform = (track?.isEmpty ?? true) ? nil : track
+        askDoorSide(t, to: l)                             // (0.42.11) which side you get out
         if t.live, let sch = s.scheduledArrival ?? s.scheduled, let a = s.arrival ?? s.departure {
             legDelay = Int((a.timeIntervalSince(sch) / 60).rounded())
         } else {
             legDelay = nil
         }
     }
+
+    /// (0.42.11) Which side you get out at this leg's stop (`DoorSideStore`): from the train's own trip, never while it rings.
+    private func askDoorSide(_ t: LiveTrip, to l: Leg) {
+        guard !demo else { return }
+        let ringing: Bool = { if case .alarm = phase { return true }; return false }()
+        let stops: [DoorSide.Stop] = t.stops.map { DoorSide.Stop(point: GeoPoint($0.coordinate), track: $0.track) }
+        DoorSideStore.shared.look(train: legIsTrain, stops: stops, to: GeoPoint(l.to.coordinate), toName: l.to.name,
+                                  code: NSStore.code(l.to), ringing: ringing)
+    }
+
+    /// (0.42.11) "Exit on the left · platform 4" for this train leg's stop; nil: not known (or not a train).
+    var doorLine: String? { legIsTrain ? DoorSideStore.shared.line(for: leg?.to.name) : nil }
 
     /// As the trip starts: its planned rides (from this leg on) saved on the phone, for the stretches without signal.
     private func saveRidesAhead() {
@@ -3296,7 +3310,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         rideLog("get ready · one stop before yours", once: "ready|\(index)", every: 600)
         let c = UNMutableNotificationContent()
         c.title = w.title
-        c.body = w.body
+        c.body = DoorSide.withLine(w.body, doorLine)      // (0.42.11) which side you get out
         c.sound = nil                                     // quiet: the alarm is what rings
         c.interruptionLevel = .active
         c.userInfo = ["kind": "info"]
@@ -3432,7 +3446,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         guard let last = recent.last, max(last.speed, currentSpeed ?? 0) >= 4 else { return }      // a clear fix, moving with it
         checkingSame = true
         defer { checkingSame = false }
-        let every = rideTripEvery                                   // (0.42.10: 2 minutes far from the stop, 45 s near)
+        let every = rideTripEvery                                   // (0.42.12: 2 minutes far from the stop, 45 s near)
         if roadOf?.tripId != v.tripId || now.timeIntervalSince(roadOf!.at) > every {
             // (the same answer as the vehicle's own times, of the last minute or two: one fetch for both)
             guard let t = await Transit.liveTrip(v.tripId, maxAge: every), t.path.count >= 2 else { return }
@@ -3566,7 +3580,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
                 far = t.live && !w.done && last.distance(from: CLLocation(latitude: at.latitude, longitude: at.longitude)) > (v.isTrain ? 2500 : 1000)
             }
             farLooks = far ? farLooks + 1 : 0
-            // (0.42.10) on the rough tier, not sure (too few fixes a look apart) neither passes nor resets: it holds, and
+            // (0.42.12) on the rough tier, not sure (too few fixes a look apart) neither passes nor resets: it holds, and
             // the last pass gets older (`RideAccuracy.confirmFresh` brings the best back for a look within 10 minutes)
             if !(rideReducedOn && verdict == .notSure && !far) { noteSameLook(v, passed: verdict == .passes && !far) }
             if farLooks >= 3 {
@@ -4380,7 +4394,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         // For buses also the stop's own board (asked first, so it runs beside the plans): it shows cancelled buses
         // (the planner leaves them out) and the ones that left.
         async let boardAsk: [BoardDeparture] = rail ? [] : Transit.board(stopIds: from.ids, from: Date().addingTimeInterval(-30 * 60), n: 40)
-        // (0.42.10) behind the screen at a change: 5 ways from just before you got there, not 10 from half an hour back
+        // (0.42.12) behind the screen at a change: 5 ways from just before you got there, not 10 from half an hour back
         let ask = phase == .transfer ? RideNet.changeList(inFront: UIApplication.shared.applicationState == .active, arrived: changeSince, now: Date())
                                      : (from: Date().addingTimeInterval(-30 * 60), count: 10)
         let planJobs: [@Sendable () async -> [DoorTrip]] = t.to.map { dest in
@@ -4431,7 +4445,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         // A saved board that stayed (its own answer didn't come) goes with the rest of the saved answer: all that shows is live.
         if keptSavedBoard { upcomingBoard = [] }
         upcomingAsOf = nil
-        noteChangeList(listFrom: ask.from)                // (at a change: what the hour’s end counts from; 0.42.10: as asked)
+        noteChangeList(listFrom: ask.from)                // (at a change: what the hour’s end counts from; 0.42.12: as asked)
         let fromHere = t.from.key == "here"        // (a leg from where you were: saved with where that was)
         SnapshotStore.shared.save(SavedUpcoming(upcoming: upcoming, board: upcomingBoard,
                                                 lat: fromHere ? t.from.coordinate.latitude : nil, lon: fromHere ? t.from.coordinate.longitude : nil),
@@ -4609,7 +4623,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         guard force || Date().timeIntervalSince(lastEta) >= RideTick.etaGap(changeIn: changeIn) else { return }
         lastEta = Date()
         let legs = self.legs, i = index, start = legStart, known = legArrival
-        let ways = RideNet.ways(4, inFront: UIApplication.shared.applicationState == .active)   // (0.42.10: 3 behind the screen)
+        let ways = RideNet.ways(4, inFront: UIApplication.shared.applicationState == .active)   // (0.42.12: 3 behind the screen)
         Task {
             guard i < legs.count else { return }
             var t: Date
@@ -4742,7 +4756,9 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             text = parts.joined(separator: " · ")
         }
         let delay: Int? = riding ? legDelay : nil
-        let platform: String? = riding ? arrivePlatform : nil
+        // (0.42.11) "platform 4 · exit on the left"
+        let door: DoorSide.Answer? = legIsTrain ? DoorSideStore.shared.answer(for: leg?.to.name) : nil
+        let platform: String? = riding ? DoorSide.lockPlatform(arrivePlatform, door) : nil
         return (nextName, delay, platform, text, changeGuide?.target.departure, changeGuide?.missText)
     }
 
@@ -4778,7 +4794,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         // riding without one (it couldn't start, or it was lost): start it now
         guard let activity else { if isRiding { startActivity() }; return }
         let s = state
-        // (0.42.10, `ActivityCadence`) what it says goes at once; a meaningful change (the arrival minute, a stop passed,
+        // (0.42.12, `ActivityCadence`) what it says goes at once; a meaningful change (the arrival minute, a stop passed,
         // the delay, the vehicle, the next ride, the platform, the song) at most once a minute far from the stop; the
         // distance and the bar alone every 3 minutes; anything every 20 s in the last 5 minutes
         var key: String = "\(s.legTitle)|\(ActivityCadence.minute(s.arrival))|\(s.awake)"
@@ -4803,7 +4819,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         Task { await activity.update(ActivityContent(state: s, staleDate: nil)) }
     }
 
-    /// (0.42.10) The lock screen is near the stop: awake or ringing, the stop within 5 minutes; at a change, the next
+    /// (0.42.12) The lock screen is near the stop: awake or ringing, the stop within 5 minutes; at a change, the next
     /// ride within 5 minutes (`ActivityCadence.near`).
     private var activityNear: Bool {
         switch phase {

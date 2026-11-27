@@ -215,9 +215,9 @@ The same switches, words and rules, so the relay and the replay treat both alike
   conditions as the lines (after a trip, else hourly; not during a trip, on a metered/Low Data network or in battery
   saver). Drop the sent points from the queue only after a 200; switching off clears the queue.
 
-### Less battery and data on long rides (0.42.10)
+### Less battery and data on long rides (0.42.12)
 
-What's new in 0.42.10 (`ios/App/RideSaver.swift`, tests `RideSaverTests` against `docs/battery-vectors.json`; Android
+What's new in 0.42.12 (`ios/App/RideSaver.swift`, tests `RideSaverTests` against `docs/battery-vectors.json`; Android
 0.10.9 `ride/RideSaver.kt`, `RideSaverTest`, the same vectors). New lines in the ride log:
 
 - `gps · rough on a long ride, the vehicle confirmed: 100 m, every 300 m (31.2 km from the stop · 24 min)`: the rough

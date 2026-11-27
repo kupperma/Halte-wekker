@@ -3,12 +3,12 @@
 The rules and numbers for each are in [logs-export.md](logs-export.md) › For Android (parity), with the iOS files and
 their tests.
 
-## iOS 0.42.10 (less battery and data on long rides)
+## iOS 0.42.12 (less battery and data on long rides)
 
 Field logs of long door-to-door trips showed the best GPS for almost the whole ride (also long train legs far from the
 stop and long waits at a change), a Live Activity update about once a minute, and long-distance coaches far away
 judged on every look. Rules and numbers in
-[logs-export.md](logs-export.md) › "Less battery and data on long rides (0.42.10)"; shared vectors
+[logs-export.md](logs-export.md) › "Less battery and data on long rides (0.42.12)"; shared vectors
 `docs/battery-vectors.json`.
 
 - [x] **Rough GPS far from the stop** (`RideAccuracy`): 100 m and a fix every 300 m on a confirmed vehicle while the
@@ -27,6 +27,29 @@ judged on every look. Rules and numbers in
       own plans (the home map still draws the shapes it gets).
 - [ ] Android: a Battery & data screen with the ride cost (iOS `BatteryLog`): Android has no battery log yet.
 - [ ] Android: a repeated "still the same one?" look, so the rough tier can expire and look again as on iOS.
+## iOS 0.42.11 (which side you get out)
+
+The request "I would like the app to also show which side you get out of the train". The relay's new
+`/rail/v1/side?station=BD&track=4&from=<lat,lon>&at=<lat,lon>` (`relay/rail.js`, tests `relay/test-rail.mjs`) says
+whether the platform of that track is on the left or the right of a train going from the stop before to the station,
+`both`, or `unknown`, with `confidence` high/low. It's worked out from OpenStreetMap (map data © OpenStreetMap
+contributors, ODbL): the platforms whose ref is the track (`railway=platform`/`platform_edge`, in the Netherlands one
+area per side of an island), the nearest rail to each, and the sign of (the way the train goes) × (platform − rail);
+one area for both sides of an island, or a train across the track: unknown. Overpass is asked once per station (a box
+400 m around it) and the trimmed platforms and rails are kept 30 days in the Durable Object `Rail`; on the trimmed OSM
+data of 's-Hertogenbosch, Eindhoven, Breda and Tilburg (`relay/test-rail/`) every numbered platform gets a side, the two
+sides of each island opposite, and 's-Hertogenbosch 1 (at the station hall, east) "right" going north. Rules in
+`ios/App/DoorSide.swift` (tests `DoorSideTests`, vectors `docs/door-side-vectors.json`), asked by `DoorSideStore`
+from `TripManager.noteRideDetails` (the leg's own train trip, its platform at your stop and the stop before; again only
+when those change, never while the alarm rings, a failed one again after 5 min).
+
+- [x] **"Exit on the left · platform 4".** Under "your stop" in Stops ahead, in the change card ("Get off at Den
+      Bosch: exit on the left · platform 3"), on the alarm screen, in the wake alarm's and the get-ready notification's
+      text, and on the lock screen's ride line ("platform 4 · exit on the left"). "Exit on both sides", "(estimate)" when
+      the relay isn't sure; nothing when it doesn't know. **Android 0.10.6:** `ride/DoorSide.kt` (`DoorSideTest`, the same
+      vectors), `TripStop.track` from the trip answer, `RideService.doorLook` on the ride's minute tick, `RideState.doorSide`
+      in the ride card, the change card, the ride notification, the alarm and the get-ready notification.
+
 ## iOS 0.42.9 (staying on, the best stop, every ring on the lock screen)
 
 From the field report (iOS, 15:01, the ride screen): "Leg 1 of 3 · You're on · IC Intercity to Tilburg … You're awake.
@@ -75,29 +98,6 @@ never got a second look). A plan that split one train in two legs wasn't handled
       Android: `Settings.outLoudLaterOffOnce` in `migrated()`). The backup's own notification without headphones has
       no sound either. The school wake-up at home is unchanged. **Android 0.10.7:** `AlarmPlayer.ring(loudLater)`,
       `WakeRules.loudLater`, the switch in `SettingsScreen`.
-
-## iOS 0.42.9 (which side you get out)
-
-The request "I would like the app to also show which side you get out of the train". The relay's new
-`/rail/v1/side?station=BD&track=4&from=<lat,lon>&at=<lat,lon>` (`relay/rail.js`, tests `relay/test-rail.mjs`) says
-whether the platform of that track is on the left or the right of a train going from the stop before to the station,
-`both`, or `unknown`, with `confidence` high/low. It's worked out from OpenStreetMap (map data © OpenStreetMap
-contributors, ODbL): the platforms whose ref is the track (`railway=platform`/`platform_edge`, in the Netherlands one
-area per side of an island), the nearest rail to each, and the sign of (the way the train goes) × (platform − rail);
-one area for both sides of an island, or a train across the track: unknown. Overpass is asked once per station (a box
-400 m around it) and the trimmed platforms and rails are kept 30 days in the Durable Object `Rail`; on the trimmed OSM
-data of 's-Hertogenbosch, Eindhoven, Breda and Tilburg (`relay/test-rail/`) every numbered platform gets a side, the two
-sides of each island opposite, and 's-Hertogenbosch 1 (at the station hall, east) "right" going north. Rules in
-`ios/App/DoorSide.swift` (tests `DoorSideTests`, vectors `docs/door-side-vectors.json`), asked by `DoorSideStore`
-from `TripManager.noteRideDetails` (the leg's own train trip, its platform at your stop and the stop before; again only
-when those change, never while the alarm rings, a failed one again after 5 min).
-
-- [x] **"Exit on the left · platform 4".** Under "your stop" in Stops ahead, in the change card ("Get off at Den
-      Bosch: exit on the left · platform 3"), on the alarm screen, in the wake alarm's and the get-ready notification's
-      text, and on the lock screen's ride line ("platform 4 · exit on the left"). "Exit on both sides", "(estimate)" when
-      the relay isn't sure; nothing when it doesn't know. **Android 0.10.6:** `ride/DoorSide.kt` (`DoorSideTest`, the same
-      vectors), `TripStop.track` from the trip answer, `RideService.doorLook` on the ride's minute tick, `RideState.doorSide`
-      in the ride card, the change card, the ride notification, the alarm and the get-ready notification.
 
 ## iOS 0.42.8
 

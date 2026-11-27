@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import UIKit
 import UserNotifications
 
 /// Live link (0.30): a web page with your trip's live times for someone without the app (a parent), made from the ride
@@ -28,6 +29,9 @@ final class LiveLinkStore: ObservableObject {
         var lastSeq: Int? = nil
         var seen: Int? = nil
         var replies: [LiveReply]? = nil
+        /// (0.42.10) The picture the relay has (`LiveFace.stamp`) and its version (the state's `pic`; none: not put).
+        var picStamp: String? = nil
+        var pic: Int? = nil
 
         var unread: Int { (msgs ?? []).filter { $0.seq > (seen ?? 0) }.count }
     }
@@ -59,6 +63,7 @@ final class LiveLinkStore: ObservableObject {
     private var subs: Set<AnyCancellable> = []
     private var chain: Task<Void, Never>?
     private var putQueued = false
+    private var faceTried: Date?
 
     private static var file: URL? { FriendStore.folder?.appendingPathComponent("live.json") }
     private static let nameKey = "live.name"
@@ -143,12 +148,15 @@ final class LiveLinkStore: ObservableObject {
             return
         }
         guard let s = state(t, l) else { return }
-        guard LiveRules.due(lastSent: l.lastSent, lastKey: l.lastKey, key: LiveRules.key(s), now: Date()) else { return }
+        let face: Bool = faceDue(l)
+        guard face || LiveRules.due(lastSent: l.lastSent, lastKey: l.lastKey, key: LiveRules.key(s), now: Date()) else { return }
         putQueued = true
         enqueue {
             self.putQueued = false
+            if face { await self.sendFace() }
             // (read again: a moment may have passed)
             guard let t = self.trip, let l = self.link, !l.arrived, let s = self.state(t, l) else { return }
+            guard face || LiveRules.due(lastSent: l.lastSent, lastKey: l.lastKey, key: LiveRules.key(s), now: Date()) else { return }
             _ = await self.put(s, arrived: false)
         }
     }
@@ -201,6 +209,10 @@ final class LiveLinkStore: ObservableObject {
                 x.dep = p?.departure.timeIntervalSince1970
             }
             x.depPlatform = p?.platform
+            // (0.42.10) where it goes from and to, and the saved road of the rides ahead (the page draws the rest of the trip)
+            x.fromPt = GeoPoint(l.from.coordinate)
+            x.toPt = GeoPoint(l.to.coordinate)
+            if k >= t.index, let id = tripId, let r = RideCacheStore.shared.saved(id) { x.road = r.shape }
             if let id = tripId, let r = RideCacheStore.shared.saved(id) {
                 if x.arr == nil, let i = RideCache.stop(near: GeoPoint(l.to.coordinate), in: r) { x.arr = (r.stops[i].arrival ?? r.stops[i].departure)?.timeIntervalSince1970 }
                 if let i = RideCache.stop(near: GeoPoint(l.to.coordinate), in: r) { x.arrPlatform = r.stops[i].platform }
@@ -227,6 +239,7 @@ final class LiveLinkStore: ObservableObject {
             trip.vehicle = LiveTripV2.Vehicle(lat: f.lat, lon: f.lon, at: f.at.timeIntervalSince1970)
         }
         trip.face = LiveTripV2.face(FriendStore.shared.account)
+        trip.pic = saved.link?.pic
         // (listening now) the song, when you share it with live links
         trip.music = MusicShareStore.shared.forLink(travelling: FriendTravelShare.running(t) && !t.demo)
         return trip
@@ -252,7 +265,56 @@ final class LiveLinkStore: ObservableObject {
             problem = "Couldn’t make the link. Check your connection and try again."
             return nil
         }
+        // (0.42.10) your picture, then a state that says so (the relay takes one every 5 s)
+        if faceDue(l) {
+            enqueue {
+                await self.sendFace()
+                try? await Task.sleep(nanoseconds: 5_200_000_000)
+                guard let t = self.trip, let cur = self.link, cur.keys == l.keys, !cur.arrived, let s = self.state(t, cur) else { return }
+                _ = await self.put(s, arrived: false)
+            }
+        }
         return URL(string: l.keys.link)
+    }
+
+    // MARK: your picture (0.42.10): 128 px, ≤ 12 KB, locked with the link's key; put once, again when it changes
+
+    private func faceDue(_ l: Link) -> Bool {
+        LiveFace.due(LiveFace.stamp(FriendStore.shared.myPicture), sent: l.picStamp ?? "", lastTry: faceTried, now: Date())
+    }
+
+    private func sendFace() async {
+        guard let l = saved.link, let src = FriendStore.shared.myPicture else { return }
+        let stamp: String = LiveFace.stamp(src)
+        guard LiveFace.due(stamp, sent: l.picStamp ?? "", lastTry: faceTried, now: Date()) else { return }
+        faceTried = Date()
+        guard let jpeg = Self.small(src), let data = try? LiveFace.seal(jpeg, key: l.keys.key, token: l.keys.token) else { return }
+        let a: Answer = await call("/live/v1/face", ["secret": B64URL.encode(l.keys.secret), "data": B64URL.encode(data)])
+        guard case .ok = a, var cur = saved.link, cur.keys == l.keys else { return }
+        cur.picStamp = stamp
+        cur.pic = (cur.pic ?? 0) + 1
+        saved.link = cur
+        save()
+        faceTried = nil
+    }
+
+    /// The picture at 128 px, a JPEG of at most 12 KB (lower quality until it fits); nil: it can't be read.
+    private static func small(_ jpeg: Data) -> Data? {
+        guard let img = UIImage(data: jpeg), img.size.width > 0, img.size.height > 0 else { return nil }
+        let side: CGFloat = CGFloat(LiveFace.side)
+        let scale: CGFloat = side / min(img.size.width, img.size.height)
+        let drawn = CGSize(width: img.size.width * scale, height: img.size.height * scale)
+        let origin = CGPoint(x: (side - drawn.width) / 2, y: (side - drawn.height) / 2)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        let square: UIImage = UIGraphicsImageRenderer(size: CGSize(width: side, height: side), format: format).image { _ in
+            img.draw(in: CGRect(origin: origin, size: drawn))
+        }
+        for q in [0.7, 0.6, 0.5, 0.4, 0.3] as [CGFloat] {
+            if let j = square.jpegData(compressionQuality: q), j.count <= LiveFace.maxBytes { return j }
+        }
+        return nil
     }
 
     /// "Stop sharing": the page says the link has ended, at once.

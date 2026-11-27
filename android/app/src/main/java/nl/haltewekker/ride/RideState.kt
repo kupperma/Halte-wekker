@@ -33,7 +33,7 @@ data class RideState(
     val lastFixAt: Double? = null,
     val quiet: Boolean = false,
     val roughGPS: Boolean = false,
-    /** (0.10.9, iOS 0.42.10) The rough tier of a long ride (network location), and of a wait at a change. */
+    /** (0.10.9, iOS 0.42.12) The rough tier of a long ride (network location), and of a wait at a change. */
     val reducedGPS: Boolean = false,
     val changeLowGPS: Boolean = false,
     val note: String? = null,

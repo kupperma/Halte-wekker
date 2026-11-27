@@ -6,7 +6,7 @@ import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
 
-// iOS 0.42.10 (`RideSaver.swift`), Android 0.10.9: a long ride for less battery and data. The same rules and numbers as
+// iOS 0.42.12 (`RideSaver.swift`), Android 0.10.9: a long ride for less battery and data. The same rules and numbers as
 // iOS, checked against the same vectors (`docs/battery-vectors.json`). Nothing here makes the alarm later: the rough
 // GPS is only on while the nearest you can be to the stop (the fix's distance, less its accuracy, less how far the
 // vehicle can have gone since at its top speed) is beyond the wake distance plus 2 km plus what it covers until the

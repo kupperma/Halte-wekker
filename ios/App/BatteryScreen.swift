@@ -60,7 +60,7 @@ struct BatteryDataScreen: View {
                 ForEach(Array(saved.rides.reversed().prefix(12).enumerated()), id: \.offset) { _, r in
                     VStack(alignment: .leading, spacing: 2) {
                         Text(BatteryReport.rideLine(r)).font(DS.footnote).foregroundStyle(DS.text).monospacedDigit()
-                        // (0.42.10) the best GPS against the rough tiers of long rides and waits at a change
+                        // (0.42.12) the best GPS against the rough tiers of long rides and waits at a change
                         if let split = BatteryReport.gpsSplit(r) {
                             Text(split).font(DS.footnote).foregroundStyle(DS.secondary).monospacedDigit()
                         }

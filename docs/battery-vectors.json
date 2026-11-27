@@ -1,5 +1,5 @@
 {
- "_about": "Battery and data rules (iOS RideSaver.swift, Android ride/RideSaver.kt, 0.42.10): the same vectors on both. Synthetic numbers only.",
+ "_about": "Battery and data rules (iOS RideSaver.swift, Android ride/RideSaver.kt, 0.42.12): the same vectors on both. Synthetic numbers only.",
  "accuracy": [
   {
    "name": "train far, confirmed",
