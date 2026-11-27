@@ -515,7 +515,7 @@ if (!LIVE) {
   assert.equal(v.map.later[0].color, "#E0632E");
   assert.deepEqual(v.map.later[0].coords, [[4.78, 51.5955], [4.9, 51.6]]);
   assert.equal(v.map.dest.name, "Campus");
-  // each leg's own "shape" (the apps send them from iOS 0.42.9 and Android 0.10.6): at a change with no stops, the next ride's road
+  // each leg's own "shape" (the apps send them from iOS 0.42.9 and Android 0.10.7): at a change with no stops, the next ride's road
   // from its leg; a walk's as dots; a ride known only from where to where as a dashed straight line; the end of the walk
   const pl = trip().legs.map((l) => ({ ...l }));
   pl[1].shape = enc([[5.47901, 51.44306], [5.4795, 51.4428]]);
@@ -644,7 +644,7 @@ if (vec) {
   assert.deepEqual(v.legs.map((x) => x.text), vec.page.legs);
   assert.deepEqual(v.timeline.map((x) => x.title), vec.page.timeline);
   assert.equal(v.map.shape.length, vec.page.shapePoints);
-  // (Android 0.10.6, iOS 0.42.9) at a change: each leg's own road, the phone, the picture's version; the picture itself
+  // (Android 0.10.7, iOS 0.42.9) at a change: each leg's own road, the phone, the picture's version; the picture itself
   if (vec.state2) {
     assert.equal(await unseal(vec.state2.data, key, "hw-live-v1\n" + vt), vec.state2.plain);
     assert.equal(b64u(await seal(vec.state2.plain, key, "hw-live-v1\n" + vt, Buffer.from(vec.state2.nonce, "hex"))), vec.state2.data);

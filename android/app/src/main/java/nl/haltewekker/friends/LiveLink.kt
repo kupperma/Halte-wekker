@@ -45,7 +45,7 @@ data class LiveState(
     val legs: List<LiveLeg>? = null,
     val music: LiveMusic? = null,
     val next: Int? = null,
-    /** (0.10.6) The version of the sharer's picture at `/live/v1/face` (`LiveFace`): the page fetches it again when it changes. */
+    /** (0.10.7) The version of the sharer's picture at `/live/v1/face` (`LiveFace`): the page fetches it again when it changes. */
     val pic: Int? = null,
     val shape: String? = null,
     val stops: List<LiveStop>? = null,

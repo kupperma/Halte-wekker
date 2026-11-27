@@ -205,7 +205,7 @@ class LiveTripV2Test {
         assertNotNull(LiveTripV2.face("3c157621a97cf055f5804a9826c6d1e1"))
     }
 
-    // MARK: (0.10.6) each leg's own road, the picture
+    // MARK: (0.10.7) each leg's own road, the picture
 
     private fun input2(): Triple<LiveState, LiveTripV2.Trip, Double> {
         val inp = vec["input2"]!!.jsonObject

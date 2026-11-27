@@ -93,7 +93,7 @@ class LiveRelay(private val base: String = LiveCrypto.RELAY, private val userAge
         return answer(st, text)
     }
 
-    /** (0.10.6) Your picture, locked (`LiveFace.seal`): the relay keeps it until the link ends. */
+    /** (0.10.7) Your picture, locked (`LiveFace.seal`): the relay keeps it until the link ends. */
     suspend fun face(keys: LiveKeys, data: ByteArray): Answer {
         val (st, text) = call("/live/v1/face", buildJsonObject { put("secret", B64u.encode(keys.secretBytes)); put("data", B64u.encode(data)) })
         return answer(st, text)
@@ -146,7 +146,7 @@ object LiveLinkStore {
         val seen: Int = 0,
         /** Your answers. */
         val replies: List<LiveReply> = emptyList(),
-        /** (0.10.6) The picture the relay has (`LiveFace.stamp`) and its version (the state's `pic`; 0: none). */
+        /** (0.10.7) The picture the relay has (`LiveFace.stamp`) and its version (the state's `pic`; 0: none). */
         val picStamp: String = "",
         val pic: Int = 0,
     ) {
@@ -405,7 +405,7 @@ object LiveLinkStore {
         return true
     }
 
-    // MARK: your picture (0.10.6): 128 px, ≤ 12 KB, locked with the link's key; put once, again when it changes
+    // MARK: your picture (0.10.7): 128 px, ≤ 12 KB, locked with the link's key; put once, again when it changes
 
     private fun faceDue(l: Link): Boolean = LiveFace.due(LiveFace.stamp(FriendStore.myPicture.value), l.picStamp, faceTried, now())
 
