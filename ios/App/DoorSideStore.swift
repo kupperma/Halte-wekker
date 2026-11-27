@@ -1,6 +1,6 @@
 import Foundation
 
-/// (0.42.10) Which side you get out of the train at this leg's stop (`DoorSide`): asked of the relay once the leg's train
+/// (0.42.11) Which side you get out of the train at this leg's stop (`DoorSide`): asked of the relay once the leg's train
 /// says its platform there, again only when that (or the stop before) changes, never while the alarm rings. A question
 /// that got no answer is asked again after 5 minutes at the earliest. Only station places and a platform are sent.
 @MainActor

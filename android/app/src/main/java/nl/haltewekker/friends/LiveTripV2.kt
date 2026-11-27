@@ -36,6 +36,9 @@ data class LiveLeg(
     val deck: String? = null,
     val late: Int? = null,
     val mins: Int? = null,
+    /** (0.10.8) This leg's own road, encoded as the state's `shape`: the next two rides' (≤ 80 points), else where it
+     *  goes from and to (two points); the current ride's only when the state has no road or stops of its own. */
+    val shape: String? = null,
 )
 
 /** A stop of the leg you're on (from where you got on to where you get off). */
@@ -51,6 +54,9 @@ object LiveTripV2 {
     const val MAX_LEGS = 12
     const val MAX_STOPS = 60
     const val MAX_SHAPE = 200
+    /** A later leg's road at most (points), for the next this many rides. */
+    const val MAX_LEG_SHAPE = 80
+    const val LEG_ROADS = 2
     /** The whole state's JSON at most (bytes): over it the road goes, then the stops. */
     const val BUDGET = 12_000
 
@@ -58,6 +64,8 @@ object LiveTripV2 {
         val mode: String, val line: String? = null, val num: String? = null, val from: String, val to: String,
         val dep: Double? = null, val arr: Double? = null, val depPlatform: String? = null, val arrPlatform: String? = null,
         val coach: Int? = null, val deck: String? = null, val late: Int? = null, val mins: Int? = null,
+        /** (0.10.8) Where it starts and ends, and its vehicle's whole road when saved (cut here to this leg). */
+        val fromPt: GeoPoint? = null, val toPt: GeoPoint? = null, val road: List<GeoPoint> = emptyList(),
     )
     data class StopIn(val name: String, val lat: Double, val lon: Double, val t: Double? = null)
     data class Vehicle(val lat: Double, val lon: Double, val at: Double)
@@ -74,6 +82,8 @@ object LiveTripV2 {
         /** This app reads messages (the page shows its message box). */
         val inbox: Boolean = true,
         val music: LiveMusic? = null,
+        /** (0.10.8) The version of your picture the relay has (`LiveFace`), when it has one. */
+        val pic: Int? = null,
     )
 
     /** A name or place as sent: no control characters, single spaces, at most `max` characters. */
@@ -152,8 +162,8 @@ object LiveTripV2 {
         return pts.filterIndexed { i, _ -> keep[i] }
     }
 
-    /** Your part of the road (nearest the first and the last stop), at most 200 points, encoded; null: none. */
-    fun road(shape: List<GeoPoint>, stops: List<StopIn>): String? {
+    /** Your part of the road (nearest the first and the last stop), at most `max` points, encoded; null: none. */
+    fun road(shape: List<GeoPoint>, stops: List<StopIn>, max: Int = MAX_SHAPE): String? {
         var pts = shape.map { longArrayOf(q(it.lat), q(it.lon)) }
         val qs = stops.map { longArrayOf(q(it.lat), q(it.lon)) }
         if (pts.size < 2 || qs.size < 2) pts = qs
@@ -167,7 +177,7 @@ object LiveTripV2 {
         if (d.size < 2) return null
         var tol = 1L
         var r = simplify(d, tol)
-        while (r.size > MAX_SHAPE) { tol *= 2; r = simplify(d, tol) }
+        while (r.size > max) { tol *= 2; r = simplify(d, tol) }
         return encode(r)
     }
 
@@ -202,7 +212,35 @@ object LiveTripV2 {
             v = 2, legs = legs, leg = if (legs.isEmpty()) null else max(0, min(legs.size - 1, t.leg)),
             stops = stops.ifEmpty { null }, next = next, shape = road(t.shape, src), pos = pos,
             face = t.face?.takeIf { Regex("^[0-9A-Fa-f]{6}$").matches(it) }?.uppercase(), inbox = if (t.inbox) true else null, music = music,
+            pic = t.pic?.takeIf { it >= 1 },
         )
+        // (0.10.8) each leg's own road from the one before the current (a walk) on: the next two rides' in full
+        val cur = s.leg ?: 0
+        val own = s.shape != null || s.stops != null
+        val straight = arrayOfNulls<String>(legs.size)
+        val full = arrayOfNulls<String>(legs.size)
+        var rides = 0
+        for (i in legs.indices) {
+            val l = t.legs[i]
+            val walk = legs[i].mode == "walk"
+            if (i < cur - 1 || (i == cur - 1 && !walk) || (i == cur && own)) continue
+            val a = l.fromPt ?: continue
+            val b = l.toPt ?: continue
+            val ends = listOf(StopIn("", a.lat, a.lon), StopIn("", b.lat, b.lon))
+            straight[i] = road(emptyList(), ends, 2)
+            if (!walk && i >= cur) {
+                if (rides < LEG_ROADS + (if (own) 0 else 1) && l.road.size >= 2) full[i] = road(l.road, ends, MAX_LEG_SHAPE)
+                rides++
+            }
+        }
+        fun withShapes(): LiveState = s.copy(legs = legs.mapIndexed { i, l -> l.copy(shape = full[i] ?: straight[i]) })
+        if (legs.isNotEmpty()) s = withShapes()
+        // over the budget: the farthest leg's road first, then the rest of the legs' roads, the road, the stops
+        for (i in legs.indices.reversed()) {
+            if (bytes(s) <= BUDGET) break
+            if (full[i] != null) { full[i] = null; s = withShapes() }
+        }
+        if (bytes(s) > BUDGET && legs.isNotEmpty()) s = s.copy(legs = legs)
         if (bytes(s) > BUDGET) s = s.copy(shape = null)
         if (bytes(s) > BUDGET) s = s.copy(stops = null, next = null)
         return s
@@ -217,20 +255,23 @@ object LiveTripV2 {
     fun fromRide(
         trip: DoorTrip, index: Int, destination: String, legArrival: Double?, saved: SavedRide?, vehicle: Vehicle?,
         coach: Pair<String, TravelState.Coach>?, face: String?, now: Double, music: LiveMusic? = null,
+        roads: (String) -> List<GeoPoint>? = { null }, pic: Int? = null,
     ): Trip {
         val legs = ArrayList<LegIn>()
         var cur = 0
         for ((k, r) in trip.rides.withIndex()) {
             if (k > 0 && r.walkBefore > 0) {
                 val prev = trip.rides[k - 1]
-                legs.add(LegIn("walk", from = prev.toStop, to = r.fromStop, dep = prev.arrival, arr = prev.arrival + r.walkBefore * 60, mins = r.walkBefore))
+                legs.add(LegIn("walk", from = prev.toStop, to = r.fromStop, dep = prev.arrival, arr = prev.arrival + r.walkBefore * 60, mins = r.walkBefore,
+                    fromPt = prev.to, toPt = r.from))
             }
             if (k == index) cur = legs.size
             val mode = if (r.isTrain) "train" else r.mode.uppercase().let { m -> if (m.contains("TRAM")) "tram" else if (m.contains("SUBWAY") || m.contains("METRO")) "metro" else if (m.contains("FERRY")) "ferry" else "bus" }
             val c = coach?.takeIf { it.first == r.tripId && r.isTrain }?.second
             legs.add(LegIn(mode, line = if (r.isTrain) TransitLabel.train(r.line, r.name) else r.line, num = r.num.ifEmpty { null }, from = r.fromStop, to = r.toStop,
                 dep = r.departure, arr = if (k == index) legArrival ?: r.arrival else r.arrival, depPlatform = r.platform ?: r.plannedPlatform,
-                coach = c?.n, deck = c?.seat?.deck, late = if (r.live) r.delay else null))
+                coach = c?.n, deck = c?.seat?.deck, late = if (r.live) r.delay else null,
+                fromPt = r.from, toPt = r.to, road = if (k >= index) roads(r.tripId) ?: emptyList() else emptyList()))
         }
         val last = trip.rides.last()
         if (trip.walkAfter > 0) legs.add(LegIn("walk", from = last.toStop, to = destination.ifEmpty { last.toStop }, dep = last.arrival, arr = trip.end, mins = trip.walkAfter))
@@ -246,7 +287,7 @@ object LiveTripV2 {
                 shape = saved.shape
             }
         }
-        return Trip(legs, cur, stops, shape, vehicle, face, true, music)
+        return Trip(legs, cur, stops, shape, vehicle, face, true, music, pic)
     }
 
     /** A friends account's colour for its initial (the app's own: the same six, picked by the account). */
@@ -326,4 +367,30 @@ object LiveMessages {
             Triple(seq, at, data)
         }
     }
+}
+
+/**
+ * (0.10.8) Your Friends picture on a live link's page: 128 px, a JPEG of at most 12 KB, locked with the link's key under
+ * its own AAD ("hw-live-face-v1\n" + token) and put once at `/live/v1/face` (again when the picture changes); the state's
+ * `pic` says which one the relay has, so the page fetches it once. No picture: nothing is put.
+ */
+object LiveFace {
+    const val KIND = "hw-live-face-v1"
+    const val SIDE = 128
+    const val MAX_BYTES = 12 * 1024
+    /** A put that failed is tried again after this long (s). */
+    const val RETRY = 60.0
+
+    fun seal(jpeg: ByteArray, key: ByteArray, token: String, nonce: ByteArray = FriendCrypto.randomBytes(12)): ByteArray =
+        LiveCrypto.sealAs(KIND, jpeg, key, token, nonce)
+
+    fun open(data: ByteArray, key: ByteArray, token: String): ByteArray = LiveCrypto.openAs(KIND, data, key, token)
+
+    /** Which picture it is (the first 16 bytes of its SHA-256, hex); "" for none. */
+    fun stamp(picture: ByteArray?): String =
+        if (picture == null || picture.isEmpty()) "" else java.security.MessageDigest.getInstance("SHA-256").digest(picture).take(16).joinToString("") { "%02x".format(it) }
+
+    /** Put it now: there is one, the relay doesn't have this one, and the last try isn't too recent. */
+    fun due(stamp: String, sent: String, lastTry: Double?, now: Double): Boolean =
+        stamp.isNotEmpty() && stamp != sent && (lastTry == null || now - lastTry >= RETRY)
 }

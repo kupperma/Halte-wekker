@@ -566,7 +566,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         whichTrain = []; whichTrainTo = [:]; whichTrainAsked = false; trainSeen = [:]; rivalLookAt = Date().addingTimeInterval(60)
         lastGood = nil; reckonFrom = nil; reckoning = false
         readyTold = false; ringNote = nil; arrivePlatform = nil; legDelay = nil; changeGuide = nil; nextOptions = []; usingSaved = false
-        DoorSideStore.shared.reset()                      // (0.42.10) the exit side is asked for this leg's stop
+        DoorSideStore.shared.reset()                      // (0.42.11) the exit side is asked for this leg's stop
         missHold = MissCall.Hold(); quietLeg = false; ringInUse = false; headsign = ""; stayOnTo = nil
         betterOffer = nil; betterTask?.cancel(); betterTask = nil; betterAt = .distantPast
         meant = route?.planned?[safe: index]; meantTo = leg?.to; wrongBus = nil; otherAtStop = nil      // (0.39.1)
@@ -1436,7 +1436,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         let t = WristNotice.ring(approach: approach, stop: leg?.to.short, soon: soonText(secs), inUse: inUse)
         let c = UNMutableNotificationContent()
         c.title = t.title
-        c.body = DoorSide.withLine(t.body, doorLine)      // (0.42.10) "Exit on the left · platform 4"
+        c.body = DoorSide.withLine(t.body, doorLine)      // (0.42.11) "Exit on the left · platform 4"
         c.sound = sound.quietNow ? nil : .default         // no headphones: it buzzes instead
         c.interruptionLevel = .timeSensitive
         c.userInfo = ["kind": "go"]
@@ -2929,7 +2929,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         let s = t.stops[i]
         let track: String? = s.track?.trimmingCharacters(in: .whitespaces)
         arrivePlatform = (track?.isEmpty ?? true) ? nil : track
-        askDoorSide(t, to: l)                             // (0.42.10) which side you get out
+        askDoorSide(t, to: l)                             // (0.42.11) which side you get out
         if t.live, let sch = s.scheduledArrival ?? s.scheduled, let a = s.arrival ?? s.departure {
             legDelay = Int((a.timeIntervalSince(sch) / 60).rounded())
         } else {
@@ -2937,7 +2937,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         }
     }
 
-    /// (0.42.10) Which side you get out at this leg's stop (`DoorSideStore`): from the train's own trip, never while it rings.
+    /// (0.42.11) Which side you get out at this leg's stop (`DoorSideStore`): from the train's own trip, never while it rings.
     private func askDoorSide(_ t: LiveTrip, to l: Leg) {
         guard !demo else { return }
         let ringing: Bool = { if case .alarm = phase { return true }; return false }()
@@ -2946,7 +2946,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
                                   code: NSStore.code(l.to), ringing: ringing)
     }
 
-    /// (0.42.9) "Exit on the left · platform 4" for this train leg's stop; nil: not known (or not a train).
+    /// (0.42.11) "Exit on the left · platform 4" for this train leg's stop; nil: not known (or not a train).
     var doorLine: String? { legIsTrain ? DoorSideStore.shared.line(for: leg?.to.name) : nil }
 
     /// As the trip starts: its planned rides (from this leg on) saved on the phone, for the stretches without signal.
@@ -3203,7 +3203,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         rideLog("get ready · one stop before yours", once: "ready|\(index)", every: 600)
         let c = UNMutableNotificationContent()
         c.title = w.title
-        c.body = DoorSide.withLine(w.body, doorLine)      // (0.42.10) which side you get out
+        c.body = DoorSide.withLine(w.body, doorLine)      // (0.42.11) which side you get out
         c.sound = nil                                     // quiet: the alarm is what rings
         c.interruptionLevel = .active
         c.userInfo = ["kind": "info"]
@@ -4642,7 +4642,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             text = parts.joined(separator: " · ")
         }
         let delay: Int? = riding ? legDelay : nil
-        // (0.42.10) "platform 4 · exit on the left"
+        // (0.42.11) "platform 4 · exit on the left"
         let door: DoorSide.Answer? = legIsTrain ? DoorSideStore.shared.answer(for: leg?.to.name) : nil
         let platform: String? = riding ? DoorSide.lockPlatform(arrivePlatform, door) : nil
         return (nextName, delay, platform, text, changeGuide?.target.departure, changeGuide?.missText)

@@ -1,6 +1,6 @@
 import XCTest
 
-/// (0.42.10) Which side you get out: the relay's answer, the line the app shows and how it asks, against
+/// (0.42.11) Which side you get out: the relay's answer, the line the app shows and how it asks, against
 /// docs/door-side-vectors.json (the vectors Android and the relay check too).
 final class DoorSideTests: XCTestCase {
     private var v: [String: Any] = [:]

@@ -192,4 +192,136 @@ final class LiveTripV2Tests: XCTestCase {
         s.pos = LiveState.Position(lat: 51.61672, lon: 5.54861, at: Date(timeIntervalSince1970: 1_799_999_990))
         XCTAssertEqual(String(decoding: try LiveCrypto.encoder.encode(s), as: UTF8.self), FriendLiveTests.plain)
     }
+
+    // MARK: (0.42.10) each leg's own road, the picture: docs/live-link-vectors.json's input2, state2 and face
+
+    private func vectors() throws -> [String: Any] {
+        let url = Bundle(for: Self.self).url(forResource: "live-link-vectors", withExtension: "json")
+            ?? URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../docs/live-link-vectors.json")
+        return try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+    }
+
+    private func point(_ x: Any?) -> GeoPoint? {
+        guard let a = x as? [Double], a.count == 2 else { return nil }
+        return GeoPoint(lat: a[0], lon: a[1])
+    }
+
+    private func input2(_ v: [String: Any]) throws -> (LiveState, LiveTripV2.Trip) {
+        let inp: [String: Any] = try XCTUnwrap(v["input2"] as? [String: Any])
+        let t: [String: Any] = try XCTUnwrap(inp["trip"] as? [String: Any])
+        var s = LiveState(name: "Sam", state: "change", mode: "train", t: Date(timeIntervalSince1970: 1800001300))
+        s.line = "IC"
+        s.from = "Eindhoven Centraal"
+        s.to = "Breda"
+        s.dest = "Campus"
+        s.dep = Date(timeIntervalSince1970: 1800001500)
+        s.eta = Date(timeIntervalSince1970: 1800003840)
+        s.end = Date(timeIntervalSince1970: 1800005400)
+        s.late = 1
+        s.pos = LiveState.Position(lat: 51.4425123, lon: 5.4770249, at: Date(timeIntervalSince1970: 1800001290))
+        let rows: [[String: Any]] = try XCTUnwrap(t["legs"] as? [[String: Any]])
+        var legs: [LiveTripV2.LegIn] = []
+        for l in rows {
+            let mode: String = l["mode"] as? String ?? ""
+            let from: String = l["from"] as? String ?? ""
+            let to: String = l["to"] as? String ?? ""
+            var x = LiveTripV2.LegIn(mode: mode, from: from, to: to)
+            x.line = l["line"] as? String
+            x.num = l["num"] as? String
+            x.dep = l["dep"] as? Double
+            x.arr = l["arr"] as? Double
+            x.depPlatform = l["depPlatform"] as? String
+            x.arrPlatform = l["arrPlatform"] as? String
+            x.late = l["late"] as? Int
+            x.mins = l["mins"] as? Int
+            x.fromPt = point(l["fromPt"])
+            x.toPt = point(l["toPt"])
+            let road: [Any] = l["road"] as? [Any] ?? []
+            x.road = road.compactMap { point($0) }
+            legs.append(x)
+        }
+        var trip = LiveTripV2.Trip(legs: legs, leg: t["leg"] as? Int ?? 0)
+        trip.face = t["face"] as? String
+        trip.inbox = true
+        trip.pic = t["pic"] as? Int
+        return (s, trip)
+    }
+
+    private func decode(_ p: String) -> [GeoPoint] {
+        var out: [GeoPoint] = []
+        let b: [UInt8] = Array(p.utf8)
+        var i: Int = 0
+        var lat: Int = 0
+        var lon: Int = 0
+        while i < b.count {
+            var vals: [Int] = []
+            for _ in 0..<2 {
+                var shift: Int = 0
+                var res: Int = 0
+                var c: Int = 0
+                repeat {
+                    c = Int(b[i]) - 63
+                    i += 1
+                    res |= (c & 31) << shift
+                    shift += 5
+                } while c >= 32 && i < b.count
+                let half: Int = res >> 1
+                vals.append((res & 1) != 0 ? ~half : half)
+            }
+            lat += vals[0]
+            lon += vals[1]
+            out.append(GeoPoint(lat: Double(lat) / 1e5, lon: Double(lon) / 1e5))
+        }
+        return out
+    }
+
+    func test_legRoadsByteForByte() throws {
+        let v = try vectors()
+        let (base, trip) = try input2(v)
+        let s: LiveState = LiveTripV2.build(base, trip, now: Date(timeIntervalSince1970: 1800001300))
+        let want: [String: Any] = try XCTUnwrap(v["state2"] as? [String: Any])
+        let json: Data = try LiveCrypto.encoder.encode(s)
+        XCTAssertEqual(String(decoding: json, as: UTF8.self), want["plain"] as? String)
+        let nonce = try AES.GCM.Nonce(data: hex(try XCTUnwrap(want["nonce"] as? String)))
+        XCTAssertEqual(B64URL.encode(try LiveCrypto.seal(json, key: key, token: token, nonce: nonce)), want["data"] as? String)
+        let legs: [LiveLeg] = try XCTUnwrap(s.legs)
+        XCTAssertNil(legs[0].shape, "before the walk: none")
+        XCTAssertEqual(decode(try XCTUnwrap(legs[1].shape)).count, 2)
+        let ic: [GeoPoint] = decode(try XCTUnwrap(legs[2].shape))
+        XCTAssertTrue((3...LiveTripV2.maxLegShape).contains(ic.count))
+        XCTAssertGreaterThan(decode(try XCTUnwrap(legs[3].shape)).count, 2)
+        XCTAssertEqual(s.pic, 2)
+        XCTAssertEqual(s.pos?.src, "phone")
+        XCTAssertNil(s.shape)
+        // with a road of its own the current ride sends none
+        var t2 = trip
+        t2.stops = [LiveTripV2.StopIn(name: "A", lat: 51.44, lon: 5.47), LiveTripV2.StopIn(name: "B", lat: 51.59, lon: 4.78)]
+        let own: LiveState = LiveTripV2.build(base, t2, now: Date(timeIntervalSince1970: 1800001300))
+        XCTAssertNil(own.legs?[2].shape)
+        var s3: LiveState = s
+        s3.pic = 3
+        XCTAssertNotEqual(LiveRules.key(s), LiveRules.key(s3))
+    }
+
+    func test_faceByteForByte() throws {
+        let v = try vectors()
+        let f: [String: Any] = try XCTUnwrap(v["face"] as? [String: Any])
+        let jpeg: Data = try XCTUnwrap(B64URL.decode(try XCTUnwrap(f["plain"] as? String)))
+        let nonce = try AES.GCM.Nonce(data: hex(try XCTUnwrap(f["nonce"] as? String)))
+        let sealed: Data = try LiveFace.seal(jpeg, key: key, token: token, nonce: nonce)
+        XCTAssertEqual(B64URL.encode(sealed), f["data"] as? String)
+        XCTAssertEqual(try LiveFace.open(sealed, key: key, token: token), jpeg)
+        // its own AAD: not a trip state, not a message
+        XCTAssertThrowsError(try LiveCrypto.open(sealed, key: key, token: token))
+        XCTAssertThrowsError(try LiveCrypto.open(sealed, key: key, token: token, kind: LiveMessages.msg))
+        let stamp: String = LiveFace.stamp(jpeg)
+        XCTAssertEqual(stamp.count, 32)
+        XCTAssertEqual(LiveFace.stamp(nil), "")
+        let at = Date(timeIntervalSince1970: 100)
+        XCTAssertTrue(LiveFace.due(stamp, sent: "", lastTry: nil, now: at))
+        XCTAssertFalse(LiveFace.due(stamp, sent: stamp, lastTry: nil, now: at))
+        XCTAssertFalse(LiveFace.due("", sent: "", lastTry: nil, now: at))
+        XCTAssertFalse(LiveFace.due(stamp, sent: "", lastTry: Date(timeIntervalSince1970: 70), now: at))
+        XCTAssertTrue(LiveFace.due(stamp, sent: "", lastTry: Date(timeIntervalSince1970: 40), now: at))
+    }
 }

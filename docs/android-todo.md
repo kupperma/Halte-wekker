@@ -3,7 +3,7 @@
 The rules and numbers for each are in [logs-export.md](logs-export.md) › For Android (parity), with the iOS files and
 their tests.
 
-## iOS 0.42.10 (which side you get out)
+## iOS 0.42.11 (which side you get out)
 
 The request "I would like the app to also show which side you get out of the train". The relay's new
 `/rail/v1/side?station=BD&track=4&from=<lat,lon>&at=<lat,lon>` (`relay/rail.js`, tests `relay/test-rail.mjs`) says
