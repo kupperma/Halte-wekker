@@ -6,7 +6,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 
-/** (0.10.6, iOS 0.42.9 `BetterStopTests`) a through train's later stops planned from, the faster one offered. */
+/** (0.10.7, iOS 0.42.9 `BetterStopTests`) a through train's later stops planned from, the faster one offered. */
 class BetterStopTest {
     private val t0 = Fx.t0
     private fun at(s: Double) = t0 + s

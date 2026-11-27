@@ -90,7 +90,7 @@ fun RideScreen(s: RideState, onBack: () -> Unit) {
                 q.ids.forEachIndexed { k, id -> QuietButton(q.answers.getOrElse(k) { "This one" }) { RideService.send(context, RideService.ACTION_ANSWER, trip = id) } }
             }
         } }
-        // (0.10.6, iOS 0.42.9) a later stop of the one you're on gets you there sooner
+        // (0.10.7, iOS 0.42.9) a later stop of the one you're on gets you there sooner
         s.better?.let { b -> Card {
             Text("A faster way: stay on", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = DS.t.text)
             Text(b.text, color = DS.t.text)
@@ -117,7 +117,7 @@ fun RideScreen(s: RideState, onBack: () -> Unit) {
         } }
         if (leg != null && s.phase != Phase.FINISHED) Card {
             Header(if (s.trip.rides.size > 1) "Leg ${s.index + 1} of ${s.trip.rides.size}" else "Your ride", s.legArrival?.let { "there ${Fmt.time(it)}" })
-            // (0.10.6, iOS 0.42.9) by where it really goes ("Intercity to Zwolle"), and where you get off
+            // (0.10.7, iOS 0.42.9) by where it really goes ("Intercity to Zwolle"), and where you get off
             val head = s.headline
             Row(verticalAlignment = Alignment.CenterVertically) {
                 LinePill(s.vehicleLine ?: leg.line, leg.kind); Spacer(Modifier.width(8.dp))

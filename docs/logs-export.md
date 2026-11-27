@@ -218,7 +218,7 @@ The same switches, words and rules, so the relay and the replay treat both alike
 ### Staying on, the best stop to get off, every ring on the lock screen (0.42.9)
 
 What's new in 0.42.9 (`ios/App/TrainRules.swift` `stayOn`/`headline`, `ios/App/BetterStop.swift`, `ios/App/AlarmStop.swift`
-`RingShow`; tests `TrainRulesTests`, `BetterStopTests`, `AlarmStopTests`; Android 0.10.6 in
+`RingShow`; tests `TrainRulesTests`, `BetterStopTests`, `AlarmStopTests`; Android 0.10.7 in
 [android-todo.md](android-todo.md) › iOS 0.42.9). New and changed lines in the ride log:
 
 - `stay on · IC 3529 also reaches Eindhoven 15:44 (plan changed at Tilburg 15:05 → IC 3631 15:12)`: the vehicle you're

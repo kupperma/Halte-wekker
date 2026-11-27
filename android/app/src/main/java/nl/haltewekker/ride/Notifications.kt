@@ -99,7 +99,7 @@ object Notifications {
             Phase.ALARM -> "Wake up: ${leg.toStop}"
             Phase.AWAKE -> "Get ready: ${leg.toStop}"
             Phase.FINISHED -> "You're there"
-            // (0.10.6, iOS 0.42.9) where it really goes, and where you get off ("Intercity to Zwolle · get off at Tilburg")
+            // (0.10.7, iOS 0.42.9) where it really goes, and where you get off ("Intercity to Zwolle · get off at Tilburg")
             else -> s.lockTitle ?: "$what to ${leg.toStop}"
         }
         val parts = ArrayList<String>()

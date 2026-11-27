@@ -27,17 +27,17 @@ never got a second look). A plan that split one train in two legs wasn't handled
       number): always merged. Merged: one leg less ("Leg 1 of 2"), headline "Stay on to Eindhoven", the stops list to
       there, the lock screen and the change guide without that change, the wake-up for the new stop (a ring for the
       skipped station, if it rang already, goes). Looked at again with every new answer of its stops (every minute).
-      **Android 0.10.6:** `match/TrainRules.kt` (`stayOn`, the same names; `TrainRulesTest`), `RideService.stayOnIfItGoes`
+      **Android 0.10.7:** `match/TrainRules.kt` (`stayOn`, the same names; `TrainRulesTest`), `RideService.stayOnIfItGoes`
       (also every minute now, buses too) and `applyStay`.
 - [x] **The headline** (`TrainRules.headline`/`lockHeadline`): "Intercity to Zwolle" / "Get off at Tilburg" (the
       vehicle's headsign, else its last stop); never "Intercity to <your stop>". The lock screen: "Intercity to Zwolle ·
-      get off at Tilburg". **Android 0.10.6:** `RideState.headline`/`lockTitle`, `RideScreen`, the ride notification.
+      get off at Tilburg". **Android 0.10.7:** `RideState.headline`/`lockTitle`, `RideScreen`, the ride notification.
 - [x] **The best place to get off** (`BetterStop`; tests `BetterStopTests`): on a vehicle whose stops go on past this
       leg's stop, up to 3 of its later stops within 90 min (nearest the destination first) are planned from, one
       planner question each, every 5 min at most; one that gets you there ≥ 3 min sooner (or as soon with fewer
       changes) is offered: card and quiet notification "Stay on to 's-Hertogenbosch — home 15:52 instead of 16:01 (bus
       306 at 15:31)", "Do this" (this leg to there, the wake-up there, then the new legs) / "Keep my plan" (not again
-      for that stop this trip). Only a tap takes it. **Android 0.10.6:** `match/BetterStop.kt` (`BetterStopTest`),
+      for that stop this trip). Only a tap takes it. **Android 0.10.7:** `match/BetterStop.kt` (`BetterStopTest`),
       `RideService.betterStopLook`/`takeBetterStop`/`keepPlan`, the card on `RideScreen`.
 - [x] **Every ring on the lock screen** (`RingShow` in `AlarmStop.swift`; tests `AlarmStopTests`): the ring while you
       use the phone (one chime or two buzzes, no loop), the vibration-only ring without headphones (from its first
@@ -49,7 +49,7 @@ never got a second look). A plan that split one train in two legs wasn't handled
 - [x] **No out loud without headphones**: vibration only until you stop it; out loud after a minute only with Settings ›
       Trips & alarm › "Out loud if I don't stop it (after 1 min)", off for everyone (iOS: `outLoudLaterSet` once;
       Android: `Settings.outLoudLaterOffOnce` in `migrated()`). The backup's own notification without headphones has
-      no sound either. The school wake-up at home is unchanged. **Android 0.10.6:** `AlarmPlayer.ring(loudLater)`,
+      no sound either. The school wake-up at home is unchanged. **Android 0.10.7:** `AlarmPlayer.ring(loudLater)`,
       `WakeRules.loudLater`, the switch in `SettingsScreen`.
 
 ## iOS 0.42.8
