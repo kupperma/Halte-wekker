@@ -86,6 +86,8 @@ object FriendTravelShare {
         val s = RideStore.state.value
         val sig = signals(s)
         confirmed = if (sig.running) TravelShareRules.confirmed(confirmed, sig) else false
+        // (listening now) the trip ended: the song is forgotten
+        if (!sig.running) MusicShareStore.stop()
         if (coachTrip.value != null && coachTrip.value != s?.vehicleTripId) { coach.value = null; coachTrip.value = null }
         evaluate(c, force = s != null && key(s) != lastKey)
     }
@@ -94,6 +96,8 @@ object FriendTravelShare {
     fun tick(c: Context) = FriendStore.launch {
         val app = c.applicationContext
         val s = RideStore.state.value
+        // (listening now) a look at what you listen to, when sharing it is on and one is due (every 30 s at most)
+        MusicShareStore.tick(app, running(s))
         confirmed = if (signals(s).running) TravelShareRules.confirmed(confirmed, signals(s)) else false
         evaluate(app, force = false)
         // (0.30) the live link's next state, and the ride history (friends on this bus or train with you)
@@ -189,6 +193,8 @@ object FriendTravelShare {
             leg = s.index + 1,
             legs = s.trip.rides.size,
             coach = if (train && coachTrip.value == tripId) coach.value else null,
+            // (listening now) the song, when you share it with friends
+            music = MusicShareStore.forFriends(running(s)),
         )
     }
 

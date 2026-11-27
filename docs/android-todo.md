@@ -3,6 +3,23 @@
 The rules and numbers for each are in [logs-export.md](logs-export.md) › For Android (parity), with the iOS files and
 their tests.
 
+## iOS 0.42.7 (Listening now)
+
+Sharing the song you listen to while you travel, with friends and on your live link. Rules, the relay route and the
+vectors in [the friends spec](superpowers/specs/2026-11-18-friends-design.md) › "As built: Listening now"; the shared
+vectors `docs/music-vectors.json` are checked by the relay, iOS and Android alike.
+
+- [x] **Settings › Friends › "Share what I’m listening to"** (off), From, Who sees it, "Check what’s playing".
+      iOS: Apple Music or Last.fm (Spotify via Last.fm). **Android 0.10.4:** `friends/MusicShare.kt` (`MusicShareTest`,
+      every vector), `MusicShareStore` (any music app's media session through Notification access, the
+      `MusicListener` service in the manifest; or Last.fm), `ui/friends/MusicShareUi.kt`'s card.
+- [x] **Out with the existing puts**: the travel state's `music` and payload v2's `music`, looked at on the ride's tick
+      (≤ every 30 s), dropped when paused or 10 minutes old, gone at the trip's end. **Android 0.10.4:**
+      `FriendTravelShare.build`/`tick`, `LiveLinkStore.state`, `LiveRules.key`.
+- [x] **A friend's page**: the "LISTENING NOW" strip, "💬 Message" and "🎧 Listen too". **Android 0.10.4:**
+      `FriendListeningStrip` on `FriendMapPage`. (Android's own live-link view doesn't show the card yet; the page does.)
+- [ ] Android: the card in the app's own live-link view (`LiveViewScreen`), drawn in its dark colours.
+
 ## iOS 0.42.6
 
 From the field report "The alarm went off when I was already on a trip to school. I was meeting friends earlier, so I

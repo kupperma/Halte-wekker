@@ -1342,7 +1342,7 @@ and "(0.30.1)" holds: the token, the key in the fragment, the lock (`0x01 ‖ no
 - **Listening now** (only when `music` is there and its `at` is under 10 minutes old): the cover (only from `i.scdn.co`,
   `*.mzstatic.com`, `lastfm.freetls.fastly.net`; else a ♪ tile), an equalizer and "LISTENING NOW", the title, "artist ·
   app", and "Open ↗" when `url` is on `open.spotify.com`, `music.apple.com` or `www.last.fm` (https only). All text is set
-  as text. The apps don't fill `music` yet (reserved: their builders take it, nil by default).
+  as text. Filled by the apps from iOS 0.42.7 and Android 0.10.4 when you share it ("Listening now" below).
 - On a phone, "Open in Haltewekker" (top right) opens `haltewekker://live/<token>#k=<key>`.
 
 ### Payload v2 (inside the same lock; `LiveTripV2` in `ios/App/LiveTripV2.swift` and `android/…/friends/LiveTripV2.kt`)
@@ -1402,3 +1402,52 @@ and "(0.30.1)" holds: the token, the key in the fragment, the lock (`0x01 ‖ no
   `{"at":1800000060,"re":1,"text":"See you there"}` (nonce `707172737475767778797a7b`), each with its locked bytes in the file.
 - The page draws it as "Sam is on bus 305" / "to Eindhoven Centraal · on time", legs `305 → 🚶 → IC → 1 → 🚶 Campus`, a
   16-point road.
+
+## As built: Listening now (relay 2026-11-27, iOS 0.42.7, Android 0.10.4)
+
+Opt-in, off by default: Settings › Friends › "Share what I’m listening to" ("Only while you travel · song and artist
+only"). The song playing now, its artist and app and a cover, while a trip runs (a live link is only live during one);
+never history, nothing when paused. Rules in `ios/App/MusicShare.swift` and `android/…/friends/MusicShare.kt`, the
+stores `MusicShareStore` on each.
+
+### Where it comes from
+- **From** (iOS): Apple Music (the Music app's `MPMusicPlayerController.systemMusicPlayer.nowPlayingItem`; Media &
+  Apple Music is asked for when you turn sharing on with it), "Spotify (via Last.fm)" or "Last.fm" (any app that
+  scrobbles there) with your Last.fm username. (Android): any music app on the phone through its media session
+  (`MediaSessionManager.getActiveSessions` with the `MusicListener` notification listener: you turn on Notification
+  access; no notification is read), or the same two Last.fm choices.
+- Covers and links are public ones only: the iTunes Search API (`https://itunes.apple.com/search?term=<artist
+  title>&entity=song&limit=1`, no key) gives `artworkUrl100` (taken at 300×300, `*.mzstatic.com`) and `trackViewUrl`
+  (`music.apple.com`, without `uo`), used only when the result's artist is alike (lowercase letters and digits, one
+  containing the other; no artist: the title); kept per song in memory. A song in Spotify on Android links to an
+  `open.spotify.com/search/…` instead. A phone's own cover picture is never sent.
+- **Last.fm through the relay**: `GET /music/v1/now?user=<2–15: a letter, then letters, digits, _ or ->[&app=spotify|
+  lastfm]` (`relay/music.js`) asks `user.getrecenttracks&limit=1` with the relay's secret `LASTFM_API_KEY` and answers
+  only the track playing now (`@attr.nowplaying`): `{"nowPlaying":true,"title","artist","app":"Spotify"|"Last.fm","url"
+  (a Spotify search for app=spotify, else the www.last.fm track page),"coverUrl"? (the largest on
+  lastfm.freetls.fastly.net, not Last.fm's grey star),"at"}`, else `{"nowPlaying":false,"at"}`. 400 bad input, 404
+  unknown user, 403 private listening, 429 (30 a minute per hashed network address, or Last.fm's), 502 Last.fm away,
+  503 `not_configured` without the secret (the apps say "Last.fm isn’t set up yet"). Kept 30 s per user in the Worker.
+
+### When it goes out
+- Looked at on the ride's own network tick (`FriendTravelShare.tick`), at most every 30 s, only with sharing on and a
+  trip running: no wake-up of its own. A new song makes the live link put at the next tick (`LiveRules.key` ends with
+  the song's title).
+- `MusicShare.share(song, on, who, channel, travelling, now)`: nothing when off, not travelling, paused, the last look
+  10 minutes old or more, or no title; **Who sees it**: "Friends + live links" (`all`), "Only friends", "Only live
+  links". Title ≤ 80, artist ≤ 60, app ≤ 20 (cleaned as names), `url` only on open.spotify.com, music.apple.com or
+  www.last.fm, `coverUrl` only from i.scdn.co, *.mzstatic.com or lastfm.freetls.fastly.net (https, ≤ 500), `at` the
+  last look that saw it, ISO 8601 in whole seconds.
+- To friends: the travel state's optional `music` (the same object; older apps ignore the key). To a live link:
+  payload v2's `music`. Both gone when the trip ends; the song is forgotten.
+- A friend's page (both apps) shows the strip while their `music` is under 10 minutes old: the cover (♪ tile
+  otherwise), the equalizer and "LISTENING NOW", the title, "artist · app", "Open ↗", then "💬 Message" (their chat)
+  and "🎧 Listen too" (the link). The iPhone's own view of a live link shows the card too.
+- The log says only "music · sharing on" / "music · sharing off" and "music · 3 songs shared" at a trip's end.
+
+### Test vectors (`docs/music-vectors.json`; checked by `relay/test-music.mjs`, `ios/Tests/MusicShareTests.swift`,
+`android/app/src/test/java/nl/haltewekker/MusicShareTest.kt`)
+- 13 cases of the rule (base: "Midnight City" by M83 in Spotify, seen 30 s before `now` 1800000000) with what friends
+  and a link get, the `music` JSON, a travel state with it (`{"eta":1800000960,…,"music":{…},"state":"riding",…}`),
+  three iTunes queries and five picks from one answer, and the relay's answer to a Last.fm reply (playing, and not).
+

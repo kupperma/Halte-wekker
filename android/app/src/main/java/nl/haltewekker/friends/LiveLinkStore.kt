@@ -266,7 +266,7 @@ object LiveLinkStore {
                 ?: num.toIntOrNull()?.let { nl.haltewekker.live.LiveFeeds.trains[it] }?.let { nl.haltewekker.live.RealPositions.usable(it, tripId, now) }
             val coach = FriendTravelShare.coachTrip.value?.let { id -> FriendTravelShare.coach.value?.let { id to it } }
             val trip = LiveTripV2.fromRide(s.trip, s.index, s.destination, s.legArrival, saved, fix?.let { LiveTripV2.Vehicle(it.lat, it.lon, it.at) },
-                coach, LiveTripV2.face(FriendStore.myAccount), now)
+                coach, LiveTripV2.face(FriendStore.myAccount), now, MusicShareStore.forLink(running(s)))
             LiveTripV2.build(base, trip, now)
         } catch (_: Exception) { base }
     }

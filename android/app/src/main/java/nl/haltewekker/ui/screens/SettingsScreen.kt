@@ -182,12 +182,16 @@ private fun TopicPage(t: SettingsTopic, onBack: () -> Unit, onSetup: () -> Unit,
                 QuietButton("Set up again", onClick = onSetup)
             }
             SettingsTopic.SCHOOL -> SchoolSettingsCard(onDay, onCalendars, onWeek)
-            SettingsTopic.FRIENDS -> Card {
-                Text("Friends", fontWeight = FontWeight.Bold, color = DS.t.text)
-                Text(if (nl.haltewekker.friends.FriendStore.hasAccount) "Your friends, chats, what they see, your backup code, the leaderboard." else "Travel with friends: share trips, chat, compare timetables.",
-                    color = DS.t.secondary)
-                QuietButton("Open Friends", onClick = onFriends)
-                nl.haltewekker.ui.friends.TestFriendSettingsRow()
+            SettingsTopic.FRIENDS -> {
+                Card {
+                    Text("Friends", fontWeight = FontWeight.Bold, color = DS.t.text)
+                    Text(if (nl.haltewekker.friends.FriendStore.hasAccount) "Your friends, chats, what they see, your backup code, the leaderboard." else "Travel with friends: share trips, chat, compare timetables.",
+                        color = DS.t.secondary)
+                    QuietButton("Open Friends", onClick = onFriends)
+                    nl.haltewekker.ui.friends.TestFriendSettingsRow()
+                }
+                // (listening now) sharing what you listen to while you travel
+                nl.haltewekker.ui.friends.MusicShareCard()
             }
             SettingsTopic.MAP -> {
                 Card {

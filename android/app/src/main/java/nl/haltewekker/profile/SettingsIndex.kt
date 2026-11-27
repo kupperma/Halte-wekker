@@ -65,6 +65,7 @@ object SettingsIndex {
         // Friends
         e("friends.open", "Friends", SettingsTopic.FRIENDS, "chats", "groups", "requests", "friend code", "backup code", "sharing", "leaderboard", "scores"),
         e("friends.test", "Test friend", SettingsTopic.FRIENDS, "bot", "add a test friend", "remove test friend", "try friends"),
+        e("friends.music", "Share what I’m listening to", SettingsTopic.FRIENDS, "listening now", "music", "song", "spotify", "last.fm", "lastfm", "now playing", "listen too", "notification access"),
         // Map & home
         e("map.real", "Real bus and train positions", SettingsTopic.MAP, "gps", "ovapi", "ns", "where they are", "data"),
         e("map.busPosition", "Bus position", SettingsTopic.MAP, "real gps", "estimated", "where the bus is", "train position", "expected"),
