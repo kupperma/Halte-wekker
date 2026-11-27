@@ -45,6 +45,7 @@ object SettingsIndex {
         e("trips.autoHome", "Switch to Home at school", SettingsTopic.TRIPS, "direction", "going home", "auto home"),
         e("trips.motion", "Use motion to notice rides faster", SettingsTopic.TRIPS, "motion & fitness", "activity", "walking", "cycling", "step", "on board", "battery", "permission"),
         e("alarm.headphones", "Sound only with headphones", SettingsTopic.TRIPS, "vibrate", "silent", "earbuds", "bluetooth", "quiet"),
+        e("alarm.loudLater", "Out loud if I don't stop it (after 1 min)", SettingsTopic.TRIPS, "speaker", "escalate", "deep sleeper", "no headphones", "loud"),
         e("alarm.backup", "Backup alarm", SettingsTopic.TRIPS, "minutes", "timer", "gps drops", "safety"),
         e("wake.by", "Wake me … before my stop", SettingsTopic.TRIPS, "by time", "by distance", "minutes", "min", "eta", "arrival", "how soon", "when to wake", "train", "bus"),
         e("wake.bus", "Wake distance by bus", SettingsTopic.TRIPS, "km", "kilometres", "how far", "usual distance"),

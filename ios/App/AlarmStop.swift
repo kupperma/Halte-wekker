@@ -60,3 +60,66 @@ enum AlarmStop {
     /// app while nothing rings.
     static let tripDelivered: [String] = [WristNotice.alarmId, WristNotice.againId, "backup", "heads-up-true", "heads-up-false"]
 }
+
+/// (0.42.9) How each kind of ring shows: on 2026-11-27 the approach to a change rang while the phone was in use (and no
+/// headphones in): one plain notification and "You're awake. A chime when you're there." on the ride screen, with no
+/// ringing state and no Stop alarm on the lock screen. Now every ring the trip makes, whatever set it off (the wake rule
+/// by distance or by time, the reckoned position, the backup alarm, its repeat), and however it sounds (out loud, by
+/// vibration only without headphones, a single chime while you use the phone) rings the same way: the Live Activity's
+/// ringing state with its Stop button, the alarm's own notification with Stop alarm, and the in-app alarm card. Only the
+/// quiet words (one stop before a short leg's stop, get ready, you're there) stay plain notifications.
+/// Plain values only, so it can be tested.
+enum RingShow {
+    enum Kind: CaseIterable, Sendable {
+        case alarm              // out loud (or with headphones)
+        case headphonesQuiet    // no headphones in: vibration only
+        case phoneInUse         // unlocked and in use: one chime (or two buzzes), no loop
+        case byTime, reckoned, backup, again
+        case shortNotice        // "Get off at the next stop" on a short leg
+        case getReady, arrived
+    }
+
+    /// How it sounds.
+    enum Sound: Equatable, Sendable {
+        case loop                       // the announcement, then the alarm on repeat
+        case vibrate(loudAfter: Bool)   // a strong buzz on repeat; out loud after a minute only when you said so
+        case chimeOnce                  // once, nothing on repeat
+        case none
+    }
+
+    /// The lock screen's ringing state, with its Stop button.
+    static func lockRinging(_ k: Kind) -> Bool {
+        switch k {
+        case .shortNotice, .getReady, .arrived: return false
+        default: return true
+        }
+    }
+
+    /// The notification's category: the alarm's own one (Stop alarm, a swipe away stops it too) for every ring.
+    static func category(_ k: Kind) -> String { lockRinging(k) ? WristNotice.alarmCategory : WristNotice.tripCategory }
+
+    /// The notification's id: the alarm's own (so Stop alarm, opening it or swiping it away stops the ring), its repeat's.
+    static func notificationId(_ k: Kind) -> String? {
+        switch k {
+        case .again: return WristNotice.againId
+        case .shortNotice, .getReady, .arrived: return nil
+        default: return WristNotice.alarmId
+        }
+    }
+
+    /// The ring's kind from how it sounds now: in use (and quiet when in use on), no headphones (and headphones-only on),
+    /// else out loud.
+    static func kind(inUse: Bool, quiet: Bool) -> Kind { inUse ? .phoneInUse : quiet ? .headphonesQuiet : .alarm }
+
+    /// How a ring sounds: never out of the speaker without headphones unless "Out loud if I don't stop it" is on.
+    static func sound(_ k: Kind, quiet: Bool, outLoudLater: Bool) -> Sound {
+        switch k {
+        case .phoneInUse: return .chimeOnce
+        case .shortNotice, .getReady, .arrived: return .none
+        default: return quiet ? .vibrate(loudAfter: outLoudLater) : .loop
+        }
+    }
+
+    /// The minute the vibration-only ring waits before it goes out loud (only with that switch on).
+    static let loudAfter: TimeInterval = 60
+}

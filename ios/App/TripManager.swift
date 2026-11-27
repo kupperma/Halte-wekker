@@ -71,9 +71,20 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     @Published var pauseMusic: Bool = UserDefaults.standard.bool(forKey: "pauseMusic") {
         didSet { UserDefaults.standard.set(pauseMusic, forKey: "pauseMusic"); sound.pauseMusic = pauseMusic }
     }
-    /// Without headphones the alarm and the announcer only vibrate (out loud after a minute if not stopped). In Settings.
+    /// Without headphones the alarm and the announcer only vibrate. In Settings.
     @Published var headphonesOnly: Bool = UserDefaults.standard.object(forKey: "headphonesOnly") as? Bool ?? true {
         didSet { UserDefaults.standard.set(headphonesOnly, forKey: "headphonesOnly"); sound.headphonesOnly = headphonesOnly }
+    }
+    /// (0.42.9) Settings › Trips & alarm › "Out loud if I don't stop it (after 1 min)": without headphones the alarm
+    /// goes out loud after a minute. Off for everyone (it would wake the whole train); existing installs too, once.
+    @Published var outLoudLater: Bool = TripManager.loadOutLoudLater() {
+        didSet { UserDefaults.standard.set(outLoudLater, forKey: "outLoudLater"); sound.loudLaterOn = outLoudLater }
+    }
+    /// Off once for every install (`outLoudLaterSet`: the one-time switch-off done), then as you set it.
+    nonisolated static func loadOutLoudLater() -> Bool {
+        let d = UserDefaults.standard
+        if !d.bool(forKey: "outLoudLaterSet") { d.set(false, forKey: "outLoudLater"); d.set(true, forKey: "outLoudLaterSet") }
+        return d.bool(forKey: "outLoudLater")
     }
     /// If you're using your phone when it would ring, you're awake: one notification instead of the alarm.
     @Published var quietWhenInUse: Bool = UserDefaults.standard.object(forKey: "quietWhenInUse") as? Bool ?? true {
@@ -269,6 +280,11 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     // 0.42.3: a field log of 27 November (`MissCall`, `ShortLeg`, `RideGuards.plannedNextAmong`)
     private var missHold = MissCall.Hold()                // a miss is told only once it has held a minute
     private var quietLeg = false                          // awake without the alarm (short, or started inside its wake)
+    private var ringInUse = false                         // (0.42.9) the ring now is the one chime while you used the phone
+    /// (0.42.9) Where the vehicle you're on really goes (its last stop, else the planned headsign): the ride's headline.
+    @Published private(set) var headsign = ""
+    /// (0.42.9) This leg stays on the vehicle past a planned change: "Stay on to Eindhoven". Nil: no such change.
+    @Published private(set) var stayOnTo: String?
     /// The ring before your stop, for the adaptive wake-up (`AdaptiveWake`): when, which mode, when you stopped it.
     private var ringNote: (at: Date, train: Bool, stopped: Date?)?
     private var plannedNextAt = Date.distantPast           // the next leg's planned ride last asked (its live time, platform)
@@ -465,6 +481,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         AlarmResponder.shared.attach(self)
         sound.pauseMusic = pauseMusic
         sound.headphonesOnly = headphonesOnly
+        sound.loudLaterOn = outLoudLater
         WatchStore.shared.holdAlerts = { [weak self] in self?.phase == .sleeping }
         // (0.42.4) a platform change of a train of this trip: on the change card and the lock screen at once
         WatchStore.shared.onChange = { [weak self] in
@@ -504,7 +521,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             for (l, k) in zip(legs, kms) { kmMem["\(l.mode.rawValue):\(l.to.key)"] = k }
             UserDefaults.standard.set(kmMem, forKey: "kmMem")
         }
-        tripStart = Date(); startedAtLeg = index; lastScore = nil
+        tripStart = Date(); startedAtLeg = index; lastScore = nil; betterKept = []
         wrongBusTold = false; wrongBus = nil; gpsRuns = [:]; otherTold = []; otherClosed = []; otherAtStop = nil; otherBoard = nil
         tripStartSpot = lastFix.flatMap { Date().timeIntervalSince($0.timestamp) < ScoreRules.freshStart ? $0.coordinate : nil }
         tripPlannedEnd = r.plannedEnd; tripLate = nil; trainLate = []
@@ -549,7 +566,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         whichTrain = []; whichTrainTo = [:]; whichTrainAsked = false; trainSeen = [:]; rivalLookAt = Date().addingTimeInterval(60)
         lastGood = nil; reckonFrom = nil; reckoning = false
         readyTold = false; ringNote = nil; arrivePlatform = nil; legDelay = nil; changeGuide = nil; nextOptions = []; usingSaved = false
-        missHold = MissCall.Hold(); quietLeg = false
+        missHold = MissCall.Hold(); quietLeg = false; ringInUse = false; headsign = ""; stayOnTo = nil
+        betterOffer = nil; betterTask?.cancel(); betterTask = nil; betterAt = .distantPast
         meant = route?.planned?[safe: index]; meantTo = leg?.to; wrongBus = nil; otherAtStop = nil      // (0.39.1)
         if index > 0, !demo, let a = changeArrived, let l = leg { noteChangeWalk(arrived: a.at, at: l.from) }
         changeToRecord = index > 0 && changeArrived != nil
@@ -654,6 +672,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     var waitingToBoard: Bool { phase == .sleeping && vehicle == nil && handLock == nil && (startDistance ?? 0) < 2000 }
 
     func stopAlarm() {
+        ringInUse = false
         sound.stop()
         cancelAgain()
         UNUserNotificationCenter.current().removeAllDeliveredNotifications()
@@ -901,7 +920,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         smoother = SpeedSmoother(); lastSpeedFix = nil; wakeLive = nil; wakeRoute = []; waitLowOn = false
         stopReckon(); whichTrain = []; whichTrainTo = [:]; changeArrived = nil; changeToRecord = false
         changeGuide = nil; switchingChange = false; arrivePlatform = nil; legDelay = nil; nextOptions = []; readyTold = false; ringNote = nil
-        missHold = MissCall.Hold(); quietLeg = false
+        missHold = MissCall.Hold(); quietLeg = false; ringInUse = false; headsign = ""; stayOnTo = nil
+        betterOffer = nil; betterTask?.cancel(); betterTask = nil; betterAt = .distantPast
         offline = false; usingSaved = false; plannedNextAt = .distantPast; plannedNextTrip = nil
         meant = nil; meantTo = nil; gpsRuns = [:]; wrongBus = nil; otherAtStop = nil; otherTold = []; otherClosed = []; otherBoard = nil
         RideCacheStore.shared.clear()                     // (0.39) the saved copy of the trip's rides goes with it
@@ -1315,6 +1335,14 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             } else if ringAtStop || forceArrival { arrive() } else { legDone(why: "by GPS, quietly") }
         } else if case .alarm(approach: true) = phase, d <= arriveM, loc.horizontalAccuracy <= 600 {
             noteWakeOutcome(arrivedRinging: true)         // (0.39) there before you stopped it: next time a little earlier
+            // (0.42.9) the one chime while you used the phone, never stopped: at the stop it goes on as before (the
+            // announcement, or the leg ends quietly); a ring on repeat rings on until you stop it
+            if ringInUse {
+                ringInUse = false
+                sound.stop(); cancelAgain()
+                UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [WristNotice.alarmId])
+                if ringAtStop || forceArrival { arrive() } else { legDone(why: "by GPS, quietly") }
+            }
         }
         if phase == .sleeping { checkGetReady() }         // (0.39) "Get ready" one stop before yours
         if phase == .awake, quietLeg { checkShortNotice(metres: d) }    // (0.42.3) "Get off at the next stop"
@@ -1391,9 +1419,14 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
                         : "Arriving at \(place). This is your stop. Please leave the \(veh) here."
     }
 
+    /// (0.42.9) Every ring rings the same way (`RingShow`): the ringing state with Stop on the lock screen, the alarm's
+    /// own notification, the alarm card in the app. In use, it's one chime (no loop); no headphones, vibration only.
     private func ring(approach: Bool, why: String = "approach", fire: WakeRule.Fire? = nil) {
         let inUse = quietWhenInUse && phoneInUse() && !demo
-        rideLog(FieldFormat.rideRing(why + (inUse ? ", phone in use: a notification" : ""), metres: distance,
+        let quiet: Bool = sound.quietNow
+        let kind: RingShow.Kind = RingShow.kind(inUse: inUse, quiet: quiet)
+        let how: String = inUse ? ", phone in use: one chime" : quiet ? ", no headphones: vibration only" : ""
+        rideLog(FieldFormat.rideRing(why + how + ", ringing on the lock screen", metres: distance,
                                      legAge: Date().timeIntervalSince(legStart), started: legStartMetres))
         setBackup(0)
         // (0.37.1) short and the stop first, for a glance at a paired Apple Watch: "Get off at Breda · 2 min"
@@ -1406,20 +1439,20 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         c.sound = sound.quietNow ? nil : .default         // no headphones: it buzzes instead
         c.interruptionLevel = .timeSensitive
         c.userInfo = ["kind": "go"]
-        // Using your phone right now? Then you're awake: one notification is enough.
-        if inUse {
-            tripNotice(c, .headsUp, category: WristNotice.tripCategory)
-            UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "heads-up-\(approach)", content: c, trigger: nil)) { _ in }
-            if approach && (ringAtStop || forceArrival) { phase = .awake; pushActivity(force: true); WatchStore.shared.showNext() } else { legDone(why: "phone in use") }
-            return
-        }
+        // Using your phone right now? Then you're awake: one chime, not the alarm on repeat; but it rings as every ring
+        // does (0.42.9: it was one plain notification, with nothing on the lock screen to stop)
         phase = .alarm(approach: approach)
+        ringInUse = inUse
         if approach, !demo { ringNote = (Date(), legIsTrain, nil) }      // (0.39) for the adaptive wake-up
-        sound.ring(announcement: announcement(approach: approach))
-        tripNotice(c, .alarm, category: WristNotice.alarmCategory)
-        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: WristNotice.alarmId, content: c, trigger: nil))
+        if RingShow.sound(kind, quiet: quiet, outLoudLater: outLoudLater) == .chimeOnce {
+            sound.chime(announcement: announcement(approach: approach))
+        } else {
+            sound.ring(announcement: announcement(approach: approach))
+        }
+        tripNotice(c, .alarm, category: RingShow.category(kind))
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: RingShow.notificationId(kind) ?? WristNotice.alarmId, content: c, trigger: nil))
         pushActivity(force: true)
-        scheduleAgain(approach: approach, secs: secs)
+        if !inUse { scheduleAgain(approach: approach, secs: secs) }
     }
 
     /// How soon, as the title says it: by the time rule's seconds, else the distance.
@@ -1574,10 +1607,11 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         let t = WristNotice.backup(stop: leg?.to.short)
         c.title = t.title
         c.body = t.body
-        c.sound = .default
+        // (0.42.9) without headphones, not out of the speaker (unless "Out loud if I don't stop it" is on)
+        c.sound = headphonesOnly && !outLoudLater ? nil : .default
         c.interruptionLevel = .timeSensitive
         c.userInfo = ["kind": "go"]
-        tripNotice(c, .backup, category: WristNotice.tripCategory)
+        tripNotice(c, .backup, category: RingShow.category(.backup))
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "backup", content: c,
                                                                      trigger: UNTimeIntervalNotificationTrigger(timeInterval: Double(minutes) * 60, repeats: false))) { _ in }
     }
@@ -2020,11 +2054,14 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         }
         boardedHere(v, stops: stops)
         noteBoarding(v, stops: stops)
+        if vehicle == v { headsign = ""; noteHeadsign(v, stops: stops) }
         stayOnIfItGoes(stops)
         applyStops(stops)
         if !demo {
             // (0.39) its road, platforms and delay; saved on the phone for the stretches without signal
             if let c = await Transit.cachedLiveTrip(v.tripId), vehicle == v {
+                // (0.42.9) its train number, now known: the plan may have split this very train
+                if !c.trip.num.isEmpty, stayOnIfItGoes(stops, num: c.trip.num) { applyStops(stops) }
                 noteRideDetails(c.trip)
                 RideCacheStore.shared.save(c.trip, tripId: v.tripId, at: c.at, trip: tripStart, force: true)
                 if wakeRoute.isEmpty { noteWakeTrip(c.trip, at: c.at) }
@@ -2038,40 +2075,211 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
 
     /// Your bus or train also goes to where a later leg starts, in time for it: stay on instead of changing. A Sprinter
     /// to Tilburg, then an Intercity to Breda, when the Sprinter goes on to Breda anyway and makes the same bus.
-    /// 0.34 (`TrainRules.stayOn`): also when it goes to where the trip's last ride ends (the through Intercity to Den
-    /// Bosch where it planned a change at Tilburg to a Sprinter): stay on to there.
-    private func stayOnIfItGoes(_ stops: [TripStop]) {
+    /// 0.34 (`TrainRules.stayOn`): also when it goes to where the trip's last ride ends: stay on to there.
+    /// 0.42.9: on 2026-11-27 the Intercity you were on went on to Eindhoven, where the plan changed at Tilburg to another
+    /// train to Eindhoven and the bus from there; it rang at Tilburg. It only looked for the train at the next ride's
+    /// boarding stop (the bus bay, a stop of its own by the station, often further than the 400 m it allowed) and by
+    /// that bus's departure, never at where the next leg itself gets off, and only once, when the vehicle was found.
+    /// Now, by the vehicle's own stops: where a later leg gets off (by place, or by the station's name) or where the
+    /// ride after it gets on, no later than the planned ride gets there (+2 min) and a minute before the ride after it;
+    /// always when the plan split one train (the same number); looked at again with each new answer of its stops.
+    /// `num`: the vehicle's train number when its trip answer said it. True: the legs were merged.
+    @discardableResult
+    private func stayOnIfItGoes(_ stops: [TripStop], num known: String = "") -> Bool {
         guard let r = route, var custom = r.custom, var planned = r.planned, planned.count == custom.count,
-              index + 1 < custom.count, let v = vehicle else { return }
+              index + 1 < custom.count, let v = vehicle else { return false }
         let now = Date()
-        // where you'd get off when staying on through leg k: where the ride after it leaves (the last leg: where it ends)
-        let targets: [GeoPoint] = custom.indices.map { k in GeoPoint(k + 1 < custom.count ? custom[k + 1].from.coordinate : custom[k].to.coordinate) }
-        let calls = stops.map { (p: GeoPoint($0.coordinate), arrival: $0.arrival) }
-        guard let hit = TrainRules.stayOn(index: index, ends: targets, departures: planned.map { Optional($0.departure) }, calls: calls, now: now)
-        else { return }
-        let k = hit.leg, s = stops[hit.call]
-        let skipped = custom[(index + 1)...k].map(\.from.short)
-        let name = Fmt.place(s.name)
-        let to = Place(key: "s:\(s.name)|\(s.coordinate.latitude),\(s.coordinate.longitude)", name: s.name, short: name,
+        let num: String = v.isTrain ? stayNum(v, known: known) : ""        // (a train's number only: buses' trip names repeat)
+        let spots: [TrainRules.StayLeg] = custom.indices.map { k in
+            let l: Leg = custom[k], p: PlannedRide = planned[k]
+            return TrainRules.StayLeg(from: GeoPoint(l.from.coordinate), to: GeoPoint(l.to.coordinate), fromName: l.from.name,
+                                      toName: l.to.name, departure: p.departure, arrival: p.arrival, tripId: p.tripId,
+                                      num: p.isTrain ? p.num : "")
+        }
+        let calls: [TrainRules.StayCall] = stops.map { TrainRules.StayCall(name: $0.name, p: GeoPoint($0.coordinate), arrival: $0.arrival) }
+        guard let hit = TrainRules.stayOn(index: index, legs: spots, tripId: v.tripId, num: num, calls: calls, now: now) else { return false }
+        let k = hit.leg
+        let to: Place
+        var reachesAt: Date? = planned[k].arrival
+        if let ci = hit.call {
+            let s = stops[ci]
+            let name = Fmt.place(s.name)
+            to = Place(key: "s:\(s.name)|\(s.coordinate.latitude),\(s.coordinate.longitude)", name: s.name, short: name,
                        ids: ["\(s.coordinate.latitude),\(s.coordinate.longitude)"], coordinate: s.coordinate, spoken: name)
+            reachesAt = s.arrival ?? reachesAt
+        } else {
+            to = custom[k].to
+        }
+        let skipped: [String] = custom[(index + 1)...k].map(\.from.short)
+        let changeAt: String = custom[index].to.short
+        let changeTime: String = (planned[index].arrival ?? legTo).map(Fmt.hhmm) ?? ""
+        let was: PlannedRide = planned[index + 1]
+        let wasLabel: String = was.num.isEmpty ? was.line : "\(was.line) \(TrainRules.digits(was.num))"
+        let mineLabel: String = num.isEmpty ? Self.logLabel(v) : "\(v.line) \(TrainRules.digits(num))"
         let cur = custom[index]
         let nextRide: PlannedRide? = k + 1 < planned.count ? planned[k + 1] : nil
+        var mine: PlannedRide = planned[index]
+        mine.arrival = reachesAt
         custom = Array(custom[..<index]) + [Leg(mode: cur.mode, from: cur.from, to: to)] + Array(custom[(k + 1)...])
-        planned = Array(planned[...index]) + Array(planned[(k + 1)...])
-        let nr = RoutePlan(id: r.id, name: r.name, station: r.station, custom: custom, planned: planned)
+        planned = Array(planned[..<index]) + [mine] + Array(planned[(k + 1)...])
+        let nr = RoutePlan(id: r.id, name: r.name, station: r.station, custom: custom, planned: planned, plannedEnd: r.plannedEnd)
+        applyStayRoute(nr, to: to)
+        rideLog(TrainRules.stayLog(vehicle: mineLabel, reaches: to.short, at: reachesAt.map(Fmt.hhmm) ?? "", changeAt: changeAt,
+                                   changeTime: changeTime, next: wasLabel, nextTime: Fmt.hhmm(was.departure), sameTrain: hit.sameTrain))
+        let no: String = skipped.joined(separator: ", ")
+        if let nextRide {
+            let then = nextRide.isTrain ? (nextRide.line == "IC" ? "Intercity" : nextRide.line) : "bus \(nextRide.line)"
+            tellBus("Stay on to \(to.short)", "This \(v.title) goes on to \(to.short) in time for the same \(then) at \(Fmt.hhmm(nextRide.departure)): no change at \(no).")
+        } else {
+            tellBus("Stay on to \(to.short)", "This \(v.title) goes all the way to \(to.short): no change at \(no).")
+        }
+        return true
+    }
+
+    /// (0.42.9) The trip now stays on the vehicle you're on to `to` (this leg's new end), the rest as in `nr`: the
+    /// wake-up for the new stop, no ring for the change it skips (one ringing for it goes), the lock screen and the
+    /// change guide after it.
+    private func applyStayRoute(_ nr: RoutePlan, to: Place) {
         route = nr
         legs = nr.legs(direction)
         distance = nil; arrival = nil; next = nil; legArrival = nil; legTo = nil
         maxDistance = legSpan
-        if phase == .awake { phase = .sleeping }
-        rideLog("stay on · \(Self.logLabel(v)) to \(name) · no change at \(skipped.joined(separator: ", "))")
-        if let nextRide {
-            let then = nextRide.isTrain ? (nextRide.line == "IC" ? "Intercity" : nextRide.line) : "bus \(nextRide.line)"
-            tellBus("Stay on to \(name)", "This \(v.title) goes on to \(name) in time for the same \(then) at \(Fmt.hhmm(nextRide.departure)): no change at \(skipped.joined(separator: ", ")).")
-        } else {
-            tellBus("Stay on to \(name)", "This \(v.title) goes all the way to \(name): no change at \(skipped.joined(separator: ", ")).")
+        // the wake-up goes by the new stop: not by the old one's live arrival or road
+        wakeLive = nil; wakeRoute = []; legClosest = nil; awayLooked = false
+        stayOnTo = to.short
+        betterOffer = nil
+        if phase == .awake { phase = .sleeping; forceArrival = false; quietLeg = false }
+        if case .alarm = phase {
+            // it rang for the change it now skips: that ring goes, the alarm is for the new stop
+            ringInUse = false; ringNote = nil
+            sound.stop(); cancelAgain()
+            UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [WristNotice.alarmId, WristNotice.againId])
+            phase = .sleeping; forceArrival = false; quietLeg = false
         }
+        watchTrains()
+        updateChangeGuide()
+        pushActivity(force: true)
         Task { await loadUpcoming(force: true) }
+    }
+
+    // MARK: (0.42.9) the best place to get off
+
+    /// A faster way from a later stop of the vehicle you're on (`BetterStop`): offered, taken only with a tap.
+    struct BetterOffer: Equatable {
+        let stop: Place
+        let reachesAt: Date             // when the vehicle gets there
+        let trip: DoorTrip              // the plan from there
+        let text: String
+        let log: String
+    }
+    @Published private(set) var betterOffer: BetterOffer?
+    private var betterAt = Date.distantPast
+    private var betterTask: Task<Void, Never>?
+    private var betterKept: Set<String> = []        // stops you said "Keep my plan" to, this trip
+
+    /// The vehicle's stops go on past where this leg gets off: plan from a few of them (at most every 5 minutes, a
+    /// question each, on the planner's own limits), and offer one that gets you there sooner.
+    private func lookForBetterStop(_ stops: [TripStop]) {
+        guard !demo, betterOffer == nil, betterTask == nil, let v = vehicle, phase == .sleeping || phase == .awake,
+              let r = route, r.custom != nil, let planned = r.planned, index + 1 < legs.count,
+              let l = leg, let final = legs.last else { return }
+        let now = Date()
+        guard now.timeIntervalSince(betterAt) >= BetterStop.every else { return }
+        betterAt = now
+        let calls: [TrainRules.StayCall] = stops.map { TrainRules.StayCall(name: $0.name, p: GeoPoint($0.coordinate), arrival: $0.arrival) }
+        guard let after = TrainRules.callAt(GeoPoint(l.to.coordinate), name: l.to.name, in: calls, now: now) else { return }
+        let picks: [Int] = BetterStop.candidates(calls: calls, after: after, dest: GeoPoint(final.to.coordinate), now: now)
+            .filter { !betterKept.contains(stops[$0].name) }
+        guard !picks.isEmpty, let current = arrival ?? planned.last?.arrival else { return }
+        let changes: Int = legs.count - index - 1
+        let destKey: String = "\(final.to.coordinate.latitude),\(final.to.coordinate.longitude)"
+        let destWord: String = direction == .home ? "home" : final.to.short
+        betterTask = Task { [weak self] in
+            var options: [BetterStop.Option] = []
+            var plans: [Int: DoorTrip] = [:]
+            for i in picks {
+                guard let a = calls[i].arrival else { continue }
+                let from: String = "\(calls[i].p.lat),\(calls[i].p.lon)"
+                let found: [DoorTrip] = await Transit.plan(from: from, to: destKey, modes: nil, at: a.addingTimeInterval(BetterStop.changeRoom),
+                                                           count: 3, maxTransfers: 2)
+                guard let self, !Task.isCancelled else { return }
+                guard self.vehicle == v else { self.betterTask = nil; return }
+                let ok: [DoorTrip] = found.filter { $0.first.tripId != v.tripId && $0.first.departure >= a.addingTimeInterval(BetterStop.changeRoom) }
+                guard let t = ok.min(by: { $0.last.arrival < $1.last.arrival }), RoutePlan.from(t) != nil else { continue }
+                options.append(BetterStop.Option(stop: i, arrival: t.last.arrival, changes: t.rides.count - 1))
+                plans[i] = t
+            }
+            guard let self else { return }
+            self.betterTask = nil
+            guard self.vehicle == v, self.betterOffer == nil,
+                  let o = BetterStop.best(current: current, currentChanges: changes, options: options), let t = plans[o.stop] else { return }
+            self.offerBetterStop(stops[o.stop], trip: t, current: current, destWord: destWord)
+        }
+    }
+
+    private func offerBetterStop(_ s: TripStop, trip t: DoorTrip, current: Date, destWord: String) {
+        let name = Fmt.place(s.name)
+        let stop = Place(key: "s:\(s.name)|\(s.coordinate.latitude),\(s.coordinate.longitude)", name: s.name, short: name,
+                         ids: ["\(s.coordinate.latitude),\(s.coordinate.longitude)"], coordinate: s.coordinate, spoken: name)
+        let f = t.first
+        let trainName: String = f.line == "IC" ? "Intercity" : f.line
+        let what: String = f.isTrain ? trainName : "bus \(f.line)"
+        let then: String = "\(what) at \(Fmt.hhmm(f.departure))"
+        let newAt: String = Fmt.hhmm(t.last.arrival)
+        let text = BetterStop.offerText(stop: name, dest: destWord, newAt: newAt, oldAt: Fmt.hhmm(current), then: then)
+        let log = BetterStop.log(stop: name, dest: destWord, newAt: newAt, minutes: BetterStop.minutesSooner(current: current, better: t.last.arrival))
+        betterOffer = BetterOffer(stop: stop, reachesAt: s.arrival ?? t.first.departure, trip: t, text: text, log: log)
+        rideLog(log)
+        // a quiet word (no sound): the card on the ride screen has the buttons
+        let c = UNMutableNotificationContent()
+        c.title = "Stay on to \(name)"
+        c.body = text
+        c.sound = nil
+        c.interruptionLevel = .passive
+        c.userInfo = ["kind": "info"]
+        tripNotice(c, .headsUp, category: WristNotice.tripCategory)
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "betterstop", content: c, trigger: nil)) { _ in }
+    }
+
+    /// "Do this": this leg goes on to that stop (the wake-up there), then the new plan from there.
+    func takeBetterStop() {
+        guard let o = betterOffer else { return }
+        betterOffer = nil
+        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ["betterstop"])
+        guard let r = route, var custom = r.custom, var planned = r.planned, planned.count == custom.count, index < custom.count,
+              let from = RoutePlan.from(o.trip), let newLegs = from.custom, let newRides = from.planned else { return }
+        let cur = custom[index]
+        var mine: PlannedRide = planned[index]
+        mine.arrival = o.reachesAt
+        custom = Array(custom[..<index]) + [Leg(mode: cur.mode, from: cur.from, to: o.stop)] + newLegs
+        planned = Array(planned[..<index]) + [mine] + newRides
+        let nr = RoutePlan(id: r.id, name: r.name, station: r.station, custom: custom, planned: planned, plannedEnd: from.plannedEnd)
+        applyStayRoute(nr, to: o.stop)
+        rideLog(o.log + " · taken")
+        Task { await refreshVehicle() }
+    }
+
+    /// "Keep my plan": not offered again for that stop on this trip.
+    func keepPlanNotBetterStop() {
+        guard let o = betterOffer else { return }
+        betterKept.insert(o.stop.name)
+        betterOffer = nil
+        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ["betterstop"])
+        rideLog("better stop · kept the plan (not at \(o.stop.short))")
+    }
+
+    /// The train number of the vehicle you're on: from its trip answer, else the ride this leg was planned with when
+    /// it's that one, else the departures listed (`upcoming`).
+    private func stayNum(_ v: Vehicle, known: String) -> String {
+        if !known.isEmpty { return known }
+        if let p = route?.planned?[safe: index], p.tripId == v.tripId, !p.num.isEmpty { return p.num }
+        return upcoming.first(where: { $0.trip.first.tripId == v.tripId })?.trip.first.num ?? ""
+    }
+
+    /// (0.42.9) Where the vehicle really goes, for the ride's headline: its trip's last stop (else the planned headsign).
+    private func noteHeadsign(_ v: Vehicle, stops: [TripStop]) {
+        if let last = stops.last?.name, !last.isEmpty { headsign = Fmt.place(last); return }
+        if headsign.isEmpty, let p = route?.planned?[safe: index], p.tripId == v.tripId, !p.headsign.isEmpty { headsign = Fmt.place(p.headsign) }
     }
 
     /// It got you there: how late it was against its timetable (by its own live times when it has them), so next time
@@ -2712,6 +2920,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
 
     /// The ride's own answer: the platform you get in at, and how late it is at your stop.
     private func noteRideDetails(_ t: LiveTrip) {
+        if !t.headsign.isEmpty { headsign = Fmt.place(t.headsign) }      // (0.42.9) where it really goes
         guard let l = leg, t.stops.count >= 2 else { return }
         let mine = GeoPoint(l.to.coordinate)
         func d(_ i: Int) -> Double { Geo.metres(GeoPoint(t.stops[i].coordinate), mine) }
@@ -3895,7 +4104,14 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             return
         }
         noteAnswer()
+        // (0.42.9) a new answer of its stops: does it go on past the change after all (the first answer may have been
+        // none, or a copy saved without the stops further on)
+        noteHeadsign(v, stops: stops)
+        let num: String = await Transit.cachedLiveTrip(v.tripId)?.trip.num ?? ""
+        guard vehicle == v else { return }
+        stayOnIfItGoes(stops, num: num)
         applyStops(stops)
+        lookForBetterStop(stops)                          // (0.42.9) a later stop of it may be the faster way
         // (the same answer, as it was asked: no request of its own)
         if let c = await Transit.cachedLiveTrip(v.tripId), vehicle == v {
             noteWakeTrip(c.trip, at: c.at)
@@ -4241,7 +4457,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         let c = UNMutableNotificationContent()
         c.title = "Trip started by itself"
         // (a leg that started inside its wake distance has no alarm: it tells you at the stop)
-        c.body = "\(v.title) to \(legs[safe: i]?.to.short ?? "your stop"). "
+        c.body = "\(v.title): get off at \(legs[safe: i]?.to.short ?? "your stop"). "
             + (phase == .awake ? "It tells you when you’re there." : "It rings \(wakeWords).")
         c.sound = .default
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "autostart", content: c, trigger: nil)) { _ in }
@@ -4264,7 +4480,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         let c = UNMutableNotificationContent()
         c.title = "Trip started by itself"
         // (a leg that started inside its wake distance has no alarm: it tells you at the stop)
-        c.body = "\(v.title) to \(legs.first?.to.short ?? "your stop"), on your way to \(home ? RoleWords.current.school : "home"). "
+        c.body = "\(v.title): get off at \(legs.first?.to.short ?? "your stop"), on your way to \(home ? RoleWords.current.school : "home"). "
             + (phase == .awake ? "It tells you when you’re there." : "It rings \(wakeWords).")
         c.sound = .default
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "autostart", content: c, trigger: nil)) { _ in }
@@ -4368,7 +4584,10 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         case .transfer: title = "Change at \(leg?.to.short ?? "")"
         case .finished: title = "You’re there"
         case .alarm(let a): title = a ? "Wake up: \(leg?.to.short ?? "")" : "Get off now"
-        default: title = vehicle.map { "\($0.title) to \(leg?.to.short ?? "")" } ?? leg?.title ?? ""
+        default:
+            // (0.42.9) where it really goes, and where you get off ("Intercity to Zwolle · get off at Tilburg")
+            let end: String = leg?.to.short ?? ""
+            title = vehicle.map { TrainRules.lockHeadline(vehicle: $0.title, headsign: headsign, legEnd: end, stayOnTo: stayOnTo) } ?? leg?.title ?? ""
         }
         var awake = false
         if case .alarm = phase { awake = true } else if phase == .awake { awake = true }
@@ -4480,10 +4699,10 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     func resetAll() {
         if isRiding { endTrip() }
         let d = UserDefaults.standard
-        for k in ["busKm", "trainKm", "ringAtStop", "announce", "movingStation", "autoStart", "sound", "pauseMusic", "autoHome", "kmMem", "dir", "dirAt", "autoHomeDay", "quietWhenInUse", "headphonesOnly", "backupMinutes", RideGPS.settingKey] { d.removeObject(forKey: k) }
+        for k in ["busKm", "trainKm", "ringAtStop", "announce", "movingStation", "autoStart", "sound", "pauseMusic", "autoHome", "kmMem", "dir", "dirAt", "autoHomeDay", "quietWhenInUse", "headphonesOnly", "outLoudLater", "backupMinutes", RideGPS.settingKey] { d.removeObject(forKey: k) }
         BatteryLog.shared.clear(); BatteryLog.shared.flush()          // (the battery and data log too)
         busKm = 2; trainKm = 5; ringAtStop = true; announce = true; movingStation = true; autoStart = true
-        soundKind = .steam; pauseMusic = false; autoHome = true; quietWhenInUse = true; headphonesOnly = true; kmMem = [:]; lastScore = nil
+        soundKind = .steam; pauseMusic = false; autoHome = true; quietWhenInUse = true; headphonesOnly = true; outLoudLater = false; kmMem = [:]; lastScore = nil
         direction = Self.savedDirection()
         Ratings.shared.reset(); ScoreBook.shared.reset(); TravelLogStore.shared.reset(); WatchStore.shared.reset(); StopsStore.shared.reset(); LineWatchStore.shared.reset()
         music.disconnectSpotify(); music.source = .off
