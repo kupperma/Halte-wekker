@@ -15,11 +15,14 @@
 // 9. (0.36) NS disruptions and planned works: /ns/disruptions[?station=BD]; what a journey costs: /ns/price?from=TB&to=BD
 //    (see ns-extra.js).
 // 10. (0.37) How many OV-fiets are left at a station: /ns/ovfiets?station=BD (see ns-extra.js).
+// 11. (2026-11-27) "Listening now" from Last.fm: /music/v1/now?user=<last.fm user>[&app=spotify] (see music.js).
+//    Needs a free Last.fm API key saved as the secret LASTFM_API_KEY; without it the route answers 503 not_configured.
 import { DurableObject } from "cloudflare:workers";
 import { friends, FriendsCore } from "./friends.js";
 import { logs, LogsCore } from "./logs.js";
 import { live, LiveCore } from "./live.js";
 import { nsExtra } from "./ns-extra.js";
+import { music } from "./music.js";
 
 export class Friends extends DurableObject {
   constructor(ctx, env) {
@@ -62,6 +65,13 @@ export default {
     }
     if (url.pathname.startsWith("/logs/")) {
       try { return await logs(request, env, url); } catch (e) { return new Response("relay error", { status: 500 }); }
+    }
+    if (url.pathname.startsWith("/music/")) {
+      try {
+        const r = await music(request, env, url, cors);
+        if (r) return r;
+      } catch (e) { return new Response("relay error", { status: 500, headers: cors }); }
+      return new Response("Not found", { status: 404, headers: cors });
     }
     // The key may be saved as NS_KEY or NS-KEY.
     const NS_KEY = env.NS_KEY || env["NS-KEY"];

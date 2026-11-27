@@ -1,0 +1,333 @@
+{
+  "about": "Listening now (relay 2026-11-27): when the song you listen to is shared, as each app decides it and puts it in a live link's payload v2 (`music`) and in the friends travel state (`music`, optional: older apps ignore it). Checked by relay/test-music.mjs, ios/Tests/MusicShareTests.swift and android/app/src/test/java/nl/haltewekker/MusicShareTest.kt. Each case changes `base` (its `song` fields one by one; `noSong`: nothing playing) and says what friends and a live link get: true is `music`, null nothing, else exactly that object.",
+  "now": 1800000000,
+  "maxAge": 600,
+  "lookEvery": 30,
+  "base": {
+    "on": true,
+    "who": "all",
+    "travelling": true,
+    "song": {
+      "title": "Midnight City",
+      "artist": "M83",
+      "app": "Spotify",
+      "url": "https://open.spotify.com/search/M83%20Midnight%20City",
+      "coverUrl": "https://lastfm.freetls.fastly.net/i/u/300x300/0000000000000000000000000000000a.png",
+      "playing": true,
+      "seen": 1799999970
+    }
+  },
+  "music": {
+    "app": "Spotify",
+    "artist": "M83",
+    "at": "2027-01-15T07:59:30Z",
+    "coverUrl": "https://lastfm.freetls.fastly.net/i/u/300x300/0000000000000000000000000000000a.png",
+    "title": "Midnight City",
+    "url": "https://open.spotify.com/search/M83%20Midnight%20City"
+  },
+  "musicJSON": "{\"app\":\"Spotify\",\"artist\":\"M83\",\"at\":\"2027-01-15T07:59:30Z\",\"coverUrl\":\"https://lastfm.freetls.fastly.net/i/u/300x300/0000000000000000000000000000000a.png\",\"title\":\"Midnight City\",\"url\":\"https://open.spotify.com/search/M83%20Midnight%20City\"}",
+  "cases": [
+    {
+      "case": "shared everywhere",
+      "friends": true,
+      "link": true
+    },
+    {
+      "case": "sharing off",
+      "on": false,
+      "friends": null,
+      "link": null
+    },
+    {
+      "case": "not travelling",
+      "travelling": false,
+      "friends": null,
+      "link": null
+    },
+    {
+      "case": "only friends",
+      "who": "friends",
+      "friends": true,
+      "link": null
+    },
+    {
+      "case": "only live links",
+      "who": "links",
+      "friends": null,
+      "link": true
+    },
+    {
+      "case": "paused",
+      "song": {
+        "playing": false
+      },
+      "friends": null,
+      "link": null
+    },
+    {
+      "case": "ten minutes old",
+      "song": {
+        "seen": 1799999400
+      },
+      "friends": null,
+      "link": null
+    },
+    {
+      "case": "nine minutes old",
+      "song": {
+        "seen": 1799999460
+      },
+      "friends": {
+        "app": "Spotify",
+        "artist": "M83",
+        "at": "2027-01-15T07:51:00Z",
+        "coverUrl": "https://lastfm.freetls.fastly.net/i/u/300x300/0000000000000000000000000000000a.png",
+        "title": "Midnight City",
+        "url": "https://open.spotify.com/search/M83%20Midnight%20City"
+      },
+      "link": {
+        "app": "Spotify",
+        "artist": "M83",
+        "at": "2027-01-15T07:51:00Z",
+        "coverUrl": "https://lastfm.freetls.fastly.net/i/u/300x300/0000000000000000000000000000000a.png",
+        "title": "Midnight City",
+        "url": "https://open.spotify.com/search/M83%20Midnight%20City"
+      }
+    },
+    {
+      "case": "links and covers from elsewhere",
+      "song": {
+        "url": "http://open.spotify.com/track/1",
+        "coverUrl": "https://images.example.com/c.png"
+      },
+      "friends": {
+        "app": "Spotify",
+        "artist": "M83",
+        "at": "2027-01-15T07:59:30Z",
+        "title": "Midnight City"
+      },
+      "link": {
+        "app": "Spotify",
+        "artist": "M83",
+        "at": "2027-01-15T07:59:30Z",
+        "title": "Midnight City"
+      }
+    },
+    {
+      "case": "Apple Music",
+      "song": {
+        "app": "Apple Music",
+        "url": "https://music.apple.com/us/album/midnight-city/1007589212?i=1007589221",
+        "coverUrl": "https://is1-ssl.mzstatic.com/image/thumb/Music125/v4/00/00/00/0000/source/300x300bb.jpg"
+      },
+      "friends": {
+        "app": "Apple Music",
+        "artist": "M83",
+        "at": "2027-01-15T07:59:30Z",
+        "coverUrl": "https://is1-ssl.mzstatic.com/image/thumb/Music125/v4/00/00/00/0000/source/300x300bb.jpg",
+        "title": "Midnight City",
+        "url": "https://music.apple.com/us/album/midnight-city/1007589212?i=1007589221"
+      },
+      "link": {
+        "app": "Apple Music",
+        "artist": "M83",
+        "at": "2027-01-15T07:59:30Z",
+        "coverUrl": "https://is1-ssl.mzstatic.com/image/thumb/Music125/v4/00/00/00/0000/source/300x300bb.jpg",
+        "title": "Midnight City",
+        "url": "https://music.apple.com/us/album/midnight-city/1007589212?i=1007589221"
+      }
+    },
+    {
+      "case": "messy text",
+      "song": {
+        "title": "Midnight\n   City ",
+        "artist": "   ",
+        "app": "Last.fm",
+        "url": "https://www.last.fm/music/M83/_/Midnight+City",
+        "coverUrl": null
+      },
+      "friends": {
+        "app": "Last.fm",
+        "at": "2027-01-15T07:59:30Z",
+        "title": "Midnight City",
+        "url": "https://www.last.fm/music/M83/_/Midnight+City"
+      },
+      "link": {
+        "app": "Last.fm",
+        "at": "2027-01-15T07:59:30Z",
+        "title": "Midnight City",
+        "url": "https://www.last.fm/music/M83/_/Midnight+City"
+      }
+    },
+    {
+      "case": "no title",
+      "song": {
+        "title": "  "
+      },
+      "friends": null,
+      "link": null
+    },
+    {
+      "case": "nothing playing",
+      "noSong": true,
+      "friends": null,
+      "link": null
+    }
+  ],
+  "travel": {
+    "plain": "{\"eta\":1800000960,\"from\":{\"name\":\"Veghel, Busstation\"},\"line\":\"305\",\"mode\":\"bus\",\"music\":{\"app\":\"Spotify\",\"artist\":\"M83\",\"at\":\"2027-01-15T07:59:30Z\",\"coverUrl\":\"https://lastfm.freetls.fastly.net/i/u/300x300/0000000000000000000000000000000a.png\",\"title\":\"Midnight City\",\"url\":\"https://open.spotify.com/search/M83%20Midnight%20City\"},\"state\":\"riding\",\"to\":{\"name\":\"Eindhoven Centraal\"}}"
+  },
+  "itunes": {
+    "queries": [
+      {
+        "title": "Midnight City",
+        "artist": "M83",
+        "url": "https://itunes.apple.com/search?term=M83%20Midnight%20City&entity=song&limit=1"
+      },
+      {
+        "title": "Cecilia",
+        "artist": "Simon & Garfunkel",
+        "url": "https://itunes.apple.com/search?term=Simon%20%26%20Garfunkel%20Cecilia&entity=song&limit=1"
+      },
+      {
+        "title": "Été",
+        "artist": "",
+        "url": "https://itunes.apple.com/search?term=%C3%89t%C3%A9&entity=song&limit=1"
+      }
+    ],
+    "answer": {
+      "resultCount": 1,
+      "results": [
+        {
+          "wrapperType": "track",
+          "kind": "song",
+          "artistName": "M83",
+          "trackName": "Midnight City",
+          "collectionName": "Hurry Up, We're Dreaming",
+          "trackViewUrl": "https://music.apple.com/us/album/midnight-city/1007589212?i=1007589221&uo=4",
+          "artworkUrl100": "https://is1-ssl.mzstatic.com/image/thumb/Music125/v4/00/00/00/0000/source/100x100bb.jpg"
+        }
+      ]
+    },
+    "picks": [
+      {
+        "title": "Midnight City",
+        "artist": "M83",
+        "coverUrl": "https://is1-ssl.mzstatic.com/image/thumb/Music125/v4/00/00/00/0000/source/300x300bb.jpg",
+        "url": "https://music.apple.com/us/album/midnight-city/1007589212?i=1007589221"
+      },
+      {
+        "title": "midnight city",
+        "artist": "m83 ",
+        "coverUrl": "https://is1-ssl.mzstatic.com/image/thumb/Music125/v4/00/00/00/0000/source/300x300bb.jpg",
+        "url": "https://music.apple.com/us/album/midnight-city/1007589212?i=1007589221"
+      },
+      {
+        "title": "Midnight City",
+        "artist": "Someone Else",
+        "none": true
+      },
+      {
+        "title": "Midnight City",
+        "artist": "",
+        "coverUrl": "https://is1-ssl.mzstatic.com/image/thumb/Music125/v4/00/00/00/0000/source/300x300bb.jpg",
+        "url": "https://music.apple.com/us/album/midnight-city/1007589212?i=1007589221"
+      },
+      {
+        "title": "Another Song",
+        "artist": "",
+        "none": true
+      }
+    ]
+  },
+  "relay": {
+    "lastfm": {
+      "recenttracks": {
+        "track": [
+          {
+            "artist": {
+              "mbid": "",
+              "#text": "M83"
+            },
+            "streamable": "0",
+            "image": [
+              {
+                "size": "small",
+                "#text": "https://lastfm.freetls.fastly.net/i/u/34s/0000000000000000000000000000000a.png"
+              },
+              {
+                "size": "medium",
+                "#text": "https://lastfm.freetls.fastly.net/i/u/64s/0000000000000000000000000000000a.png"
+              },
+              {
+                "size": "large",
+                "#text": "https://lastfm.freetls.fastly.net/i/u/174s/0000000000000000000000000000000a.png"
+              },
+              {
+                "size": "extralarge",
+                "#text": "https://lastfm.freetls.fastly.net/i/u/300x300/0000000000000000000000000000000a.png"
+              }
+            ],
+            "mbid": "",
+            "album": {
+              "mbid": "",
+              "#text": "Hurry Up, We're Dreaming"
+            },
+            "name": "Midnight City",
+            "@attr": {
+              "nowplaying": "true"
+            },
+            "url": "https://www.last.fm/music/M83/_/Midnight+City"
+          },
+          {
+            "artist": {
+              "mbid": "",
+              "#text": "Earlier Artist"
+            },
+            "image": [],
+            "mbid": "",
+            "album": {
+              "mbid": "",
+              "#text": ""
+            },
+            "name": "An Earlier Song",
+            "url": "https://www.last.fm/music/Earlier+Artist/_/An+Earlier+Song",
+            "date": {
+              "uts": "1799990000",
+              "#text": "15 Jan 2027, 05:33"
+            }
+          }
+        ],
+        "@attr": {
+          "user": "test",
+          "totalPages": "1",
+          "page": "1",
+          "perPage": "1",
+          "total": "2"
+        }
+      }
+    },
+    "spotify": {
+      "nowPlaying": true,
+      "title": "Midnight City",
+      "artist": "M83",
+      "app": "Spotify",
+      "url": "https://open.spotify.com/search/M83%20Midnight%20City",
+      "coverUrl": "https://lastfm.freetls.fastly.net/i/u/300x300/0000000000000000000000000000000a.png",
+      "at": "2027-01-15T08:00:00Z"
+    },
+    "other": {
+      "nowPlaying": true,
+      "title": "Midnight City",
+      "artist": "M83",
+      "app": "Last.fm",
+      "url": "https://www.last.fm/music/M83/_/Midnight+City",
+      "coverUrl": "https://lastfm.freetls.fastly.net/i/u/300x300/0000000000000000000000000000000a.png",
+      "at": "2027-01-15T08:00:00Z"
+    },
+    "idle": {
+      "nowPlaying": false,
+      "at": "2027-01-15T08:00:00Z"
+    }
+  }
+}
