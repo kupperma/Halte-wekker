@@ -248,16 +248,57 @@ export const APP_JS = String.raw`(function () {
     m.age = st === "arrived" ? null : stale ? { text: (age > 600 ? "last seen " + hhmm(t) + " · the phone may be out of reach" : "last seen " + hhmm(t)), grey: true }
       : { text: ago(age), grey: false };
     m.title = m.head + " · Haltewekker";
-    // the map
+    // the map: the ride (and, waiting or at a change, the walk there), every later ride known, the sharer or the vehicle
     var shape = v2 ? decode(s.shape) : [];
-    m.map = {
-      pos: st === "arrived" || !pos ? null : [pos.lon, pos.lat], old: !!pos && num(pos.at) !== null && now - pos.at > 120,
-      label: chipText(l), shape: shape, waiting: st === "waiting" || st === "change", arrived: st === "arrived",
-      stops: stops.map(function (x, k) { return { lon: x.lon, lat: x.lat, done: st === "arrived" || k < next }; }),
-      dest: stops.length ? { lon: stops[stops.length - 1].lon, lat: stops[stops.length - 1].lat, name: str(l.to) } : null,
-      key: cur + "|" + str(l.line) + "|" + str(l.to),
-    };
+    var road = shape.length > 1 ? shape : stops.length > 1 ? stops.map(function (x) { return [x.lon, x.lat]; }) : [];
+    var still = st === "waiting" || st === "change";
+    var phone = !!pos && (pos.src === "phone" || (!pos.src && still));
+    var here = st === "arrived" || !pos ? null : [pos.lon, pos.lat];
+    m.pic = num(s.pic) !== null && s.pic >= 1 ? Math.floor(s.pic) : 0;
+    m.map = route(legs, cur, road, st, here && phone && still ? here : null);
+    m.map.pos = here && !(phone && still) ? here : null;
+    m.map.person = here && phone && still ? { pos: here, letter: m.face.letter, color: m.face.color } : null;
+    m.map.old = !!pos && num(pos.at) !== null && now - pos.at > 120;
+    m.map.label = chipText(l);
+    m.map.shape = shape;
+    m.map.waiting = still;
+    m.map.arrived = st === "arrived";
+    m.map.stops = stops.map(function (x, k) { return { lon: x.lon, lat: x.lat, done: st === "arrived" || k < next }; });
+    if (!m.map.dest && stops.length) m.map.dest = { lon: stops[stops.length - 1].lon, lat: stops[stops.length - 1].lat, name: str(l.to) };
+    m.map.key = cur + "|" + str(l.line) + "|" + str(l.to);
     return m;
+  }
+
+  /// The rest of the trip on the map (pure): the current ride's road, each later ride's own "shape" when the payload has
+  /// it (else a dashed straight line across it, from the last known point to the next), the walks between them dotted,
+  /// the change points as rings and the end of the last known ride as the destination. person: the sharer's phone
+  /// while waiting or at a change (the walk to the stop starts there).
+  function route(legs, cur, road, st, person) {
+    var still = st === "waiting" || st === "change";
+    var out = { road: road, later: [], walks: [], rings: [], dest: null, all: [] };
+    if (st === "arrived") { out.all = road.slice(); return out; }
+    var end = null, gap = null, lastRide = -1;
+    function add(c) { for (var i = 0; i < c.length; i++) out.all.push(c[i]); }
+    function apart(p, q) { return Math.abs(p[0] - q[0]) > 1e-5 || Math.abs(p[1] - q[1]) > 1e-5; }
+    if (person) { add([person]); end = person; }
+    for (var i = cur; i < legs.length; i++) {
+      var g = legs[i];
+      if (!isRide(g)) continue;
+      var geo = i === cur ? road : decode(g.shape);
+      if (geo.length < 2) { if (!gap) gap = g; continue; }
+      var a = geo[0];
+      if (end && apart(end, a)) {
+        if (gap) out.later.push({ coords: [end, a], color: colour(gap), dashed: true });
+        else out.walks.push([end, a]);
+      }
+      // (where it gets on: a change, or the stop the sharer walks or waits at)
+      if (i > cur || still) out.rings.push(a);
+      if (i > cur) out.later.push({ coords: geo, color: colour(g), dashed: false });
+      add(geo);
+      end = geo[geo.length - 1]; gap = null; lastRide = i;
+    }
+    if (lastRide >= 0) out.dest = { lon: end[0], lat: end[1], name: str(legs[lastRide].to) };
+    return out;
   }
 
   /// The whole trip, top to bottom: {time, title, sub, kind: "done" | "now" | "next"}.
@@ -308,7 +349,9 @@ export const APP_JS = String.raw`(function () {
 
   function drawCard(m) {
     var f = $("face");
-    f.textContent = m.face.letter; f.style.background = m.face.color;
+    f.style.background = m.face.color;
+    if (pic) { if (!f.firstChild || f.firstChild.tagName !== "IMG" || f.firstChild.src !== pic) { f.textContent = ""; var fi = el("img"); fi.alt = ""; fi.src = pic; f.appendChild(fi); } }
+    else f.textContent = m.face.letter;
     var eb = $("eyebrow"); eb.textContent = m.eyebrow.text; eb.className = "eyebrow " + m.eyebrow.cls;
     text("head", m.head); text("sub", m.sub);
     D.title = m.title;
@@ -353,7 +396,7 @@ export const APP_JS = String.raw`(function () {
   }
 
   function hideAll() {
-    ["sub", "big", "note", "legs", "tl", "msg", "music", "age"].forEach(function (id) { $(id).hidden = true; });
+    ["sub", "big", "note", "legs", "tl", "msg", "sfoot", "music", "age"].forEach(function (id) { $(id).hidden = true; });
     $("openApp").hidden = true;
   }
   function ended(t, badge, cls) {
@@ -396,6 +439,7 @@ export const APP_JS = String.raw`(function () {
   function drawMessages(m) {
     var box = $("msg");
     box.hidden = !m.msgs || over;
+    $("sfoot").hidden = box.hidden;
     if (box.hidden) return;
     $("msgHead").textContent = "Send " + (m.name === "Your friend" ? "your friend" : m.name) + " a message";
     var ul = $("sent"); ul.textContent = "";
@@ -455,7 +499,9 @@ export const APP_JS = String.raw`(function () {
   }
 
   // MARK: the map (only when MapLibre loaded and the browser can draw it)
-  var M = null, ready = false, vMark = null, dMark = null, shown = null, target = null, anim = 0, follow = true, framedKey = "", road = [], col = "#E0632E";
+  var M = null, ready = false, vMark = null, dMark = null, pMark = null, shown = null, target = null, anim = 0, follow = true, framedKey = "", road = [], col = "#E0632E";
+  var SRC = ["walk", "later", "rest", "done", "stops", "rings"];
+  function fc(f) { return { type: "FeatureCollection", features: f || [] }; }
   function mapInit() {
     var ml = W.maplibregl;
     if (!ml || !ml.Map) { D.body.className += " nomap"; return; }
@@ -465,12 +511,20 @@ export const APP_JS = String.raw`(function () {
     } catch (e) { M = null; D.body.className += " nomap"; return; }
     try { M.touchZoomRotate.disableRotation(); M.addControl(new ml.AttributionControl({ compact: true }), W.innerWidth >= 900 ? "bottom-right" : "top-left"); } catch (e) {}
     M.on("load", function () {
-      var empty = { type: "FeatureCollection", features: [] };
-      ["rest", "done", "stops"].forEach(function (id) { M.addSource(id, { type: "geojson", data: empty }); });
-      M.addLayer({ id: "rest", type: "line", source: "rest", layout: { "line-cap": "round", "line-join": "round" }, paint: { "line-color": col, "line-width": 6, "line-opacity": 0.35 } });
-      M.addLayer({ id: "done", type: "line", source: "done", layout: { "line-cap": "round", "line-join": "round" }, paint: { "line-color": col, "line-width": 6 } });
+      SRC.forEach(function (id) { M.addSource(id, { type: "geojson", data: fc() }); });
+      var round = { "line-cap": "round", "line-join": "round" };
+      // walks: grey dots; later rides: their own colour, fainter (dashed where the road isn't known)
+      M.addLayer({ id: "walk", type: "line", source: "walk", layout: round, paint: { "line-color": "#A3ABB3", "line-width": 4, "line-dasharray": [0, 2] } });
+      M.addLayer({ id: "later", type: "line", source: "later", layout: round, filter: ["!", ["get", "dashed"]],
+        paint: { "line-color": ["get", "color"], "line-width": 5, "line-opacity": 0.6 } });
+      M.addLayer({ id: "laterDash", type: "line", source: "later", layout: { "line-join": "round" }, filter: ["get", "dashed"],
+        paint: { "line-color": ["get", "color"], "line-width": 4, "line-opacity": 0.6, "line-dasharray": [2, 2] } });
+      M.addLayer({ id: "rest", type: "line", source: "rest", layout: round, paint: { "line-color": col, "line-width": 6, "line-opacity": 0.45 } });
+      M.addLayer({ id: "done", type: "line", source: "done", layout: round, paint: { "line-color": col, "line-width": 6 } });
       M.addLayer({ id: "stops", type: "circle", source: "stops", paint: { "circle-radius": 5, "circle-color": "#111316", "circle-stroke-width": 3,
         "circle-stroke-color": col, "circle-stroke-opacity": ["case", ["get", "done"], 1, 0.45] } });
+      M.addLayer({ id: "rings", type: "circle", source: "rings", paint: { "circle-radius": 8, "circle-color": "#111316", "circle-stroke-width": 3,
+        "circle-stroke-color": "#F2F4F5" } });
       ready = true;
       // (the credits folded to their (i), not over the card's top)
       try { var at = D.querySelector(".maplibregl-ctrl-attrib"); if (at) at.classList.remove("maplibregl-compact-show"); } catch (e) {}
@@ -482,19 +536,22 @@ export const APP_JS = String.raw`(function () {
   function mapClear() {
     if (vMark) { vMark.remove(); vMark = null; }
     if (dMark) { dMark.remove(); dMark = null; }
-    if (ready) ["rest", "done", "stops"].forEach(function (id) { M.getSource(id).setData({ type: "FeatureCollection", features: [] }); });
+    if (pMark) { pMark.remove(); pMark = null; }
+    if (ready) SRC.forEach(function (id) { M.getSource(id).setData(fc()); });
   }
-  function line(c) { return { type: "FeatureCollection", features: c.length > 1 ? [{ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: c } }] : [] }; }
+  function lineF(c, props) { return { type: "Feature", properties: props || {}, geometry: { type: "LineString", coordinates: c } }; }
+  function line(c) { return fc(c.length > 1 ? [lineF(c)] : []); }
   function drawRoad(p, mm) {
     if (!ready) return;
     var parts = mm.waiting ? [[], road] : mm.arrived || !p ? (mm.arrived ? [road, []] : [[], road]) : split(road, p);
     M.getSource("done").setData(line(parts[0]));
     M.getSource("rest").setData(line(parts[1]));
   }
+  // (the part of the map the sheet doesn't cover)
   function padding() {
-    var wide = W.innerWidth >= 900, card = $("card"), h = 0;
-    try { h = card.getBoundingClientRect().height; } catch (e) {}
-    return wide ? { top: 60, bottom: 60, left: 450, right: 60 } : { top: 70, bottom: Math.min(h, W.innerHeight * 0.7) + 30, left: 40, right: 40 };
+    var wide = W.innerWidth >= 900, h = sheetShown();
+    var vh = W.innerHeight || 800;
+    return wide ? { top: 60, bottom: 60, left: 450, right: 60 } : { top: 80, bottom: Math.min(h, vh * 0.7) + 30, left: 40, right: 40 };
   }
   function glide() {
     cancelAnimationFrame(anim);
@@ -510,18 +567,27 @@ export const APP_JS = String.raw`(function () {
     anim = requestAnimationFrame(step);
   }
   function far(a, b) { return Math.abs(a[0] - b[0]) > 0.05 || Math.abs(a[1] - b[1]) > 0.05; }
+  function personEl(e, p) {
+    e.style.background = p.color;
+    if (pic) {
+      if (!e.firstChild || e.firstChild.tagName !== "IMG" || e.firstChild.src !== pic) { e.textContent = ""; var im = el("img"); im.alt = ""; im.src = pic; e.appendChild(im); }
+    } else e.textContent = p.letter;
+  }
   function drawMap(mm) {
     if (!M || !mm) return;
-    if (mm.shape.length > 1) road = mm.shape;
-    else if (mm.stops.length > 1) road = mm.stops.map(function (x) { return [x.lon, x.lat]; });
-    else road = [];
-    if (ready && col !== model.col) {
-      col = model.col;
-      M.setPaintProperty("rest", "line-color", col); M.setPaintProperty("done", "line-color", col); M.setPaintProperty("stops", "circle-stroke-color", col);
-    }
-    if (ready) M.getSource("stops").setData({ type: "FeatureCollection", features: mm.stops.map(function (x) {
-      return { type: "Feature", properties: { done: x.done }, geometry: { type: "Point", coordinates: [x.lon, x.lat] } }; }) });
+    road = mm.road || [];
     var ml = W.maplibregl;
+    if (ready) {
+      if (col !== model.col) {
+        col = model.col;
+        M.setPaintProperty("rest", "line-color", col); M.setPaintProperty("done", "line-color", col); M.setPaintProperty("stops", "circle-stroke-color", col);
+      }
+      M.getSource("stops").setData(fc(mm.stops.map(function (x) {
+        return { type: "Feature", properties: { done: x.done }, geometry: { type: "Point", coordinates: [x.lon, x.lat] } }; })));
+      M.getSource("later").setData(fc(mm.later.map(function (x) { return lineF(x.coords, { color: x.color, dashed: x.dashed }); })));
+      M.getSource("walk").setData(fc(mm.walks.map(function (c) { return lineF(c); })));
+      M.getSource("rings").setData(fc(mm.rings.map(function (c) { return { type: "Feature", properties: {}, geometry: { type: "Point", coordinates: c } }; })));
+    }
     if (mm.dest) {
       if (!dMark) {
         var w = el("div", "destw"), lb = el("div", "lbl");
@@ -531,6 +597,12 @@ export const APP_JS = String.raw`(function () {
       dMark.setLngLat([mm.dest.lon, mm.dest.lat]);
       dMark.getElement().lastChild.textContent = mm.dest.name;
     } else if (dMark) { dMark.remove(); dMark = null; }
+    // the sharer (waiting, or at a change): a dot with their picture or initial
+    if (mm.person) {
+      if (!pMark) { var pw = el("div", "mew"); pw.appendChild(el("div", "me")); pMark = new ml.Marker({ element: pw }).setLngLat(mm.person.pos).addTo(M); }
+      pMark.setLngLat(mm.person.pos);
+      personEl(pMark.getElement().firstChild, mm.person);
+    } else if (pMark) { pMark.remove(); pMark = null; }
     if (mm.pos) {
       if (!vMark) { var vw = el("div", "mkw"); vw.appendChild(el("div", "mk")); vMark = new ml.Marker({ element: vw }).setLngLat(mm.pos).addTo(M); }
       var e = vMark.getElement().firstChild; e.textContent = mm.label; e.className = mm.old ? "mk old" : "mk"; e.style.background = model.col;
@@ -542,8 +614,8 @@ export const APP_JS = String.raw`(function () {
       shown = null; target = null;
       drawRoad(null, mm);
     }
-    // framing: the ride and the vehicle, again for a new ride; then it follows gently
-    var pts = road.slice();
+    // framing: the rest of the trip with the sharer and the vehicle, again for a new ride; then it follows gently
+    var pts = (mm.all || []).slice();
     if (mm.pos) pts.push(mm.pos);
     if (!pts.length) return;
     if (framedKey !== mm.key && follow) {
@@ -560,25 +632,141 @@ export const APP_JS = String.raw`(function () {
     }
   }
 
-  // MARK: the sheet (drag the handle; a tap toggles)
+  // MARK: the sharer's picture (locked with the link's key, AAD "hw-live-face-v1\n" + token; fetched once per "pic")
+  var pic = "", picV = 0;
+  function loadPic(v) {
+    if (!v || v === picV || !key) return;
+    picV = v;
+    fetch("/live/v1/face?t=" + encodeURIComponent(token) + "&v=" + v).then(function (r) {
+      if (!r.ok) throw new Error("no picture");
+      return r.arrayBuffer();
+    }).then(function (buf) {
+      var box = new Uint8Array(buf);
+      if (box.length < 29 || box[0] !== 1) throw new Error("bad box");
+      return crypto.subtle.decrypt({ name: "AES-GCM", iv: box.slice(1, 13), additionalData: new TextEncoder().encode("hw-live-face-v1\n" + token), tagLength: 128 },
+        key, box.slice(13));
+    }).then(function (jpg) {
+      var u = URL.createObjectURL(new Blob([jpg], { type: "image/jpeg" }));
+      if (pic) { try { URL.revokeObjectURL(pic); } catch (e) {} }
+      pic = u;
+      if (model) { drawCard(model); drawMap(model.map); }
+    }).catch(function () { picV = 0; });
+  }
+
+  // MARK: the sheet (phone): peek, half, full. The whole header drags it (a tap on it goes peek → half → full → peek);
+  // the body drags it too until it's full, then scrolls inside (and drags it down again from its top).
+  var snap = "peek", sheetY = 0, fullH = 0, resnap = function () {};
+  function vv() { var v = W.visualViewport; return v ? { h: v.height, top: v.offsetTop } : { h: W.innerHeight || 800, top: 0 }; }
+  function wide() { return (W.innerWidth || 0) >= 900; }
+  function snapH(n) {
+    var h = vv().h, card = $("card");
+    if (n === "full") return Math.round(h * 0.92);
+    if (n === "half") return Math.round(h * 0.55);
+    // (peek: the header and the big time, about a third)
+    var want = h * 0.35;
+    try {
+      var big = $("big"), head = $("shead"), top = card.getBoundingClientRect().top;
+      var showing = big && !big.hidden ? big : head;
+      var bottom = showing.getBoundingClientRect().bottom - top + 14;
+      if (bottom > 0) want = Math.max(want, bottom);
+    } catch (e) {}
+    return Math.round(Math.min(want, h * 0.55));
+  }
+  function sheetShown() { return wide() ? 0 : Math.max(0, fullH - sheetY); }
+  function place(y, drag) {
+    var card = $("card");
+    sheetY = y;
+    card.style.transform = "translateY(" + Math.round(y) + "px)";
+    D.documentElement.style.setProperty("--h", Math.round(Math.max(0, fullH - y)) + "px");
+    if (!drag) card.className = "sheet " + snap;
+  }
+  function setSnap(n) {
+    snap = n;
+    if (wide()) { $("card").className = "sheet " + n; return; }
+    if (n !== "full") { try { $("sbody").scrollTop = 0; } catch (e) {} }
+    place(fullH - snapH(n), false);
+  }
+  function layout() {
+    var v = vv(), kb = Math.max(0, (W.innerHeight || v.h) - v.h - v.top);
+    fullH = Math.round(v.h * 0.92);
+    D.documentElement.style.setProperty("--full", fullH + "px");
+    D.documentElement.style.setProperty("--kb", Math.round(kb) + "px");
+    if (!wide()) place(fullH - snapH(snap), false);
+  }
   function setupSheet() {
-    var g = $("grab"), card = $("card"), y0 = 0, h0 = 0, moved = false, down = false;
-    function setH(px) { D.documentElement.style.setProperty("--h", px + "px"); }
-    g.addEventListener("pointerdown", function (e) { down = true; moved = false; y0 = e.clientY; h0 = card.getBoundingClientRect().height; card.className = "sheet drag"; try { g.setPointerCapture(e.pointerId); } catch (x) {} });
-    g.addEventListener("pointermove", function (e) {
-      if (!down) return;
-      if (Math.abs(e.clientY - y0) > 4) moved = true;
-      setH(Math.max(W.innerHeight * 0.2, Math.min(W.innerHeight * 0.88, h0 - (e.clientY - y0))));
+    var card = $("card"), head = $("shead"), body = $("sbody");
+    var t = null; // {y0, y, s0, at, v, mode: "" | "sheet" | "scroll", inBody}
+    resnap = function () { if (!t && !wide()) place(fullH - snapH(snap), false); };
+    var dragged = false;
+    function rubber(y) {
+      var top = fullH - snapH("full"), bottom = fullH - snapH("peek");
+      if (y < top) return top - Math.sqrt(top - y) * 4;
+      if (y > bottom) return bottom + Math.sqrt(y - bottom) * 4;
+      return y;
+    }
+    function start(y, inBody) { t = { y0: y, y: y, s0: sheetY, at: Date.now(), v: 0, mode: inBody ? "" : "sheet", inBody: inBody }; if (!inBody) card.className = "sheet drag " + snap; }
+    function move(y, ev) {
+      if (!t) return;
+      var now = Date.now(), dy = y - t.y0;
+      if (!t.mode) {
+        // (until it's full, or from the top of a full one going down, the page itself never scrolls)
+        if (ev && ev.cancelable && (snap !== "full" || (dy > 0 && body.scrollTop <= 0))) ev.preventDefault();
+        if (Math.abs(dy) < 6) return;
+        t.mode = snap !== "full" || (dy > 0 && body.scrollTop <= 0) ? "sheet" : "scroll";
+        if (t.mode === "sheet") { t.y0 = y; dy = 0; card.className = "sheet drag " + snap; }
+      }
+      if (t.mode !== "sheet") return;
+      if (ev && ev.cancelable) ev.preventDefault();
+      var dt = Math.max(1, now - t.at);
+      t.v = 0.7 * ((y - t.y) / dt) + 0.3 * t.v; t.y = y; t.at = now;
+      if (Math.abs(dy) > 4) dragged = true;
+      place(rubber(t.s0 + dy), true);
+    }
+    function end() {
+      if (!t) return;
+      var was = t; t = null;
+      if (was.mode !== "sheet") return;
+      if (!dragged) { card.className = "sheet " + snap; return; }
+      var order = ["full", "half", "peek"], ys = order.map(function (n) { return fullH - snapH(n); });
+      var best = 0;
+      for (var i = 1; i < ys.length; i++) if (Math.abs(ys[i] - sheetY) < Math.abs(ys[best] - sheetY)) best = i;
+      // a flick goes on to the next snap that way
+      if (Math.abs(was.v) > 0.45) {
+        var down = was.v > 0, pick = -1;
+        for (var k = 0; k < ys.length; k++) { if (down ? ys[k] > sheetY + 2 : ys[k] < sheetY - 2) { if (pick < 0 || (down ? ys[k] < ys[pick] : ys[k] > ys[pick])) pick = k; } }
+        if (pick >= 0) best = pick;
+      }
+      setSnap(order[best]);
+    }
+    function y(e) { return e.touches && e.touches[0] ? e.touches[0].clientY : e.clientY; }
+    var opt = { passive: false };
+    head.addEventListener("touchstart", function (e) { dragged = false; start(y(e), false); }, { passive: true });
+    body.addEventListener("touchstart", function (e) { dragged = false; start(y(e), true); }, { passive: true });
+    [head, body].forEach(function (x) {
+      x.addEventListener("touchmove", function (e) { move(y(e), e); }, opt);
+      x.addEventListener("touchend", end); x.addEventListener("touchcancel", end);
     });
-    g.addEventListener("pointerup", function () {
-      if (!down) return;
-      down = false; card.className = "sheet";
-      var h = card.getBoundingClientRect().height, vh = W.innerHeight, snaps = [0.3, 0.56, 0.88];
-      if (!moved) { setH((h < vh * 0.7 ? 0.88 : 0.56) * vh); return; }
-      var best = snaps[0];
-      snaps.forEach(function (s) { if (Math.abs(s * vh - h) < Math.abs(best * vh - h)) best = s; });
-      setH(best * vh);
+    // a mouse (or a pen) on the header
+    head.addEventListener("pointerdown", function (e) {
+      if (e.pointerType === "touch" || wide()) return;
+      dragged = false; start(e.clientY, false); try { head.setPointerCapture(e.pointerId); } catch (x) {}
     });
+    head.addEventListener("pointermove", function (e) { if (e.pointerType !== "touch") move(e.clientY, null); });
+    head.addEventListener("pointerup", function (e) { if (e.pointerType !== "touch") end(); });
+    // a tap (or Enter on the handle): peek → half → full → peek
+    head.addEventListener("click", function (e) {
+      if (wide()) return;
+      if (dragged) { dragged = false; return; }
+      if (e && e.target && e.target.closest && e.target.closest("a")) return;
+      setSnap(snap === "peek" ? "half" : snap === "half" ? "full" : "peek");
+    });
+    // the message box: full, and above the keyboard
+    $("msgText").addEventListener("focus", function () { if (!wide()) setSnap("full"); });
+    var v = W.visualViewport;
+    if (v && v.addEventListener) { v.addEventListener("resize", layout); v.addEventListener("scroll", layout); }
+    if (W.addEventListener) W.addEventListener("resize", layout);
+    layout();
+    setSnap("peek");
   }
 
   // MARK: polling
@@ -586,7 +774,9 @@ export const APP_JS = String.raw`(function () {
     last = s; lastAt = relayAt;
     model = view(s, relayAt, Date.now() / 1000);
     drawCard(model);
+    try { resnap(); } catch (e) {}
     drawMap(model.map);
+    loadPic(model.pic);
   }
   function next(ms) { clearTimeout(timer); if (!over && D.visibilityState !== "hidden") timer = setTimeout(poll, ms); }
   function poll() {
@@ -617,7 +807,7 @@ export const APP_JS = String.raw`(function () {
     });
   }
 
-  W.HWLive = { view: view, decode: decode, split: split, keyFrom: keyFrom, music: music, timeline: timeline };
+  W.HWLive = { view: view, decode: decode, split: split, keyFrom: keyFrom, music: music, timeline: timeline, route: route };
   D.addEventListener("visibilitychange", function () { if (D.visibilityState === "visible" && key && !over) poll(); });
   var raw = keyText ? b64u(keyText) : null;
   if (!W.crypto || !crypto.subtle) { ended("This browser can’t open the trip. Try another browser.", "Can’t open", "warn"); return; }
@@ -627,7 +817,7 @@ export const APP_JS = String.raw`(function () {
     if (/iPhone|iPad|iPod|Android/.test(ua)) { var oa = $("openApp"); oa.href = "haltewekker://live/" + token + "#k=" + keyText; oa.hidden = false; }
   } catch (e) {}
   setupMessages();
-  setupSheet();
+  try { setupSheet(); } catch (e) {}
   mapInit();
   crypto.subtle.importKey("raw", raw, { name: "AES-GCM" }, false, ["encrypt", "decrypt"]).then(function (k) {
     key = k; poll();

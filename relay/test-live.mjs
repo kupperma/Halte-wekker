@@ -60,7 +60,7 @@ if (LIVE) {
 async function seal(obj, keyBytes, aad, nonce = crypto.getRandomValues(new Uint8Array(12))) {
   const key = await crypto.subtle.importKey("raw", keyBytes, { name: "AES-GCM" }, false, ["encrypt"]);
   const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv: nonce, additionalData: new TextEncoder().encode(aad), tagLength: 128 }, key,
-    typeof obj === "string" ? new TextEncoder().encode(obj) : new TextEncoder().encode(JSON.stringify(obj))));
+    obj instanceof Uint8Array ? obj : typeof obj === "string" ? new TextEncoder().encode(obj) : new TextEncoder().encode(JSON.stringify(obj))));
   return new Uint8Array([1, ...nonce, ...ct]);
 }
 async function unseal(data, keyBytes, aad) {
@@ -475,6 +475,109 @@ if (!LIVE) {
   assert.equal(codes.filter((c) => c === 200).length, 20, "20 an hour");
 }
 
+// MARK: the map at a change: the sharer, the stop, the next rides (pure)
+{
+  const enc = (pts) => { let out = "", pl = 0, pn = 0; for (const [lon, lat] of pts) { for (const [v, p] of [[Math.round(lat * 1e5), pl], [Math.round(lon * 1e5), pn]]) {
+    let d = v - p; d = d < 0 ? ~(d << 1) : d << 1; while (d >= 0x20) { out += String.fromCharCode((0x20 | (d & 0x1f)) + 63); d >>= 5; } out += String.fromCharCode(d + 63); }
+    pl = Math.round(lat * 1e5); pn = Math.round(lon * 1e5); } return out; };
+  assert.deepEqual(Dc(enc([[5.1, 51.2], [5.3, 51.4]])), [[5.1, 51.2], [5.3, 51.4]]);
+  const at = { state: "change", leg: 2, mode: "train", line: "IC", from: "Eindhoven Centraal", to: "Breda", dep: now + 1480, eta: now + 3800, t: now + 1300,
+    pos: { lat: 51.4425, lon: 5.4770, at: now + 1290, src: "phone" }, next: 0, shape: undefined,
+    stops: [{ name: "Eindhoven Centraal", lat: 51.44306, lon: 5.47901 }, { name: "Tilburg", lat: 51.5606, lon: 5.0836 }, { name: "Breda", lat: 51.5955, lon: 4.7800 }] };
+  const legs = trip().legs.map((l, i) => i === 3 ? { ...l, shape: enc([[4.7810, 51.5950], [4.7900, 51.5800], [4.8000, 51.5700]]) } : l);
+  v = Vw(trip({ ...at, legs }), now + 1300, now + 1300);
+  assert.equal(v.eyebrow.text, "Changing");
+  // the sharer (their phone) as a dot with their initial, not as the vehicle
+  assert.deepEqual(v.map.person, { pos: [5.477, 51.4425], letter: "S", color: "#E8A33D" });
+  assert.equal(v.map.pos, null);
+  // the walk to the stop (dotted), the stop they wait at as a ring, the IC's road, then bus 1's own road
+  assert.deepEqual(v.map.walks[0], [[5.477, 51.4425], [5.47901, 51.44306]]);
+  assert.deepEqual(v.map.rings[0], [5.47901, 51.44306]);
+  assert.equal(v.map.road.length, 3);
+  assert.equal(v.map.later.length, 1, "bus 1");
+  assert.deepEqual(v.map.walks[1], [[4.78, 51.5955], [4.781, 51.595]], "the walk at Breda");
+  assert.equal(v.map.later[0].color, "#E0632E");
+  assert.equal(v.map.later[0].dashed, false);
+  assert.deepEqual(v.map.later[0].coords[0], [4.781, 51.595]);
+  assert.deepEqual(v.map.rings.slice(1), [[4.781, 51.595]], "the change at Breda");
+  assert.deepEqual(v.map.dest, { lon: 4.8, lat: 51.57, name: "Breda, Hogeschool" });
+  // framed together: the sharer, the IC's road and bus 1's
+  assert.ok(v.map.all.some((p) => p[0] === 5.477) && v.map.all.some((p) => p[0] === 4.8));
+  // the vehicle's own GPS at a change: the vehicle, and the stop still ringed
+  v = Vw(trip({ ...at, legs, pos: { lat: 51.50, lon: 5.30, at: now + 1290, src: "gps" } }), now + 1300, now + 1300);
+  assert.equal(v.map.person, null);
+  assert.deepEqual(v.map.pos, [5.3, 51.5]);
+  assert.equal(v.map.label, "IC");
+  assert.deepEqual(v.map.rings[0], [5.47901, 51.44306]);
+  // a later ride with no road: dashed across it, in its colour
+  v = Vw(trip({ ...at, legs: [...trip().legs.slice(0, 3), { ...trip().legs[3] }, { mode: "bus", line: "9", from: "x", to: "Campus", shape: enc([[4.9, 51.6], [4.95, 51.62]]) }] }), now + 1300, now + 1300);
+  assert.equal(v.map.later[0].dashed, true);
+  assert.equal(v.map.later[0].color, "#E0632E");
+  assert.deepEqual(v.map.later[0].coords, [[4.78, 51.5955], [4.9, 51.6]]);
+  assert.equal(v.map.dest.name, "Campus");
+  // riding: the phone's fix is inside the vehicle (its pill), no person dot
+  v = Vw(trip({ pos: { lat: 51.55, lon: 5.45, at: now - 12, src: "phone" } }), now, now);
+  assert.equal(v.map.person, null);
+  assert.deepEqual(v.map.pos, [5.45, 51.55]);
+  assert.equal(v.map.later.length, 0, "no later road known");
+  assert.equal(v.pic, 0);
+  assert.equal(Vw(trip({ pic: 3 }), now, now).pic, 3);
+}
+
+// MARK: the page's layout: a sheet whose header is the drag area; the music strip inside the card, under the name
+{
+  const card = html.slice(html.indexOf('<main id="card"'), html.indexOf("</main>"));
+  const head = card.slice(card.indexOf('<div id="shead"'), card.indexOf('<div id="sbody"'));
+  assert.ok(head.includes('id="grab"') && head.includes('id="head"') && head.includes('id="face"'), "handle and name row drag the sheet");
+  assert.ok(card.indexOf('id="music"') > card.indexOf('id="sbody"'), "the music strip is in the card's body");
+  assert.ok(card.indexOf('id="music"') < card.indexOf('id="big"'), "under the name, above the big time");
+  assert.ok(card.includes('id="sfoot"') && card.indexOf('id="msgText"') > card.indexOf('id="sfoot"'), "the message box at the sheet's bottom");
+  // nothing floats over the map but the (i), "Open in Haltewekker" and "⌖"; all below the browser's own bar
+  const fixed = [...html.matchAll(/(?:^|[}\n])([.#][\w-]+)\{[^}]*position:fixed/g)].map((m) => m[1]);
+  assert.deepEqual(fixed.sort(), ["#map", ".ghost", ".pill", ".sheet"]);
+  assert.match(html, /\.pill\{position:fixed;top:max\(14px,calc\(env\(safe-area-inset-top\) \+ 10px\)\)/);
+  assert.match(html, /\.maplibregl-ctrl-top-left\{top:max\(14px,calc\(env\(safe-area-inset-top\) \+ 10px\)\)/);
+  assert.match(html, /body\{position:fixed;inset:0;/);
+  assert.match(html, /\.shead\{[^}]*min-height:56px[^}]*touch-action:none/);
+  assert.match(html, /\.sheet\.full \.sbody\{overflow-y:auto;touch-action:pan-y/);
+  assert.match(html, /92dvh/);
+  assert.match(script, /visualViewport/);
+}
+
+// MARK: the sharer's picture (locked with the link's key; its own AAD)
+{
+  const faceAad = "hw-live-face-v1\n" + token;
+  const jpg = new Uint8Array(9000).map((_, i) => (i * 7) & 255); jpg[0] = 0xff; jpg[1] = 0xd8;
+  const sealedFace = await seal(jpg, keyBytes, faceAad);
+  const fput = (sec, data, method = "PUT") => call("/live/v1/face", { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ secret: b64u(sec), data: b64u(data) }) });
+  assert.equal((await call(`/live/v1/face?t=${token}`)).status, 404, "none yet");
+  assert.equal((await fput(new Uint8Array(16), sealedFace)).status, 400, "a bad secret");
+  assert.equal((await fput(crypto.getRandomValues(new Uint8Array(32)), sealedFace)).status, 404, "another secret: no such link");
+  assert.equal((await fput(secret, new Uint8Array(24 * 1024 + 1).fill(1))).status, 400, "at most 24 KB");
+  assert.equal((await fput(secret, new Uint8Array([2, ...sealedFace.slice(1)]))).status, 400, "first byte 1");
+  assert.equal((await call(`/live/v1/face?t=${token}`, { method: "DELETE" })).status, 405);
+  const fp = await fput(secret, sealedFace);
+  assert.equal(fp.status, 200);
+  const etag = (await fp.json()).etag;
+  assert.match(etag, /^[0-9a-f]{32}$/);
+  assert.equal((await fput(secret, sealedFace, "POST")).status, 429, "5 s apart");
+  r = await call(`/live/v1/face?t=${token}&v=1`);
+  assert.equal(r.status, 200);
+  assert.equal(r.headers.get("Content-Type"), "application/octet-stream");
+  assert.equal(r.headers.get("ETag"), `"${etag}"`);
+  assert.match(r.headers.get("Cache-Control"), /max-age=86400/);
+  const box = new Uint8Array(await r.arrayBuffer());
+  assert.deepEqual(box, sealedFace, "only the locked bytes");
+  assert.equal((await call(`/live/v1/face?t=${token}&v=1`, { headers: { "If-None-Match": `"${etag}"` } })).status, 304);
+  // opened only as a picture: not with the trip's AAD, and a trip state doesn't open as a picture
+  const k = await crypto.subtle.importKey("raw", keyBytes, { name: "AES-GCM" }, false, ["decrypt"]);
+  const openAs = (b, aad) => crypto.subtle.decrypt({ name: "AES-GCM", iv: b.slice(1, 13), additionalData: new TextEncoder().encode(aad) }, k, b.slice(13));
+  assert.deepEqual(new Uint8Array(await openAs(box, faceAad)), jpg);
+  await assert.rejects(openAs(box, "hw-live-v1\n" + token));
+  await assert.rejects(openAs(await lock(v2, keyBytes, token), faceAad));
+  assert.ok(script.includes("hw-live-face-v1"), "the page opens it with the same AAD");
+}
+
 // arrived (the app's last state), then ended
 await pause(5200);
 const arrived = { ...state, state: "arrived", eta: now + 60, pos: undefined, late: undefined, t: now + 60 };
@@ -492,10 +595,11 @@ r = await call(`/live/v1/get?t=${token}`);
 assert.equal(r.status, 410);
 if (!LIVE) {
   const left = [...env.LIVE.objects.get("t:" + token).store.map.keys()];
-  assert.deepEqual(left, ["s"], "the messages go with the link");
+  assert.deepEqual(left, ["s"], "the messages and the picture go with the link");
 }
 assert.equal((await post(`/live/v1/msg?t=${token}`, { data: b64u(reply) }, LIVE ? {} : { "CF-Connecting-IP": "203.0.113.9" })).status, 410);
 assert.equal((await post("/live/v1/inbox", { secret: b64u(secret), after: 0 })).status, 410);
+assert.equal((await call(`/live/v1/face?t=${token}`)).status, 410, "the picture goes with the link");
 page = await runPage(link, script, storage);
 assert.equal(page.els.head.textContent, "This link has ended");
 assert.equal(page.els.eyebrow.textContent, "Ended");
