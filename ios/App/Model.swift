@@ -106,6 +106,9 @@ struct PlannedRide: Hashable {
     /// (0.42.4) A train's number and planned departure, for its platform watch (`PlatformWatch`).
     var num: String = ""
     var scheduled: Date? = nil
+    /// (0.42.9) When it gets to the leg's stop, as planned, and where it goes (staying on past a change: `TrainRules.stayOn`).
+    var arrival: Date? = nil
+    var headsign: String = ""
 }
 
 /// Your two routes. Going home is the same route backwards.
@@ -136,7 +139,8 @@ struct RoutePlan: Identifiable, Hashable {
         guard let last = legs.last else { return nil }
         return RoutePlan(id: "trip-\(t.id)", name: "To \(last.to.short)", station: last.to, custom: legs,
                          planned: t.rides.map { PlannedRide(tripId: $0.tripId, line: $0.line, isTrain: $0.isTrain, departure: $0.departure, agency: $0.agency,
-                                                            platform: $0.platform, num: $0.num, scheduled: $0.scheduledDeparture) },
+                                                            platform: $0.platform, num: $0.num, scheduled: $0.scheduledDeparture,
+                                                            arrival: $0.arrival, headsign: $0.headsign) },
                          plannedEnd: t.last.scheduledArrival)
     }
 

@@ -65,4 +65,40 @@ final class AlarmStopTests: XCTestCase {
         XCTAssertTrue(AlarmStop.tripDelivered.contains(WristNotice.againId))
         XCTAssertTrue(AlarmStop.tripDelivered.contains("backup"))
     }
+
+    // MARK: (0.42.9) which ring gets the lock screen's ringing state
+
+    func test_everyRingKindRingsOnTheLockScreenWithStop() {
+        let rings: [RingShow.Kind] = [.alarm, .headphonesQuiet, .phoneInUse, .byTime, .reckoned, .backup, .again]
+        for k in rings {
+            XCTAssertTrue(RingShow.lockRinging(k), "\(k)")
+            XCTAssertEqual(RingShow.category(k), WristNotice.alarmCategory, "\(k)")
+            XCTAssertNotNil(RingShow.notificationId(k), "\(k)")
+        }
+        // its notification is the alarm's own: Stop alarm, opening it or swiping it away stops it
+        for k in rings { XCTAssertTrue(AlarmStop.plan(id: RingShow.notificationId(k)!, action: .dismiss).stopTrip, "\(k)") }
+        for k: RingShow.Kind in [.shortNotice, .getReady, .arrived] {
+            XCTAssertFalse(RingShow.lockRinging(k), "\(k)")
+            XCTAssertEqual(RingShow.category(k), WristNotice.tripCategory)
+            XCTAssertNil(RingShow.notificationId(k))
+        }
+    }
+
+    func test_phoneInUseAndNoHeadphonesStillRing() {
+        XCTAssertEqual(RingShow.kind(inUse: true, quiet: true), .phoneInUse)
+        XCTAssertEqual(RingShow.kind(inUse: false, quiet: true), .headphonesQuiet)
+        XCTAssertEqual(RingShow.kind(inUse: false, quiet: false), .alarm)
+        XCTAssertTrue(RingShow.lockRinging(RingShow.kind(inUse: true, quiet: true)))
+        XCTAssertTrue(RingShow.lockRinging(RingShow.kind(inUse: false, quiet: true)), "from the first second, while it only vibrates")
+    }
+
+    /// Without headphones it never goes out loud by itself: only with "Out loud if I don't stop it" on.
+    func test_noHeadphonesStaysVibrationOnly() {
+        XCTAssertEqual(RingShow.sound(.headphonesQuiet, quiet: true, outLoudLater: false), .vibrate(loudAfter: false))
+        XCTAssertEqual(RingShow.sound(.backup, quiet: true, outLoudLater: false), .vibrate(loudAfter: false))
+        XCTAssertEqual(RingShow.sound(.headphonesQuiet, quiet: true, outLoudLater: true), .vibrate(loudAfter: true))
+        XCTAssertEqual(RingShow.sound(.alarm, quiet: false, outLoudLater: false), .loop)
+        XCTAssertEqual(RingShow.sound(.phoneInUse, quiet: true, outLoudLater: true), .chimeOnce)
+        XCTAssertEqual(RingShow.sound(.arrived, quiet: false, outLoudLater: false), .none)
+    }
 }

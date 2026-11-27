@@ -74,6 +74,9 @@ class RideService : Service() {
         const val ACTION_DISMISS = "nl.haltewekker.ride.DISMISS"
         const val ACTION_PICK_AGAIN = "nl.haltewekker.ride.PICK_AGAIN"
         const val ACTION_SWITCH_CHANGE = "nl.haltewekker.ride.SWITCH_CHANGE"
+        /** (0.10.7) the faster stop offered: "Do this", "Keep my plan". */
+        const val ACTION_BETTER_TAKE = "nl.haltewekker.ride.BETTER_TAKE"
+        const val ACTION_BETTER_KEEP = "nl.haltewekker.ride.BETTER_KEEP"
         const val EXTRA_TRIP = "trip"
         const val EXTRA_WHAT = "what"
 
@@ -221,6 +224,8 @@ class RideService : Service() {
             ACTION_DISMISS -> RideStore.update(this) { if (intent.getStringExtra(EXTRA_WHAT) == "other") { it.otherAtStop?.let { a -> otherClosed.add(a.tripId) }; it.copy(otherAtStop = null) } else it.copy(wrongBus = null) }
             ACTION_PICK_AGAIN -> pickAgain()
             ACTION_SWITCH_CHANGE -> scope.launch { switchChange() }
+            ACTION_BETTER_TAKE -> takeBetterStop()
+            ACTION_BETTER_KEEP -> keepPlan()
         }
         begin()
         return START_STICKY
@@ -428,6 +433,8 @@ class RideService : Service() {
                 val v = RideStore.state.value?.vehicleTripId ?: leg.tripId
                 if (now - etaAt >= 60 && leg.to != null) {
                     etaAt = now
+                    // (0.10.7, iOS 0.42.9) a new answer of its stops: on past the change after all? a faster stop further on?
+                    RideStore.state.value?.vehicleTripId?.let { id -> scope.launch { try { stayOnIfItGoes(id); betterStopLook(id) } catch (_: Exception) {} } }
                     val cur0 = RideStore.state.value
                     // (A8, iOS 0.39 `RideCache`) no answer: the stops and times saved on the phone when the trip started
                     val w = look.wakeTrip(v, leg.from, leg.to!!, fixes.lastOrNull()?.p, now) { id -> RideCacheStore.live(id, cur0?.startedAt, now) }
@@ -441,6 +448,7 @@ class RideService : Service() {
                         wakeLive = w.arrival?.takeIf { w.live && !w.saved }?.let { it to Iso.now() }
                         RideStore.update(this) { it.copy(eta = w.arrival ?: it.eta, nextStop = w.nextStop, delayMin = w.delayMin) }
                         wakeBeforeAt = w.beforeAt
+                        if (!w.saved && w.trip != null) doorLook(w.trip, leg)
                         checkGetReady(w, now)
                         if (!w.saved && w.trip != null) RideStore.state.value?.let { st -> if (RideCacheStore.due(v, now)) RideCacheStore.put(this, v, w.trip, st.startedAt, now) }
                     }
@@ -470,7 +478,10 @@ class RideService : Service() {
         stopReckon()
         cancelBackup()
         requestLocation(RideGPS.intervalMs(false))
-        AlarmPlayer.ring(this, if (st.announce && leg != null) WakeRules.announcement(leg.toStop, leg.isTrain, true) else null, quiet)
+        // (0.10.7, iOS 0.42.9) every ring rings the same way (the alarm's notification, full screen, Stop alarm); without
+        // headphones it stays vibration only, out loud after a minute only with "Out loud if I don't stop it" on
+        AlarmPlayer.ring(this, if (st.announce && leg != null) WakeRules.announcement(leg.toStop, leg.isTrain, true) else null, quiet,
+            loudLater = WakeRules.loudLater(quiet, st.outLoudLater))
         RideStore.state.value?.let { Notifications.post(this, Notifications.ALARM_ID, Notifications.alarm(this, it, backup = why.startsWith("backup")), WristNotice.ALARM_ID) }
         scope.launch { delay((WristNotice.AGAIN_AFTER * 1000).toLong() + 500); ringAgain() }
         notifyRide(force = true)
@@ -535,7 +546,8 @@ class RideService : Service() {
         choice.clear(); chooseJob?.cancel(); chooseJob = null
         Notifications.cancelTag(this, Notifications.ASK_TAG, Notifications.NEWS_ID + 3)
         gpsRuns = emptyMap(); rivalAt = 0.0; departure = null
-        RideStore.update(this) { it.copy(choosing = emptyList(), ask = null, otherAtStop = null, wrongBus = null, readyTold = false, nextStop = null, delayMin = null) }
+        RideStore.update(this) { it.copy(choosing = emptyList(), ask = null, otherAtStop = null, wrongBus = null, readyTold = false, nextStop = null, delayMin = null,
+            doorSide = null, doorKey = null) }
         val s = RideStore.state.value ?: return
         look.reset()
         etaAt = 0.0
@@ -544,7 +556,8 @@ class RideService : Service() {
             RideStore.update(this) {
                 it.copy(index = it.index + 1, phase = Phase.SLEEPING, legStart = now, vehicleTripId = null, vehicleLine = null,
                     vehicleSource = VehicleSource.NONE, eta = null, distance = null, quiet = false, note = null, roughGPS = false,
-                    ringMinutes = null, reckoning = false, changeArrived = now, changeFromVehicle = s.vehicleTripId, quietLeg = false, legStartMetres = null)
+                    ringMinutes = null, reckoning = false, changeArrived = now, changeFromVehicle = s.vehicleTripId, quietLeg = false, legStartMetres = null,
+                    headsign = null, stayOnTo = null, better = null)
             }
             requestLocation(RideGPS.intervalMs(false))
             scheduleBackup()
@@ -927,6 +940,39 @@ class RideService : Service() {
 
     // MARK: (A8, iOS 0.39) get ready, the saved rides, the change guide
 
+    private var doorAsking = false
+    private var doorTried: Pair<String, Double>? = null      // a question that got no answer, and when: again after 5 min
+
+    /**
+     * (0.10.6) Which side you get out (`DoorSide`, the relay's `/rail/v1/side`): asked once this train leg's trip says
+     * the platform at your stop, again only when that (or the stop before) changes; never while the alarm rings.
+     */
+    private fun doorLook(t: TransitParse.LiveTrip, leg: nl.haltewekker.data.Ride) {
+        val s = RideStore.state.value ?: return
+        val to = leg.to ?: return
+        if (s.phase == Phase.ALARM || s.phase == Phase.FINISHED || doorAsking) return
+        val codes = nl.haltewekker.friends.NSCodes.get(this)
+        val code = codes.code(leg.toStop) ?: codes.nearest(to, 600.0)?.code
+        val a = DoorSide.ask(leg.isTrain, t.stops, to, code) ?: return
+        if (a.key == s.doorKey) return
+        val now = Iso.now()
+        doorTried?.let { (k, at) -> if (k == a.key && now - at < 300) return }
+        doorTried = a.key to now
+        doorAsking = true
+        val index = s.index
+        scope.launch {
+            try {
+                val r = nl.haltewekker.data.Net.get("${nl.haltewekker.friends.FriendRelay.BASE}/rail/v1/side?${a.query()}")
+                val line = if (r.ok) DoorSide.line(DoorSide.parse(r.text), a.track) else null
+                // a busy relay or no network: asked again on a later tick
+                if (r.ok || r.status in 400..499) RideStore.update(this@RideService) { cur ->
+                    if (cur.index != index) cur else cur.copy(doorSide = line, doorKey = a.key)
+                }
+                if (r.ok) FieldLog.ride("exit side · ${a.station} platform ${a.track}: ${line ?: "not known"}")
+            } finally { doorAsking = false }
+        }
+    }
+
     /** The quiet "Get ready" once the vehicle is at the stop before yours, before the alarm rang (`GetReady`). */
     private fun checkGetReady(w: OnBoardLook.WakeTrip, now: Double) {
         val s = RideStore.state.value ?: return
@@ -937,7 +983,7 @@ class RideService : Service() {
         RideStore.update(this) { it.copy(readyTold = true) }
         val (t, b) = GetReady.words(leg.toStop, w.arrival?.let { it - now })
         FieldLog.ride("get ready · at ${w.before ?: "the stop before yours"} · ${leg.toStop} next")
-        Notifications.quiet(this, GetReady.id(s.startedAt, s.index), t, b, s)
+        Notifications.quiet(this, GetReady.id(s.startedAt, s.index), t, DoorSide.withLine(b, s.doorSide), s)
     }
 
     /** Each planned ride's trip answer saved on the phone (at most every 2 minutes a ride, 4 rides). */
@@ -1231,38 +1277,150 @@ class RideService : Service() {
     }
 
     /**
-     * (iOS 0.34 `stayOnIfItGoes`) the train you're on goes on to a later leg's stop in time for the ride after it: the
-     * trip follows it (stay on, no change).
+     * (iOS 0.34 / 0.42.9 `stayOnIfItGoes`) the vehicle you're on goes on to a later leg's stop (where it gets off, or
+     * where the ride after it gets on) no later than the planned ride (+2 min), or the plan split this very train: the
+     * trip follows it (stay on, no change, no ring there). Looked at again with each new answer of its stops.
      */
     private suspend fun stayOnIfItGoes(tripId: String) {
         val s = RideStore.state.value ?: return
         val leg = s.leg ?: return
-        if (!leg.isTrain || s.index + 1 >= s.trip.rides.size) return
-        val t = try { Transit.trip(tripId, maxAge = 60.0) } catch (_: Exception) { null } ?: return
+        if (s.index + 1 >= s.trip.rides.size) return
+        val t = try { Transit.trip(tripId, maxAge = 60.0) } catch (_: Exception) { null }
         val rides = s.trip.rides
-        val ends = rides.indices.map { k -> (if (k + 1 < rides.size) rides[k + 1].from else rides[k].to) ?: return }
-        val calls = t.stops.map { nl.haltewekker.match.TrainRules.Call(it.point, it.arrival) }
-        val (k, ci) = nl.haltewekker.match.TrainRules.stayOn(s.index, ends, rides.map { it.departure }, calls, Iso.now()) ?: return
-        val st = t.stops[ci]
+        val legs = rides.map { r ->
+            nl.haltewekker.match.TrainRules.StayLeg(r.from ?: return, r.to ?: return, r.fromStop, r.toStop, r.departure, r.arrival,
+                r.tripId, if (r.isTrain) r.num else "")
+        }
+        val stops = t?.stops ?: emptyList()
+        val calls = stops.map { nl.haltewekker.match.TrainRules.Call(it.point, it.arrival, it.name) }
+        val num = if (leg.isTrain) (t?.num?.takeIf { it.isNotEmpty() } ?: leg.num.takeIf { leg.tripId == tripId } ?: "") else ""
+        // (0.10.7, iOS 0.42.9) where it really goes, for the headline: its headsign, else its last stop
+        if (t != null) {
+            val h = t.headsign.ifEmpty { stops.lastOrNull()?.name ?: "" }
+            if (h.isNotEmpty() && RideStore.state.value?.headsign != h) RideStore.update(this) { it.copy(headsign = h) }
+        }
+        val hit = nl.haltewekker.match.TrainRules.stayOn(s.index, legs, tripId, num, calls, Iso.now()) ?: return
+        val k = hit.leg
         val cur = RideStore.state.value ?: return
         if (cur.index != s.index || cur.vehicleTripId != tripId) return
         val skipped = rides.subList(s.index + 1, k + 1).map { it.fromStop }
-        val name = nl.haltewekker.ui.Fmt.place(st.name)
-        val mine = leg.copy(toStop = st.name, toLat = st.point.lat, toLon = st.point.lon, arrival = st.arrival ?: leg.arrival)
+        val st = hit.call?.let { stops[it] }
+        val endName = st?.name ?: rides[k].toStop
+        val name = nl.haltewekker.ui.Fmt.place(endName)
+        val reaches = st?.arrival ?: rides[k].arrival
+        val mine = if (st != null) leg.copy(toStop = st.name, toLat = st.point.lat, toLon = st.point.lon, arrival = reaches)
+            else leg.copy(toStop = rides[k].toStop, toLat = rides[k].toLat, toLon = rides[k].toLon, arrival = reaches, scheduledArrival = rides[k].scheduledArrival)
         val newRides = rides.subList(0, s.index) + mine + rides.subList(k + 1, rides.size)
         val kms = s.wakeKm.subList(0, minOf(s.index + 1, s.wakeKm.size)) + s.wakeKm.drop(k + 1)
-        RideStore.update(this) { it.copy(trip = it.trip.copy(rides = newRides, end = if (k + 1 >= rides.size) (st.arrival ?: it.trip.end) else it.trip.end),
-            wakeKm = kms, eta = null, distance = null, phase = if (it.phase == Phase.AWAKE) Phase.SLEEPING else it.phase,
-            quietLeg = if (it.phase == Phase.AWAKE) false else it.quietLeg, legStartMetres = null) }
-        etaAt = 0.0; wakeRoute = emptyList(); wakeLive = null
-        legClosest = null; awayLooked = false; wakeBeforeAt = null
-        backupScheduledFor = null; scheduleBackup()
-        FieldLog.ride("stay on · ${FieldFormat.vehicle(cur.vehicleLine ?: leg.line, tripId, true)} to $name · no change at ${skipped.joinToString(", ")}")
+        applyStay(newRides, kms, name, if (k + 1 >= rides.size) reaches else null)
+        val was = rides[s.index + 1]
+        val wasLabel = if (was.num.isEmpty()) was.line else "${was.line} ${nl.haltewekker.match.TrainRules.digits(was.num)}"
+        val mineLabel = if (num.isEmpty()) FieldFormat.vehicle(cur.vehicleLine ?: leg.line, tripId, leg.isTrain) else "${cur.vehicleLine ?: leg.line} ${nl.haltewekker.match.TrainRules.digits(num)}"
+        FieldLog.ride(nl.haltewekker.match.TrainRules.stayLog(mineLabel, name, Notifications.time(reaches), nl.haltewekker.ui.Fmt.place(leg.toStop),
+            Notifications.time(leg.arrival), wasLabel, Notifications.time(was.departure), hit.sameTrain))
         val nextRide = rides.getOrNull(k + 1)
-        val what = cur.vehicleLine ?: leg.line
+        val what = cur.vehicleTitle ?: (cur.vehicleLine ?: leg.line)
         val body = if (nextRide != null) "This $what goes on to $name in time for the same ${if (nextRide.isTrain) nextRide.line else "bus ${nextRide.line}"} at ${Notifications.time(nextRide.departure)}: no change at ${skipped.joinToString(", ")}."
         else "This $what goes all the way to $name: no change at ${skipped.joinToString(", ")}."
         Notifications.news(this, "stayon-${s.startedAt.toLong()}", "Stay on to $name", body)
+        notifyRide(force = true)
+    }
+
+    /** (0.10.7) The trip now stays on the vehicle to `name`: the wake-up for the new stop; a ring for the change it skips goes. */
+    private fun applyStay(newRides: List<nl.haltewekker.data.Ride>, kms: List<Double>, name: String, end: Double?) {
+        val wasRinging = RideStore.state.value?.phase == Phase.ALARM
+        if (wasRinging) {
+            AlarmPlayer.stop(this)
+            Notifications.cancel(this, Notifications.ALARM_ID)
+            Notifications.cancelTag(this, WristNotice.ALARM_ID, Notifications.ALARM_ID)
+            Notifications.cancelTag(this, WristNotice.AGAIN_ID, Notifications.ALARM_ID)
+        }
+        RideStore.update(this) { it.copy(trip = it.trip.copy(rides = newRides, end = end ?: it.trip.end),
+            wakeKm = kms, eta = null, distance = null, stayOnTo = name, better = null, doorSide = null, doorKey = null,
+            phase = if (it.phase == Phase.AWAKE || it.phase == Phase.ALARM) Phase.SLEEPING else it.phase,
+            quietLeg = if (it.phase == Phase.AWAKE || it.phase == Phase.ALARM) false else it.quietLeg, legStartMetres = null, rangAt = null) }
+        etaAt = 0.0; wakeRoute = emptyList(); wakeLive = null
+        legClosest = null; awayLooked = false; wakeBeforeAt = null
+        backupScheduledFor = null; scheduleBackup()
+    }
+
+    // MARK: (0.10.7, iOS 0.42.9 `BetterStop`) the best place to get off
+
+    private var betterAt = 0.0
+    private var betterBusy = false
+    private val betterKept = HashSet<String>()
+
+    /** The vehicle's stops go on past this leg's stop: plan from a few of them (every 5 min at most), offer a faster one. */
+    private suspend fun betterStopLook(tripId: String) {
+        val s = RideStore.state.value ?: return
+        val leg = s.leg ?: return
+        val final = s.trip.rides.lastOrNull() ?: return
+        val now = Iso.now()
+        if (betterBusy || s.better != null || s.index + 1 >= s.trip.rides.size || now - betterAt < nl.haltewekker.match.BetterStop.EVERY) return
+        if (!(s.phase == Phase.SLEEPING || s.phase == Phase.AWAKE) || s.vehicleTripId != tripId) return
+        val legTo = leg.to ?: return
+        val dest = final.to ?: return
+        betterAt = now
+        val t = try { Transit.trip(tripId, maxAge = 60.0) } catch (_: Exception) { null } ?: return
+        val calls = t.stops.map { nl.haltewekker.match.TrainRules.Call(it.point, it.arrival, it.name) }
+        val after = nl.haltewekker.match.TrainRules.callAt(legTo, leg.toStop, calls, now) ?: return
+        val picks = nl.haltewekker.match.BetterStop.candidates(calls, after, dest, now).filter { t.stops[it].name !in betterKept }
+        if (picks.isEmpty()) return
+        val current = s.trip.rides.last().arrival
+        val changes = s.trip.rides.size - s.index - 1
+        betterBusy = true
+        try {
+            val options = ArrayList<nl.haltewekker.match.BetterStop.Option>()
+            val plans = HashMap<Int, DoorTrip>()
+            for (i in picks) {
+                val a = calls[i].arrival ?: continue
+                val found = try { Transit.plan("${calls[i].p.lat},${calls[i].p.lon}", "${dest.lat},${dest.lon}", a + nl.haltewekker.match.BetterStop.CHANGE_ROOM, count = 3, maxTransfers = 2) } catch (_: Exception) { emptyList() }
+                if (RideStore.state.value?.vehicleTripId != tripId) return
+                val ok = found.filter { it.rides.isNotEmpty() && it.first.tripId != tripId && it.first.departure >= a + nl.haltewekker.match.BetterStop.CHANGE_ROOM &&
+                    it.rides.all { r -> r.from != null && r.to != null } }
+                val best = ok.minByOrNull { it.last.arrival } ?: continue
+                options.add(nl.haltewekker.match.BetterStop.Option(i, best.last.arrival, best.rides.size - 1))
+                plans[i] = best
+            }
+            val o = nl.haltewekker.match.BetterStop.best(current, changes, options) ?: return
+            val plan = plans[o.stop] ?: return
+            val st = t.stops[o.stop]
+            val name = nl.haltewekker.ui.Fmt.place(st.name)
+            val f = plan.first
+            val then = (if (f.isTrain) (if (f.line == "IC") "Intercity" else f.line) else "bus ${f.line}") + " at ${Notifications.time(f.departure)}"
+            val destWord = s.destination
+            val newAt = Notifications.time(plan.last.arrival)
+            val text = nl.haltewekker.match.BetterStop.offerText(name, destWord, newAt, Notifications.time(current), then)
+            val log = nl.haltewekker.match.BetterStop.log(name, destWord, newAt, nl.haltewekker.match.BetterStop.minutesSooner(current, plan.last.arrival))
+            FieldLog.ride(log)
+            RideStore.update(this) { it.copy(better = BetterCard(st.name, st.point.lat, st.point.lon, st.arrival ?: f.departure, plan, text, log)) }
+            Notifications.quiet(this, "betterstop", "Stay on to $name", text, RideStore.state.value)
+            notifyRide(force = true)
+        } finally { betterBusy = false }
+    }
+
+    /** "Do this": this leg goes on to that stop (the wake-up there), then the new plan from there. */
+    private fun takeBetterStop() {
+        val s = RideStore.state.value ?: return
+        val b = s.better ?: return
+        val leg = s.leg ?: return
+        Notifications.cancelTag(this, "betterstop", Notifications.NEWS_ID + 5)
+        val mine = leg.copy(toStop = b.stop, toLat = b.lat, toLon = b.lon, arrival = b.reachesAt)
+        val newRides = s.trip.rides.subList(0, s.index) + mine + b.trip.rides
+        val km = s.wakeKm.getOrNull(s.index)
+        val kms = s.wakeKm.subList(0, minOf(s.index + 1, s.wakeKm.size)) + b.trip.rides.map { r -> if (r.isTrain) (km ?: WakeRules.TRAIN_KM) else WakeRules.BUS_KM }
+        applyStay(newRides, kms, nl.haltewekker.ui.Fmt.place(b.stop), b.trip.end)
+        FieldLog.ride(b.log + " · taken")
+        notifyRide(force = true)
+    }
+
+    /** "Keep my plan": not offered again for that stop on this trip. */
+    private fun keepPlan() {
+        val b = RideStore.state.value?.better ?: return
+        betterKept.add(b.stop)
+        Notifications.cancelTag(this, "betterstop", Notifications.NEWS_ID + 5)
+        RideStore.update(this) { it.copy(better = null) }
+        FieldLog.ride("better stop · kept the plan (not at ${nl.haltewekker.ui.Fmt.place(b.stop)})")
         notifyRide(force = true)
     }
 

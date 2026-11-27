@@ -99,12 +99,14 @@ object Notifications {
             Phase.ALARM -> "Wake up: ${leg.toStop}"
             Phase.AWAKE -> "Get ready: ${leg.toStop}"
             Phase.FINISHED -> "You're there"
-            else -> "$what to ${leg.toStop}"
+            // (0.10.7, iOS 0.42.9) where it really goes, and where you get off ("Intercity to Zwolle · get off at Tilburg")
+            else -> s.lockTitle ?: "$what to ${leg.toStop}"
         }
         val parts = ArrayList<String>()
         // (A8, iOS 0.39) the next stop (not yours), how late at your stop
         s.nextStop?.takeIf { s.phase == Phase.SLEEPING }?.let { parts.add("Next: $it") }
         s.delayMin?.let { parts.add(if (it >= 1) "$it min late" else if (it <= -1) "${-it} min early" else "on time") }
+        s.doorSide?.let { parts.add(it) }                 // (0.10.6) "Exit on the left · platform 4"
         s.distance?.let { parts.add("${WakeRules.distanceText(it)} to go") }
         s.legArrival?.let { parts.add("there ${time(it)}") }
         if (s.reckoning) parts.add("no GPS here: following its route")
@@ -172,7 +174,7 @@ object Notifications {
         val b = NotificationCompat.Builder(context, ALARM)
             .setSmallIcon(R.drawable.ic_stat_ride)
             .setContentTitle(lines.title)
-            .setContentText(lines.body)
+            .setContentText(DoorSide.withLine(lines.body, s.doorSide))
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)

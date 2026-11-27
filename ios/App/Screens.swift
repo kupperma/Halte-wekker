@@ -1784,7 +1784,7 @@ struct RideView: View {
                 if let v { LineBullet(line: v.line, train: v.isTrain, height: 30, minWidth: 48, font: 16) }
                 VStack(alignment: .leading, spacing: 1) {
                     Text(rideKicker).font(HWFont.body(10, bold: true)).tracking(1.6).opacity(0.85)
-                    Text(v.map { "\($0.title) to \(to)" } ?? (trip.leg?.title ?? "")).font(HWFont.display(21)).lineLimit(1).minimumScaleFactor(0.6)
+                    Text(v.map { TrainRules.lockHeadline(vehicle: $0.title, headsign: trip.headsign, legEnd: to, stayOnTo: trip.stayOnTo) } ?? (trip.leg?.title ?? "")).font(HWFont.display(21)).lineLimit(1).minimumScaleFactor(0.6)
                 }
             }
         }
@@ -2325,7 +2325,7 @@ struct SettingsView: View {
                         Button("Allow location Always") { trip.askForAlways() }.foregroundStyle(link)
                     }
                     Toggle(isOn: $trip.announce) { label("Station announcement", "A jingle and a voice that names your stop, before the alarm.") }
-                    Toggle(isOn: $trip.quietWhenInUse) { label("Just a notification when I’m on my phone", "If your phone is unlocked and in use when it would ring, you’re awake: you get one notification instead of the alarm. Locked, it rings as usual. (Only with a passcode on your phone.)") }
+                    Toggle(isOn: $trip.quietWhenInUse) { label("Just a notification when I’m on my phone", "If your phone is unlocked and in use when it would ring, you’re awake: one chime instead of the alarm on repeat, still with Stop alarm on the lock screen and in the app. Locked, it rings as usual. (Only with a passcode on your phone.)") }
                     Toggle(isOn: $trip.ringAtStop) { label("Chime at the stop", "The station jingle, the announcement and a notification when you arrive. No second alarm to stop: the leg ends by itself.") }
                     Toggle(isOn: $trip.autoHome) { label("Switch to Home at school", "When you reach \(RoleWords.current.school), the app switches to going home once that day. Switch back whenever you like.") }
                     Toggle(isOn: $trip.movingStation) { label("Moving station", "The station and train behind the home and ride screens. It pauses when the screen is off. Off shows a still picture.") }
@@ -2337,14 +2337,17 @@ struct SettingsView: View {
                     .onChange(of: trip.soundKind) { _, k in trip.sound.play(preview: k) }
                     Text(trip.soundKind.detail).font(ink.note(12)).foregroundStyle(ink.muted)
                     Button("Test alarm") { trip.testAlarm() }.foregroundStyle(link)
-                    Toggle(isOn: $trip.headphonesOnly) { label("Sound only with headphones", "Without Bluetooth, wired or USB headphones, the alarm and the announcer only vibrate, so the rest of the train doesn’t hear it. Not stopped after a minute? Then it rings out loud anyway.") }
+                    Toggle(isOn: $trip.headphonesOnly) { label("Sound only with headphones", "Without Bluetooth, wired or USB headphones, the alarm and the announcer only vibrate (a strong buzz on repeat until you stop it), so the rest of the train doesn’t hear it. It also rings on the lock screen, with Stop alarm.") }
+                    if trip.headphonesOnly {
+                        Toggle(isOn: $trip.outLoudLater) { label("Out loud if I don’t stop it (after 1 min)", "Without headphones: not stopped after a minute, it rings out of the speaker. Off unless you turn it on, so it never wakes the rest of the train.") }
+                    }
                     Picker("If music is playing", selection: $trip.pauseMusic) {
                         Text("Keep it playing").tag(false)
                         Text("Pause it").tag(true)
                     }
                     Text(trip.pauseMusic ? "The loudest option: your music stops while it rings. To start it again, press play on your earbuds."
                                          : "The alarm plays over your music, a little louder than it.").font(ink.note(12)).foregroundStyle(ink.muted)
-                } header: { Text("Alarm") } footer: { Text("The alarm also rings in silent mode (with headphones, or out loud when Sound only with headphones is off). Keep the volume up. You can stop it from the lock screen: tap Stop alarm on the trip, or on the notification.") }
+                } header: { Text("Alarm") } footer: { Text("The alarm also rings in silent mode (with headphones, or out loud when Sound only with headphones is off). Keep the volume up. Every alarm rings on the lock screen too: tap Stop alarm on the trip, or on the notification.") }
                 Section {
                     Picker("Backup alarm", selection: $trip.backupMinutes) {
                         Text("Off").tag(0)
