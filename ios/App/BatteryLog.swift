@@ -511,6 +511,17 @@ enum BatteryReport {
         return parts.isEmpty ? "GPS off" : "GPS " + parts.joined(separator: " / ")
     }
 
+    /// (0.42.8) A ride's GPS, the best against the rough tiers (10 m and 100 m): "GPS best 6 min · reduced 18 min (75%)".
+    /// Nil: GPS was off (or on under 30 s).
+    static func gpsSplit(_ r: RideCost) -> String? {
+        let best = r.gps[GPSMode.best.rawValue] ?? 0
+        let reduced = (r.gps[GPSMode.tenMetres.rawValue] ?? 0) + (r.gps[GPSMode.hundredMetres.rawValue] ?? 0)
+        let total = best + reduced
+        guard total >= 30 else { return nil }
+        let share = Int((reduced / total * 100).rounded())
+        return "GPS best \(duration(best)) · reduced \(duration(reduced)) (\(share)%)"
+    }
+
     /// "Ride 18:51–19:15 · 24 min · −4% · GPS best 6 min / 10 m 18 min · 2.1 MB"
     static func rideLine(_ r: RideCost, timeZone: TimeZone = .current) -> String {
         let f = DateFormatter()
@@ -528,6 +539,15 @@ enum BatteryReport {
     static func fieldLine(_ r: RideCost, timeZone: TimeZone = .current) -> String {
         "cost · " + String(rideLine(r, timeZone: timeZone).dropFirst("Ride ".count))
             + (r.mobile > 0 ? " · mobile \(mb(r.mobile))" : "") + " · \(r.checks) checks · \(r.activityUpdates) LA updates · CPU \(duration(r.cpu))"
+            + reducedShare(r)
+    }
+
+    /// " · GPS reduced 75%" (0.42.8), for the field log's ride line; "" with GPS off.
+    static func reducedShare(_ r: RideCost) -> String {
+        let best = r.gps[GPSMode.best.rawValue] ?? 0
+        let reduced = (r.gps[GPSMode.tenMetres.rawValue] ?? 0) + (r.gps[GPSMode.hundredMetres.rawValue] ?? 0)
+        guard best + reduced >= 30 else { return "" }
+        return " · GPS reduced \(Int((reduced / (best + reduced) * 100).rounded()))%"
     }
 
     /// Everything as text, for "Copy as text".
@@ -542,7 +562,7 @@ enum BatteryReport {
             let k = kinds(d).map { "\($0.kind.label) \(mb($0.bytes))/\($0.requests)" }
             if !k.isEmpty { out.append("  " + k.joined(separator: " · ")) }
         }
-        for r in s.rides.reversed() { out.append(rideLine(r, timeZone: timeZone)) }
+        for r in s.rides.reversed() { out.append(rideLine(r, timeZone: timeZone) + reducedShare(r)) }
         return out.joined(separator: "\n")
     }
 }

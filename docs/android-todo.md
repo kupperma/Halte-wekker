@@ -3,6 +3,31 @@
 The rules and numbers for each are in [logs-export.md](logs-export.md) › For Android (parity), with the iOS files and
 their tests.
 
+## iOS 0.42.8 (less battery and data on long rides)
+
+Field logs of long door-to-door trips showed the best GPS for almost the whole ride (also long train legs far from the
+stop and long waits at a change), a Live Activity update about once a minute, and long-distance coaches far away
+judged on every look. Rules and numbers in
+[logs-export.md](logs-export.md) › "Less battery and data on long rides (0.42.8)"; shared vectors
+`docs/battery-vectors.json`.
+
+- [x] **Rough GPS far from the stop** (`RideAccuracy`): 100 m and a fix every 300 m on a confirmed vehicle while the
+      nearest you can be is beyond the wake distance + 2 km (+ 30 s at top speed) and the stop is more than 6 minutes
+      off; the best in a leg's first 2 minutes, a bus's last 3 km, on doubt, in the backstop region. **Android 0.10.5:**
+      `ride/RideSaver.kt` (`RideSaverTest`, every vector), `RideService.gpsTier` on each fix and each tick: the network
+      provider every 20 s and the passive one, no GPS chip (only without a network provider, once a minute). Android
+      has no repeated "still the same one?" look: found by GPS counts as confirmed (fresh).
+- [x] **Rough GPS while you wait at a change** (`ChangeWait`): stood 3 minutes, until 3 minutes before the next ride.
+      **Android 0.10.5:** after a leg with no vehicle yet, the stand from `noteWaitAnchor`, the next ride's departure.
+- [x] **Live Activity cadence** (`ActivityCadence`). **Android 0.10.5:** the ongoing ride notification (`notifyRide`).
+- [x] **The trip's live times every 2 minutes far away, 45 s near** (`RideNet`). **Android 0.10.5:** the tick's
+      arrival look.
+- [x] **Candidate prefilter** (`CandidatePrefilter`). **Android 0.10.5:** `OnBoardLook.look`.
+- [x] **Smaller plans** (`detailedLegs=false`). **Android 0.10.5:** `Transit.plan(detailed = false)` for the ride's
+      own plans (the home map still draws the shapes it gets).
+- [ ] Android: a Battery & data screen with the ride cost (iOS `BatteryLog`): Android has no battery log yet.
+- [ ] Android: a repeated "still the same one?" look, so the rough tier can expire and look again as on iOS.
+
 ## iOS 0.42.7 (Listening now)
 
 Sharing the song you listen to while you travel, with friends and on your live link. Rules, the relay route and the

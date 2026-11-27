@@ -52,19 +52,22 @@ object Transit {
     private class Kept(val at: Double, val trips: List<DoorTrip>)
     private val plans = ConcurrentHashMap<String, Kept>()
 
-    suspend fun plan(from: String, to: String, at: Double, count: Int = 5, maxTransfers: Int = 4, arriveBy: Boolean = false): List<DoorTrip> =
-        withContext(Dispatchers.Default) { planHere(from, to, at, count, maxTransfers, arriveBy) }
+    /** `detailed` false (0.10.5, iOS 0.42.8): without the legs' shapes (`detailedLegs=false`, half the bytes), for a ride's
+     *  own plans that never draw them. */
+    suspend fun plan(from: String, to: String, at: Double, count: Int = 5, maxTransfers: Int = 4, arriveBy: Boolean = false, detailed: Boolean = true): List<DoorTrip> =
+        withContext(Dispatchers.Default) { planHere(from, to, at, count, maxTransfers, arriveBy, detailed) }
 
-    private suspend fun planHere(from: String, to: String, at: Double, count: Int, maxTransfers: Int, arriveBy: Boolean): List<DoorTrip> {
+    private suspend fun planHere(from: String, to: String, at: Double, count: Int, maxTransfers: Int, arriveBy: Boolean, detailed: Boolean): List<DoorTrip> {
         val minute = Math.floor(at / 60) * 60
         // (A6, iOS 0.34) your walking speed, when it's learned and clearly not the planner's own
         val walk = nl.haltewekker.travel.HabitStore.pedestrianSpeed()
-        val key = "$from>$to@$minute|$count|$maxTransfers|$arriveBy|$walk"
+        val key = "$from>$to@$minute|$count|$maxTransfers|$arriveBy|$walk|$detailed"
         val now = Iso.now()
         plans[key]?.let { if (now - it.at < 45) return it.trips }
         val q = mutableListOf("fromPlace" to from, "toPlace" to to, "numItineraries" to "$count", "maxTransfers" to "$maxTransfers",
             "time" to Iso.format(minute), "detailedTransfers" to "false")
         if (arriveBy) q.add("arriveBy" to "true")
+        if (!detailed) q.add("detailedLegs" to "false")
         walk?.let { q.add("pedestrianSpeed" to String.format(java.util.Locale.ROOT, "%.1f", it)) }
         val trips = ask("/v5/plan", q)?.let(TransitParse::parsePlan) ?: return emptyList()
         if (trips.isNotEmpty()) {

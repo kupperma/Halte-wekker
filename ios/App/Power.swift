@@ -35,14 +35,21 @@ enum GPSPolicy {
     /// At a change it stays the best while standing still without Motion & Fitness: a coarse fix could see the next one
     /// you get on (an earlier one than listed, a late one without live times) more than one look later. With it, the
     /// word "automotive" (or a fix that moves) brings the best back at once.
+    ///   - rideReduced: on a long ride, the vehicle confirmed, far by distance and by time (`RideAccuracy`, 0.42.8):
+    ///     100 m, every 300 m
+    ///   - changeLow: standing at a change, the next ride more than 3 minutes off (`ChangeWait`, 0.42.8): 100 m, every 100 m
     static func plan(phase: Phase, demo: Bool, going: Bool, lineWatch: Bool, regionLook: Bool,
-                     rideFar: Bool = false, goCoarse: Bool = false, waitLow: Bool = false) -> Plan {
+                     rideFar: Bool = false, goCoarse: Bool = false, waitLow: Bool = false,
+                     rideReduced: Bool = false, changeLow: Bool = false) -> Plan {
         if demo { return .off }
         switch phase {
         case .riding:
             if waitLow { return .coarse(50) }
+            if rideReduced { return .coarse(RideAccuracy.reducedFilter) }
             return rideFar ? .ten(75) : .best(25)                   // the best near the stop, and whenever in doubt
-        case .transfer: return waitLow ? .coarse(50) : .best(25)
+        case .transfer:
+            if waitLow { return .coarse(50) }
+            return changeLow ? .coarse(ChangeWait.filter) : .best(25)
         case .finished: return .off
         case .idle:
             if going { return goCoarse ? .coarse(50) : .best(10) }

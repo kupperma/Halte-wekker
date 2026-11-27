@@ -35,6 +35,7 @@ class OnBoardLook {
     private var lastBest: String? = null
     private var run = GPSChoice()
     private var fits: Map<String, Double> = emptyMap()
+    private var prefilterLogged = 0.0
     /** (A7) this look's judgements and lines (for the wrong bus's GPS runs and the rivals look). */
     var lastJudged: List<nl.haltewekker.match.Judgement> = emptyList(); private set
     var lastLines: Map<String, String> = emptyMap(); private set
@@ -68,6 +69,19 @@ class OnBoardLook {
                     ?: num?.let { n -> trainFixes[n]?.let { RealPositions.usable(it, t.tripId, now, RealPositions.MATCH_FRESH) } }
                 if (f != null) t.copy(gps = VehicleGPS(f)) else t
             }
+        }
+        // (0.10.5, iOS 0.42.8 `CandidatePrefilter`) coaches, a route never within 1 km of you, or their own GPS 3 km (a
+        // bus) or 10 km (a train) away: left out before they're judged; how many, in the field log once a minute
+        val you = fixes.sortedBy { it.t }.takeLast(8).map { it.p }
+        val asked = tracks.size
+        val (kept, dropped) = CandidatePrefilter.filter(tracks, you, leg?.tripId) { t ->
+            CandidatePrefilter.Candidate(t.tripId, t.line, t.isTrain, t.pieces.map { it.path },
+                t.gps?.fix?.let { GeoPoint(it.lat, it.lon) }, t.gps?.fix?.let { now - it.at })
+        }
+        tracks = kept
+        if (dropped.total > 0 && now - prefilterLogged >= 60) {
+            prefilterLogged = now
+            nl.haltewekker.logs.FieldLog.match(CandidatePrefilter.line("on board", dropped, asked))
         }
         val judged0 = VehicleMatch.judgeAll(fixes, tracks)
         lastJudged = judged0

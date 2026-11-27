@@ -1,0 +1,903 @@
+{
+ "_about": "Battery and data rules (iOS RideSaver.swift, Android ride/RideSaver.kt, 0.42.8): the same vectors on both. Synthetic numbers only.",
+ "accuracy": [
+  {
+   "name": "train far, confirmed",
+   "input": {
+    "isTrain": true,
+    "wakeMetres": 5000,
+    "metresToStop": 30000,
+    "accuracy": 10,
+    "fixAge": 5,
+    "speed": 35,
+    "secondsToStop": 1500,
+    "legAge": 600,
+    "confirmed": true,
+    "confirmedAge": 60
+   },
+   "tier": "reduced"
+  },
+  {
+   "name": "not confirmed",
+   "input": {
+    "isTrain": true,
+    "wakeMetres": 5000,
+    "metresToStop": 30000,
+    "accuracy": 10,
+    "fixAge": 5,
+    "speed": 35,
+    "secondsToStop": 1500,
+    "legAge": 600,
+    "confirmed": false,
+    "confirmedAge": 60
+   },
+   "tier": "best"
+  },
+  {
+   "name": "its last look passed 11 minutes ago",
+   "input": {
+    "isTrain": true,
+    "wakeMetres": 5000,
+    "metresToStop": 30000,
+    "accuracy": 10,
+    "fixAge": 5,
+    "speed": 35,
+    "secondsToStop": 1500,
+    "legAge": 600,
+    "confirmed": true,
+    "confirmedAge": 660
+   },
+   "tier": "best"
+  },
+  {
+   "name": "no look passed yet",
+   "input": {
+    "isTrain": true,
+    "wakeMetres": 5000,
+    "metresToStop": 30000,
+    "accuracy": 10,
+    "fixAge": 5,
+    "speed": 35,
+    "secondsToStop": 1500,
+    "legAge": 600,
+    "confirmed": true,
+    "confirmedAge": null
+   },
+   "tier": "best"
+  },
+  {
+   "name": "boarding: the leg's first 2 minutes",
+   "input": {
+    "isTrain": true,
+    "wakeMetres": 5000,
+    "metresToStop": 30000,
+    "accuracy": 10,
+    "fixAge": 5,
+    "speed": 35,
+    "secondsToStop": 1500,
+    "legAge": 60,
+    "confirmed": true,
+    "confirmedAge": 60
+   },
+   "tier": "best"
+  },
+  {
+   "name": "due in 7.5 minutes: not on",
+   "input": {
+    "isTrain": true,
+    "wakeMetres": 5000,
+    "metresToStop": 30000,
+    "accuracy": 10,
+    "fixAge": 5,
+    "speed": 35,
+    "secondsToStop": 450,
+    "legAge": 600,
+    "confirmed": true,
+    "confirmedAge": 60
+   },
+   "tier": "best"
+  },
+  {
+   "name": "due in 7.5 minutes: stays on",
+   "input": {
+    "isTrain": true,
+    "wakeMetres": 5000,
+    "metresToStop": 30000,
+    "accuracy": 10,
+    "fixAge": 5,
+    "speed": 35,
+    "secondsToStop": 450,
+    "legAge": 600,
+    "confirmed": true,
+    "confirmedAge": 60,
+    "wasReduced": true
+   },
+   "tier": "reduced"
+  },
+  {
+   "name": "due in under 6 minutes",
+   "input": {
+    "isTrain": true,
+    "wakeMetres": 5000,
+    "metresToStop": 30000,
+    "accuracy": 10,
+    "fixAge": 5,
+    "speed": 35,
+    "secondsToStop": 350,
+    "legAge": 600,
+    "confirmed": true,
+    "confirmedAge": 60,
+    "wasReduced": true
+   },
+   "tier": "best"
+  },
+  {
+   "name": "rough fix while on",
+   "input": {
+    "isTrain": true,
+    "wakeMetres": 5000,
+    "metresToStop": 30000,
+    "accuracy": 800,
+    "fixAge": 10,
+    "speed": 35,
+    "secondsToStop": 1500,
+    "legAge": 600,
+    "confirmed": true,
+    "confirmedAge": 60,
+    "wasReduced": true
+   },
+   "tier": "reduced"
+  },
+  {
+   "name": "rough fix to switch on",
+   "input": {
+    "isTrain": true,
+    "wakeMetres": 5000,
+    "metresToStop": 30000,
+    "accuracy": 150,
+    "fixAge": 5,
+    "speed": 35,
+    "secondsToStop": 1500,
+    "legAge": 600,
+    "confirmed": true,
+    "confirmedAge": 60
+   },
+   "tier": "best"
+  },
+  {
+   "name": "too rough even while on",
+   "input": {
+    "isTrain": true,
+    "wakeMetres": 5000,
+    "metresToStop": 30000,
+    "accuracy": 2500,
+    "fixAge": 5,
+    "speed": 35,
+    "secondsToStop": 1500,
+    "legAge": 600,
+    "confirmed": true,
+    "confirmedAge": 60,
+    "wasReduced": true
+   },
+   "tier": "best"
+  },
+  {
+   "name": "stays on just outside the exit line",
+   "input": {
+    "isTrain": true,
+    "wakeMetres": 5000,
+    "metresToStop": 9000,
+    "accuracy": 65,
+    "fixAge": 0,
+    "speed": 35,
+    "secondsToStop": 1500,
+    "legAge": 600,
+    "confirmed": true,
+    "confirmedAge": 60,
+    "wasReduced": true
+   },
+   "tier": "reduced"
+  },
+  {
+   "name": "the best again inside the exit line",
+   "input": {
+    "isTrain": true,
+    "wakeMetres": 5000,
+    "metresToStop": 8400,
+    "accuracy": 65,
+    "fixAge": 0,
+    "speed": 35,
+    "secondsToStop": 1500,
+    "legAge": 600,
+    "confirmed": true,
+    "confirmedAge": 60,
+    "wasReduced": true
+   },
+   "tier": "best"
+  },
+  {
+   "name": "on just beyond the enter line",
+   "input": {
+    "isTrain": true,
+    "wakeMetres": 5000,
+    "metresToStop": 9400,
+    "accuracy": 10,
+    "fixAge": 0,
+    "speed": 35,
+    "secondsToStop": 1500,
+    "legAge": 600,
+    "confirmed": true,
+    "confirmedAge": 60
+   },
+   "tier": "reduced"
+  },
+  {
+   "name": "not on inside the enter line",
+   "input": {
+    "isTrain": true,
+    "wakeMetres": 5000,
+    "metresToStop": 9300,
+    "accuracy": 10,
+    "fixAge": 0,
+    "speed": 35,
+    "secondsToStop": 1500,
+    "legAge": 600,
+    "confirmed": true,
+    "confirmedAge": 60
+   },
+   "tier": "best"
+  },
+  {
+   "name": "an old fix counts as nearer",
+   "input": {
+    "isTrain": true,
+    "wakeMetres": 5000,
+    "metresToStop": 12000,
+    "accuracy": 10,
+    "fixAge": 90,
+    "speed": 35,
+    "secondsToStop": 1500,
+    "legAge": 600,
+    "confirmed": true,
+    "confirmedAge": 60,
+    "wasReduced": true
+   },
+   "tier": "best"
+  },
+  {
+   "name": "a fix too old",
+   "input": {
+    "isTrain": true,
+    "wakeMetres": 5000,
+    "metresToStop": 30000,
+    "accuracy": 10,
+    "fixAge": 400,
+    "speed": 35,
+    "secondsToStop": 1500,
+    "legAge": 600,
+    "confirmed": true,
+    "confirmedAge": 60
+   },
+   "tier": "best"
+  },
+  {
+   "name": "faster than 160 km/h: further out",
+   "input": {
+    "isTrain": true,
+    "wakeMetres": 5000,
+    "metresToStop": 9500,
+    "accuracy": 0,
+    "fixAge": 0,
+    "speed": 60,
+    "secondsToStop": 1500,
+    "legAge": 600,
+    "confirmed": true,
+    "confirmedAge": 60
+   },
+   "tier": "best"
+  },
+  {
+   "name": "no time known: by distance",
+   "input": {
+    "isTrain": true,
+    "wakeMetres": 5000,
+    "metresToStop": 30000,
+    "accuracy": 10,
+    "fixAge": 5,
+    "speed": 35,
+    "secondsToStop": null,
+    "legAge": 600,
+    "confirmed": true,
+    "confirmedAge": 60
+   },
+   "tier": "reduced"
+  },
+  {
+   "name": "awake",
+   "input": {
+    "isTrain": true,
+    "wakeMetres": 5000,
+    "metresToStop": 30000,
+    "accuracy": 10,
+    "fixAge": 5,
+    "speed": 35,
+    "secondsToStop": 1500,
+    "legAge": 600,
+    "confirmed": true,
+    "confirmedAge": 60,
+    "asleep": false
+   },
+   "tier": "best"
+  },
+  {
+   "name": "the backstop region",
+   "input": {
+    "isTrain": true,
+    "wakeMetres": 5000,
+    "metresToStop": 30000,
+    "accuracy": 10,
+    "fixAge": 5,
+    "speed": 35,
+    "secondsToStop": 1500,
+    "legAge": 600,
+    "confirmed": true,
+    "confirmedAge": 60,
+    "backstop": true
+   },
+   "tier": "best"
+  },
+  {
+   "name": "a look in doubt",
+   "input": {
+    "isTrain": true,
+    "wakeMetres": 5000,
+    "metresToStop": 30000,
+    "accuracy": 10,
+    "fixAge": 5,
+    "speed": 35,
+    "secondsToStop": 1500,
+    "legAge": 600,
+    "confirmed": true,
+    "confirmedAge": 60,
+    "needBest": true
+   },
+   "tier": "best"
+  },
+  {
+   "name": "the setting off",
+   "input": {
+    "isTrain": true,
+    "wakeMetres": 5000,
+    "metresToStop": 30000,
+    "accuracy": 10,
+    "fixAge": 5,
+    "speed": 35,
+    "secondsToStop": 1500,
+    "legAge": 600,
+    "confirmed": true,
+    "confirmedAge": 60,
+    "enabled": false
+   },
+   "tier": "best"
+  },
+  {
+   "name": "bus far",
+   "input": {
+    "isTrain": false,
+    "wakeMetres": 2000,
+    "metresToStop": 8100,
+    "accuracy": 10,
+    "fixAge": 0,
+    "speed": 12,
+    "secondsToStop": 900,
+    "legAge": 600,
+    "confirmed": true,
+    "confirmedAge": 60
+   },
+   "tier": "reduced"
+  },
+  {
+   "name": "bus inside 8 km",
+   "input": {
+    "isTrain": false,
+    "wakeMetres": 2000,
+    "metresToStop": 7900,
+    "accuracy": 10,
+    "fixAge": 0,
+    "speed": 12,
+    "secondsToStop": 900,
+    "legAge": 600,
+    "confirmed": true,
+    "confirmedAge": 60
+   },
+   "tier": "best"
+  },
+  {
+   "name": "bus stays on outside its exit line",
+   "input": {
+    "isTrain": false,
+    "wakeMetres": 2000,
+    "metresToStop": 4800,
+    "accuracy": 20,
+    "fixAge": 0,
+    "speed": 12,
+    "secondsToStop": 900,
+    "legAge": 600,
+    "confirmed": true,
+    "confirmedAge": 60,
+    "wasReduced": true
+   },
+   "tier": "reduced"
+  },
+  {
+   "name": "bus: the best again",
+   "input": {
+    "isTrain": false,
+    "wakeMetres": 2000,
+    "metresToStop": 4700,
+    "accuracy": 20,
+    "fixAge": 0,
+    "speed": 12,
+    "secondsToStop": 900,
+    "legAge": 600,
+    "confirmed": true,
+    "confirmedAge": 60,
+    "wasReduced": true
+   },
+   "tier": "best"
+  },
+  {
+   "name": "bus with a small wake distance: its last 3 km",
+   "input": {
+    "isTrain": false,
+    "wakeMetres": 200,
+    "metresToStop": 2990,
+    "accuracy": 0,
+    "fixAge": 0,
+    "speed": 12,
+    "secondsToStop": 900,
+    "legAge": 600,
+    "confirmed": true,
+    "confirmedAge": 60,
+    "wasReduced": true
+   },
+   "tier": "best"
+  }
+ ],
+ "changeWait": [
+  {
+   "standingFor": 200,
+   "nextIn": 600,
+   "moving": false,
+   "inVehicle": false,
+   "low": true
+  },
+  {
+   "standingFor": 100,
+   "nextIn": 600,
+   "moving": false,
+   "inVehicle": false,
+   "low": false
+  },
+  {
+   "standingFor": null,
+   "nextIn": 600,
+   "moving": false,
+   "inVehicle": false,
+   "low": false
+  },
+  {
+   "standingFor": 200,
+   "nextIn": 181,
+   "moving": false,
+   "inVehicle": false,
+   "low": true
+  },
+  {
+   "standingFor": 200,
+   "nextIn": 180,
+   "moving": false,
+   "inVehicle": false,
+   "low": false
+  },
+  {
+   "standingFor": 200,
+   "nextIn": null,
+   "moving": false,
+   "inVehicle": false,
+   "low": false
+  },
+  {
+   "standingFor": 900,
+   "nextIn": 1500,
+   "moving": true,
+   "inVehicle": false,
+   "low": false
+  },
+  {
+   "standingFor": 900,
+   "nextIn": 1500,
+   "moving": false,
+   "inVehicle": true,
+   "low": false
+  }
+ ],
+ "cadence": [
+  {
+   "change": "say",
+   "near": false,
+   "sinceLast": 1,
+   "send": true,
+   "later": 1
+  },
+  {
+   "change": "meaningful",
+   "near": false,
+   "sinceLast": 59,
+   "send": false,
+   "later": 1
+  },
+  {
+   "change": "meaningful",
+   "near": false,
+   "sinceLast": 60,
+   "send": true,
+   "later": 1
+  },
+  {
+   "change": "meaningful",
+   "near": false,
+   "sinceLast": 45,
+   "send": false,
+   "later": 15
+  },
+  {
+   "change": "meaningful",
+   "near": true,
+   "sinceLast": 19,
+   "send": false,
+   "later": 1
+  },
+  {
+   "change": "meaningful",
+   "near": true,
+   "sinceLast": 20,
+   "send": true,
+   "later": 1
+  },
+  {
+   "change": "look",
+   "near": false,
+   "sinceLast": 179,
+   "send": false,
+   "later": 1
+  },
+  {
+   "change": "look",
+   "near": false,
+   "sinceLast": 180,
+   "send": true,
+   "later": 1
+  },
+  {
+   "change": "look",
+   "near": false,
+   "sinceLast": 0,
+   "send": false,
+   "later": 180
+  },
+  {
+   "change": "look",
+   "near": true,
+   "sinceLast": 20,
+   "send": true,
+   "later": 1
+  },
+  {
+   "change": "none",
+   "near": true,
+   "sinceLast": 1000,
+   "send": false,
+   "later": null
+  },
+  {
+   "change": "meaningful",
+   "near": false,
+   "sinceLast": -5,
+   "send": true,
+   "later": 60
+  }
+ ],
+ "cadenceNear": [
+  {
+   "secondsToStop": 299,
+   "awake": false,
+   "near": true
+  },
+  {
+   "secondsToStop": 301,
+   "awake": false,
+   "near": false
+  },
+  {
+   "secondsToStop": null,
+   "awake": false,
+   "near": false
+  },
+  {
+   "secondsToStop": null,
+   "awake": true,
+   "near": true
+  }
+ ],
+ "rideNear": [
+  {
+   "secondsToStop": 500,
+   "metresToStop": null,
+   "wakeMetres": 5000,
+   "awake": false,
+   "near": true
+  },
+  {
+   "secondsToStop": 700,
+   "metresToStop": 20000,
+   "wakeMetres": 5000,
+   "awake": false,
+   "near": false
+  },
+  {
+   "secondsToStop": 700,
+   "metresToStop": 9000,
+   "wakeMetres": 5000,
+   "awake": false,
+   "near": true
+  },
+  {
+   "secondsToStop": null,
+   "metresToStop": null,
+   "wakeMetres": 5000,
+   "awake": false,
+   "near": true
+  },
+  {
+   "secondsToStop": null,
+   "metresToStop": 30000,
+   "wakeMetres": 2000,
+   "awake": false,
+   "near": false
+  },
+  {
+   "secondsToStop": 3000,
+   "metresToStop": 40000,
+   "wakeMetres": 5000,
+   "awake": true,
+   "near": true
+  }
+ ],
+ "prefilter": {
+  "you": [
+   [
+    50.0,
+    6.0
+   ],
+   [
+    50.001,
+    6.0
+   ]
+  ],
+  "planned": "p",
+  "candidates": [
+   {
+    "tripId": "p",
+    "line": "FlixBus N100",
+    "isTrain": false,
+    "paths": [
+     [
+      [
+       50.4,
+       6.0
+      ],
+      [
+       50.5,
+       6.0
+      ]
+     ]
+    ],
+    "drop": null
+   },
+   {
+    "tripId": "c1",
+    "line": "FlixBus 027",
+    "isTrain": false,
+    "paths": [
+     [
+      [
+       49.99,
+       6.0
+      ],
+      [
+       50.01,
+       6.0
+      ]
+     ]
+    ],
+    "drop": "coach"
+   },
+   {
+    "tripId": "c2",
+    "line": "BlaBlaCar Bus 4",
+    "isTrain": false,
+    "paths": [],
+    "drop": "coach"
+   },
+   {
+    "tripId": "b10",
+    "line": "10",
+    "isTrain": false,
+    "paths": [
+     [
+      [
+       49.99,
+       6.0
+      ],
+      [
+       50.01,
+       6.0
+      ]
+     ]
+    ],
+    "drop": null
+   },
+   {
+    "tripId": "b20",
+    "line": "20",
+    "isTrain": false,
+    "paths": [
+     [
+      [
+       50.02,
+       5.98
+      ],
+      [
+       50.02,
+       6.02
+      ]
+     ]
+    ],
+    "drop": "route"
+   },
+   {
+    "tripId": "bfar",
+    "line": "11",
+    "isTrain": false,
+    "paths": [
+     [
+      [
+       49.99,
+       6.0
+      ],
+      [
+       50.01,
+       6.0
+      ]
+     ]
+    ],
+    "gps": [
+     50.037,
+     6.0
+    ],
+    "gpsAge": 0,
+    "drop": "far"
+   },
+   {
+    "tripId": "bold",
+    "line": "11",
+    "isTrain": false,
+    "paths": [
+     [
+      [
+       49.99,
+       6.0
+      ],
+      [
+       50.01,
+       6.0
+      ]
+     ]
+    ],
+    "gps": [
+     50.037,
+     6.0
+    ],
+    "gpsAge": 60,
+    "drop": null
+   },
+   {
+    "tripId": "t1",
+    "line": "IC",
+    "isTrain": true,
+    "paths": [
+     [
+      [
+       49.9,
+       6.0
+      ],
+      [
+       50.1,
+       6.0
+      ]
+     ]
+    ],
+    "gps": [
+     50.082,
+     6.0
+    ],
+    "gpsAge": 0,
+    "drop": null
+   },
+   {
+    "tripId": "t2",
+    "line": "IC",
+    "isTrain": true,
+    "paths": [
+     [
+      [
+       49.9,
+       6.0
+      ],
+      [
+       50.1,
+       6.0
+      ]
+     ]
+    ],
+    "gps": [
+     50.111,
+     6.0
+    ],
+    "gpsAge": 0,
+    "drop": "far"
+   },
+   {
+    "tripId": "none",
+    "line": "12",
+    "isTrain": false,
+    "paths": [],
+    "drop": null
+   },
+   {
+    "tripId": "pt1",
+    "line": "13",
+    "isTrain": false,
+    "paths": [
+     [
+      [
+       50.0064,
+       6.0
+      ]
+     ]
+    ],
+    "drop": null
+   },
+   {
+    "tripId": "pt2",
+    "line": "13",
+    "isTrain": false,
+    "paths": [
+     [
+      [
+       50.015,
+       6.0
+      ]
+     ]
+    ],
+    "drop": "route"
+   }
+  ],
+  "counts": {
+   "coach": 2,
+   "route": 2,
+   "far": 2
+  }
+ }
+}
