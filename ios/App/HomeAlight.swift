@@ -1,6 +1,6 @@
 import Foundation
 
-// 0.42.10: from a ride screen at 16:01 ("Leg 2 of 2 · Bus 306 to Veghel · 2 min to Veghel · there at 16:03 · Stops
+// 0.42.11: from a ride screen at 16:01 ("Leg 2 of 2 · Bus 306 to Veghel · 2 min to Veghel · there at 16:03 · Stops
 // ahead: Veghel your stop"): "It says I should just get off at Veghel and not at which stop; and the stop I'm actually
 // getting off at is at 16:07". The stop is named in full, and on the way to Home you get off at your own home stop
 // (from the setup) when the bus or train calls there, not the planner's first stop in town. Plain rules (Foundation

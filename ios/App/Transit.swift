@@ -67,7 +67,7 @@ extension Ride {
 }
 
 extension Ride {
-    /// (0.42.10) The same ride got off at another of its stops, at its time there.
+    /// (0.42.11) The same ride got off at another of its stops, at its time there.
     func alighting(name n: String, at a: Date, point p: GeoPoint) -> Ride {
         let late: TimeInterval = arrival.timeIntervalSince(scheduledArrival)
         var r = Ride(tripId: tripId, line: line, name: name, isTrain: isTrain, departure: departure, scheduledDeparture: scheduledDeparture,
@@ -503,12 +503,12 @@ enum Transit {
             all = await fromNearest(here, to: to.ids, at: now.addingTimeInterval(-120), count: count)
         }
         let kept: [DoorTrip] = keepUseful(all, here: here, station: station, now: now, keep: keep, log: true)
-        // (0.42.10) home: off at your own home stop when the last ride calls there
+        // (0.42.11) home: off at your own home stop when the last ride calls there
         if to.key == Place.home.key { return await homeAlight(kept, to: to) }
         return kept
     }
 
-    /// (0.42.10) The ways home with their last ride got off at your own home stop (the setup's, the one with the shortest
+    /// (0.42.11) The ways home with their last ride got off at your own home stop (the setup's, the one with the shortest
     /// walk home at your speed) when it calls there, re-timed to it; the first few ways (their trips asked, kept 20 s).
     static func homeAlight(_ trips: [DoorTrip], to: Place) async -> [DoorTrip] {
         let own: [HomeAlight.Own] = await MainActor.run {

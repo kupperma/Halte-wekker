@@ -25,6 +25,9 @@ struct LiveLeg: Codable, Equatable {
     var deck: String? = nil
     var late: Int? = nil
     var mins: Int? = nil
+    /// (0.42.10) This leg's own road, encoded as the state's `shape`: the next two rides' (≤ 80 points), else where it goes
+    /// from and to (two points); the current ride's only when the state has no road or stops of its own.
+    var shape: String? = nil
 }
 
 /// A stop of the leg you're on (from where you got on to where you get off).
@@ -50,6 +53,9 @@ enum LiveTripV2 {
     static let maxLegs = 12
     static let maxStops = 60
     static let maxShape = 200
+    /// A later leg's road at most (points), for the next `legRoads` rides.
+    static let maxLegShape = 80
+    static let legRoads = 2
     /// The whole state's JSON at most (bytes): over it the road goes, then the stops.
     static let budget = 12_000
 
@@ -67,6 +73,10 @@ enum LiveTripV2 {
         var deck: String? = nil
         var late: Int? = nil
         var mins: Int? = nil
+        /// (0.42.10) Where it starts and ends, and its vehicle's whole road when saved (cut here to this leg).
+        var fromPt: GeoPoint? = nil
+        var toPt: GeoPoint? = nil
+        var road: [GeoPoint] = []
     }
 
     struct StopIn: Equatable {
@@ -95,6 +105,8 @@ enum LiveTripV2 {
         /// This app reads messages (the page shows its message box).
         var inbox: Bool = true
         var music: LiveMusic? = nil
+        /// (0.42.10) The version of your picture the relay has (`LiveFace`), when it has one.
+        var pic: Int? = nil
     }
 
     /// A name or place as sent: no control characters, single spaces, at most `max` characters.
@@ -204,8 +216,8 @@ enum LiveTripV2 {
         return pts.enumerated().filter { keep[$0.offset] }.map(\.element)
     }
 
-    /// Your part of the road (nearest the first and the last stop), at most 200 points, encoded; nil: none.
-    static func road(_ shape: [GeoPoint], _ stops: [StopIn]) -> String? {
+    /// Your part of the road (nearest the first and the last stop), at most `max` points, encoded; nil: none.
+    static func road(_ shape: [GeoPoint], _ stops: [StopIn], max: Int = maxShape) -> String? {
         var pts: [(Int64, Int64)] = shape.map { (q($0.lat), q($0.lon)) }
         let qs: [(Int64, Int64)] = stops.map { (q($0.lat), q($0.lon)) }
         if pts.count < 2 || qs.count < 2 {
@@ -220,7 +232,7 @@ enum LiveTripV2 {
         guard d.count >= 2 else { return nil }
         var tol: Int64 = 1
         var r: [(Int64, Int64)] = simplify(d, tol: tol)
-        while r.count > maxShape {
+        while r.count > max {
             tol *= 2
             r = simplify(d, tol: tol)
         }
@@ -287,6 +299,41 @@ enum LiveTripV2 {
                 s.music = LiveMusic(title: title, artist: ar.isEmpty ? nil : ar, app: ap.isEmpty ? nil : ap, url: https(m.url), coverUrl: https(m.coverUrl), at: m.at)
             }
         }
+        if let p = t.pic, p >= 1 { s.pic = p }
+        // (0.42.10) each leg's own road from the one before the current (a walk) on: the next two rides' in full
+        let cur: Int = s.leg ?? 0
+        let own: Bool = s.shape != nil || s.stops != nil
+        var straight: [String?] = Array(repeating: nil, count: legs.count)
+        var full: [String?] = Array(repeating: nil, count: legs.count)
+        var rides: Int = 0
+        for i in legs.indices {
+            let l: LegIn = t.legs[i]
+            let walk: Bool = legs[i].mode == "walk"
+            if i < cur - 1 || (i == cur - 1 && !walk) || (i == cur && own) { continue }
+            guard let a = l.fromPt, let b = l.toPt else { continue }
+            let ends: [StopIn] = [StopIn(name: "", lat: a.lat, lon: a.lon), StopIn(name: "", lat: b.lat, lon: b.lon)]
+            straight[i] = road([], ends, max: 2)
+            if !walk && i >= cur {
+                if rides < legRoads + (own ? 0 : 1) && l.road.count >= 2 { full[i] = road(l.road, ends, max: maxLegShape) }
+                rides += 1
+            }
+        }
+        func withShapes() -> LiveState {
+            var x: LiveState = s
+            x.legs = legs.indices.map { (i: Int) -> LiveLeg in
+                var g: LiveLeg = legs[i]
+                g.shape = full[i] ?? straight[i]
+                return g
+            }
+            return x
+        }
+        if !legs.isEmpty { s = withShapes() }
+        // over the budget: the farthest leg's road first, then the rest of the legs' roads, the road, the stops
+        for i in legs.indices.reversed() {
+            if bytes(s) <= budget { break }
+            if full[i] != nil { full[i] = nil; s = withShapes() }
+        }
+        if bytes(s) > budget && !legs.isEmpty { s.legs = legs }
         if bytes(s) > budget { s.shape = nil }
         if bytes(s) > budget { s.stops = nil; s.next = nil }
         return s
@@ -380,5 +427,35 @@ enum LiveMessages {
         let p = "(https://haltewekker-relay\\.tsfaw1\\.workers\\.dev/live/|haltewekker://live/)[A-Za-z0-9_-]{22}/?#[^\\s]+"
         guard let r = text.range(of: p, options: .regularExpression) else { return nil }
         return String(text[r])
+    }
+}
+
+/// (0.42.10) Your Friends picture on a live link's page: 128 px, a JPEG of at most 12 KB, locked with the link's key under
+/// its own AAD ("hw-live-face-v1\n" + token) and put once at `/live/v1/face` (again when the picture changes); the state's
+/// `pic` says which one the relay has, so the page fetches it once. No picture: nothing is put.
+enum LiveFace {
+    static let kind = "hw-live-face-v1"
+    static let side = 128
+    static let maxBytes = 12 * 1024
+    /// A put that failed is tried again after this long.
+    static let retry: TimeInterval = 60
+
+    static func seal(_ jpeg: Data, key: Data, token: String, nonce: AES.GCM.Nonce = AES.GCM.Nonce()) throws -> Data {
+        try LiveCrypto.seal(jpeg, key: key, token: token, kind: kind, nonce: nonce)
+    }
+
+    static func open(_ data: Data, key: Data, token: String) throws -> Data {
+        try LiveCrypto.open(data, key: key, token: token, kind: kind)
+    }
+
+    /// Which picture it is (the first 16 bytes of its SHA-256, hex); "" for none.
+    static func stamp(_ picture: Data?) -> String {
+        guard let picture, !picture.isEmpty else { return "" }
+        return SHA256.hash(data: picture).prefix(16).map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Put it now: there is one, the relay doesn't have this one, and the last try isn't too recent.
+    static func due(_ stamp: String, sent: String, lastTry: Date?, now: Date) -> Bool {
+        !stamp.isEmpty && stamp != sent && (lastTry.map { now.timeIntervalSince($0) >= retry } ?? true)
     }
 }

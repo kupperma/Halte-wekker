@@ -1,6 +1,6 @@
 import XCTest
 
-/// 0.42.10: off at your own home stop, named in full (the same vectors as Android's `HomeAlightTest`).
+/// 0.42.11: off at your own home stop, named in full (the same vectors as Android's `HomeAlightTest`).
 final class HomeAlightTests: XCTestCase {
     private let base: Double = 1_795_737_600
     private func hm(_ h: Double, _ m: Double) -> Date { Date(timeIntervalSince1970: base + (h * 60 + m) * 60) }

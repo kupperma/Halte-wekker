@@ -121,7 +121,7 @@ class HomeModel(app: Application) : AndroidViewModel(app) {
         val sameWay = nextDir == d
         nextFrom = from; nextTime = now; nextDir = d
         _nextLoading.value = true
-        // (iOS 0.42.10) home: off at your own home stop (the setup's) when the last ride calls there
+        // (iOS 0.42.11) home: off at your own home stop (the setup's) when the last ride calls there
         val prof = store.profile.value
         val trips = if (d == Direction.HOME) Transit.tripsFrom(from, to.planId, keep = 4, homeStops = prof.homeStops, home = to.point)
             else Transit.tripsFrom(from, to.planId, keep = 4)

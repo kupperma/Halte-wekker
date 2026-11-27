@@ -75,7 +75,7 @@ when those change, never while the alarm rings, a failed one again after 5 min).
       vectors), `TripStop.track` from the trip answer, `RideService.doorLook` on the ride's minute tick, `RideState.doorSide`
       in the ride card, the change card, the ride notification, the alarm and the get-ready notification.
 
-## iOS 0.42.10
+## iOS 0.42.11
 
 From a ride screen at 16:01 ("Bus 306 to Veghel · 2 min to Veghel · there at 16:03 · Stops ahead: Veghel your stop"):
 "It says I should just get off at Veghel and not at which stop; and the stop I'm actually getting off at is at 16:07".
