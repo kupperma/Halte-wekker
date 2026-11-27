@@ -123,7 +123,8 @@ fun NearbyView(destId: String, destName: String, seed: List<DoorTrip>, onTrip: (
     var switched by remember { mutableIntStateOf(0) }
     val rides by nl.haltewekker.travel.TravelLogStore.rides.collectAsState()
 
-    // the search: at once, again after 5 minutes on screen or when you moved 250 m (what's shown stays meanwhile)
+    // the search: at once, again after 5 minutes on screen or when you moved 250 m (what's shown stays meanwhile); never
+    // at bus speed
     LaunchedEffect(destId) {
         nl.haltewekker.travel.TravelLogStore.load(context)
         var at: GeoPoint? = null
@@ -131,7 +132,8 @@ fun NearbyView(destId: String, destName: String, seed: List<DoorTrip>, onTrip: (
         while (true) {
             val here = Locator.last(context)
             located = here != null
-            if (here != null && (at == null || Geo.metres(at, here) >= 250 || Iso.now() - askedAt >= 300)) {
+            // (0.10.3, iOS 0.42.4) not on the bus: at bus speed it doesn't search (Fastest trip shows the cards then)
+            if (here != null && nl.haltewekker.ride.WaitWatch.nearbySearches(nl.haltewekker.ride.WaitStore.atVehicleSpeed.value) && (at == null || Geo.metres(at, here) >= 250 || Iso.now() - askedAt >= 300)) {
                 busy = result == null
                 result = try { store.search(here, leave) } catch (_: Exception) { result }
                 busy = false

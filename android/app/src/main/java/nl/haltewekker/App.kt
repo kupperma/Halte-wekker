@@ -49,5 +49,7 @@ class App : Application() {
         nl.haltewekker.logs.FieldLog.init(this)
         nl.haltewekker.friends.LiveLinkStore.attach(this)
         nl.haltewekker.logs.LogShareStore.attach(this)
+        // (listening now) the switches for sharing what you listen to (off unless turned on)
+        nl.haltewekker.friends.MusicShareStore.load(this)
     }
 }

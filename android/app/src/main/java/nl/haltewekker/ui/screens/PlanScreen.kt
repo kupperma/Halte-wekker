@@ -74,7 +74,12 @@ fun PlanScreen(start: Direction?, canStart: Boolean, onBack: () -> Unit, onStart
     val app = context.applicationContext as App
     val profile by app.store.profile.collectAsState()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
-    BackHandler(onBack = onBack)
+    // (0.10.3, iOS 0.42.4) going back stops the watching; nothing else on screen does (it runs in `RideService`)
+    val back = { nl.haltewekker.ride.WaitStore.stop(context, "closed"); onBack() }
+    BackHandler(onBack = back)
+    LaunchedEffect(Unit) { nl.haltewekker.ride.WaitStore.opened() }
+    val atVehicleSpeed by nl.haltewekker.ride.WaitStore.atVehicleSpeed.collectAsState()
+    val watching by nl.haltewekker.ride.WaitStore.watching.collectAsState()
 
     var dest by remember { mutableStateOf(place ?: start?.let { if (it == Direction.TO_SCHOOL) profile.school else profile.home } ?: profile.school ?: profile.home) }
     var searching by rememberSaveable { mutableStateOf(false) }
@@ -98,6 +103,8 @@ fun PlanScreen(start: Direction?, canStart: Boolean, onBack: () -> Unit, onStart
                 val from = here ?: profile.home?.point
                 if (from == null) { asked = true; break }
                 fromLabel = if (here != null) "From where you are" else "From home"
+                // (0.10.3, iOS 0.42.4) on a bus or train already: no walk back to the stop it passed; the watching finds it
+                if (nl.haltewekker.ride.WaitStore.atVehicleSpeed.value && here != null) { delay(10_000); continue }
                 loading = true
                 val n = Iso.now()
                 val got = TransitParse.keepUseful(Transit.plan("${from.lat},${from.lon}", d.planId, nl.haltewekker.data.LiveKeep.askAt(n, true), count = 9), n, 6)
@@ -112,6 +119,19 @@ fun PlanScreen(start: Direction?, canStart: Boolean, onBack: () -> Unit, onStart
             }
         }
     }
+    // (0.10.3, iOS 0.42.4) the ways on screen are watched (the chosen one first): the trip starts by itself once you're
+    // on board, wherever you get on, whatever is on screen (`RideService`, `WaitWatch`)
+    LaunchedEffect(dest, trips, selected, canStart) {
+        val d = dest ?: return@LaunchedEffect
+        if (!canStart || trips.isEmpty()) return@LaunchedEffect
+        val n = Iso.now()
+        val live = trips.filter { it.first.departure > n - 20 * 60 }
+        val first = live.firstOrNull { it.id == selected } ?: live.firstOrNull() ?: return@LaunchedEffect
+        nl.haltewekker.ride.WaitStore.watch(context, nl.haltewekker.ride.WaitWatch.Request(d.name, d.planId, d.point,
+            listOf(first) + live.filter { it.id != first.id }))
+    }
+    // at bus speed the stops around you make no sense: the cards (iOS: the overview closes)
+    LaunchedEffect(atVehicleSpeed) { if (atVehicleSpeed) showNearby = false }
     LaunchedEffect(q) {
         if (q.trim().length < 3) { hits = emptyList(); return@LaunchedEffect }
         delay(400)
@@ -121,7 +141,7 @@ fun PlanScreen(start: Direction?, canStart: Boolean, onBack: () -> Unit, onStart
     Column(Modifier.fillMaxSize().background(DS.t.page).safeDrawingPadding().verticalScroll(rememberScrollState()).padding(horizontal = 12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = DS.t.text) }
+            IconButton(onClick = back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back. This stops the watching.", tint = DS.t.text) }
             Text("Fastest trip", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = DS.t.text, modifier = Modifier.weight(1f))
             if (loading) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
             else IconButton(onClick = { again++ }) { Icon(Icons.Filled.Refresh, "Plan again", tint = DS.t.text) }
@@ -148,6 +168,9 @@ fun PlanScreen(start: Direction?, canStart: Boolean, onBack: () -> Unit, onStart
             else {
                 if (canStart) androidx.compose.material3.TextButton(onClick = { showNearby = true }) { Text("All stops around you") }
                 Text("$fromLabel to ${d.name}", color = DS.t.secondary)
+                if (canStart && atVehicleSpeed) Note("You’re moving like a bus or train: finding the one you’re on…")
+                else if (canStart && watching) Text("Watching: the trip starts by itself once you’re on board, wherever you get on.",
+                    color = DS.t.secondary, style = MaterialTheme.typography.bodySmall)
                 if (trips.isEmpty() && asked && !loading) Note(Transit.lastTrouble ?: "No trips found. Try again in a minute.")
                 // (A8, iOS 0.40 `GhostDepartures.order`) a first ride with no live data close to leaving on a live line: after the others
                 val ordered = GhostDepartures.order(trips.map { GhostDepartures.Option(it.id, it.first.line, it.first.departure, it.first.scheduledDeparture, it.first.live, it.first.cancelled) }, now)

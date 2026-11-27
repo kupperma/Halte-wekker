@@ -141,6 +141,16 @@ object Notifications {
         .addAction(0, "Stop looking", action(context, RideService.ACTION_END, 13))
         .build()
 
+    /** (0.10.3, iOS 0.42.4) Fastest trip watches: the look at what you get on runs whatever is on screen, and locked. */
+    fun watching(context: Context, dest: String?): Notification = NotificationCompat.Builder(context, RIDE)
+        .setSmallIcon(R.drawable.ic_stat_ride)
+        .setOngoing(true)
+        .setContentTitle(if (dest.isNullOrBlank()) "Watching your way" else "Watching your way to $dest")
+        .setContentText("Get on wherever you get on: the trip starts by itself once you're on board.")
+        .setContentIntent(openApp(context))
+        .addAction(0, "Stop watching", action(context, RideService.ACTION_UNWATCH, 18))
+        .build()
+
     /** The trip's group (iOS `WristNotice.thread`): one per trip in the shade and on a watch. */
     fun group(s: RideState?) = WristNotice.thread(s?.startedAt)
 

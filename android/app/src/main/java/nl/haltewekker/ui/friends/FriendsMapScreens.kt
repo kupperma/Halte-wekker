@@ -521,6 +521,8 @@ private fun FriendPageContent(f: Friend, t: FriendTravelSeen?, now: Double, push
     val bot by TestFriendBot.account.collectAsState()
     val isBot = bot == f.id
     FriendHeader(f, t?.state, isBot, push)
+    // (listening now) their song, while it's fresh
+    freshMusic(t?.state?.music, now)?.let { FriendListeningStrip(f.id, f.name, it, push) }
     if (t != null) TripPart(f, t, now)
     FriendActions(f, t?.state, push)
     // (iOS 0.30.1) the test friend's buttons (its own "Remove" among them)

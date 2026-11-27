@@ -37,6 +37,22 @@ and `ios/App/PlanFix.swift` (`LiveKeep`, `WalkFirst`; tests `NearbyLiveTests`, `
       to spare) and the walk is no more than 1.3 × the hop (Fastest trip, the stops around you). Logged once per plan:
       `walk · planner 10 min (780 m) · yours 4 min (1.35 m/s) · used yours`. **Android 0.10.5:** `WalkFirst` (same
       vectors), in `keepUseful` (Fastest trip, the plan screens) and `NearbyStore.place`.
+## iOS 0.42.7 (Listening now)
+
+Sharing the song you listen to while you travel, with friends and on your live link. Rules, the relay route and the
+vectors in [the friends spec](superpowers/specs/2026-11-18-friends-design.md) › "As built: Listening now"; the shared
+vectors `docs/music-vectors.json` are checked by the relay, iOS and Android alike.
+
+- [x] **Settings › Friends › "Share what I’m listening to"** (off), From, Who sees it, "Check what’s playing".
+      iOS: Apple Music or Last.fm (Spotify via Last.fm). **Android 0.10.4:** `friends/MusicShare.kt` (`MusicShareTest`,
+      every vector), `MusicShareStore` (any music app's media session through Notification access, the
+      `MusicListener` service in the manifest; or Last.fm), `ui/friends/MusicShareUi.kt`'s card.
+- [x] **Out with the existing puts**: the travel state's `music` and payload v2's `music`, looked at on the ride's tick
+      (≤ every 30 s), dropped when paused or 10 minutes old, gone at the trip's end. **Android 0.10.4:**
+      `FriendTravelShare.build`/`tick`, `LiveLinkStore.state`, `LiveRules.key`.
+- [x] **A friend's page**: the "LISTENING NOW" strip, "💬 Message" and "🎧 Listen too". **Android 0.10.4:**
+      `FriendListeningStrip` on `FriendMapPage`. (Android's own live-link view doesn't show the card yet; the page does.)
+- [ ] Android: the card in the app's own live-link view (`LiveViewScreen`), drawn in its dark colours.
 
 ## iOS 0.42.6
 
@@ -119,12 +135,14 @@ What was wrong on iOS (check the same on Android's wait state, `RideService`/`Ri
   in front of the look at what you're on). Motion & Fitness's live updates belonged to the home screen and stopped
   while Fastest trip was open.
 
-- [ ] **Moving like a bus or train while waiting** (`WaitStart.moving`/`movingRule`): 30 s at 6 m/s or more in the last
+- [x] **Moving like a bus or train while waiting** (`WaitStart.moving`/`movingRule`): 30 s at 6 m/s or more in the last
       2 minutes (a step's speed is the GPS's own, else the distance over the time when it's more than the fixes'
       accuracy; a gap over 30 s says nothing), so a stop on the way still counts; 10 s with Motion & Fitness saying
       automotive; never while it says walking, running or cycling under 12 m/s; standing (no step at speed, speed < 2)
       is "standing".
-- [ ] **Each look** (every 6 s; the 4/8/15/30 s back-off only after 3 minutes at speed with nothing on its way to
+      **Android 0.10.3:** `ride/WaitStart.kt` `moving`/`movingRule` (`WaitStartTest`, every iOS vector); no Play
+      Services, so no "automotive": by speed only, the step detector's walking (when "Use motion" is on) is "afoot".
+- [x] **Each look** (every 6 s; the 4/8/15/30 s back-off only after 3 minutes at speed with nothing on its way to
       starting): the matcher's 4 best; for those within `close` (60 s) of the best, whether the trip takes you on
       (`WaitStart.reaches`: one of its stops from the one nearest to you on, not passed over 2 min ago, within 600 m of
       the watched ride's stop, a later ride's boarding stop of any way on screen, or the destination; kept 2 min per
@@ -133,22 +151,38 @@ What was wrong on iOS (check the same on Android's wait state, `RideService`/`Ri
       departure), then the best fit. Looks needed: by its own GPS (≤ 90 s old) 1 for the watched ride or its line when
       under `oneLookWatched` (20 s), else 2; by its times alone 1 for the watched ride that close, 2 for its line, 3 for
       another line.
-- [ ] **Start on the vehicle found** (any departure of the line, any line that gets you there): the way on screen that
+      **Android 0.10.3:** `WaitStart.step`/`needed`/`reaches` with these numbers (`RULES`: 20 s, 60 s), the looks by
+      `RideService`'s watching (`WaitWatch.nextLook`: 6 s, the back-off after 3 min at bus speed) and `WaitLook` (the
+      live map's vehicles, their own GPS, the 4 best, stops kept 2 min). No request while you stand.
+- [x] **Start on the vehicle found** (any departure of the line, any line that gets you there): the way on screen that
       rides it, else plan on from it (from its next stop at its time there: an earlier bus can mean an earlier train);
       another line more than 30 min slower than the watched way: not started ("a long way round"). The leg starts where
       you got on (`WaitStart.repoint`): of its trip's stops up to the one nearest to you, the one nearest to where you
       started moving at bus speed (a run with a slower fix before it, within 400 m), unless that's within 150 m of the
       planned stop; the ride's time there; where you get off and the rest stay. During a ride too (a vehicle found after
       "I'm on it"), never when that would make the leg short (no alarm) where it wasn't.
-- [ ] **The planned ride's time (`TimetableStart`, 2 min before its live departure) never holds a vehicle that was
+      **Android 0.10.3:** `RideService.startOn` (the way on screen, else `planOn` from its next stop at its time, else
+      from here; "a long way round", "its stop is where you are"), `boardedFrom` (`repoint`), `boardOn` (the ride with
+      the vehicle known, the close ones still chosen between); during a ride `boardedHere` on the first leg, never
+      making a normal leg short.
+- [x] **The planned ride's time (`TimetableStart`, 2 min before its live departure) never holds a vehicle that was
       found**: it holds only a start by the timetable alone.
-- [ ] **Sure of one that doesn't take you on** (none within `close` does, the best by its own GPS for 75 s,
+      **Android 0.10.3:** already so: `TimetableStart` held only a find by the timetable alone (`!f.live`); the watching
+      never asks it.
+- [x] **Sure of one that doesn't take you on** (none within `close` does, the best by its own GPS for 75 s,
       `WrongBus.gpsFor`): the wrong-bus notification "You’re on the 154 to Schijndel, not your 305" · "It doesn’t go to
       <destination>. Get off at the next stop, and plan again from there." once for that trip.
-- [ ] **The look belongs to the watching, not to a screen**: it runs while Fastest trip watches whatever is in front
+      **Android 0.10.3:** `WaitStart.step`'s `WrongBus` call, told once per trip as a notification (`wrongbus-wait-…`;
+      no ride screen yet).
+- [x] **The look belongs to the watching, not to a screen**: it runs while Fastest trip watches whatever is in front
       (the cards, the stops around you, a sheet, the home) and with the phone locked; Motion & Fitness live while it
       watches; the stops-around-you overview closes (and doesn't search) once you're at bus speed. A log line when the
       watching starts and stops, and why.
+      **Android 0.10.3:** Android had no watching at all; now `RideService` (`ACTION_WATCH`, a location foreground
+      service, nothing new in the manifest) watches what Fastest trip puts in `WaitStore`, whatever screen is in front
+      and with the phone locked, until back from Fastest trip, a trip starts, you're there, the trip has gone or 3 hours
+      (`WaitWatch`, `WaitWatchTest`); at bus speed (`WaitStore.atVehicleSpeed`) the stops around you close and don't
+      search. The log lines as iOS.
 - [x] **The check-out reminder ("Did you check out?", the `checkout-` notifications, also between train companies) is
       off for everyone** (from the request "Stop giving the 'Did you check out?' notification, it's useless"): off by
       default, and existing users moved to off once (iOS: `notes.checkOut` set to false under the one-time flag
@@ -168,8 +202,9 @@ What was wrong on iOS (check the same on Android's wait state, `RideService`/`Ri
       once a minute while riding, at a change and while Fastest trip watches. Android: check whether its platform watch
       has the same first-ride limit (and the silent first fill). **Android 0.10.1:** it had no platform watch at all;
       now `ride/PlatformWatch.kt` with these rules (10 min behind, "5" = "5b", NS's planned as what it was), see above.
-- [ ] **"Walk there" opens the walk with arrows at once** (on the Go to card, at a change, on the boards): Android's
+- [x] **"Walk there" opens the walk with arrows at once** (on the Go to card, at a change, on the boards): Android's
       `WalkScreen` directly, no map sheet with the turns first; Apple Maps (Android: the maps app) stays in the guide.
+      **Android 0.10.3:** `WalkThere` is one "Walk there" button that opens `WalkScreen`; "Open in maps" is inside it.
 
 ## iOS 0.42.3
 

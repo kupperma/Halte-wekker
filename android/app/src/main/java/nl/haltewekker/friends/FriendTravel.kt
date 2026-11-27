@@ -28,6 +28,8 @@ data class TravelState(
     val leg: Int? = null,
     val legs: Int? = null,
     val coach: Coach? = null,
+    /** (Listening now, relay 2026-11-27) The song playing now, when you share it with friends; an app before it ignores it. */
+    val music: LiveMusic? = null,
 ) {
     @Serializable data class Spot(val name: String, val lat: Double? = null, val lon: Double? = null)
     @Serializable data class Position(val lat: Double, val lon: Double, val acc: Double? = null, val at: Double)

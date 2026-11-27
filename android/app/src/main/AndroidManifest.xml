@@ -170,6 +170,18 @@
             android:name=".auto.RegionReceiver"
             android:exported="false" />
 
+        <!-- (listening now) Android shows a music app's media session only to an app with Notification access: this
+             service is what that access is given to. It reads no notification; only on when you turn it on in Settings. -->
+        <service
+            android:name=".friends.MusicListener"
+            android:label="Haltewekker: what you're listening to"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
         <receiver
             android:name=".work.BootReceiver"
             android:exported="true">
