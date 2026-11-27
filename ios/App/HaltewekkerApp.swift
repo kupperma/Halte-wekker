@@ -40,7 +40,10 @@ struct HaltewekkerApp: App {
                 .environmentObject(NSStore.shared).environmentObject(WatchStore.shared)
                 .environmentObject(ScoreBook.shared).environmentObject(StopsStore.shared).environmentObject(LineWatchStore.shared)
                 .environmentObject(GoStore.shared)
+                .modifier(LiveViewHost())               // (0.42.5) someone's live link, opened in the app
                 .onOpenURL { url in
+                    // (0.42.5) someone's live link: haltewekker://live/<token>#k=… (the page's "Open in Haltewekker")
+                    if LiveViewStore.shared.open(url.absoluteString) { return }
                     // a friend's code (haltewekker://friend?…, 0.25), else back from the Spotify sign-in page
                     if FriendStore.shared.handle(url) { return }
                     // (0.37) the widget's tap: haltewekker://stop?… opens that stop's sheet

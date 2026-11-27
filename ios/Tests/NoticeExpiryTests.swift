@@ -49,4 +49,11 @@ final class NoticeExpiryTests: XCTestCase {
         XCTAssertEqual(NoticeExpiry.due(list, now: t0.addingTimeInterval(10 * 60)), ["arrived-1", "go-2-0"])
         XCTAssertEqual(NoticeExpiry.due(list, now: t0.addingTimeInterval(20 * 60)), ["arrived-1", "delay-x-4", "go-2-0"])
     }
+
+    /// (0.42.5) A message from someone with your live link stays an hour.
+    func test_liveMessages() {
+        XCTAssertEqual(NoticeExpiry.minutes(forId: "livemsg-3"), 60)
+        XCTAssertEqual(NoticeExpiry.due([("livemsg-3", t0)], now: t0.addingTimeInterval(59 * 60)), [])
+        XCTAssertEqual(NoticeExpiry.due([("livemsg-3", t0)], now: t0.addingTimeInterval(60 * 60)), ["livemsg-3"])
+    }
 }

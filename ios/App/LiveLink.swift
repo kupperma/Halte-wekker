@@ -18,6 +18,8 @@ struct LiveState: Codable, Equatable {
         var lat: Double
         var lon: Double
         var at: Date
+        /// (v2) "gps": the vehicle's own position from the open feeds; "phone": this phone's.
+        var src: String? = nil
     }
 
     enum Stage: String {
@@ -52,6 +54,15 @@ struct LiveState: Codable, Equatable {
     var pos: Position? = nil
     /// When this was written.
     var t: Date
+    // (v2, relay 2026-11-27: `LiveTripV2`) the whole trip; a page before it, and 0.30's readers, ignore these
+    var face: String? = nil
+    var inbox: Bool? = nil
+    var leg: Int? = nil
+    var legs: [LiveLeg]? = nil
+    var music: LiveMusic? = nil
+    var next: Int? = nil
+    var shape: String? = nil
+    var stops: [LiveStop]? = nil
 
     var stage: Stage { Stage(rawValue: state) ?? .riding }
 }
@@ -70,6 +81,16 @@ struct LiveKeys: Codable, Equatable {
 enum LiveCrypto {
     static let relay = "https://haltewekker-relay.tsfaw1.workers.dev"
     static let version: UInt8 = 1
+    /// (relay 2026-11-27) The app's own address for a live link, `haltewekker://live/<token>#k=<key>` (the page's "Open in Haltewekker").
+    static let scheme = "haltewekker://live/"
+
+    /// A state's or a message's JSON: sorted keys, unix seconds, slashes as they are (as the page and Android write them).
+    static var encoder: JSONEncoder {
+        let e = JSONEncoder()
+        e.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        e.dateEncodingStrategy = .secondsSince1970
+        return e
+    }
 
     static func random(_ n: Int) -> Data {
         let k = SymmetricKey(size: SymmetricKeySize(bitCount: n * 8))
@@ -89,17 +110,24 @@ enum LiveCrypto {
     /// A link back into its token and key (nil: not a live link of this relay, or no key). The fragment may be the key
     /// itself or `k=<key>` among other fields.
     static func parse(_ s: String) -> (token: String, key: Data)? {
-        let prefix = "\(relay)/live/"
         let t: String = s.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard t.hasPrefix(prefix) else { return nil }
+        guard let prefix = ["\(relay)/live/", scheme].first(where: { t.hasPrefix($0) }) else { return nil }
         let rest: Substring = t.dropFirst(prefix.count)
         let parts: [Substring] = rest.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false)
         guard parts.count == 2 else { return nil }
         let token: String = String(parts[0]).hasSuffix("/") ? String(parts[0].dropLast()) : String(parts[0])
         var keyText: String = String(parts[1])
         for field in parts[1].split(separator: "&") where field.hasPrefix("k=") { keyText = String(field.dropFirst(2)) }
-        guard token.count == 22, let key = B64URL.decode(keyText), key.count == 32 else { return nil }
+        guard token.count == 22, token.unicodeScalars.allSatisfy(Self.tokenScalar), let key = B64URL.decode(keyText), key.count == 32 else { return nil }
         return (token, key)
+    }
+
+    /// A token's characters: base64url (ASCII letters, digits, "-" and "_").
+    private static func tokenScalar(_ c: Unicode.Scalar) -> Bool {
+        let v: UInt32 = c.value
+        let letter: Bool = (v >= 65 && v <= 90) || (v >= 97 && v <= 122)
+        let digit: Bool = v >= 48 && v <= 57
+        return letter || digit || v == 45 || v == 95
     }
 
     static func aad(_ token: String) -> Data { Data("hw-live-v1\n\(token)".utf8) }
@@ -121,7 +149,23 @@ enum LiveCrypto {
 
     /// A state as it goes: its JSON (sorted keys), locked.
     static func lock(_ s: LiveState, keys: LiveKeys) throws -> Data {
-        try seal(try FriendJSON.encoder.encode(s), key: keys.key, token: keys.token)
+        try seal(try encoder.encode(s), key: keys.key, token: keys.token)
+    }
+
+    /// (relay 2026-11-27) The other two kinds, each with its own AAD (`kind` + "\n" + token): a message to the sharer
+    /// ("hw-live-msg-v1") and the sharer's answer ("hw-live-reply-v1").
+    static func seal(_ plain: Data, key: Data, token: String, kind: String, nonce: AES.GCM.Nonce = AES.GCM.Nonce()) throws -> Data {
+        let box = try AES.GCM.seal(plain, using: SymmetricKey(data: key), nonce: nonce, authenticating: Data("\(kind)\n\(token)".utf8))
+        guard let c = box.combined else { throw FriendBoxError.badFormat }
+        return Data([version]) + c
+    }
+
+    static func open(_ data: Data, key: Data, token: String, kind: String) throws -> Data {
+        guard data.count >= 1 + 12 + 16, data.first == version else { throw FriendBoxError.badFormat }
+        do {
+            let box = try AES.GCM.SealedBox(combined: Data(data.dropFirst()))
+            return try AES.GCM.open(box, using: SymmetricKey(data: key), authenticating: Data("\(kind)\n\(token)".utf8))
+        } catch { throw FriendBoxError.cantOpen }
     }
 }
 
