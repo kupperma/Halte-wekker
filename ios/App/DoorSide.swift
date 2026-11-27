@@ -1,6 +1,6 @@
 import Foundation
 
-/// (0.42.9) Which side you get out of the train: "Exit on the left · platform 4". The relay works it out from
+/// (0.42.10) Which side you get out of the train: "Exit on the left · platform 4". The relay works it out from
 /// OpenStreetMap (`/rail/v1/side`, map data © OpenStreetMap contributors) for the station, its platform and the stop
 /// before (so the way the train goes). Asked once a train leg knows the platform it gets in at (`DoorSideStore`), again
 /// only when that platform changes, never while the alarm rings; unknown: nothing is shown. Plain values, so the rules
