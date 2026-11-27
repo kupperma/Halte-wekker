@@ -517,7 +517,7 @@ private struct TripsSettingsRows: View {
             SettingsSwitch(title: "Sound only with headphones", detail: "Without Bluetooth, wired or USB headphones, the alarm and the announcer only vibrate (a strong buzz on repeat until you stop it), so the rest of the train doesn’t hear it. It also rings on the lock screen, with Stop alarm.", isOn: $trip.headphonesOnly)
                 .settingsAnchor("alarm.headphones")
             if trip.headphonesOnly {
-                // (0.42.8) off for everyone: without headphones it never goes out of the speaker unless you say so
+                // (0.42.9) off for everyone: without headphones it never goes out of the speaker unless you say so
                 SettingsSwitch(title: "Out loud if I don’t stop it (after 1 min)", detail: "Without headphones: not stopped after a minute, it rings out of the speaker. Off unless you turn it on, so it never wakes the rest of the train.", isOn: $trip.outLoudLater)
                     .settingsAnchor("alarm.loudLater")
             }

@@ -74,7 +74,7 @@ class RideService : Service() {
         const val ACTION_DISMISS = "nl.haltewekker.ride.DISMISS"
         const val ACTION_PICK_AGAIN = "nl.haltewekker.ride.PICK_AGAIN"
         const val ACTION_SWITCH_CHANGE = "nl.haltewekker.ride.SWITCH_CHANGE"
-        /** (0.10.5) the faster stop offered: "Do this", "Keep my plan". */
+        /** (0.10.6) the faster stop offered: "Do this", "Keep my plan". */
         const val ACTION_BETTER_TAKE = "nl.haltewekker.ride.BETTER_TAKE"
         const val ACTION_BETTER_KEEP = "nl.haltewekker.ride.BETTER_KEEP"
         const val EXTRA_TRIP = "trip"
@@ -433,7 +433,7 @@ class RideService : Service() {
                 val v = RideStore.state.value?.vehicleTripId ?: leg.tripId
                 if (now - etaAt >= 60 && leg.to != null) {
                     etaAt = now
-                    // (0.10.5, iOS 0.42.8) a new answer of its stops: on past the change after all? a faster stop further on?
+                    // (0.10.6, iOS 0.42.9) a new answer of its stops: on past the change after all? a faster stop further on?
                     RideStore.state.value?.vehicleTripId?.let { id -> scope.launch { try { stayOnIfItGoes(id); betterStopLook(id) } catch (_: Exception) {} } }
                     val cur0 = RideStore.state.value
                     // (A8, iOS 0.39 `RideCache`) no answer: the stops and times saved on the phone when the trip started
@@ -477,7 +477,7 @@ class RideService : Service() {
         stopReckon()
         cancelBackup()
         requestLocation(RideGPS.intervalMs(false))
-        // (0.10.5, iOS 0.42.8) every ring rings the same way (the alarm's notification, full screen, Stop alarm); without
+        // (0.10.6, iOS 0.42.9) every ring rings the same way (the alarm's notification, full screen, Stop alarm); without
         // headphones it stays vibration only, out loud after a minute only with "Out loud if I don't stop it" on
         AlarmPlayer.ring(this, if (st.announce && leg != null) WakeRules.announcement(leg.toStop, leg.isTrain, true) else null, quiet,
             loudLater = WakeRules.loudLater(quiet, st.outLoudLater))
@@ -1242,7 +1242,7 @@ class RideService : Service() {
     }
 
     /**
-     * (iOS 0.34 / 0.42.8 `stayOnIfItGoes`) the vehicle you're on goes on to a later leg's stop (where it gets off, or
+     * (iOS 0.34 / 0.42.9 `stayOnIfItGoes`) the vehicle you're on goes on to a later leg's stop (where it gets off, or
      * where the ride after it gets on) no later than the planned ride (+2 min), or the plan split this very train: the
      * trip follows it (stay on, no change, no ring there). Looked at again with each new answer of its stops.
      */
@@ -1259,7 +1259,7 @@ class RideService : Service() {
         val stops = t?.stops ?: emptyList()
         val calls = stops.map { nl.haltewekker.match.TrainRules.Call(it.point, it.arrival, it.name) }
         val num = if (leg.isTrain) (t?.num?.takeIf { it.isNotEmpty() } ?: leg.num.takeIf { leg.tripId == tripId } ?: "") else ""
-        // (0.10.5, iOS 0.42.8) where it really goes, for the headline: its headsign, else its last stop
+        // (0.10.6, iOS 0.42.9) where it really goes, for the headline: its headsign, else its last stop
         if (t != null) {
             val h = t.headsign.ifEmpty { stops.lastOrNull()?.name ?: "" }
             if (h.isNotEmpty() && RideStore.state.value?.headsign != h) RideStore.update(this) { it.copy(headsign = h) }
@@ -1291,7 +1291,7 @@ class RideService : Service() {
         notifyRide(force = true)
     }
 
-    /** (0.10.5) The trip now stays on the vehicle to `name`: the wake-up for the new stop; a ring for the change it skips goes. */
+    /** (0.10.6) The trip now stays on the vehicle to `name`: the wake-up for the new stop; a ring for the change it skips goes. */
     private fun applyStay(newRides: List<nl.haltewekker.data.Ride>, kms: List<Double>, name: String, end: Double?) {
         val wasRinging = RideStore.state.value?.phase == Phase.ALARM
         if (wasRinging) {
@@ -1309,7 +1309,7 @@ class RideService : Service() {
         backupScheduledFor = null; scheduleBackup()
     }
 
-    // MARK: (0.10.5, iOS 0.42.8 `BetterStop`) the best place to get off
+    // MARK: (0.10.6, iOS 0.42.9 `BetterStop`) the best place to get off
 
     private var betterAt = 0.0
     private var betterBusy = false

@@ -1,6 +1,6 @@
 import Foundation
 
-/// (0.42.8) The best place to get off. On 2026-11-27 the Intercity you were on went past both 's-Hertogenbosch and
+/// (0.42.9) The best place to get off. On 2026-11-27 the Intercity you were on went past both 's-Hertogenbosch and
 /// Eindhoven, while the plan changed at Tilburg for Eindhoven and the 305 from there; getting off at 's-Hertogenbosch
 /// for the 306 was much faster. While on a bus or train whose own stops go on past where this leg gets off, a few of its
 /// later stops (within `horizon`, nearest your destination first, `maxCandidates` at most) are planned from, once each

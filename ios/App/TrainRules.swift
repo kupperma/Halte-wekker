@@ -9,7 +9,7 @@ import Foundation
 /// - `seen`/`outByStops`: the stopping pattern. Through a station at speed: not one that calls there; standing at a
 ///   station: not one that runs through it without calling.
 /// - `ask`: still tied after 2 minutes with different destinations: ask once which one.
-/// - `stayOn`: the trip follows the train you're on (no change at Tilburg on the through train; 0.42.8: by the
+/// - `stayOn`: the trip follows the train you're on (no change at Tilburg on the through train; 0.42.9: by the
 ///   vehicle's own stops against where the next leg gets off and when, and always when the plan split one train).
 /// - `headline`: the ride by where the vehicle really goes, and where you get off.
 /// Plain values only, so it can be tested.

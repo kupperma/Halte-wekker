@@ -20,7 +20,7 @@ import java.util.Locale
 
 /**
  * The alarm, the arrival chime and the announcer (iOS `AlarmSound`). "Sound only with headphones" (0.24.3): without
- * headphones it only vibrates (iOS 0.42.8: until you stop it; out loud after a minute only with "Out loud if I don't
+ * headphones it only vibrates (iOS 0.42.9: until you stop it; out loud after a minute only with "Out loud if I don't
  * stop it" on). With headphones in it plays as media
  * (Android's alarm stream also comes out of the speaker); out loud, on the alarm stream (it rings in silent mode).
  */

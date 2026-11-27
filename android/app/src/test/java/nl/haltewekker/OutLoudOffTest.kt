@@ -9,7 +9,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** (0.10.5, iOS 0.42.8) Without headphones the alarm stays vibration only; every ring rings on the lock screen. */
+/** (0.10.6, iOS 0.42.9) Without headphones the alarm stays vibration only; every ring rings on the lock screen. */
 class OutLoudOffTest {
     @Test fun outLoudLaterIsOffForEveryoneOnce() {
         assertFalse(Settings().outLoudLater)

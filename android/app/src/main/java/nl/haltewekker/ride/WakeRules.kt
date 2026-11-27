@@ -20,7 +20,7 @@ object WakeRules {
     const val GOOD_ACCURACY = 250.0       // m: a fix this good or better counts for the wake-up
     const val ARRIVE_ACCURACY = 600.0     // …and this for "you're there"
     const val EARLY_LEG = 20.0            // s: inside the wake distance this soon after the leg started: awake, silently
-    const val LOUD_AFTER = 60.0           // s: with "Out loud if I don't stop it" on (iOS 0.42.8: off by default), out loud after this
+    const val LOUD_AFTER = 60.0           // s: with "Out loud if I don't stop it" on (iOS 0.42.9: off by default), out loud after this
 
     fun wakeKm(isTrain: Boolean, busKm: Double = BUS_KM, trainKm: Double = TRAIN_KM): Double = if (isTrain) trainKm else busKm
 
@@ -46,7 +46,7 @@ object WakeRules {
     /** No headphones in and the setting on: it only vibrates (iOS `AlarmSound.quietNow`, 0.24.3). */
     fun quiet(headphonesOnly: Boolean, privateOutput: Boolean): Boolean = headphonesOnly && !privateOutput
 
-    /** (iOS 0.42.8 `RingShow`) every kind of ring. */
+    /** (iOS 0.42.9 `RingShow`) every kind of ring. */
     enum class RingKind { ALARM, HEADPHONES_QUIET, PHONE_IN_USE, BY_TIME, RECKONED, BACKUP, AGAIN, SHORT_NOTICE, GET_READY, ARRIVED }
 
     /** The alarm's own notification (full screen, Stop alarm) and the ringing ride: every ring, not the quiet words. */

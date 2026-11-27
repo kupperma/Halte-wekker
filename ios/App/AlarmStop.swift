@@ -61,7 +61,7 @@ enum AlarmStop {
     static let tripDelivered: [String] = [WristNotice.alarmId, WristNotice.againId, "backup", "heads-up-true", "heads-up-false"]
 }
 
-/// (0.42.8) How each kind of ring shows: on 2026-11-27 the approach to a change rang while the phone was in use (and no
+/// (0.42.9) How each kind of ring shows: on 2026-11-27 the approach to a change rang while the phone was in use (and no
 /// headphones in): one plain notification and "You're awake. A chime when you're there." on the ride screen, with no
 /// ringing state and no Stop alarm on the lock screen. Now every ring the trip makes, whatever set it off (the wake rule
 /// by distance or by time, the reckoned position, the backup alarm, its repeat), and however it sounds (out loud, by

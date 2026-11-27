@@ -213,7 +213,7 @@ struct StillOnCard: View {
     }
 }
 
-/// (0.42.8) A later stop of the one you're on gets you there sooner (`BetterStop`): "Do this" or "Keep my plan".
+/// (0.42.9) A later stop of the one you're on gets you there sooner (`BetterStop`): "Do this" or "Keep my plan".
 struct BetterStopCard: View {
     @EnvironmentObject var trip: TripManager
     let offer: TripManager.BetterOffer

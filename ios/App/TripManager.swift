@@ -75,7 +75,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     @Published var headphonesOnly: Bool = UserDefaults.standard.object(forKey: "headphonesOnly") as? Bool ?? true {
         didSet { UserDefaults.standard.set(headphonesOnly, forKey: "headphonesOnly"); sound.headphonesOnly = headphonesOnly }
     }
-    /// (0.42.8) Settings › Trips & alarm › "Out loud if I don't stop it (after 1 min)": without headphones the alarm
+    /// (0.42.9) Settings › Trips & alarm › "Out loud if I don't stop it (after 1 min)": without headphones the alarm
     /// goes out loud after a minute. Off for everyone (it would wake the whole train); existing installs too, once.
     @Published var outLoudLater: Bool = TripManager.loadOutLoudLater() {
         didSet { UserDefaults.standard.set(outLoudLater, forKey: "outLoudLater"); sound.loudLaterOn = outLoudLater }
@@ -280,10 +280,10 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     // 0.42.3: a field log of 27 November (`MissCall`, `ShortLeg`, `RideGuards.plannedNextAmong`)
     private var missHold = MissCall.Hold()                // a miss is told only once it has held a minute
     private var quietLeg = false                          // awake without the alarm (short, or started inside its wake)
-    private var ringInUse = false                         // (0.42.8) the ring now is the one chime while you used the phone
-    /// (0.42.8) Where the vehicle you're on really goes (its last stop, else the planned headsign): the ride's headline.
+    private var ringInUse = false                         // (0.42.9) the ring now is the one chime while you used the phone
+    /// (0.42.9) Where the vehicle you're on really goes (its last stop, else the planned headsign): the ride's headline.
     @Published private(set) var headsign = ""
-    /// (0.42.8) This leg stays on the vehicle past a planned change: "Stay on to Eindhoven". Nil: no such change.
+    /// (0.42.9) This leg stays on the vehicle past a planned change: "Stay on to Eindhoven". Nil: no such change.
     @Published private(set) var stayOnTo: String?
     /// The ring before your stop, for the adaptive wake-up (`AdaptiveWake`): when, which mode, when you stopped it.
     private var ringNote: (at: Date, train: Bool, stopped: Date?)?
@@ -1335,7 +1335,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             } else if ringAtStop || forceArrival { arrive() } else { legDone(why: "by GPS, quietly") }
         } else if case .alarm(approach: true) = phase, d <= arriveM, loc.horizontalAccuracy <= 600 {
             noteWakeOutcome(arrivedRinging: true)         // (0.39) there before you stopped it: next time a little earlier
-            // (0.42.8) the one chime while you used the phone, never stopped: at the stop it goes on as before (the
+            // (0.42.9) the one chime while you used the phone, never stopped: at the stop it goes on as before (the
             // announcement, or the leg ends quietly); a ring on repeat rings on until you stop it
             if ringInUse {
                 ringInUse = false
@@ -1419,7 +1419,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
                         : "Arriving at \(place). This is your stop. Please leave the \(veh) here."
     }
 
-    /// (0.42.8) Every ring rings the same way (`RingShow`): the ringing state with Stop on the lock screen, the alarm's
+    /// (0.42.9) Every ring rings the same way (`RingShow`): the ringing state with Stop on the lock screen, the alarm's
     /// own notification, the alarm card in the app. In use, it's one chime (no loop); no headphones, vibration only.
     private func ring(approach: Bool, why: String = "approach", fire: WakeRule.Fire? = nil) {
         let inUse = quietWhenInUse && phoneInUse() && !demo
@@ -1440,7 +1440,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         c.interruptionLevel = .timeSensitive
         c.userInfo = ["kind": "go"]
         // Using your phone right now? Then you're awake: one chime, not the alarm on repeat; but it rings as every ring
-        // does (0.42.8: it was one plain notification, with nothing on the lock screen to stop)
+        // does (0.42.9: it was one plain notification, with nothing on the lock screen to stop)
         phase = .alarm(approach: approach)
         ringInUse = inUse
         if approach, !demo { ringNote = (Date(), legIsTrain, nil) }      // (0.39) for the adaptive wake-up
@@ -1607,7 +1607,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         let t = WristNotice.backup(stop: leg?.to.short)
         c.title = t.title
         c.body = t.body
-        // (0.42.8) without headphones, not out of the speaker (unless "Out loud if I don't stop it" is on)
+        // (0.42.9) without headphones, not out of the speaker (unless "Out loud if I don't stop it" is on)
         c.sound = headphonesOnly && !outLoudLater ? nil : .default
         c.interruptionLevel = .timeSensitive
         c.userInfo = ["kind": "go"]
@@ -2060,7 +2060,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         if !demo {
             // (0.39) its road, platforms and delay; saved on the phone for the stretches without signal
             if let c = await Transit.cachedLiveTrip(v.tripId), vehicle == v {
-                // (0.42.8) its train number, now known: the plan may have split this very train
+                // (0.42.9) its train number, now known: the plan may have split this very train
                 if !c.trip.num.isEmpty, stayOnIfItGoes(stops, num: c.trip.num) { applyStops(stops) }
                 noteRideDetails(c.trip)
                 RideCacheStore.shared.save(c.trip, tripId: v.tripId, at: c.at, trip: tripStart, force: true)
@@ -2076,7 +2076,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     /// Your bus or train also goes to where a later leg starts, in time for it: stay on instead of changing. A Sprinter
     /// to Tilburg, then an Intercity to Breda, when the Sprinter goes on to Breda anyway and makes the same bus.
     /// 0.34 (`TrainRules.stayOn`): also when it goes to where the trip's last ride ends: stay on to there.
-    /// 0.42.8: on 2026-11-27 the Intercity you were on went on to Eindhoven, where the plan changed at Tilburg to another
+    /// 0.42.9: on 2026-11-27 the Intercity you were on went on to Eindhoven, where the plan changed at Tilburg to another
     /// train to Eindhoven and the bus from there; it rang at Tilburg. It only looked for the train at the next ride's
     /// boarding stop (the bus bay, a stop of its own by the station, often further than the 400 m it allowed) and by
     /// that bus's departure, never at where the next leg itself gets off, and only once, when the vehicle was found.
@@ -2136,7 +2136,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         return true
     }
 
-    /// (0.42.8) The trip now stays on the vehicle you're on to `to` (this leg's new end), the rest as in `nr`: the
+    /// (0.42.9) The trip now stays on the vehicle you're on to `to` (this leg's new end), the rest as in `nr`: the
     /// wake-up for the new stop, no ring for the change it skips (one ringing for it goes), the lock screen and the
     /// change guide after it.
     private func applyStayRoute(_ nr: RoutePlan, to: Place) {
@@ -2162,7 +2162,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         Task { await loadUpcoming(force: true) }
     }
 
-    // MARK: (0.42.8) the best place to get off
+    // MARK: (0.42.9) the best place to get off
 
     /// A faster way from a later stop of the vehicle you're on (`BetterStop`): offered, taken only with a tap.
     struct BetterOffer: Equatable {
@@ -2276,7 +2276,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         return upcoming.first(where: { $0.trip.first.tripId == v.tripId })?.trip.first.num ?? ""
     }
 
-    /// (0.42.8) Where the vehicle really goes, for the ride's headline: its trip's last stop (else the planned headsign).
+    /// (0.42.9) Where the vehicle really goes, for the ride's headline: its trip's last stop (else the planned headsign).
     private func noteHeadsign(_ v: Vehicle, stops: [TripStop]) {
         if let last = stops.last?.name, !last.isEmpty { headsign = Fmt.place(last); return }
         if headsign.isEmpty, let p = route?.planned?[safe: index], p.tripId == v.tripId, !p.headsign.isEmpty { headsign = Fmt.place(p.headsign) }
@@ -2920,7 +2920,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
 
     /// The ride's own answer: the platform you get in at, and how late it is at your stop.
     private func noteRideDetails(_ t: LiveTrip) {
-        if !t.headsign.isEmpty { headsign = Fmt.place(t.headsign) }      // (0.42.8) where it really goes
+        if !t.headsign.isEmpty { headsign = Fmt.place(t.headsign) }      // (0.42.9) where it really goes
         guard let l = leg, t.stops.count >= 2 else { return }
         let mine = GeoPoint(l.to.coordinate)
         func d(_ i: Int) -> Double { Geo.metres(GeoPoint(t.stops[i].coordinate), mine) }
@@ -4104,14 +4104,14 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             return
         }
         noteAnswer()
-        // (0.42.8) a new answer of its stops: does it go on past the change after all (the first answer may have been
+        // (0.42.9) a new answer of its stops: does it go on past the change after all (the first answer may have been
         // none, or a copy saved without the stops further on)
         noteHeadsign(v, stops: stops)
         let num: String = await Transit.cachedLiveTrip(v.tripId)?.trip.num ?? ""
         guard vehicle == v else { return }
         stayOnIfItGoes(stops, num: num)
         applyStops(stops)
-        lookForBetterStop(stops)                          // (0.42.8) a later stop of it may be the faster way
+        lookForBetterStop(stops)                          // (0.42.9) a later stop of it may be the faster way
         // (the same answer, as it was asked: no request of its own)
         if let c = await Transit.cachedLiveTrip(v.tripId), vehicle == v {
             noteWakeTrip(c.trip, at: c.at)
@@ -4585,7 +4585,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         case .finished: title = "You’re there"
         case .alarm(let a): title = a ? "Wake up: \(leg?.to.short ?? "")" : "Get off now"
         default:
-            // (0.42.8) where it really goes, and where you get off ("Intercity to Zwolle · get off at Tilburg")
+            // (0.42.9) where it really goes, and where you get off ("Intercity to Zwolle · get off at Tilburg")
             let end: String = leg?.to.short ?? ""
             title = vehicle.map { TrainRules.lockHeadline(vehicle: $0.title, headsign: headsign, legEnd: end, stayOnTo: stayOnTo) } ?? leg?.title ?? ""
         }

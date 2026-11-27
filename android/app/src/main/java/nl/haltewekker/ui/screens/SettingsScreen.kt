@@ -154,7 +154,7 @@ private fun TopicPage(t: SettingsTopic, onBack: () -> Unit, onSetup: () -> Unit,
                 Card {
                     Text("Alarm", fontWeight = FontWeight.Bold, color = DS.t.text)
                     Toggle("Sound only with headphones", "Without Bluetooth, wired or USB headphones the alarm only vibrates (a strong buzz on repeat until you stop it), so the rest of the train doesn't hear it. It still rings on the lock screen, with Stop alarm.", s.headphonesOnly) { v -> set { it.copy(headphonesOnly = v) } }
-                    // (0.10.5, iOS 0.42.8) off for everyone: without headphones it never goes out of the speaker unless you say so
+                    // (0.10.6, iOS 0.42.9) off for everyone: without headphones it never goes out of the speaker unless you say so
                     if (s.headphonesOnly) Toggle("Out loud if I don't stop it (after 1 min)", "Without headphones: not stopped after a minute, it rings out of the speaker. Off unless you turn it on, so it never wakes the rest of the train.", s.outLoudLater) { v -> set { it.copy(outLoudLater = v) } }
                     Toggle("Station announcement", "\"Attention please. We are now approaching …\" before the alarm.", s.announce) { v -> set { it.copy(announce = v) } }
                     Toggle("Chime at the stop", "After the alarm, a chime and a notification at the stop itself.", s.ringAtStop) { v -> set { it.copy(ringAtStop = v) } }

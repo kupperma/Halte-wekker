@@ -106,7 +106,7 @@ struct PlannedRide: Hashable {
     /// (0.42.4) A train's number and planned departure, for its platform watch (`PlatformWatch`).
     var num: String = ""
     var scheduled: Date? = nil
-    /// (0.42.8) When it gets to the leg's stop, as planned, and where it goes (staying on past a change: `TrainRules.stayOn`).
+    /// (0.42.9) When it gets to the leg's stop, as planned, and where it goes (staying on past a change: `TrainRules.stayOn`).
     var arrival: Date? = nil
     var headsign: String = ""
 }

@@ -87,7 +87,7 @@ data class RideState(
      *  how far from its stop this leg started (its first good fix). */
     val quietLeg: Boolean = false,
     val legStartMetres: Double? = null,
-    /** (0.10.5, iOS 0.42.8) where the vehicle you're on really goes (the headline), and this leg staying on it past a
+    /** (0.10.6, iOS 0.42.9) where the vehicle you're on really goes (the headline), and this leg staying on it past a
      *  planned change ("Stay on to Eindhoven"); a faster way from a later stop of it, offered. */
     val headsign: String? = null,
     val stayOnTo: String? = null,
@@ -102,7 +102,7 @@ data class RideState(
     }
     /** Where the vehicle goes: its own trip's headsign, else the planned ride's when it's that one. */
     private val sign: String get() = headsign ?: leg?.let { l -> l.headsign.takeIf { vehicleTripId == null || vehicleTripId == l.tripId } }.orEmpty()
-    /** (iOS 0.42.8 `TrainRules.headline`) "Intercity to Zwolle" / "Get off at Tilburg"; "Stay on to Eindhoven". */
+    /** (iOS 0.42.9 `TrainRules.headline`) "Intercity to Zwolle" / "Get off at Tilburg"; "Stay on to Eindhoven". */
     val headline: Pair<String, String?>? get() {
         val l = leg ?: return null
         val v = vehicleTitle ?: return null
@@ -120,7 +120,7 @@ data class RideState(
     val legArrival: Double? get() = eta ?: leg?.arrival
 }
 
-/** (0.10.5, iOS 0.42.8 `BetterOffer`) getting off at `stop` (the vehicle there at `reachesAt`), then `trip` from there. */
+/** (0.10.6, iOS 0.42.9 `BetterOffer`) getting off at `stop` (the vehicle there at `reachesAt`), then `trip` from there. */
 @Serializable
 data class BetterCard(val stop: String, val lat: Double, val lon: Double, val reachesAt: Double, val trip: DoorTrip, val text: String, val log: String)
 

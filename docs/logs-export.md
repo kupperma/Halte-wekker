@@ -215,11 +215,11 @@ The same switches, words and rules, so the relay and the replay treat both alike
   conditions as the lines (after a trip, else hourly; not during a trip, on a metered/Low Data network or in battery
   saver). Drop the sent points from the queue only after a 200; switching off clears the queue.
 
-### Staying on, the best stop to get off, every ring on the lock screen (0.42.8)
+### Staying on, the best stop to get off, every ring on the lock screen (0.42.9)
 
-What's new in 0.42.8 (`ios/App/TrainRules.swift` `stayOn`/`headline`, `ios/App/BetterStop.swift`, `ios/App/AlarmStop.swift`
-`RingShow`; tests `TrainRulesTests`, `BetterStopTests`, `AlarmStopTests`; Android 0.10.5 in
-[android-todo.md](android-todo.md) › iOS 0.42.8). New and changed lines in the ride log:
+What's new in 0.42.9 (`ios/App/TrainRules.swift` `stayOn`/`headline`, `ios/App/BetterStop.swift`, `ios/App/AlarmStop.swift`
+`RingShow`; tests `TrainRulesTests`, `BetterStopTests`, `AlarmStopTests`; Android 0.10.6 in
+[android-todo.md](android-todo.md) › iOS 0.42.9). New and changed lines in the ride log:
 
 - `stay on · IC 3529 also reaches Eindhoven 15:44 (plan changed at Tilburg 15:05 → IC 3631 15:12)`: the vehicle you're
   on calls, by its own stop list, where a later leg gets off (or where the ride after it gets on) no later than the

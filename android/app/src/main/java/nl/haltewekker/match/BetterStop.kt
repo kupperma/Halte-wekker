@@ -7,7 +7,7 @@ import kotlin.math.max
 import kotlin.math.roundToInt
 
 /**
- * (0.10.5, iOS 0.42.8 `BetterStop.swift`) the best place to get off: a few later stops of the vehicle you're on (within
+ * (0.10.6, iOS 0.42.9 `BetterStop.swift`) the best place to get off: a few later stops of the vehicle you're on (within
  * 90 min, nearest your destination first, 3 at most) planned from, once each (every 5 min at most); one that gets you
  * there 3 min sooner, or as soon with fewer changes, is offered ("Do this" / "Keep my plan"). Pure.
  */

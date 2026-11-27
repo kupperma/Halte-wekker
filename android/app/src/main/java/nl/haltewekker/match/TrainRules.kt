@@ -88,7 +88,7 @@ object TrainRules {
     const val STAY_LATE = 120.0
     const val STAY_CATCH = 60.0
 
-    /** One leg as the stay-on rule needs it (iOS 0.42.8 `TrainRules.StayLeg`). Times in seconds since 1970. */
+    /** One leg as the stay-on rule needs it (iOS 0.42.9 `TrainRules.StayLeg`). Times in seconds since 1970. */
     data class StayLeg(val from: GeoPoint, val to: GeoPoint, val fromName: String = "", val toName: String = "",
                        val departure: Double? = null, val arrival: Double? = null, val tripId: String = "", val num: String = "")
 
@@ -125,7 +125,7 @@ object TrainRules {
     }
 
     /**
-     * (iOS 0.42.8 `TrainRules.stayOn`) stay seated instead of changing: the plan's next legs are this very train (the
+     * (iOS 0.42.9 `TrainRules.stayOn`) stay seated instead of changing: the plan's next legs are this very train (the
      * same trip or number): always; or it calls at a later leg's stop (where it gets off, or where the ride after it gets
      * on) no later than the planned ride (+2 min) and a minute before the ride after it. The furthest such leg.
      */
@@ -165,7 +165,7 @@ object TrainRules {
         return "stay on · $vehicle also reaches $reaches$whenText (plan changed at $changed$then)"
     }
 
-    /** (iOS 0.42.8) The ride's headline by where the vehicle really goes, and where you get off. */
+    /** (iOS 0.42.9) The ride's headline by where the vehicle really goes, and where you get off. */
     fun headline(vehicle: String, headsign: String, legEnd: String, stayOnTo: String?): Pair<String, String?> {
         val sign = headsign.trim()
         val going = if (sign.isEmpty()) vehicle else "$vehicle to $sign"

@@ -1,6 +1,6 @@
 import XCTest
 
-/// 0.42.8: the best place to get off: a through train's later stops planned from, the faster one offered.
+/// 0.42.9: the best place to get off: a through train's later stops planned from, the faster one offered.
 final class BetterStopTests: XCTestCase {
     private let t0 = Fx.t0
     private func at(_ s: Double) -> Date { t0.addingTimeInterval(s) }

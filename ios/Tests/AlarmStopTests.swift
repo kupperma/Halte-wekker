@@ -66,7 +66,7 @@ final class AlarmStopTests: XCTestCase {
         XCTAssertTrue(AlarmStop.tripDelivered.contains("backup"))
     }
 
-    // MARK: (0.42.8) which ring gets the lock screen's ringing state
+    // MARK: (0.42.9) which ring gets the lock screen's ringing state
 
     func test_everyRingKindRingsOnTheLockScreenWithStop() {
         let rings: [RingShow.Kind] = [.alarm, .headphonesQuiet, .phoneInUse, .byTime, .reckoned, .backup, .again]
