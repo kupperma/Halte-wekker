@@ -69,19 +69,21 @@ final class PlanTripModel: ObservableObject {
         let now = Date()
         let (at, arriveBy): (Date, Bool) = {
             switch when {
-            case .now: return (now.addingTimeInterval(-60), false)
+            // (0.42.7) from 15 minutes back: a late train or bus whose timetable time has passed is in the answer
+            case .now: return (LiveKeep.askAt(now: now, atStation: true), false)
             case .leave(let d): return (d.addingTimeInterval(-60), false)
             case .arrive(let d): return (d, true)
             }
         }()
         let m = modes
         let all = await Transit.$urgent.withValue(true) { () async -> [DoorTrip] in
-            await Transit.plan(from: a, to: b, modes: m, at: at, count: 6, maxTransfers: 4, arriveBy: arriveBy)
+            await Transit.plan(from: a, to: b, modes: m, at: at, count: LiveKeep.count(6, atStation: when == .now), maxTransfers: 4, arriveBy: arriveBy)
         }
         guard mine == round else { return }
         let kept = all.filter { t in
             switch when {
-            case .now: return t.first.departure >= now.addingTimeInterval(-60)
+            case .now: return LiveKeep.keep(LiveKeep.Way(departure: t.first.departure, scheduled: t.first.scheduledDeparture, start: t.first.departure,
+                                                         cancelled: t.first.cancelled), now: now)
             case .leave(let d): return t.first.departure >= d.addingTimeInterval(-60)
             case .arrive: return t.first.departure >= now.addingTimeInterval(-60)
             }

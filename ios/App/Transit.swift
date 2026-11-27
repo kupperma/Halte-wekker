@@ -28,6 +28,8 @@ struct Ride: Identifiable, Hashable, Codable {
     var toLon: Double? = nil
     /// (0.36) Who runs it ("NS", "Arriva"), from Transitous; for where you check out at a change between train companies.
     var agency: String? = nil
+    /// (0.42.7) The planner's walking distance to this ride (its foot route, metres), when it said.
+    var walkMetres: Double? = nil
     var delay: Int { live ? Int((departure.timeIntervalSince(scheduledDeparture) / 60).rounded()) : 0 }
     var rideMinutes: Int { Fmt.mins(arrival.timeIntervalSince(departure)) }
     var badge: String { isTrain ? line : "BUS \(line)" }
@@ -334,8 +336,10 @@ enum Transit {
             guard let dep = date(l["startTime"]), let arr = date(l["endTime"]) else { continue }
             let short = (l["routeShortName"] as? String) ?? (l["displayName"] as? String) ?? "?"
             var walk = 0
+            var walkM: Double? = nil
             if i > 0, (legs[i - 1]["mode"] as? String) == "WALK", let a = date(legs[i - 1]["startTime"]), let b = date(legs[i - 1]["endTime"]) {
                 walk = Fmt.mins(b.timeIntervalSince(a))
+                walkM = (legs[i - 1]["distance"] as? NSNumber)?.doubleValue
             }
             rides.append(Ride(tripId: (l["tripId"] as? String) ?? UUID().uuidString, line: train ? trainLabel(short) : short, name: short, isTrain: train,
                               departure: dep, scheduledDeparture: date(l["scheduledStartTime"]) ?? dep,
@@ -347,7 +351,7 @@ enum Transit {
                               num: Self.text(l["tripShortName"]), headsign: (l["headsign"] as? String) ?? "",
                               plannedPlatform: (from["scheduledTrack"] as? String) ?? (from["track"] as? String),
                               fromLat: from["lat"] as? Double, fromLon: from["lon"] as? Double, toLat: to["lat"] as? Double, toLon: to["lon"] as? Double,
-                              agency: l["agencyName"] as? String))
+                              agency: l["agencyName"] as? String, walkMetres: walkM))
         }
         guard !rides.isEmpty, let s = date(it["startTime"]), let e = date(it["endTime"]) else { return nil }
         return DoorTrip(rides: rides, start: s, end: e)
@@ -449,7 +453,7 @@ enum Transit {
         var fromHere: [DoorTrip]?, fromStation: [DoorTrip]?
         var station: NearStop?, stationKnown = false
         await withTaskGroup(of: FromHerePart.self) { g in
-            g.addTask { FromHerePart.spot(await planAll(from: "\(c.latitude),\(c.longitude)", to: to.ids, at: now.addingTimeInterval(-120), count: count)) }
+            g.addTask { FromHerePart.spot(await planAll(from: "\(c.latitude),\(c.longitude)", to: to.ids, at: LiveKeep.askAt(now: now, atStation: false), count: count)) }
             g.addTask { FromHerePart.station(await stationAt(c)) }
             while let part = await g.next() {
                 switch part {
@@ -458,8 +462,13 @@ enum Transit {
                 case .station(let s):
                     station = s
                     stationKnown = true
-                    g.addTask { FromHerePart.fromStation(await planAll(from: s?.id, to: to.ids, at: now.addingTimeInterval(-120), count: count)) }
-                case .fromStation(let trips):
+                    // (0.42.7) from 15 minutes back: a late train whose timetable time has passed is in the answer
+                    g.addTask { FromHerePart.fromStation(await planAll(from: s?.id, to: to.ids, at: LiveKeep.askAt(now: now, atStation: true),
+                                                                       count: LiveKeep.count(count, atStation: true))) }
+                case .fromStation(let got):
+                    // (0.42.7) NS's board of the station: its trains' live times (a late one the planner had at its
+                    // timetable time), and only the ways whose changes are still made with them
+                    let trips: [DoorTrip] = await nsLive(got, station: station)
                     // At a station: from the station itself too. From your GPS spot inside a big one, the walk to the
                     // platforms can come out long or odd, and a bus to the station you're standing in looks quicker. Your
                     // walk to the platform: about how far it is.
@@ -471,7 +480,7 @@ enum Transit {
                     }
                 }
                 guard let publish, stationKnown, fromHere != nil || fromStation != nil else { continue }
-                await publish(keepUseful((fromHere ?? []) + (fromStation ?? []), here: here, station: station, now: now, keep: keep))
+                await publish(keepUseful((fromHere ?? []) + (fromStation ?? []), here: here, station: station, now: now, keep: keep, log: false))
             }
         }
         var all = (fromHere ?? []) + (fromStation ?? [])
@@ -480,7 +489,65 @@ enum Transit {
         if all.isEmpty {
             all = await fromNearest(here, to: to.ids, at: now.addingTimeInterval(-120), count: count)
         }
-        return keepUseful(all, here: here, station: station, now: now, keep: keep)
+        return keepUseful(all, here: here, station: station, now: now, keep: keep, log: true)
+    }
+
+    /// (0.42.7) A station's trips with NS's live times (by train number, from its board): a late train is moved to its
+    /// live time, and a way whose changes it no longer makes goes.
+    private static func nsLive(_ trips: [DoorTrip], station: NearStop?) async -> [DoorTrip] {
+        guard let st = station, let code = NSStore.code(stopId: st.id, name: st.name), trips.contains(where: { $0.first.isTrain }) else { return trips }
+        guard let board = await NSStore.shared.board(code) else { return trips }
+        let now = Date()
+        var ups: [NearbyLive.Update] = []
+        for t in trips {
+            let f = t.first
+            guard f.isTrain, !f.num.isEmpty, let d = board.first(where: { $0.num == f.num }), let p = d.planned, let a = d.actual else { continue }
+            ups.append(NearbyLive.Update(tripId: f.tripId, departureDelay: a.timeIntervalSince(p), live: true, asOf: now))
+        }
+        guard !ups.isEmpty else { return trips }
+        let byTrip: [String: NearbyLive.Update] = NearbyLive.merge([:], ups)
+        var out: [DoorTrip] = []
+        for t in trips {
+            guard byTrip[t.first.tripId] != nil else { out.append(t); continue }
+            let legs: [NearbyLive.Leg] = t.rides.map { r in
+                NearbyLive.Leg(tripId: r.tripId, departure: r.departure, scheduledDeparture: r.scheduledDeparture, arrival: r.arrival,
+                               scheduledArrival: r.scheduledArrival, live: r.live, toStop: r.toStop)
+            }
+            let r = NearbyLive.trip(start: t.start, end: t.end, legs: legs, updates: byTrip, answered: nil)
+            let rides: [Ride] = zip(t.rides, r.legs).map { pair in pair.0.retimed(departure: pair.1.departure, arrival: pair.1.arrival, live: pair.1.live) }
+            let ok: Bool = LiveKeep.connects(arrivals: rides.map(\.arrival), departures: rides.map(\.departure), walks: rides.map(\.walkBefore))
+            if ok { out.append(DoorTrip(rides: rides, start: r.start, end: r.end)) }
+        }
+        return out
+    }
+
+    /// (0.42.7) A way's first walk timed by its distance (the planner's foot route, or the straight line when that's
+    /// odd), and a short first hop swapped for walking straight to the next ride's stop when that makes the same ride.
+    /// `note`: the field log's line for the walk, when it changed it.
+    static func walkFixed(_ t: DoorTrip, here: CLLocation, now: Date) -> (trip: DoorTrip, note: String?) {
+        guard let f = t.rides.first, f.fromId != "onboard" else { return (t, nil) }
+        let used: Double = HabitStore.pedestrianSpeed() ?? WalkFirst.plannerSpeed
+        // a short hop first: walk straight to the next ride's stop instead, when you make the same ride
+        if t.rides.count > 1, let la = t.rides[1].fromLat, let lo = t.rides[1].fromLon {
+            let next: Ride = t.rides[1]
+            let metres: Double = here.distance(from: CLLocation(latitude: la, longitude: lo)) * WalkFirst.streets
+            let rideMin: Double = f.arrival.timeIntervalSince(f.departure) / 60
+            if let w = WalkFirst.walkInstead(rideMinutes: rideMin, now: now, start: t.start, nextDeparture: next.departure, walkMetres: metres, speed: used) {
+                let walked: DoorTrip = DoorTrip(rides: [next.walking(w)] + Array(t.rides.dropFirst(2)),
+                                                start: next.departure.addingTimeInterval(-Double(w) * 60), end: t.end)
+                return (walked, "walk · straight to \(Fmt.place(next.fromStop)) (\(w) min) instead of the \(f.line) there")
+            }
+        }
+        guard f.walkBefore > 0 else { return (t, nil) }
+        let straight: Double? = f.fromLat.flatMap { a in f.fromLon.map { o in here.distance(from: CLLocation(latitude: a, longitude: o)) } }
+        let m: Double? = WalkFirst.metres(planner: f.walkMetres, straight: straight)
+        let w: Int = WalkFirst.walk(plannerMinutes: f.walkBefore, metres: m, speed: used)
+        let line: String = WalkFirst.logLine(plannerMinutes: f.walkBefore, plannerMetres: f.walkMetres ?? straight, yours: w, speed: used,
+                                             usedYours: w < f.walkBefore)
+        guard w < f.walkBefore else { return (t, line) }
+        var r: Ride = f.walking(w)
+        r.walkMetres = m
+        return (DoorTrip(rides: [r] + Array(t.rides.dropFirst()), start: f.departure.addingTimeInterval(-Double(w) * 60), end: t.end), line)
     }
 
     /// What `tripsFrom` hears back, each as it comes in.
@@ -492,8 +559,15 @@ enum Transit {
 
     /// The trips worth showing, soonest first: no ride to where you are already, nothing that has left, none a later
     /// trip beats, at most `keep`.
-    private static func keepUseful(_ all: [DoorTrip], here: CLLocation, station: NearStop?, now: Date, keep: Int) -> [DoorTrip] {
-        var all = all
+    private static func keepUseful(_ all: [DoorTrip], here: CLLocation, station: NearStop?, now: Date, keep: Int, log: Bool) -> [DoorTrip] {
+        // (0.42.7) walks by their distance, a short first hop swapped for the walk
+        var notes: [String] = []
+        var all: [DoorTrip] = all.map { t in
+            let r = walkFixed(t, here: here, now: now)
+            if let n = r.note { notes.append(n) }
+            return r.trip
+        }
+        if log, let n = notes.first { FieldLog.shared.add(.net, n) }
         // A ride that only takes you to where you are (the station you're at): you're there already. Only when there's
         // another way, though.
         let at = station.map { CLLocation(latitude: $0.lat, longitude: $0.lon) }
@@ -505,7 +579,11 @@ enum Transit {
         let direct = all.filter { !hop($0) }
         if !direct.isEmpty { all = direct }
         var seen = Set<String>()
-        all = all.filter { $0.first.departure >= now.addingTimeInterval(-60) && $0.start >= now.addingTimeInterval(-90) && seen.insert($0.id).inserted }
+        // (0.42.7) by its live departure (a late train whose timetable time has passed stays)
+        all = all.filter { t in
+            LiveKeep.keep(LiveKeep.Way(departure: t.first.departure, scheduled: t.first.scheduledDeparture, start: t.start, cancelled: t.first.cancelled), now: now)
+                && seen.insert(t.id).inserted
+        }
             .sorted { $0.first.departure < $1.first.departure }
         let kept = all.filter { t in !all.contains { $0.id != t.id && $0.first.departure >= t.first.departure && $0.end < t.end } }
         return Array(kept.prefix(keep))

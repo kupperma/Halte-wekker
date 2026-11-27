@@ -55,6 +55,8 @@ struct NearbyOverview: View {
         .dynamicTypeSize(...DynamicTypeSize.accessibility2)
         .task(id: startKey) { start() }
         .onChange(of: go.best?.id) { _, _ in store.absorb(seed) }
+        // (0.42.7) Fastest trip's fresher live times freshen the same trips here (by trip id, at any of their stops)
+        .onChange(of: go.updated) { _, u in store.freshen(from: seed, asOf: u ?? Date()) }
         .onChange(of: frameKey) { _, _ in refit() }
         .task {
             // once a minute: "Leave now" moves on with the clock, and it asks again after a few minutes
@@ -86,6 +88,7 @@ struct NearbyOverview: View {
     private func start() {
         guard let h = here else { return }
         store.open(here: h, dest: go.dest, seed: seed)
+        store.freshen(from: seed, asOf: go.updated ?? Date())
     }
 
     // MARK: the map
@@ -390,6 +393,13 @@ struct NearbyOverview: View {
                     }
                     Text("· leaves \(Fmt.hhmm(o.departure))").font(DS.footnote).monospacedDigit().foregroundStyle(DS.secondary)
                         .lineLimit(1).minimumScaleFactor(0.8)
+                    // (0.42.7) how late it leaves, by live times
+                    if let f = store.bestTrip(o.id)?.first {
+                        let sh: NearbyLive.Shown = NearbyLive.shown(departure: f.departure, scheduled: f.scheduledDeparture, live: f.live, cancelled: f.cancelled)
+                        if sh.late {
+                            Text(sh.word).font(DS.footnoteStrong).monospacedDigit().foregroundStyle(DS.warning).lineLimit(1).fixedSize()
+                        }
+                    }
                 }
             }
             Spacer(minLength: 4)
@@ -477,8 +487,11 @@ struct NearbyTagChip: View {
         Text(tag.rawValue)
             .font(DS.caption)
             .foregroundStyle(ink)
+            .lineLimit(1)
+            .fixedSize()                     // (0.42.7) never "Fastes / t": the row's other text gives way first
             .padding(.horizontal, 7).padding(.vertical, 2)
             .background(fill, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .layoutPriority(2)
     }
 }
 

@@ -37,7 +37,11 @@ struct NearbyDetailSheet: View {
     /// surer than that one).
     private var marks: (fastest: String?, surest: String?) {
         let d: [DoorTrip] = soon
-        guard let fi = d.indices.min(by: { d[$0].end < d[$1].end }) else { return (nil, nil) }
+        // (0.42.7) by live arrival (the trips are freshened with the newest live times)
+        let arrivals: [Date] = d.map(\.end)
+        let changes: [Int] = d.map { $0.rides.count - 1 }
+        let leaves: [Date] = d.map(\.first.departure)
+        guard let fi = NearbyLive.fastest(arrivals: arrivals, changes: changes, departures: leaves) else { return (nil, nil) }
         let pcts: [Int] = d.map { store.sure($0).percent }
         let si: Int? = Nearby.surestOf(pcts, fastest: fi)
         return (d[fi].first.tripId, si.map { d[$0].first.tripId })
@@ -171,11 +175,12 @@ struct NearbyDetailSheet: View {
     /// One of the stop's other departures of the same line: its time and how it's running (when it gets you there is
     /// the planner's to say: tap the stop again later).
     private func boardRow(_ b: BoardDeparture) -> some View {
-        let live: String = b.live ? (b.delay > 0 ? "+\(b.delay)" : "live") : "timetable"
+        let sh: NearbyLive.Shown = NearbyLive.shown(departure: b.time, scheduled: b.scheduled, live: b.live, cancelled: b.cancelled)
+        let live: String = sh.word
         return HStack(spacing: DS.s8) {
             DSLinePill(line: b.train ? Transit.trainLabel(b.line) : b.line, train: b.train)
-            Text(Fmt.hhmm(b.time)).font(DS.bodyStrong).monospacedDigit().foregroundStyle(DS.text)
-            Text(live).font(DS.footnoteStrong).foregroundStyle(b.live && b.delay > 0 ? DS.warning : DS.secondary)
+            timeText(sh)
+            Text(live).font(DS.footnoteStrong).foregroundStyle(sh.late ? DS.warning : DS.secondary).lineLimit(1).fixedSize()
             Text(b.headsign).font(DS.footnote).foregroundStyle(DS.secondary).lineLimit(1)
             Spacer(minLength: 4)
         }
@@ -184,13 +189,23 @@ struct NearbyDetailSheet: View {
         .accessibilityLabel("\(b.train ? "Train" : "Bus") \(b.line) at \(Fmt.hhmm(b.time)) to \(b.headsign), \(live)")
     }
 
-    private func status(_ r: Ride) -> (text: String, color: Color) {
-        if r.cancelled { return ("cancelled", DS.warning) }
-        if !r.live { return ("timetable", DS.secondary) }
-        let d: Int = r.delay
-        if d > 0 { return ("+\(d)", DS.warning) }
-        if d < 0 { return ("\(d)", DS.warning) }
-        return ("live", DS.accentText)
+    /// (0.42.7) "live" only with live times; "+3" (and the timetable's time struck through beside it) when late.
+    private func status(_ r: Ride) -> (text: String, color: Color, shown: NearbyLive.Shown) {
+        let sh: NearbyLive.Shown = NearbyLive.shown(departure: r.departure, scheduled: r.scheduledDeparture, live: r.live, cancelled: r.cancelled)
+        let color: Color = sh.late ? DS.warning : sh.word == "live" ? DS.accentText : DS.secondary
+        return (sh.word, color, sh)
+    }
+
+    /// The live time, the timetable's struck through and grey before it when they differ.
+    private func timeText(_ sh: NearbyLive.Shown) -> some View {
+        HStack(spacing: 4) {
+            if let p = sh.planned {
+                Text(Fmt.hhmm(p)).font(DS.footnote).monospacedDigit().strikethrough().foregroundStyle(DS.secondary)
+                    .lineLimit(1).fixedSize()
+            }
+            Text(Fmt.hhmm(sh.time)).font(DS.bodyStrong).monospacedDigit().foregroundStyle(sh.late ? DS.warning : DS.text)
+                .lineLimit(1).fixedSize()
+        }
     }
 
     private func timeRow(_ t: DoorTrip, fastest: Bool, surest: Bool) -> some View {
@@ -200,25 +215,27 @@ struct NearbyDetailSheet: View {
         let changes: Int = t.rides.count - 1
         return HStack(spacing: DS.s8) {
             DSLinePill(line: f.isTrain ? Transit.trainLabel(f.line) : f.line, train: f.isTrain)
-            Text(Fmt.hhmm(f.departure)).font(DS.bodyStrong).monospacedDigit().foregroundStyle(DS.text)
-            Text(st.text).font(DS.footnoteStrong).foregroundStyle(st.color)
+            timeText(st.shown)
+            Text(st.text).font(DS.footnoteStrong).foregroundStyle(st.color).lineLimit(1).fixedSize()
             if changes > 0 {
-                Text("· \(changes) change\(changes > 1 ? "s" : "")").font(DS.footnote).foregroundStyle(DS.secondary).lineLimit(1)
+                Text("· \(changes) change\(changes > 1 ? "s" : "")").font(DS.footnote).foregroundStyle(DS.secondary)
+                    .lineLimit(1).truncationMode(.tail).layoutPriority(-1)
             }
             Spacer(minLength: 4)
             if fastest { NearbyTagChip(tag: .fastest) } else if surest { NearbyTagChip(tag: .surest) }
-            Text("arrive").font(DS.footnote).foregroundStyle(DS.secondary)
+            Text("arrive").font(DS.footnote).foregroundStyle(DS.secondary).lineLimit(1).layoutPriority(-1)
             if let d = Nearby.dayWord(t.end, now: Date(), calendar: Calendar.current) {
-                Text(d).font(DS.footnote).foregroundStyle(DS.secondary)
+                Text(d).font(DS.footnote).foregroundStyle(DS.secondary).lineLimit(1)
             }
-            Text(Fmt.hhmm(t.end)).font(DS.bodyStrong).monospacedDigit().foregroundStyle(DS.text)
+            Text(Fmt.hhmm(t.end)).font(DS.bodyStrong).monospacedDigit().foregroundStyle(t.last.live && t.last.delay > 0 ? DS.warning : DS.text)
+                .lineLimit(1).fixedSize()
         }
         .padding(.vertical, 9).padding(.horizontal, 8)
         .background(on ? AnyShapeStyle(DS.surface2) : AnyShapeStyle(Color.clear), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(alignment: .top) { Rectangle().fill(DS.divider).frame(height: 1).padding(.horizontal, 8) }
         .contentShape(Rectangle())
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(GoStore.what(f)) at \(Fmt.hhmm(f.departure)), \(st.text), there \(Fmt.hhmm(t.end))\(fastest ? ", fastest" : surest ? ", surest" : "")")
+        .accessibilityLabel("\(GoStore.what(f)) at \(Fmt.hhmm(st.shown.time))\(st.shown.planned.map { ", planned \(Fmt.hhmm($0))" } ?? ""), \(st.text), there \(Fmt.hhmm(t.end))\(fastest ? ", fastest" : surest ? ", surest" : "")")
         .accessibilityAddTraits(on ? [.isButton, .isSelected] : .isButton)
     }
 
