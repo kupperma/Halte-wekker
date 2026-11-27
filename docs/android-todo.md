@@ -20,7 +20,7 @@ left two hours earlier and set my own alarm. Maybe add a change-arrival-time opt
       doesn't count. iOS cancels the AlarmKit alarm and the `wake-<day>-0…2` notifications, on a trip start, a region,
       the trip's position (each minute) and every plan (background refresh too); a quiet notification says "No school
       alarm today · You're already on the way (trip 07:12)", and the day's switch on Your day turns it back on (not
-      skipped again that day). **Android 0.10.x:** `school/SchoolArrive.kt` `OnTheWay` (`SchoolArriveTest`, every iOS
+      skipped again that day). **Android 0.10.2:** `school/SchoolArrive.kt` `OnTheWay` (`SchoolArriveTest`, every iOS
       vector); a ride's start and end from `RideStore.set`, home's exit and school's entry from `AutoStart.onRegion`,
       every plan, and `WakeReceiver` checks once more as the alarm goes off (decided as if still to come).
 - [x] **"Be there at …" per day.** Your day / Your week (and the school alarm's card): the day's be-there time (default
@@ -32,7 +32,7 @@ left two hours earlier and set my own alarm. Maybe add a change-arrival-time opt
       at the next chance). The alarm's label and the wake-up notification: "Time to get up · be there 09:00", "Leave
       07:50 to be there 09:00 (class 11:00)" (as before when the day isn't changed); a new label alone sets the alarm
       again while it's more than 5 min ahead. Siri / Shortcuts: "Be at school at a time" for the next school day.
-      **Android 0.10.x:** `SchoolArrive` and `SchoolPlan.plan(arrive = …)` (the same shift and relabel), `DayScreen`'s
+      **Android 0.10.2:** `SchoolArrive` and `SchoolPlan.plan(arrive = …)` (the same shift and relabel), `DayScreen`'s
       "Be there at" row (time picker, the quick choices, no alarm this day, reset), the home card's changed line.
       No Siri on Android.
 ## iOS 0.42.5 (the live link: the whole trip, messages back)
