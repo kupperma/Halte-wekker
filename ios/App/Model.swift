@@ -128,7 +128,7 @@ struct RoutePlan: Identifiable, Hashable {
             guard let fa = r.fromLat, let fo = r.fromLon, let ta = r.toLat, let to = r.toLon else { return nil }
             let a = Place(key: "s:\(r.fromId)", name: r.fromStop, short: Fmt.place(r.fromStop), ids: [r.fromId],
                           coordinate: .init(latitude: fa, longitude: fo), spoken: Fmt.place(r.fromStop))
-            let bName = Fmt.place(r.toStop)
+            let bName = HomeAlight.fullName(r.toStop)          // (0.42.9) "Veghel, Busstation", not "Veghel"
             let b = Place(key: "s:\(r.toStop)|\(ta),\(to)", name: r.toStop, short: bName, ids: ["\(ta),\(to)"],
                           coordinate: .init(latitude: ta, longitude: to), spoken: bName)
             legs.append(Leg(mode: r.isTrain ? .train : .bus, from: a, to: b))

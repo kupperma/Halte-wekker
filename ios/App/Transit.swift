@@ -66,6 +66,19 @@ extension Ride {
     }
 }
 
+extension Ride {
+    /// (0.42.9) The same ride got off at another of its stops, at its time there.
+    func alighting(name n: String, at a: Date, point p: GeoPoint) -> Ride {
+        let late: TimeInterval = arrival.timeIntervalSince(scheduledArrival)
+        var r = Ride(tripId: tripId, line: line, name: name, isTrain: isTrain, departure: departure, scheduledDeparture: scheduledDeparture,
+                     arrival: a, scheduledArrival: a.addingTimeInterval(-late), fromStop: fromStop, fromId: fromId, toStop: n, platform: platform,
+                     live: live, cancelled: cancelled, walkBefore: walkBefore, num: num, headsign: headsign, plannedPlatform: plannedPlatform,
+                     fromLat: fromLat, fromLon: fromLon, toLat: p.lat, toLon: p.lon, agency: agency)
+        r.walkMetres = walkMetres
+        return r
+    }
+}
+
 extension DoorTrip {
     /// The same trip, its first ride got on at another stop of its trip (`BoardAt`): you leave by then minus the walk.
     func boardingFirst(at s: BoardAt.Stop, walk minutes: Int) -> DoorTrip {
@@ -489,7 +502,40 @@ enum Transit {
         if all.isEmpty {
             all = await fromNearest(here, to: to.ids, at: now.addingTimeInterval(-120), count: count)
         }
-        return keepUseful(all, here: here, station: station, now: now, keep: keep, log: true)
+        let kept: [DoorTrip] = keepUseful(all, here: here, station: station, now: now, keep: keep, log: true)
+        // (0.42.9) home: off at your own home stop when the last ride calls there
+        if to.key == Place.home.key { return await homeAlight(kept, to: to) }
+        return kept
+    }
+
+    /// (0.42.9) The ways home with their last ride got off at your own home stop (the setup's, the one with the shortest
+    /// walk home at your speed) when it calls there, re-timed to it; the first few ways (their trips asked, kept 20 s).
+    static func homeAlight(_ trips: [DoorTrip], to: Place) async -> [DoorTrip] {
+        let own: [HomeAlight.Own] = await MainActor.run {
+            StopsStore.shared.boardStops.map { b in HomeAlight.Own(id: b.id, point: b.lat.flatMap { a in b.lon.map { GeoPoint(lat: a, lon: $0) } }) }
+        }
+        guard !own.isEmpty, !trips.isEmpty else { return trips }
+        let place = GeoPoint(lat: to.coordinate.latitude, lon: to.coordinate.longitude)
+        let speed: Double = HabitStore.pedestrianSpeed() ?? WalkFirst.plannerSpeed
+        var out: [DoorTrip] = trips
+        for k in out.indices.prefix(4) {
+            let t = out[k]
+            let r = t.last
+            guard r.fromId != "onboard", let stops = await Net.within(3, { await boardStops(r.tripId, maxAge: RideTick.tripCache) }) ?? nil else { continue }
+            let calls: [HomeAlight.Call] = stops.map { HomeAlight.Call(id: $0.id, name: $0.name, point: $0.point, arrival: $0.arrival ?? $0.departure) }
+            let fromPt: GeoPoint? = r.fromLat.flatMap { a in r.fromLon.map { GeoPoint(lat: a, lon: $0) } }
+            let toPt: GeoPoint? = r.toLat.flatMap { a in r.toLon.map { GeoPoint(lat: a, lon: $0) } }
+            guard let fi = HomeAlight.index(of: r.fromId, point: fromPt, in: calls),
+                  let ti = HomeAlight.index(of: "", point: toPt, in: calls, after: fi),
+                  let pi = HomeAlight.pick(calls: calls, from: fi, plannerTo: ti, own: own, place: place, speed: speed),
+                  let at = calls[pi].arrival else { continue }
+            let c = calls[pi]
+            let walk: Int = HomeAlight.walkMinutes(c.point, place, speed: speed)
+            let ride: Ride = r.alighting(name: c.name, at: at, point: c.point)
+            out[k] = DoorTrip(rides: Array(t.rides.dropLast()) + [ride], start: t.start, end: at.addingTimeInterval(Double(walk) * 60))
+            FieldLog.shared.add(.net, "home · off at \(c.name) \(Fmt.hhmm(at)) (your stop, \(walk) min walk) instead of \(r.toStop) \(Fmt.hhmm(r.arrival))")
+        }
+        return out
     }
 
     /// (0.42.8) A station's trips with NS's live times (by train number, from its board): a late train is moved to its

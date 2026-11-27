@@ -26,6 +26,24 @@ when those change, never while the alarm rings, a failed one again after 5 min).
       vectors), `TripStop.track` from the trip answer, `RideService.doorLook` on the ride's minute tick, `RideState.doorSide`
       in the ride card, the change card, the ride notification, the alarm and the get-ready notification.
 
+## iOS 0.42.9
+
+From a ride screen at 16:01 ("Bus 306 to Veghel · 2 min to Veghel · there at 16:03 · Stops ahead: Veghel your stop"):
+"It says I should just get off at Veghel and not at which stop; and the stop I'm actually getting off at is at 16:07".
+Rules in `ios/App/HomeAlight.swift` (tests `HomeAlightTests`), the wiring in `RoutePlan.from` and
+`Transit.homeAlight` (from `tripsFrom` to Home).
+
+- [x] **The stop named in full** where you get off ("Veghel, Busstation", not the town): the leg's name on the ride
+      screen, the alarm, the Live Activity and the live link. **Android:** already the full name (`Fmt.place`).
+- [x] **Home: off at your own home stop.** The way home's last ride: when its trip calls at one of your home stops
+      from the setup (by id, or within 60 m), you get off at the one with the shortest walk home at your speed (the
+      earlier on a tie), not the planner's first stop in town (also when its way ends with a longer walk); its
+      arrival, the trip's end (+ the walk), so the alarm, the ETA, the Live Activity and the live link, go by that
+      stop. Kept when the planner's stop is that one already, or none is called at. The first 4 ways (their trips
+      asked, kept 20 s). Logged `home · off at Veghel, Busstation 16:07 (your stop, 3 min walk) instead of Veghel,
+      Rembrandtlaan 16:03`. **Android 0.10.7:** `data/HomeAlight.kt` (`HomeAlightTest`, the same vectors), in
+      `Transit.tripsFrom(homeStops, home)` from the home screen's next trips home.
+
 ## iOS 0.42.8
 
 Three field reports on the planner's ways: "The new screen doesn't account for delayed time" (Breda 14:37: Fastest
