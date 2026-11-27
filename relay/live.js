@@ -28,6 +28,11 @@
 //   POST /live/v1/inbox {"secret","after": seq}  -> {"msgs":[{"seq","at","data"}],"mseq","seen"}  (the sharer's phone)
 //   POST /live/v1/ack   {"secret","seq"}         -> {"ok":true,"seen"}: seen up to `seq` (the pages say "Seen")
 //   POST /live/v1/reply {"secret","data": b64url(≤ 2 KB)} -> {"ok":true,"seq"}: the sharer's answer (the newest 10 kept)
+//   POST|PUT /live/v1/face {"secret","data": b64url(≤ 24 KB, first byte 1)} -> {"ok":true,"etag"}: the sharer's picture
+//                      (a JPEG locked with the link's key, AAD "hw-live-face-v1\n" + token); at most 20 an hour, 5 s apart
+//   GET  /live/v1/face?t=<token>[&v=<n>]         -> the locked bytes (application/octet-stream, ETag, kept a day by the
+//                                                browser: the page asks again with a new `v` when payload v2's `pic`
+//                                                changes) | 404 {"error":"none"} | 410 "ended". Gone when the link ends.
 //   GET  /live/<token>                           the page (it reads the key from the fragment and decrypts there;
 //                                                a key that worked is kept in that browser for that link until it ends)
 //   GET  /live/app.js                            the page's script (same origin; the map's library comes pinned, with
@@ -49,6 +54,9 @@ const MSGS_PER_HOUR = 20;                 // per network address and link
 const MAX_REPLIES = 10;                   // kept (the newest)
 const REPLY_GAP = 5;
 const OWNER_PER_MIN = 60;                 // inbox, ack and reply calls per link
+const MAX_FACE = 24 * 1024;               // the sharer's picture, locked, decoded
+const FACE_GAP = 5;
+const FACES_PER_HOUR = 20;
 const TOKEN = /^[A-Za-z0-9_-]{22}$/;
 const B64URL = /^[A-Za-z0-9_-]*={0,2}$/;
 
@@ -89,10 +97,10 @@ async function ipKey(request) {
   return hex(await crypto.subtle.digest("SHA-256", enc.encode("hw-live-ip-v1:" + ip))).slice(0, 32);
 }
 
-async function body(request) {
-  if (Number(request.headers.get("Content-Length") || "0") > MAX_BODY) return { error: fail("too_big", 413) };
+async function body(request, max = MAX_BODY) {
+  if (Number(request.headers.get("Content-Length") || "0") > max) return { error: fail("too_big", 413) };
   const raw = await request.arrayBuffer();
-  if (raw.byteLength > MAX_BODY) return { error: fail("too_big", 413) };
+  if (raw.byteLength > max) return { error: fail("too_big", 413) };
   let input;
   try { input = JSON.parse(new TextDecoder().decode(raw)); } catch { return { error: fail("bad_json", 400) }; }
   if (typeof input !== "object" || input === null || Array.isArray(input)) return { error: fail("bad_json", 400) };
@@ -125,6 +133,33 @@ export async function live(request, env, url) {
     if (error) return error;
     if (!sealed(b64urlDecode(input.data), MAX_MSG)) return fail("bad_data", 400);
     return link(env, t).fetch("https://do/msg", { method: "POST", body: JSON.stringify({ data: input.data, ip: await ipKey(request) }) });
+  }
+  if (path === "/live/v1/face" && request.method === "GET") {
+    const t = url.searchParams.get("t") || "";
+    if (!TOKEN.test(t)) return fail("bad_token", 400);
+    if (!env.LIVE) return fail("no_storage", 503);
+    const r = await link(env, t).fetch("https://do/face-get", { method: "POST" });
+    if (r.status !== 200) return r;
+    const f = await r.json();
+    const etag = '"' + f.etag + '"';
+    const headers = { "Cache-Control": "private, max-age=86400", "ETag": etag, "X-Content-Type-Options": "nosniff" };
+    if ((request.headers.get("If-None-Match") || "") === etag) return new Response(null, { status: 304, headers });
+    return new Response(b64urlDecode(f.data), { headers: { ...headers, "Content-Type": "application/octet-stream" } });
+  }
+  if (path === "/live/v1/face") {
+    if (request.method !== "POST" && request.method !== "PUT") return fail("method", 405);
+    if (!env.LIVE) return fail("no_storage", 503);
+    const { input, error } = await body(request, MAX_FACE * 2);
+    if (error) return error;
+    const secret = b64urlDecode(input.secret);
+    if (!secret || secret.length !== 32) return fail("bad_secret", 400);
+    const token = await liveToken(secret);
+    const t = url.searchParams.get("t");
+    if (t && t !== token) return fail("bad_token", 400);
+    const d = b64urlDecode(input.data);
+    if (!sealed(d, MAX_FACE)) return fail("bad_data", 400);
+    const etag = hex(await crypto.subtle.digest("SHA-256", d)).slice(0, 32);
+    return link(env, token).fetch("https://do/face-put", { method: "POST", body: JSON.stringify({ data: input.data, etag }) });
   }
   const owner = { "/live/v1/put": 1, "/live/v1/end": 1, "/live/v1/inbox": 1, "/live/v1/ack": 1, "/live/v1/reply": 1 };
   if (owner[path]) {
@@ -192,6 +227,8 @@ export class LiveCore {
       if (p === "/inbox") return await this.inbox(await request.json());
       if (p === "/ack") return await this.ack(await request.json());
       if (p === "/reply") return await this.reply(await request.json());
+      if (p === "/face-put") return await this.facePut(await request.json());
+      if (p === "/face-get") return await this.faceGet();
       return fail("not_found", 404);
     } catch (e) {
       return fail("relay_error", 500);
@@ -244,7 +281,7 @@ export class LiveCore {
   async dropMessages() {
     const keys = [];
     for (const prefix of ["m:", "r:"]) for (const k of (await this.store.list({ prefix })).keys()) keys.push(k);
-    keys.push("rp");
+    keys.push("rp", "f");
     for (let i = 0; i < keys.length; i += 100) await this.store.delete(keys.slice(i, i + 100));
   }
 
@@ -329,6 +366,32 @@ export class LiveCore {
     return json({ ok: true, seq: s.rseq, at: t });
   }
 
+  /// The sharer's picture (locked; only the phone with the secret puts it).
+  async facePut({ data, etag }) {
+    const s = await this.slot();
+    if (!s) return fail("gone", 404);
+    if (s.ended || !s.data) return fail("ended", 410);
+    const t = now(), hour = Math.floor(t / 3600);
+    if (s.fhour !== hour) { s.fhour = hour; s.fn = 0; }
+    if (t - (s.fat || 0) < FACE_GAP || s.fn >= FACES_PER_HOUR) return fail("slow_down", 429);
+    s.fat = t; s.fn += 1;
+    await this.store.put("f", { data, etag });
+    await this.store.put("s", s);
+    return json({ ok: true, etag });
+  }
+
+  async faceGet() {
+    const s = await this.slot();
+    if (!s) return fail("gone", 404);
+    const minute = Math.floor(now() / 60);
+    if (this.minute !== minute) { this.minute = minute; this.gets = 0; }
+    this.gets += 1;
+    if (this.gets > GETS_PER_MIN) return fail("slow_down", 429);
+    if (s.ended || !s.data) return fail("ended", 410);
+    const f = await this.store.get("f");
+    return f ? json(f) : fail("none", 404);
+  }
+
   async gate() {
     const hour = Math.floor(now() / 3600);
     const g = (await this.store.get("g")) || { hour, n: 0 };
@@ -390,21 +453,29 @@ const PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <style>
 :root{--bg:#111316;--card:#1E2126;--card2:#2A2E34;--line:#3A3F47;--text:#F2F4F5;--sub:#A3ABB3;--acc:#3DD598;--yel:#E8A33D;--grey:#6B7280;--warn:#FF8A5C;--col:#E0632E}
 *{box-sizing:border-box}
-html,body{height:100%}
-body{margin:0;background:var(--bg);color:var(--text);font:16px/1.4 -apple-system,system-ui,"Segoe UI",Roboto,sans-serif;-webkit-text-size-adjust:100%;overflow:hidden}
+html,body{height:100%;margin:0;overflow:hidden;overscroll-behavior:none}
+body{position:fixed;inset:0;background:var(--bg);color:var(--text);font:16px/1.4 -apple-system,system-ui,"Segoe UI",Roboto,sans-serif;-webkit-text-size-adjust:100%}
 #map{position:fixed;inset:0;background:var(--bg)}
 .nomap #map{background:radial-gradient(120% 80% at 50% 20%,#1b1f24,#111316)}
 .maplibregl-ctrl-attrib{background:rgba(17,19,22,.7)!important;color:var(--sub)}
 .maplibregl-ctrl-attrib a{color:var(--sub)!important}
 .maplibregl-ctrl-attrib-button{filter:invert(1)}
-.sheet{position:fixed;left:0;right:0;bottom:0;max-height:88vh;height:var(--h,56vh);background:var(--card);border-radius:24px 24px 0 0;
-padding:10px 18px calc(18px + env(safe-area-inset-bottom));overflow-y:auto;overscroll-behavior:contain;box-shadow:0 -8px 30px rgba(0,0,0,.35);
-transition:height .25s ease;z-index:3;scrollbar-width:none}
-.sheet::-webkit-scrollbar{display:none}
+.maplibregl-ctrl-top-left{top:max(14px,calc(env(safe-area-inset-top) + 10px))!important;left:max(6px,env(safe-area-inset-left))!important}
+/* the sheet (phone): as tall as it can be (--full), moved down to its snap (peek, half, full) with a transform */
+.sheet{position:fixed;left:0;right:0;bottom:var(--kb,0px);height:var(--full,92vh);height:var(--full,92dvh);display:flex;flex-direction:column;
+background:var(--card);border-radius:24px 24px 0 0;box-shadow:0 -8px 30px rgba(0,0,0,.35);z-index:3;transform:translateY(var(--off,40vh));
+transition:transform .32s cubic-bezier(.2,.8,.25,1);will-change:transform;overscroll-behavior:contain}
 .sheet.drag{transition:none}
-.grab{display:block;width:100%;height:22px;margin:-10px 0 4px;padding:0;border:0;background:none;cursor:grab;touch-action:none}
-.grab::before{content:"";display:block;width:40px;height:5px;border-radius:3px;background:var(--line);margin:9px auto 0}
-@media (min-width:900px){.sheet{left:16px;top:16px;bottom:16px;right:auto;width:400px;height:auto!important;max-height:none;border-radius:24px;padding-top:18px}.grab{display:none}}
+.shead{flex:none;min-height:56px;padding:0 18px 4px;touch-action:none;cursor:grab;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+.grab{display:block;width:100%;height:24px;margin:0;padding:0;border:0;background:none;cursor:grab;touch-action:none}
+.grab::before{content:"";display:block;width:40px;height:5px;border-radius:3px;background:var(--line);margin:10px auto 0}
+.sbody{flex:1;min-height:0;overflow:hidden;padding:0 18px 18px;overscroll-behavior:contain;touch-action:none;scrollbar-width:none}
+.sbody::-webkit-scrollbar{display:none}
+.sheet.full .sbody{overflow-y:auto;touch-action:pan-y;-webkit-overflow-scrolling:touch}
+.sfoot{flex:none;padding:8px 18px calc(10px + env(safe-area-inset-bottom));border-top:1px solid var(--line);background:var(--card)}
+@media (min-width:900px){.sheet{left:16px;top:16px;bottom:16px;right:auto;width:400px;height:auto!important;max-height:none;border-radius:24px;padding-top:18px;transform:none!important}
+.shead{cursor:auto;touch-action:auto;-webkit-user-select:auto;user-select:auto}.grab{display:none}.sbody{overflow-y:auto;touch-action:auto}
+.sfoot{padding-bottom:12px;border-radius:0 0 24px 24px}}
 .who{display:flex;gap:12px;align-items:center}.grow{flex:1;min-width:0}
 .age{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--sub);white-space:nowrap;align-self:flex-start;margin-top:22px}
 .music{display:flex;gap:12px;align-items:center;background:var(--card2);border-radius:16px;padding:10px 12px;margin-top:14px}
@@ -449,6 +520,7 @@ h1{margin:0;font-size:20px;line-height:1.25;font-weight:800;overflow-wrap:anywhe
 input,textarea{display:block;width:100%;font:inherit;font-size:16px;color:var(--text);background:var(--card2);border:1px solid transparent;border-radius:12px;padding:10px 12px;margin:0 0 8px}
 input:focus,textarea:focus{outline:none;border-color:var(--acc)}
 textarea{resize:none;height:44px;margin:0;min-width:0}
+.sfoot .compose{margin:0}
 .compose{display:flex;gap:8px;align-items:flex-end;background:var(--card2);border-radius:14px;padding:6px 6px 6px 4px;margin-bottom:8px}
 .compose textarea{background:none;border:0;flex:1}
 .row{display:flex;align-items:center;justify-content:space-between;gap:8px}
@@ -458,12 +530,15 @@ textarea{resize:none;height:44px;margin:0;min-width:0}
 .sent li{background:var(--card2);border-radius:14px;padding:8px 12px;margin-top:6px;font-size:14px;overflow-wrap:anywhere}
 .sent li.them{background:#16352A}
 .sent .small{display:block;margin-top:2px}
-.pill{position:fixed;top:calc(12px + env(safe-area-inset-top));right:12px;z-index:4;background:rgba(30,33,38,.92);text-decoration:none;font-weight:700}
-.ghost{position:fixed;right:12px;z-index:2;bottom:calc(var(--h,56vh) + 12px);width:40px;height:40px;padding:0;font-size:20px;background:rgba(30,33,38,.92)}
+.pill{position:fixed;top:max(14px,calc(env(safe-area-inset-top) + 10px));right:max(12px,env(safe-area-inset-right));z-index:4;background:rgba(30,33,38,.92);text-decoration:none;font-weight:700}
+.ghost{position:fixed;right:12px;z-index:2;bottom:calc(var(--h,35vh) + var(--kb,0px) + 12px);width:40px;height:40px;padding:0;font-size:20px;background:rgba(30,33,38,.92)}
 @media (min-width:900px){.ghost{bottom:24px}}
 .mk{display:flex;align-items:center;justify-content:center;min-width:44px;height:30px;padding:0 8px;border-radius:9px;border:2.5px solid #fff;
 color:#fff;font-weight:800;font-size:13px;background:var(--col);box-shadow:0 0 0 10px rgba(255,255,255,.08)}
 .mk.old{filter:grayscale(1);opacity:.7}
+.me{display:flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:50%;border:3px solid #fff;overflow:hidden;
+color:#fff;font-weight:800;font-size:15px;background:#0E7A55;box-shadow:0 0 0 8px rgba(61,213,152,.18)}.me img,.face img{width:100%;height:100%;object-fit:cover}
+.face{overflow:hidden}
 .dest{width:22px;height:22px;border-radius:50%;background:var(--acc);border:3px solid var(--bg)}
 .lbl{position:absolute;bottom:28px;left:50%;transform:translateX(-50%);font-size:11px;font-weight:700;color:var(--text);text-shadow:0 1px 3px #000;white-space:nowrap}
 .foot{font-size:12px;color:var(--sub);margin:16px 0 0}
@@ -474,10 +549,13 @@ color:#fff;font-weight:800;font-size:13px;background:var(--col);box-shadow:0 0 0
 <a id="openApp" class="pill" hidden>Open in Haltewekker</a>
 <button id="recentre" class="ghost" type="button" aria-label="Show the whole ride" hidden>⌖</button>
 <main id="card" class="sheet" aria-live="polite">
-<button id="grab" class="grab" type="button" aria-label="Show more or less"></button>
+<div id="shead" class="shead">
+<button id="grab" class="grab" type="button" aria-label="Show more or less of the trip"></button>
 <div class="who"><span id="face" class="face" aria-hidden="true">·</span><div class="grow">
 <p id="eyebrow" class="eyebrow">Live trip</p><h1 id="head">Opening the trip…</h1><p id="sub" class="sub" hidden></p></div>
 <span id="age" class="age" hidden><span id="ageDot" class="dot"></span><span id="ageText"></span></span></div>
+</div>
+<div id="sbody" class="sbody">
 <div id="music" class="music" hidden><span id="cover" class="cover" aria-hidden="true">♪</span><div class="grow">
 <p class="lis"><span class="eq" aria-hidden="true"><i></i><i></i><i></i><i></i></span>Listening now</p>
 <p id="muTitle" class="mt"></p><p id="muSub" class="small"></p></div>
@@ -491,8 +569,6 @@ color:#fff;font-weight:800;font-size:13px;background:var(--col);box-shadow:0 0 0
 <h2 id="msgHead">Send a message</h2>
 <p id="msgNote" class="small" hidden></p>
 <div id="chips" class="chips"></div>
-<div class="compose"><textarea id="msgText" maxlength="280" rows="1" placeholder="Send a message…" aria-label="Your message"></textarea>
-<button id="msgSend" class="send" type="button">Send</button></div>
 <input id="msgName" maxlength="40" autocomplete="nickname" placeholder="Your name (optional)" aria-label="Your name (optional)">
 <p id="msgInfo" class="small" hidden></p>
 <ul id="sent" class="sent"></ul>
@@ -501,6 +577,11 @@ color:#fff;font-weight:800;font-size:13px;background:var(--col);box-shadow:0 0 0
 <p class="foot">Only people with this link can see this trip. It ends when the trip does (at most 4 hours). The trip and the
 messages are locked with a key that is only in the link (after the #), so the relay that passes them on can’t read them.
 Made with Haltewekker.</p>
+</div>
+<div id="sfoot" class="sfoot" hidden>
+<div class="compose"><textarea id="msgText" maxlength="280" rows="1" placeholder="Send a message…" aria-label="Your message"></textarea>
+<button id="msgSend" class="send" type="button">Send</button></div>
+</div>
 </main>
 <script src="${ML}maplibre-gl.js" integrity="${ML_JS_SRI}" crossorigin="anonymous" defer></script>
 <script src="/live/app.js" defer></script></body></html>`;
