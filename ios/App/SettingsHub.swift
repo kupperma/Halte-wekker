@@ -446,7 +446,7 @@ private struct TripsSettingsRows: View {
             }
             SettingsSwitch(title: "Station announcement", detail: "A jingle and a voice that names your stop, before the alarm.", isOn: $trip.announce)
                 .settingsAnchor("trips.announce")
-            SettingsSwitch(title: "Just a notification when I’m on my phone", detail: "If your phone is unlocked and in use when it would ring, you’re awake: you get one notification instead of the alarm. Locked, it rings as usual. (Only with a passcode on your phone.)", isOn: $trip.quietWhenInUse)
+            SettingsSwitch(title: "Just a notification when I’m on my phone", detail: "If your phone is unlocked and in use when it would ring, you’re awake: one chime instead of the alarm on repeat, still with Stop alarm on the lock screen and in the app. Locked, it rings as usual. (Only with a passcode on your phone.)", isOn: $trip.quietWhenInUse)
                 .settingsAnchor("trips.quiet")
             SettingsSwitch(title: "Chime at the stop", detail: "The station jingle, the announcement and a notification when you arrive. No second alarm to stop: the leg ends by itself.", isOn: $trip.ringAtStop)
                 .settingsAnchor("trips.chime")
@@ -514,8 +514,13 @@ private struct TripsSettingsRows: View {
             .onChange(of: trip.soundKind) { _, k in trip.sound.play(preview: k) }
             .settingsAnchor("alarm.sound")
             Text(trip.soundKind.detail).font(DS.footnote).foregroundStyle(DS.secondary)
-            SettingsSwitch(title: "Sound only with headphones", detail: "Without Bluetooth, wired or USB headphones, the alarm and the announcer only vibrate, so the rest of the train doesn’t hear it. Not stopped after a minute? Then it rings out loud anyway.", isOn: $trip.headphonesOnly)
+            SettingsSwitch(title: "Sound only with headphones", detail: "Without Bluetooth, wired or USB headphones, the alarm and the announcer only vibrate (a strong buzz on repeat until you stop it), so the rest of the train doesn’t hear it. It also rings on the lock screen, with Stop alarm.", isOn: $trip.headphonesOnly)
                 .settingsAnchor("alarm.headphones")
+            if trip.headphonesOnly {
+                // (0.42.8) off for everyone: without headphones it never goes out of the speaker unless you say so
+                SettingsSwitch(title: "Out loud if I don’t stop it (after 1 min)", detail: "Without headphones: not stopped after a minute, it rings out of the speaker. Off unless you turn it on, so it never wakes the rest of the train.", isOn: $trip.outLoudLater)
+                    .settingsAnchor("alarm.loudLater")
+            }
             Picker("If music is playing", selection: $trip.pauseMusic) {
                 Text("Keep it playing").tag(false)
                 Text("Pause it").tag(true)
@@ -530,7 +535,7 @@ private struct TripsSettingsRows: View {
                 .font(DS.footnote).foregroundStyle(DS.secondary)
                 .settingsAnchor("alarm.watch")
         } header: { Text("Alarm") } footer: {
-            Text("It also rings in silent mode (with headphones, or out loud when Sound only with headphones is off). Keep the volume up. Stop it from the lock screen: Stop alarm on the trip, or on the notification.")
+            Text("It also rings in silent mode (with headphones, or out loud when Sound only with headphones is off). Keep the volume up. Every alarm rings on the lock screen too, also while it only vibrates or while you use your phone: stop it there with Stop alarm, on the trip or on the notification.")
         }
     }
 

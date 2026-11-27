@@ -9,7 +9,9 @@ import Foundation
 /// - `seen`/`outByStops`: the stopping pattern. Through a station at speed: not one that calls there; standing at a
 ///   station: not one that runs through it without calling.
 /// - `ask`: still tied after 2 minutes with different destinations: ask once which one.
-/// - `stayOn`: the trip follows the train you're on (no change at Tilburg on the through train).
+/// - `stayOn`: the trip follows the train you're on (no change at Tilburg on the through train; 0.42.8: by the
+///   vehicle's own stops against where the next leg gets off and when, and always when the plan split one train).
+/// - `headline`: the ride by where the vehicle really goes, and where you get off.
 /// Plain values only, so it can be tested.
 enum TrainRules {
     // MARK: rivals of a confirmed train
@@ -115,25 +117,136 @@ enum TrainRules {
 
     // MARK: the trip follows the train you're on
 
-    static let stayNear = 400.0             // m: a call this close to where a later leg ends is there
-    static let stayRoom: TimeInterval = 120 // s: in time for the ride after it, with this much room
+    static let stayNear = 400.0             // m: a call this close to a leg's stop is there
+    static let stayNameNear = 1500.0        // m: …or this close with the same station name ("Eindhoven" / "Eindhoven Centraal")
+    static let stayRoom: TimeInterval = 120 // s: with only the ride after it to go by, it arrives this long before that leaves
+    static let stayLate: TimeInterval = 120 // s: no later than the planned ride gets there, give or take this
+    static let stayCatch: TimeInterval = 60 // s: …and still this long before the ride after it leaves
 
-    /// The train you're on (`calls`: its stops with their arrivals) goes on to where a later leg ends (`ends`, leg by
-    /// leg; `departures`: each leg's planned departure): stay on to there instead of changing. The furthest such leg `k`
-    /// (> `index`) and the call there; when `k` isn't the last leg, only when it arrives `stayRoom` before the ride after
-    /// it (leg k + 1) leaves. Calls already behind you (`now`) don't count.
-    static func stayOn(index: Int, ends: [GeoPoint], departures: [Date?], calls: [(p: GeoPoint, arrival: Date?)], now: Date) -> (leg: Int, call: Int)? {
-        guard index + 1 < ends.count else { return nil }
-        for k in stride(from: ends.count - 1, through: index + 1, by: -1) {
-            guard let c = calls.indices.first(where: { i in
-                guard let a = calls[i].arrival, a > now else { return false }
-                return Geo.metres(calls[i].p, ends[k]) <= stayNear
-            }), let arr = calls[c].arrival else { continue }
-            if k + 1 < ends.count {
-                guard departures.indices.contains(k + 1), let next = departures[k + 1], arr <= next.addingTimeInterval(-stayRoom) else { continue }
-            }
-            return (k, c)
+    /// One leg of the trip as the stay-on rule needs it: where it gets on and off, the planned ride's times there, and
+    /// which vehicle it was planned with (its trip id, its train number).
+    struct StayLeg: Equatable, Sendable {
+        var from: GeoPoint
+        var to: GeoPoint
+        var fromName: String = ""
+        var toName: String = ""
+        var departure: Date? = nil
+        var arrival: Date? = nil
+        var tripId: String = ""
+        var num: String = ""
+    }
+
+    /// One stop of the vehicle you're on (its own stop list: the Transitous trip, the NS journey).
+    struct StayCall: Equatable, Sendable {
+        var name: String
+        var p: GeoPoint
+        var arrival: Date?
+    }
+
+    /// Stay on through leg `leg` (its stop becomes this leg's end): at `call` of the vehicle's stops (nil: the plan's
+    /// own stop, the same train). `sameTrain`: the plan had split one train into legs.
+    struct StayHit: Equatable, Sendable {
+        let leg: Int
+        let call: Int?
+        let sameTrain: Bool
+    }
+
+    /// A station's name, to tell two spellings of one apart: "Eindhoven Centraal", "Eindhoven, Station" → "eindhoven".
+    static func stationKey(_ s: String) -> String {
+        let folded = s.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil).lowercased()
+        let words = folded.split { !$0.isLetter && !$0.isNumber }.map(String.init)
+        let drop: Set<String> = ["station", "centraal", "cs", "centraalstation", "busstation", "perron"]
+        return words.filter { !drop.contains($0) }.joined()
+    }
+
+    /// A train number's digits ("IC 3529" → "3529"); empty when it has none.
+    static func digits(_ s: String) -> String { String(s.filter(\.isNumber)) }
+
+    /// The plan's leg runs on the vehicle you're on: the same trip, or the same train number.
+    static func sameTrain(_ l: StayLeg, tripId: String, num: String) -> Bool {
+        if !tripId.isEmpty, l.tripId == tripId { return true }
+        let a = digits(l.num), b = digits(num)
+        return !a.isEmpty && a == b
+    }
+
+    /// The first call still ahead (`now`) at a stop: within `stayNear`, or by its name within `stayNameNear`.
+    static func callAt(_ p: GeoPoint, name: String, in calls: [StayCall], now: Date) -> Int? {
+        let key = stationKey(name)
+        return calls.indices.first { i in
+            guard let a = calls[i].arrival, a > now else { return false }
+            let m = Geo.metres(calls[i].p, p)
+            if m <= stayNear { return true }
+            return !key.isEmpty && m <= stayNameNear && stationKey(calls[i].name) == key
         }
-        return nil
+    }
+
+    /// The vehicle you're on (`tripId`, `num`; `calls`: its own stops, with their arrivals) and the trip's `legs`, on
+    /// leg `index`: stay seated instead of changing?
+    /// - The plan's next legs are the same train (the planner split it): always, up to the last of them.
+    /// - It calls at a later leg `k`'s stop (where that leg gets off, or where the ride after it gets on) no later than
+    ///   the planned ride gets there (+ `stayLate`), and `stayCatch` before the ride after it leaves; with no planned
+    ///   arrival, `stayRoom` before that ride leaves (the last leg: it just has to go there). The furthest such leg.
+    /// - Slower, or not going there: nil (the change stays).
+    static func stayOn(index: Int, legs: [StayLeg], tripId: String, num: String, calls: [StayCall], now: Date) -> StayHit? {
+        guard index >= 0, index + 1 < legs.count else { return nil }
+        var same = index
+        while same + 1 < legs.count, sameTrain(legs[same + 1], tripId: tripId, num: num) { same += 1 }
+        for k in stride(from: legs.count - 1, through: index + 1, by: -1) where k > same {
+            if let c = throughCall(k, legs: legs, calls: calls, now: now) { return StayHit(leg: k, call: c, sameTrain: false) }
+        }
+        guard same > index else { return nil }
+        let end = legs[same]
+        return StayHit(leg: same, call: callAt(end.to, name: end.toName, in: calls, now: now), sameTrain: true)
+    }
+
+    /// Where the vehicle calls at leg `k`'s stop in time (`stayOn`), or nil.
+    private static func throughCall(_ k: Int, legs: [StayLeg], calls: [StayCall], now: Date) -> Int? {
+        let l = legs[k]
+        let after: StayLeg? = k + 1 < legs.count ? legs[k + 1] : nil
+        var c = callAt(l.to, name: l.toName, in: calls, now: now)
+        if c == nil, let a = after { c = callAt(a.from, name: a.fromName, in: calls, now: now) }
+        guard let i = c, let arr = calls[i].arrival else { return nil }
+        let nextDep: Date? = after?.departure
+        if let planned = l.arrival {
+            guard arr <= planned.addingTimeInterval(stayLate) else { return nil }
+            if let d = nextDep { guard arr <= d.addingTimeInterval(-stayCatch) else { return nil } }
+            return i
+        }
+        if let d = nextDep { return arr <= d.addingTimeInterval(-stayRoom) ? i : nil }
+        return after == nil ? i : nil
+    }
+
+    /// The field log's line: "stay on · IC 3529 also reaches Eindhoven 15:24 (plan changed at Tilburg 15:05 → IC 3631
+    /// 15:12)"; the same train split by the plan: "stay on · IC 3529 is the next leg's train too: on to Eindhoven
+    /// (plan split it at Tilburg)". Times as shown ("" when not known).
+    static func stayLog(vehicle: String, reaches: String, at: String, changeAt: String, changeTime: String,
+                        next: String, nextTime: String, sameTrain: Bool) -> String {
+        if sameTrain { return "stay on · \(vehicle) is the next leg's train too: on to \(reaches) (plan split it at \(changeAt))" }
+        let when = at.isEmpty ? "" : " \(at)"
+        let changed = changeTime.isEmpty ? changeAt : "\(changeAt) \(changeTime)"
+        let nextAt: String = nextTime.isEmpty ? "" : " \(nextTime)"
+        let then: String = next.isEmpty ? "" : " → \(next)\(nextAt)"
+        return "stay on · \(vehicle) also reaches \(reaches)\(when) (plan changed at \(changed)\(then))"
+    }
+
+    // MARK: what the ride screen calls it
+
+    /// The ride's headline: the vehicle by where it really goes (its headsign), and where you get off. Never "Intercity
+    /// to <your stop>" for a train that goes further. `stayOnTo`: the trip stays on it past a planned change.
+    /// "Intercity to Zwolle" / "Get off at Tilburg"; "Stay on to Eindhoven" / "Intercity to Zwolle".
+    static func headline(vehicle: String, headsign: String, legEnd: String, stayOnTo: String?) -> (title: String, detail: String?) {
+        let sign = headsign.trimmingCharacters(in: .whitespaces)
+        let going = sign.isEmpty ? vehicle : "\(vehicle) to \(sign)"
+        if let s = stayOnTo, !s.isEmpty { return ("Stay on to \(s)", going) }
+        if !sign.isEmpty, stationKey(sign) == stationKey(legEnd) { return (going, nil) }
+        return (going, legEnd.isEmpty ? nil : "Get off at \(legEnd)")
+    }
+
+    /// The same, on one line for the lock screen: "Intercity to Zwolle · get off at Tilburg"; "Stay on to Eindhoven".
+    static func lockHeadline(vehicle: String, headsign: String, legEnd: String, stayOnTo: String?) -> String {
+        let h = headline(vehicle: vehicle, headsign: headsign, legEnd: legEnd, stayOnTo: stayOnTo)
+        if stayOnTo != nil { return h.title }
+        guard let d = h.detail else { return h.title }
+        return "\(h.title) · \(d.prefix(1).lowercased())\(d.dropFirst())"
     }
 }

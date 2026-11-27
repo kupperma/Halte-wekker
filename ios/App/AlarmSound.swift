@@ -28,9 +28,11 @@ final class AlarmSound: NSObject, AVSpeechSynthesizerDelegate {
     /// "Pause it": the alarm stops your music instead of playing over it (louder; press play afterwards).
     var pauseMusic = false
     /// Settings › "Sound only with headphones" (0.24.3): without headphones the alarm and the announcer only vibrate,
-    /// so the rest of the train doesn't hear it. Not stopped after `loudAfter`, it rings out loud anyway.
+    /// so the rest of the train doesn't hear it. (0.42.8) It stays that way: only with "Out loud if I don't stop it"
+    /// (`loudLaterOn`, off unless you turn it on) does it ring out loud after `loudAfter`.
     var headphonesOnly = true
-    static let loudAfter: TimeInterval = 60
+    var loudLaterOn = false
+    static let loudAfter: TimeInterval = RingShow.loudAfter
     private var loudLater: DispatchWorkItem?
 
     /// Sound goes somewhere only you hear it: wired, USB or Bluetooth headphones (or the car).
@@ -79,8 +81,10 @@ final class AlarmSound: NSObject, AVSpeechSynthesizerDelegate {
         try? s.setCategory(.playback, mode: .spokenAudio, options: pauseMusic ? [] : [.mixWithOthers, .duckOthers])
         try? s.setActive(true)
         if quietNow {
-            // no headphones: a strong buzz only, and out loud after a minute if you sleep through it
+            // no headphones: a strong buzz only, on repeat until you stop it (out loud after a minute only when you
+            // turned that on: 0.42.8)
             vibrate(every: 0.8)
+            guard RingShow.sound(.headphonesQuiet, quiet: true, outLoudLater: loudLaterOn) == .vibrate(loudAfter: true) else { return }
             let l = DispatchWorkItem { [weak self] in self?.startLoop() }
             loudLater = l
             DispatchQueue.main.asyncAfter(deadline: .now() + Self.loudAfter, execute: l)

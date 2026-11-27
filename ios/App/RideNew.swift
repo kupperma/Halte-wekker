@@ -223,14 +223,20 @@ struct RideViewNew: View {
         let eta = trip.legArrival ?? trip.legTo
         if let w = trip.wrongBus { WrongBusCard(alert: w) }        // (0.39.1)
         if let s = trip.stillOnAsk { StillOnCard(v: s) }
+        if let b = trip.betterOffer { BetterStopCard(offer: b) }      // (0.42.8)
         if trip.whichTrain.count == 2 { WhichTrainCard(trains: trip.whichTrain, to: trip.whichTrainTo) }
         VStack(alignment: .leading, spacing: 6) {
             Text(rideKicker).font(DS.subStrong).foregroundStyle(DS.secondary)
+            // (0.42.8) by where it really goes ("Intercity to Zwolle"), and where you get off; never "… to <your stop>"
+            let head = v.map { TrainRules.headline(vehicle: $0.title, headsign: trip.headsign, legEnd: to, stayOnTo: trip.stayOnTo) }
             HStack(spacing: 10) {
                 if let v { DSLinePill(line: v.isTrain ? Transit.trainLabel(v.line) : v.line, train: v.isTrain) }
-                Text(v.map { "\($0.title) to \(to)" } ?? (trip.leg?.title ?? "")).font(DS.title).foregroundStyle(DS.text)
+                Text(head?.title ?? (trip.leg?.title ?? "")).font(DS.title).foregroundStyle(DS.text)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityAddTraits(.isHeader)
+            }
+            if let d = head?.detail {
+                Text(d).font(DS.subStrong).foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
             }
             // (0.20.5) it picked the wrong one, or none yet: say which one you're on
             if !trip.demo { RidePickButton { picking = true } }

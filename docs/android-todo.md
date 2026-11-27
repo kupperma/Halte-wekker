@@ -3,6 +3,55 @@
 The rules and numbers for each are in [logs-export.md](logs-export.md) › For Android (parity), with the iOS files and
 their tests.
 
+## iOS 0.42.8 (staying on, the best stop, every ring on the lock screen)
+
+From the field report (iOS, 15:01, the ride screen): "Leg 1 of 3 · You're on · IC Intercity to Tilburg … You're awake.
+A chime when you're there … Then … Veghel around 16:01": "It knows I'm on the intercity, so why is it giving me an alarm
+at Tilburg and a leg — I can just stay on the same intercity." The plan changed at Tilburg for another train to
+Eindhoven and bus 305 from there; the Intercity they were on went on to Eindhoven anyway (and past 's-Hertogenbosch,
+where the 306 is faster). Also: "It was the old alarm, where it isn't on the lock screen", "Maybe because I don't have
+headphones on", and "Remove the go-loud-after-60-seconds, it would disturb other people on the train." The log lines
+are in [logs-export.md](logs-export.md) › 0.42.8.
+
+Why it didn't merge (0.34's `stayOn`): it looked for the train only at the *next ride's boarding stop* (for the leg to
+Eindhoven: the 305's bus bay, a stop of its own by the station, often more than the 400 m it allowed from where the
+train calls) and judged it by that bus's departure; it never looked at where the next leg itself gets off (the
+station), and it looked only once, when the vehicle was found (an auto-started trip whose first stops answer was empty
+never got a second look). A plan that split one train in two legs wasn't handled at all.
+
+- [x] **Stay seated** (`TrainRules.stayOn`, `StayLeg`/`StayCall`/`StayHit`; tests `TrainRulesTests`): by the vehicle's
+      own stop list (its Transitous trip), against each later leg's stop where it gets off (within 400 m, or by the
+      station's name within 1.5 km: "Eindhoven" / "Eindhoven Centraal") or where the ride after it gets on; no later
+      than the planned ride gets there + 2 min and a minute before the ride after it (no planned arrival: 2 min before
+      that ride); the furthest such leg. The plan's next leg on the same train (same trip id, or a train's same
+      number): always merged. Merged: one leg less ("Leg 1 of 2"), headline "Stay on to Eindhoven", the stops list to
+      there, the lock screen and the change guide without that change, the wake-up for the new stop (a ring for the
+      skipped station, if it rang already, goes). Looked at again with every new answer of its stops (every minute).
+      **Android 0.10.5:** `match/TrainRules.kt` (`stayOn`, the same names; `TrainRulesTest`), `RideService.stayOnIfItGoes`
+      (also every minute now, buses too) and `applyStay`.
+- [x] **The headline** (`TrainRules.headline`/`lockHeadline`): "Intercity to Zwolle" / "Get off at Tilburg" (the
+      vehicle's headsign, else its last stop); never "Intercity to <your stop>". The lock screen: "Intercity to Zwolle ·
+      get off at Tilburg". **Android 0.10.5:** `RideState.headline`/`lockTitle`, `RideScreen`, the ride notification.
+- [x] **The best place to get off** (`BetterStop`; tests `BetterStopTests`): on a vehicle whose stops go on past this
+      leg's stop, up to 3 of its later stops within 90 min (nearest the destination first) are planned from, one
+      planner question each, every 5 min at most; one that gets you there ≥ 3 min sooner (or as soon with fewer
+      changes) is offered: card and quiet notification "Stay on to 's-Hertogenbosch — home 15:52 instead of 16:01 (bus
+      306 at 15:31)", "Do this" (this leg to there, the wake-up there, then the new legs) / "Keep my plan" (not again
+      for that stop this trip). Only a tap takes it. **Android 0.10.5:** `match/BetterStop.kt` (`BetterStopTest`),
+      `RideService.betterStopLook`/`takeBetterStop`/`keepPlan`, the card on `RideScreen`.
+- [x] **Every ring on the lock screen** (`RingShow` in `AlarmStop.swift`; tests `AlarmStopTests`): the ring while you
+      use the phone (one chime or two buzzes, no loop), the vibration-only ring without headphones (from its first
+      second), by time, reckoned, the backup and its repeat all set the ringing state with Stop, post the alarm's own
+      notification (Stop alarm; open or swipe stops it) and show the alarm card in the app. In use and never stopped,
+      it goes on at the stop as before. Only the quiet words (short leg, get ready, you're there) stay plain.
+      **Android:** every ring already goes through `RideService.ring` (the alarm's notification, full screen, Stop
+      alarm); `WakeRules.RingKind`/`lockRinging` mirror the rule (`OutLoudOffTest`).
+- [x] **No out loud without headphones**: vibration only until you stop it; out loud after a minute only with Settings ›
+      Trips & alarm › "Out loud if I don't stop it (after 1 min)", off for everyone (iOS: `outLoudLaterSet` once;
+      Android: `Settings.outLoudLaterOffOnce` in `migrated()`). The backup's own notification without headphones has
+      no sound either. The school wake-up at home is unchanged. **Android 0.10.5:** `AlarmPlayer.ring(loudLater)`,
+      `WakeRules.loudLater`, the switch in `SettingsScreen`.
+
 ## iOS 0.42.7 (Listening now)
 
 Sharing the song you listen to while you travel, with friends and on your live link. Rules, the relay route and the

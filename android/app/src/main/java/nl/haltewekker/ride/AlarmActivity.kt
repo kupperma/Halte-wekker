@@ -50,7 +50,7 @@ class AlarmActivity : ComponentActivity() {
                     Text(leg?.toStop ?: "Your stop", color = Color.White, style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)
                     Text("in about ${Fmt.metres(s?.distance ?: s?.wakeMetres ?: 0.0)}" + (s?.legArrival?.let { " · ${Fmt.time(it)}" } ?: ""),
                         color = Color(0xFFA3ABB3), textAlign = TextAlign.Center)
-                    if (s?.quiet == true) Text("No headphones: vibrating only. Out loud after a minute.", color = Color(0xFFA3ABB3), textAlign = TextAlign.Center)
+                    if (s?.quiet == true) Text("No headphones: vibrating only, until you stop it.", color = Color(0xFFA3ABB3), textAlign = TextAlign.Center)
                     Spacer(Modifier.height(24.dp))
                     BigButton("I'm awake") { RideService.send(this@AlarmActivity, RideService.ACTION_STOP_ALARM); finish() }
                     QuietButton("End the trip") { RideService.send(this@AlarmActivity, RideService.ACTION_END); finish() }

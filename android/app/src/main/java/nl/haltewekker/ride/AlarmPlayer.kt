@@ -20,7 +20,8 @@ import java.util.Locale
 
 /**
  * The alarm, the arrival chime and the announcer (iOS `AlarmSound`). "Sound only with headphones" (0.24.3): without
- * headphones it only vibrates, and rings out loud after a minute if not stopped. With headphones in it plays as media
+ * headphones it only vibrates (iOS 0.42.8: until you stop it; out loud after a minute only with "Out loud if I don't
+ * stop it" on). With headphones in it plays as media
  * (Android's alarm stream also comes out of the speaker); out loud, on the alarm stream (it rings in silent mode).
  */
 object AlarmPlayer {
@@ -52,14 +53,14 @@ object AlarmPlayer {
 
     private fun later(ms: Long, r: Runnable) { pending.add(r); main.postDelayed(r, ms) }
 
-    /** The announcement (if any), then the alarm on repeat; or, `quiet`, a strong buzz, out loud after a minute. */
-    fun ring(context: Context, announcement: String?, quiet: Boolean, outLoud: Boolean = false) {
+    /** The announcement (if any), then the alarm on repeat; or, `quiet`, a strong buzz (out loud after a minute only with `loudLater`). */
+    fun ring(context: Context, announcement: String?, quiet: Boolean, outLoud: Boolean = false, loudLater: Boolean = false) {
         stop(context)
         ringing = true
         val ctx = context.applicationContext
         vibrate(ctx, repeat = true)
         if (quiet) {
-            later((WakeRules.LOUD_AFTER * 1000).toLong()) { if (ringing) loop(ctx, loud = true) }
+            if (loudLater) later((WakeRules.LOUD_AFTER * 1000).toLong()) { if (ringing) loop(ctx, loud = true) }
             return
         }
         val private = !outLoud && AudioRoute.privateOutput(ctx)

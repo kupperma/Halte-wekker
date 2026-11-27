@@ -41,6 +41,10 @@ data class Settings(
     val busKm: Double = 2.0,
     val trainKm: Double = 5.0,
     val headphonesOnly: Boolean = true,
+    /** (0.10.5, iOS 0.42.8) "Out loud if I don't stop it (after 1 min)": without headphones, out loud after a minute. Off. */
+    val outLoudLater: Boolean = false,
+    /** (0.10.5) It was turned off once for everyone (`Settings.migrated`). */
+    val outLoudLaterOffOnce: Boolean = false,
     val announce: Boolean = true,
     val ringAtStop: Boolean = true,
     val backupAlarm: Boolean = true,
@@ -75,7 +79,11 @@ data class Settings(
 )
 
 /** (0.10.1) Settings as read: the check-out reminder turned off once for everyone (it can be turned on again after). */
-fun Settings.migrated(): Settings = if (checkOutOffOnce) this else copy(checkOut = false, checkOutOffOnce = true)
+/** (0.10.5) …and the out-loud-after-a-minute turned off once for everyone (it would wake the whole train). */
+fun Settings.migrated(): Settings {
+    val a = if (checkOutOffOnce) this else copy(checkOut = false, checkOutOffOnce = true)
+    return if (a.outLoudLaterOffOnce) a else a.copy(outLoudLater = false, outLoudLaterOffOnce = true)
+}
 
 /** The profile and settings, in SharedPreferences, as state the screens follow. */
 class Store(context: Context) {

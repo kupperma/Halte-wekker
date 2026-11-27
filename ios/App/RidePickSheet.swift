@@ -212,3 +212,22 @@ struct StillOnCard: View {
         .dsPanel()
     }
 }
+
+/// (0.42.8) A later stop of the one you're on gets you there sooner (`BetterStop`): "Do this" or "Keep my plan".
+struct BetterStopCard: View {
+    @EnvironmentObject var trip: TripManager
+    let offer: TripManager.BetterOffer
+    var body: some View {
+        VStack(alignment: .leading, spacing: DS.s12) {
+            Label("A faster way: stay on", systemImage: "arrow.triangle.branch")
+                .font(DS.headline).foregroundStyle(DS.text)
+            Text(offer.text).font(DS.sub).foregroundStyle(DS.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: DS.s8) {
+                DSQuietButton(title: "Do this", full: true) { trip.takeBetterStop() }
+                DSQuietButton(title: "Keep my plan", full: true) { trip.keepPlanNotBetterStop() }
+            }
+        }
+        .dsPanel()
+    }
+}
