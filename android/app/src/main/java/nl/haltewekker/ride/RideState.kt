@@ -92,6 +92,10 @@ data class RideState(
     val headsign: String? = null,
     val stayOnTo: String? = null,
     val better: BetterCard? = null,
+    /** (0.10.6) which side you get out at this leg's stop ("Exit on the left · platform 4", `DoorSide`), and what was
+     *  asked for it (the station, platform and stop before: asked again only when that changes). */
+    val doorSide: String? = null,
+    val doorKey: String? = null,
 ) {
     val leg: Ride? get() = trip.rides.getOrNull(index)
     /** "Intercity", "Sprinter", "Bus 305": the vehicle you're on (else the planned one). */

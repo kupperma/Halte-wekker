@@ -448,6 +448,7 @@ class RideService : Service() {
                         wakeLive = w.arrival?.takeIf { w.live && !w.saved }?.let { it to Iso.now() }
                         RideStore.update(this) { it.copy(eta = w.arrival ?: it.eta, nextStop = w.nextStop, delayMin = w.delayMin) }
                         wakeBeforeAt = w.beforeAt
+                        if (!w.saved && w.trip != null) doorLook(w.trip, leg)
                         checkGetReady(w, now)
                         if (!w.saved && w.trip != null) RideStore.state.value?.let { st -> if (RideCacheStore.due(v, now)) RideCacheStore.put(this, v, w.trip, st.startedAt, now) }
                     }
@@ -545,7 +546,8 @@ class RideService : Service() {
         choice.clear(); chooseJob?.cancel(); chooseJob = null
         Notifications.cancelTag(this, Notifications.ASK_TAG, Notifications.NEWS_ID + 3)
         gpsRuns = emptyMap(); rivalAt = 0.0; departure = null
-        RideStore.update(this) { it.copy(choosing = emptyList(), ask = null, otherAtStop = null, wrongBus = null, readyTold = false, nextStop = null, delayMin = null) }
+        RideStore.update(this) { it.copy(choosing = emptyList(), ask = null, otherAtStop = null, wrongBus = null, readyTold = false, nextStop = null, delayMin = null,
+            doorSide = null, doorKey = null) }
         val s = RideStore.state.value ?: return
         look.reset()
         etaAt = 0.0
@@ -938,6 +940,39 @@ class RideService : Service() {
 
     // MARK: (A8, iOS 0.39) get ready, the saved rides, the change guide
 
+    private var doorAsking = false
+    private var doorTried: Pair<String, Double>? = null      // a question that got no answer, and when: again after 5 min
+
+    /**
+     * (0.10.6) Which side you get out (`DoorSide`, the relay's `/rail/v1/side`): asked once this train leg's trip says
+     * the platform at your stop, again only when that (or the stop before) changes; never while the alarm rings.
+     */
+    private fun doorLook(t: TransitParse.LiveTrip, leg: nl.haltewekker.data.Ride) {
+        val s = RideStore.state.value ?: return
+        val to = leg.to ?: return
+        if (s.phase == Phase.ALARM || s.phase == Phase.FINISHED || doorAsking) return
+        val codes = nl.haltewekker.friends.NSCodes.get(this)
+        val code = codes.code(leg.toStop) ?: codes.nearest(to, 600.0)?.code
+        val a = DoorSide.ask(leg.isTrain, t.stops, to, code) ?: return
+        if (a.key == s.doorKey) return
+        val now = Iso.now()
+        doorTried?.let { (k, at) -> if (k == a.key && now - at < 300) return }
+        doorTried = a.key to now
+        doorAsking = true
+        val index = s.index
+        scope.launch {
+            try {
+                val r = nl.haltewekker.data.Net.get("${nl.haltewekker.friends.FriendRelay.BASE}/rail/v1/side?${a.query()}")
+                val line = if (r.ok) DoorSide.line(DoorSide.parse(r.text), a.track) else null
+                // a busy relay or no network: asked again on a later tick
+                if (r.ok || r.status in 400..499) RideStore.update(this@RideService) { cur ->
+                    if (cur.index != index) cur else cur.copy(doorSide = line, doorKey = a.key)
+                }
+                if (r.ok) FieldLog.ride("exit side · ${a.station} platform ${a.track}: ${line ?: "not known"}")
+            } finally { doorAsking = false }
+        }
+    }
+
     /** The quiet "Get ready" once the vehicle is at the stop before yours, before the alarm rang (`GetReady`). */
     private fun checkGetReady(w: OnBoardLook.WakeTrip, now: Double) {
         val s = RideStore.state.value ?: return
@@ -948,7 +983,7 @@ class RideService : Service() {
         RideStore.update(this) { it.copy(readyTold = true) }
         val (t, b) = GetReady.words(leg.toStop, w.arrival?.let { it - now })
         FieldLog.ride("get ready · at ${w.before ?: "the stop before yours"} · ${leg.toStop} next")
-        Notifications.quiet(this, GetReady.id(s.startedAt, s.index), t, b, s)
+        Notifications.quiet(this, GetReady.id(s.startedAt, s.index), t, DoorSide.withLine(b, s.doorSide), s)
     }
 
     /** Each planned ride's trip answer saved on the phone (at most every 2 minutes a ride, 4 rides). */
@@ -1301,7 +1336,7 @@ class RideService : Service() {
             Notifications.cancelTag(this, WristNotice.AGAIN_ID, Notifications.ALARM_ID)
         }
         RideStore.update(this) { it.copy(trip = it.trip.copy(rides = newRides, end = end ?: it.trip.end),
-            wakeKm = kms, eta = null, distance = null, stayOnTo = name, better = null,
+            wakeKm = kms, eta = null, distance = null, stayOnTo = name, better = null, doorSide = null, doorKey = null,
             phase = if (it.phase == Phase.AWAKE || it.phase == Phase.ALARM) Phase.SLEEPING else it.phase,
             quietLeg = if (it.phase == Phase.AWAKE || it.phase == Phase.ALARM) false else it.quietLeg, legStartMetres = null, rangAt = null) }
         etaAt = 0.0; wakeRoute = emptyList(); wakeLive = null

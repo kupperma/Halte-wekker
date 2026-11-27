@@ -515,7 +515,7 @@ if (!LIVE) {
   assert.equal(v.map.later[0].color, "#E0632E");
   assert.deepEqual(v.map.later[0].coords, [[4.78, 51.5955], [4.9, 51.6]]);
   assert.equal(v.map.dest.name, "Campus");
-  // each leg's own "shape" (the apps send them from 0.42.8 / 0.10.5): at a change with no stops, the next ride's road
+  // each leg's own "shape" (the apps send them from iOS 0.42.9 and Android 0.10.6): at a change with no stops, the next ride's road
   // from its leg; a walk's as dots; a ride known only from where to where as a dashed straight line; the end of the walk
   const pl = trip().legs.map((l) => ({ ...l }));
   pl[1].shape = enc([[5.47901, 51.44306], [5.4795, 51.4428]]);
@@ -644,6 +644,25 @@ if (vec) {
   assert.deepEqual(v.legs.map((x) => x.text), vec.page.legs);
   assert.deepEqual(v.timeline.map((x) => x.title), vec.page.timeline);
   assert.equal(v.map.shape.length, vec.page.shapePoints);
+  // (Android 0.10.6, iOS 0.42.9) at a change: each leg's own road, the phone, the picture's version; the picture itself
+  if (vec.state2) {
+    assert.equal(await unseal(vec.state2.data, key, "hw-live-v1\n" + vt), vec.state2.plain);
+    assert.equal(b64u(await seal(vec.state2.plain, key, "hw-live-v1\n" + vt, Buffer.from(vec.state2.nonce, "hex"))), vec.state2.data);
+    const s2 = JSON.parse(vec.state2.plain);
+    v = Vw(s2, s2.t, s2.t);
+    assert.equal(v.head, vec.page2.head);
+    assert.equal(v.note, vec.page2.note);
+    assert.equal(v.pic, 2);
+    assert.deepEqual(v.map.person.pos, [s2.pos.lon, s2.pos.lat]);
+    assert.ok(v.map.road.length > 2 && v.map.road.length <= 80, "the IC's road from its leg");
+    assert.equal(v.map.later.length, 1);
+    assert.equal(v.map.later[0].dashed, false, "bus 1's own road");
+    assert.equal(v.map.dest.name, "Campus");
+    assert.ok(v.map.walks.length >= 2, "the walk to Campus, and from the sharer to the platform");
+    assert.equal(b64u(await seal(Buffer.from(vec.face.plain, "base64url"), key, "hw-live-face-v1\n" + vt, Buffer.from(vec.face.nonce, "hex"))), vec.face.data);
+    await assert.rejects(unseal(vec.face.data, key, "hw-live-v1\n" + vt));
+    console.log("live links: the shared change vector and the picture open and draw");
+  }
   console.log("live links: the shared test vector opens and draws");
 }
 
