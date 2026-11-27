@@ -63,6 +63,9 @@ class RideService : Service() {
         const val ACTION_ON_IT = "nl.haltewekker.ride.ON_IT"
         const val ACTION_WAKE = "nl.haltewekker.ride.WAKE"
         const val ACTION_LOOK = "nl.haltewekker.ride.LOOK"
+        /** (0.10.3, iOS 0.42.4) Fastest trip watches (`WaitStore.request`): the look at what you get on, whatever is on screen. */
+        const val ACTION_WATCH = "nl.haltewekker.ride.WATCH"
+        const val ACTION_UNWATCH = "nl.haltewekker.ride.UNWATCH"
         const val EXTRA_KM = "km"
         const val EXTRA_REGION = "region"
         const val EXTRA_BY_HAND = "byHand"
@@ -156,6 +159,11 @@ class RideService : Service() {
     private var otherBoardAt = 0.0
     private val otherTold = HashSet<String>()
     private val otherClosed = HashSet<String>()
+    // (0.10.3, iOS 0.42.4) Fastest trip's watching: owned here, not by a screen (`WaitWatch`, `WaitStart`)
+    private var watch = WaitWatch.State()
+    private var watchJob: Job? = null
+    private var watchDest: String? = null
+    private val waitLook = WaitLook()
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -170,8 +178,20 @@ class RideService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_WATCH) {
+            if (RideStore.state.value != null) { WaitStore.ended(); return START_STICKY }      // a ride runs: nothing to watch
+            if (!goForeground(watching = true)) { WaitStore.ended(); if (lookJob?.isActive != true) stopSelf(); return START_NOT_STICKY }
+            startWatch()
+            return START_NOT_STICKY
+        }
+        if (intent?.action == ACTION_UNWATCH) {
+            stopWatch(intent.getStringExtra(EXTRA_WHAT) ?: "stopped from the notification")
+            if (RideStore.state.value == null && lookJob?.isActive != true) stopRide()
+            return START_NOT_STICKY
+        }
         if (intent?.action == ACTION_LOOK) {
             if (RideStore.state.value != null) return START_STICKY                 // a ride runs: nothing to look for
+            if (watch.watching) return START_STICKY                               // Fastest trip watches already
             if (!goForeground(looking = true)) { stopSelf(); return START_NOT_STICKY }
             startLook(intent.getStringExtra(EXTRA_REGION) ?: "")
             return START_NOT_STICKY
@@ -183,8 +203,13 @@ class RideService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
-        if (RideStore.state.value == null) { lookJob?.cancel(); stopRide(); return START_NOT_STICKY }
+        if (RideStore.state.value == null) {
+            // (0.10.3) nothing for a ride: the watching goes on as it was
+            if (watch.watching) { goForeground(watching = true); return START_NOT_STICKY }
+            lookJob?.cancel(); stopRide(); return START_NOT_STICKY
+        }
         lookJob?.cancel(); lookJob = null
+        if (watch.watching) stopWatch("the trip started")
         if (intent?.action == ACTION_START) logStart(if (RideStore.state.value?.auto == true) "auto (station left)" else "hand")
         when (intent?.action) {
             ACTION_STOP_ALARM -> stopAlarm()
@@ -226,8 +251,9 @@ class RideService : Service() {
         if (s.index == 0) { nl.haltewekker.travel.HabitStore.load(this); nl.haltewekker.travel.HabitStore.update { it.plannedFrom(leg.fromStop) } }
     }
 
-    private fun goForeground(looking: Boolean = false): Boolean {
-        val n = if (looking) Notifications.looking(this) else Notifications.ride(this, RideStore.state.value)
+    private fun goForeground(looking: Boolean = false, watching: Boolean = false): Boolean {
+        val n = if (watching) Notifications.watching(this, WaitStore.request.value?.destName)
+            else if (looking) Notifications.looking(this) else Notifications.ride(this, RideStore.state.value)
         return try {
             if (Build.VERSION.SDK_INT >= 29) startForeground(Notifications.RIDE_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
             else startForeground(Notifications.RIDE_ID, n)
@@ -385,6 +411,8 @@ class RideService : Service() {
                             }
                             FieldLog.match(FieldFormat.detect(mine.size, "${f.line}·${f.tripId.takeLast(4)}", f.byGPS, f.tripId == leg.tripId))
                             RideStore.state.value?.let { cur -> noteBoarding(cur, f.tripId, mine) }
+                            // (0.10.3, iOS 0.42.4) got on a stop or two before the planned one: the leg starts there
+                            run { val ff = f; scope.launch { try { boardedHere(ff.tripId, ff.line, ff.isTrain) } catch (_: Exception) {} } }
                             // (A7) others that fit about as well: keep choosing between them (iOS `beginChoosing`)
                             if (f.others.isNotEmpty()) beginChoosing(listOf(RideChoice.Cand(f.tripId, f.line, f.isTrain)) + f.others)
                             else scope.launch { afterFound(f.tripId, split = false) }
@@ -576,6 +604,7 @@ class RideService : Service() {
     }
 
     private fun stopRide() {
+        if (watch.watching) stopWatch("stopped")
         tick?.cancel()
         PlatformWatch.clear()
         stopReckon()
@@ -1394,7 +1423,245 @@ class RideService : Service() {
         return false
     }
 
+    // MARK: (0.10.3, iOS 0.42.4) Fastest trip's watching: getting on wherever you get on (`WaitStart`, `WaitWatch`)
+
+    /** Fastest trip watches `WaitStore.request`: GPS on, a look every 6 s, whatever is on screen and with the phone locked. */
+    private fun startWatch() {
+        val r = WaitStore.request.value
+        if (r == null) {
+            if (!watch.watching) { WaitStore.ended(); if (lookJob?.isActive != true) stopRide() }
+            return
+        }
+        if (watch.watching && watchDest == r.destId) return
+        lookJob?.cancel(); lookJob = null                                       // the watching looks for it instead
+        val (st, line) = WaitWatch.begin(watch, Iso.now(), nl.haltewekker.friends.FriendChats.foreground, r.watched?.first?.departure)
+        watch = st; watchDest = r.destId
+        waitLook.reset()
+        FieldLog.ride(line)
+        WaitStore._watching.value = true
+        requestLocation(3_000)
+        if (app.store.settings.value.motion) nl.haltewekker.motion.StepMotion.start(this)
+        if (watchJob?.isActive != true) watchJob = scope.launch {
+            delay((WaitWatch.EVERY * 1000).toLong())
+            while (isActive && watch.watching) {
+                val wait = try { watchLook() } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { WaitWatch.EVERY }
+                if (!watch.watching) break
+                delay((wait * 1000).toLong())
+            }
+        }
+    }
+
+    private fun stopWatch(why: String) {
+        val (st, line) = WaitWatch.end(watch, why)
+        line?.let { FieldLog.ride(it) }
+        val was = watchDest
+        watch = st; watchDest = null
+        watchJob?.cancel(); watchJob = null
+        waitLook.reset()
+        // closed from Fastest trip: nothing held; stopped by itself or from the notification: not again until it opens again
+        WaitStore.ended(stopped = if (why == "closed") null else was)
+        intervalMs = 0                      // a ride that starts asks for its own GPS pace
+    }
+
+    private var lookLogged: Pair<String, Double>? = null
+
+    /** A look's line in the field log (`WaitStart.logDue`). */
+    private fun logLook(line: String, key: String, busy: Boolean, now: Double) {
+        if (!WaitStart.logDue(key, lookLogged, busy, now)) return
+        lookLogged = key to now
+        FieldLog.match(line)
+    }
+
+    /** One look while it watches: the seconds to the next one. */
+    private suspend fun watchLook(): Double {
+        val now = Iso.now()
+        val r = WaitStore.request.value ?: run { stopWatch("closed"); return 0.0 }
+        if (r.destId != watchDest) { startWatch(); return WaitWatch.EVERY }   // another destination: watching again
+        WaitStart.lookRuns(watch.watching, RideStore.state.value == null, demo = false)?.let { stopWatch(if (it == "a trip runs") "the trip started" else it); return 0.0 }
+        val mine = fixes.toList()
+        val last = mine.lastOrNull()
+        if (last != null) watch = WaitWatch.moved(watch, last.p, last.accuracy)
+        WaitWatch.autoStop(watch, last?.p, last?.accuracy ?: -1.0, r.dest, now)?.let { why ->
+            stopWatch(why)
+            if (why != "you're there") Notifications.news(this, "watch-off", "Stopped watching",
+                (if (why.startsWith("after")) "After ${WaitWatch.MAX_HOURS.toInt()} hours" else "The trip you were waiting for has gone and you stayed here") +
+                    " · open Fastest trip again when you need it")
+            if (RideStore.state.value == null && lookJob?.isActive != true) stopRide()
+            return 0.0
+        }
+        val moving = WaitStart.moving(mine, now)
+        // Android: no Play Services, so no "automotive"; the step detector's walking (when on) is "afoot"
+        val hint = if (app.store.settings.value.motion) WaitStart.hint(nl.haltewekker.motion.StepMotion.now(now)) else WaitStart.Hint.NONE
+        val fast = WaitStart.movingRule(moving, hint) == null
+        if (WaitStore.atVehicleSpeed.value != fast) WaitStore._atVehicleSpeed.value = fast
+        val planned = r.watched?.first
+        // nothing moves with you while you stand: no request then (the call is "standing" whatever is around)
+        val seen = if (moving.seconds > 0 || moving.speed >= 2)
+            withContext(Dispatchers.Default) { waitLook.look(mine, planned, WaitWatch.targets(r), now, app.store.settings.value.realPositions, WaitStart.RULES.close) }
+        else WaitLook.Seen(emptyList(), emptyList(), emptyMap(), emptyMap())
+        if (!watch.watching || RideStore.state.value != null) return 0.0
+        val out = WaitStart.step(watch.wait, moving, hint, seen.cands, WaitStart.RULES)
+        watch = watch.copy(wait = out.state)
+        val busy = moving.seconds > 0 || seen.cands.isNotEmpty()
+        val key: String? = when (val call = out.call) {
+            is WaitStart.Call.Start -> {
+                logLook(out.line, "start", true, now)
+                val label = FieldFormat.vehicle(seen.lines[call.id] ?: "", call.id, seen.trains[call.id] ?: false)
+                startOn(call.id, seen, r, mine)?.let { FieldLog.match("wait · $label · not started: $it") }
+                "${call.id}|${out.progress}"
+            }
+            is WaitStart.Call.WrongBus -> {
+                logLook(out.line, "wrong bus", true, now)
+                tellWrongBus(call.id, seen, r)
+                call.id
+            }
+            is WaitStart.Call.Hold -> {
+                logLook(out.line, call.why, busy, now)
+                seen.cands.firstOrNull()?.id
+            }
+        }
+        watch = WaitWatch.paced(watch, fast, moving, key, now)
+        return WaitWatch.nextLook(watch, fast, out.progress, now)
+    }
+
+    /**
+     * Start the trip on `id` (iOS `startOn`): the way on screen that rides it, else the ways on from it, planned now from
+     * its next stop at its time there (an earlier bus: maybe an earlier train). The leg starts where you got on
+     * (`boardedFrom`). Null: started; else why not.
+     */
+    private suspend fun startOn(id: String, seen: WaitLook.Seen, r: WaitWatch.Request, mine: List<Fix>): String? {
+        val line = seen.lines[id] ?: ""
+        val train = seen.trains[id] ?: false
+        val here = mine.lastOrNull() ?: return "no fix"
+        var way = WaitWatch.wayOn(r, id)
+        if (way == null) {
+            way = planOn(id, here.p, r) ?: return "no way on from it"
+            if (WaitWatch.longWayRound(r.watched, line, way.end)) return "a long way round"
+        }
+        if (!watch.watching || RideStore.state.value != null) return "stopped watching"
+        val boarded = boardedFrom(way, id, line, train, mine)
+        if (WaitWatch.atItsStop(boarded.first.to?.let { Geo.metres(here.p, it) }, here.accuracy)) return "its stop is where you are"
+        if (!watch.watching || RideStore.state.value != null) return "stopped watching"
+        // the others that fit about as well: the ride keeps them in the running until there's real distance between them
+        val best = seen.ranked.firstOrNull { it.id == id }?.cost
+        val others = if (best == null) emptyList() else seen.ranked.filter { it.id != id && it.cost < best + WaitStart.RULES.close }.take(2)
+            .map { RideChoice.Cand(it.id, seen.lines[it.id] ?: "", seen.trains[it.id] ?: false) }
+        boardOn(boarded, r.destName, id, line, train, others)
+        return null
+    }
+
+    /** The ways on from the vehicle `id`: planned from its next stop at its time there, else from here; only one that rides it. */
+    private suspend fun planOn(id: String, here: GeoPoint, r: WaitWatch.Request): DoorTrip? {
+        val now = Iso.now()
+        val t = waitLook.trip(id, now)
+        val tries = ArrayList<Pair<String, Double>>()
+        if (t != null && t.stops.isNotEmpty()) {
+            val near = t.stops.indices.minByOrNull { Geo.metres(t.stops[it].point, here) } ?: 0
+            val next = (near until t.stops.size).firstOrNull { i -> ((t.stops[i].departure ?: t.stops[i].arrival) ?: 0.0) > now }
+            next?.let { i -> val s0 = t.stops[i]; tries.add("${s0.point.lat},${s0.point.lon}" to ((s0.departure ?: s0.arrival ?: now) - 60)) }
+        }
+        tries.add("${here.lat},${here.lon}" to now - 5 * 60)
+        for ((from, at) in tries) {
+            val plans = try { Transit.plan(from, r.destId, at, count = 6) } catch (_: Exception) { emptyList() }
+            for (p in plans) {
+                val i = p.rides.indexOfFirst { it.tripId == id }
+                if (i < 0 || p.end < now) continue
+                return if (i == 0) p else DoorTrip(p.rides.drop(i), p.rides[i].departure, p.end)
+            }
+            if (!watch.watching) return null
+        }
+        return null
+    }
+
+    /**
+     * The way `t` on `id`, got on where you got on (iOS `boardedFrom`, `WaitStart.repoint`): its first ride from the stop
+     * of its trip nearest to where you started moving at bus speed, at its time there, when that's another stop than
+     * the way had. Else `t` as it is.
+     */
+    private suspend fun boardedFrom(t: DoorTrip, id: String, line: String, train: Boolean, mine: List<Fix>): DoorTrip {
+        val now = Iso.now()
+        val here = mine.lastOrNull()?.p ?: return t
+        val start = WaitStart.startedMoving(mine, now) ?: return t
+        val trip = waitLook.trip(id, now) ?: return t
+        val stops = WaitLook.stopsOf(trip)
+        val f = t.first
+        val i = WaitStart.repoint(stops, start, here, f.from) ?: return t
+        val s0 = trip.stops[i]
+        val at = s0.departure ?: s0.arrival ?: f.departure
+        val late = f.departure - f.scheduledDeparture
+        val ride = f.copy(fromStop = s0.name, fromId = "onboard", fromLat = s0.point.lat, fromLon = s0.point.lon, departure = at,
+            scheduledDeparture = s0.scheduledDeparture ?: (at - late), walkBefore = 0, platform = null)
+        FieldLog.match("wait · ${FieldFormat.vehicle(line, id, train)} · got on at its stop ${i + 1} of ${stops.size}, ${WaitStart.offMetres(f.from, s0.point)} m from where the way had it")
+        return DoorTrip(listOf(ride) + t.rides.drop(1), minOf(t.start, at), t.end)
+    }
+
+    /** On board: the trip starts by itself on `id` (the ride screen takes over) and the watching stops. */
+    private fun boardOn(t: DoorTrip, destName: String, id: String, line: String, train: Boolean, others: List<RideChoice.Cand>) {
+        if (RideStore.state.value != null) return
+        stopWatch("the trip started")
+        RideStore.set(this, newState(this, t, destName, 0).copy(vehicleTripId = id, vehicleLine = line, vehicleSource = VehicleSource.BY_GPS, auto = true))
+        ResumeStore.set(this, null)
+        logStart("auto (Fastest trip: on board)")
+        intervalMs = 0
+        goForeground()
+        begin()
+        val first = t.first
+        val what = if (train) line else "bus $line"
+        val s = RideStore.state.value
+        Notifications.news(this, "goboard-${Iso.now().toLong()}", "You’re on the $what",
+            "Your trip to ${if (destName == "Home") "home" else destName} started by itself. " +
+                if (s?.phase == Phase.AWAKE) "It tells you when you’re at ${first.toStop}." else "It rings before ${first.toStop}.")
+        if (others.isNotEmpty()) beginChoosing(listOf(RideChoice.Cand(id, line, train)) + others)
+        else scope.launch { afterFound(id, split = false) }
+    }
+
+    /** Sure you're on one that doesn't take you on (iOS `tellWrongBus`): the wrong-bus notification, once for that one. */
+    private suspend fun tellWrongBus(id: String, seen: WaitLook.Seen, r: WaitWatch.Request) {
+        val line = seen.lines[id] ?: ""
+        val lt = waitLook.trip(id, Iso.now())
+        val to = lt?.let { nl.haltewekker.ui.Fmt.place(it.headsign) } ?: ""
+        val mine = r.watched?.first?.line ?: ""
+        val title = if (mine.isEmpty()) "You’re on the $line${if (to.isEmpty()) "" else " to $to"}" else WrongBus.title(line, to, mine)
+        val body = "It doesn’t go to ${r.destName}. ${WrongBus.NO_FIX}."
+        FieldLog.match("wait · " + WrongBus.logLine(FieldFormat.vehicle(line, id, seen.trains[id] ?: false), to, mine, WrongBus.NO_FIX))
+        if (!watch.watching || RideStore.state.value != null) return
+        Notifications.rideNote(this, WrongBus.ID_PREFIX + "wait-" + id.takeLast(12), title, body)
+    }
+
+    /**
+     * (0.10.3, iOS 0.42.4 `TripManager.boardedHere`) a vehicle found during a ride ("I'm on it" before you got on): got
+     * on at another stop of its trip than the leg was planned from (a stop or two before it), the leg starts where you
+     * got on; where you get off and the rest of the trip stay. Never a leg made short by it (one that rings no more).
+     */
+    private suspend fun boardedHere(tripId: String, line: String, isTrain: Boolean) {
+        val s = RideStore.state.value ?: return
+        if (s.index != 0 || !(s.phase == Phase.SLEEPING || s.phase == Phase.AWAKE)) return
+        val leg = s.leg ?: return
+        val now = Iso.now()
+        val mine = fixes.toList()
+        val here = mine.lastOrNull()?.p ?: return
+        val start = WaitStart.startedMoving(mine, now) ?: return
+        val trip = try { Transit.trip(tripId, maxAge = 60.0) } catch (_: Exception) { null } ?: return
+        val stops = WaitLook.stopsOf(trip)
+        val i = WaitStart.repoint(stops, start, here, leg.from) ?: return
+        val to = leg.to ?: return
+        val st = stops[i]
+        // the alarm first: never a leg made short by it, one that rings no more
+        val wasShort = ShortLeg.isShort(LegAlarm.span(leg.from, to), s.wakeMetres)
+        if (!wasShort && ShortLeg.isShort(LegAlarm.span(st.point, to), s.wakeMetres)) return
+        val cur = RideStore.state.value ?: return
+        if (cur.index != 0 || cur.vehicleTripId != tripId || cur.startedAt != s.startedAt) return
+        val ts = trip.stops[i]
+        val at = ts.departure ?: ts.arrival ?: leg.departure
+        val mineLeg = leg.copy(fromStop = st.name, fromId = "onboard", fromLat = st.point.lat, fromLon = st.point.lon, departure = at,
+            scheduledDeparture = ts.scheduledDeparture ?: (at - (leg.departure - leg.scheduledDeparture)), walkBefore = 0, platform = null)
+        RideStore.update(this) { it.copy(trip = it.trip.copy(rides = listOf(mineLeg) + it.trip.rides.drop(1)), legStartMetres = null) }
+        etaAt = 0.0; wakeRoute = emptyList(); wakeLive = null
+        FieldLog.ride("board · ${FieldFormat.vehicle(line, tripId, isTrain)} got on at its stop ${i + 1} of ${stops.size}, ${WaitStart.offMetres(leg.from, st.point)} m from where the leg was planned from")
+    }
+
     override fun onDestroy() {
+        if (watch.watching) { FieldLog.ride(WaitStart.offLine("the service ended")); WaitStore.ended() }
         scope.cancel()
         try { lm.removeUpdates(listener) } catch (_: Exception) {}
         if (RideStore.state.value == null && nl.haltewekker.school.WakeService.ringing.value == null) AlarmPlayer.shutdown(this)
