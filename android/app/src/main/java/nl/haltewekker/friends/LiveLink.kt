@@ -45,6 +45,8 @@ data class LiveState(
     val legs: List<LiveLeg>? = null,
     val music: LiveMusic? = null,
     val next: Int? = null,
+    /** (0.10.6) The version of the sharer's picture at `/live/v1/face` (`LiveFace`): the page fetches it again when it changes. */
+    val pic: Int? = null,
     val shape: String? = null,
     val stops: List<LiveStop>? = null,
 ) {
@@ -177,7 +179,7 @@ object LiveRules {
         return max(0, ((live - scheduled) / 60).roundHalfAway())
     }
 
-    fun key(s: LiveState) = "${s.state}|${s.mode}|${s.line ?: ""}|${s.num ?: ""}|${s.from ?: ""}|${s.to ?: ""}|${s.music?.title ?: ""}"
+    fun key(s: LiveState) = "${s.state}|${s.mode}|${s.line ?: ""}|${s.num ?: ""}|${s.from ?: ""}|${s.to ?: ""}|${s.music?.title ?: ""}|${s.pic ?: 0}"
 }
 
 /** The page's words, the same in the app and on the page (relay/live.js does the same). */

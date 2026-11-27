@@ -93,6 +93,12 @@ class LiveRelay(private val base: String = LiveCrypto.RELAY, private val userAge
         return answer(st, text)
     }
 
+    /** (0.10.6) Your picture, locked (`LiveFace.seal`): the relay keeps it until the link ends. */
+    suspend fun face(keys: LiveKeys, data: ByteArray): Answer {
+        val (st, text) = call("/live/v1/face", buildJsonObject { put("secret", B64u.encode(keys.secretBytes)); put("data", B64u.encode(data)) })
+        return answer(st, text)
+    }
+
     /** What the page reads (`GET /live/v1/get?t=`): the locked data, or the status (404 gone, 410 ended). */
     suspend fun get(token: String): Pair<Int, Got?> = withContext(Dispatchers.IO) {
         val req = Request.Builder().url("$base/live/v1/get?t=$token").header("User-Agent", userAgent).get().build()
@@ -140,6 +146,9 @@ object LiveLinkStore {
         val seen: Int = 0,
         /** Your answers. */
         val replies: List<LiveReply> = emptyList(),
+        /** (0.10.6) The picture the relay has (`LiveFace.stamp`) and its version (the state's `pic`; 0: none). */
+        val picStamp: String = "",
+        val pic: Int = 0,
     ) {
         val unread: Int get() = msgs.count { it.seq > seen }
     }
@@ -161,6 +170,7 @@ object LiveLinkStore {
     private var attached = false
     private val relay = LiveRelay()
     private var asking = false
+    private var faceTried: Double? = null
     private const val NAME_KEY = "live.name"
 
     private val file: File get() = File(FriendStore.folder(ctx), "live.json")
@@ -232,14 +242,16 @@ object LiveLinkStore {
         if (!running(s) || s == null) return
         if (LiveRules.expired(l.created, now())) { enqueue { endNow() }; return }
         val st = state(s, l) ?: return
-        if (!LiveRules.due(l.lastSent, l.lastKey, LiveRules.key(st), now())) return
+        val face = faceDue(l)
+        if (!face && !LiveRules.due(l.lastSent, l.lastKey, LiveRules.key(st), now())) return
         putQueued = true
         enqueue {
             putQueued = false
+            if (face) sendFace()
             val cur = saved.link ?: return@enqueue
             val rs = RideStore.state.value ?: return@enqueue
             if (cur.arrived) return@enqueue
-            state(rs, cur)?.let { put(it, arrived = false) }
+            state(rs, cur)?.let { if (face || LiveRules.due(cur.lastSent, cur.lastKey, LiveRules.key(it), now())) put(it, arrived = false) }
         }
     }
 
@@ -266,7 +278,8 @@ object LiveLinkStore {
                 ?: num.toIntOrNull()?.let { nl.haltewekker.live.LiveFeeds.trains[it] }?.let { nl.haltewekker.live.RealPositions.usable(it, tripId, now) }
             val coach = FriendTravelShare.coachTrip.value?.let { id -> FriendTravelShare.coach.value?.let { id to it } }
             val trip = LiveTripV2.fromRide(s.trip, s.index, s.destination, s.legArrival, saved, fix?.let { LiveTripV2.Vehicle(it.lat, it.lon, it.at) },
-                coach, LiveTripV2.face(FriendStore.myAccount), now, MusicShareStore.forLink(running(s)))
+                coach, LiveTripV2.face(FriendStore.myAccount), now, MusicShareStore.forLink(running(s)),
+                roads = { id -> nl.haltewekker.ride.RideCacheStore.saved(id, s.startedAt, now)?.shape }, pic = l.pic.takeIf { it > 0 })
             LiveTripV2.build(base, trip, now)
         } catch (_: Exception) { base }
     }
@@ -291,7 +304,16 @@ object LiveLinkStore {
                     save()
                     problem.value = "Couldn’t make the link. Check your connection and try again."
                     null
-                } else l.keys.link
+                } else {
+                    // (your picture, then a state that says so; the relay takes one every 5 s)
+                    if (faceDue(l)) enqueue {
+                        sendFace()
+                        delay(5200)
+                        val cur = saved.link?.takeIf { it.keys == l.keys && !it.arrived } ?: return@enqueue
+                        RideStore.state.value?.let { rs -> state(rs, cur)?.let { put(it, arrived = false) } }
+                    }
+                    l.keys.link
+                }
             }
         } finally { making.value = false }
     }
@@ -382,6 +404,38 @@ object LiveLinkStore {
         saved.link?.takeIf { it.keys == l.keys }?.let { saved = saved.copy(link = it.copy(replies = (it.replies + r).takeLast(10))); save() }
         return true
     }
+
+    // MARK: your picture (0.10.6): 128 px, ≤ 12 KB, locked with the link's key; put once, again when it changes
+
+    private fun faceDue(l: Link): Boolean = LiveFace.due(LiveFace.stamp(FriendStore.myPicture.value), l.picStamp, faceTried, now())
+
+    private suspend fun sendFace() {
+        val l = saved.link ?: return
+        val src = FriendStore.myPicture.value ?: return
+        val stamp = LiveFace.stamp(src)
+        if (!LiveFace.due(stamp, l.picStamp, faceTried, now())) return
+        faceTried = now()
+        val jpeg = withContext(Dispatchers.Default) { small(src) } ?: return
+        val a = relay.face(l.keys, LiveFace.seal(jpeg, l.keys.keyBytes, l.keys.token))
+        val cur = saved.link ?: return
+        if (cur.keys != l.keys || a !is LiveRelay.Answer.Ok) return
+        saved = saved.copy(link = cur.copy(picStamp = stamp, pic = cur.pic + 1))
+        save()
+        faceTried = null
+    }
+
+    /** The picture at 128 px, a JPEG of at most 12 KB (lower quality until it fits); null: it can't be read. */
+    private fun small(jpeg: ByteArray): ByteArray? = try {
+        val b = android.graphics.BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size)
+        val side = minOf(b.width, b.height)
+        val sq = android.graphics.Bitmap.createBitmap(b, (b.width - side) / 2, (b.height - side) / 2, side, side)
+        val out = android.graphics.Bitmap.createScaledBitmap(sq, LiveFace.SIDE, LiveFace.SIDE, true)
+        listOf(70, 60, 50, 40, 30).firstNotNullOfOrNull { q ->
+            val o = java.io.ByteArrayOutputStream()
+            out.compress(android.graphics.Bitmap.CompressFormat.JPEG, q, o)
+            o.toByteArray().takeIf { it.size <= LiveFace.MAX_BYTES }
+        }
+    } catch (_: Exception) { null }
 
     private suspend fun put(s: LiveState, arrived: Boolean): Boolean {
         val l = saved.link ?: return false

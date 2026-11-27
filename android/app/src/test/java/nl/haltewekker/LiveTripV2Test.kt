@@ -204,4 +204,69 @@ class LiveTripV2Test {
         assertEquals("0E7A55", LiveTripV2.face(null))
         assertNotNull(LiveTripV2.face("3c157621a97cf055f5804a9826c6d1e1"))
     }
+
+    // MARK: (0.10.6) each leg's own road, the picture
+
+    private fun input2(): Triple<LiveState, LiveTripV2.Trip, Double> {
+        val inp = vec["input2"]!!.jsonObject
+        val base = FriendJson.decode(LiveState.serializer(), inp["base"]!!)!!
+        val t = inp["trip"]!!.jsonObject
+        fun pt(e: kotlinx.serialization.json.JsonElement?) = (e as? JsonArray)?.let { GeoPoint(it[0].jsonPrimitive.content.toDouble(), it[1].jsonPrimitive.content.toDouble()) }
+        val legs = t["legs"]!!.jsonArray.map { e ->
+            val l = e.jsonObject
+            LiveTripV2.LegIn(l.s("mode")!!, l.s("line"), l.s("num"), l.s("from")!!, l.s("to")!!, l.d("dep"), l.d("arr"), l.s("depPlatform"), l.s("arrPlatform"),
+                l.i("coach"), l.s("deck"), l.i("late"), l.i("mins"), pt(l["fromPt"]), pt(l["toPt"]), (l["road"] as? JsonArray)?.mapNotNull { pt(it) } ?: emptyList())
+        }
+        return Triple(base, LiveTripV2.Trip(legs, t.i("leg")!!, face = t.s("face"), inbox = true, pic = t.i("pic")), inp.d("now")!!)
+    }
+
+    @Test fun legRoadsByteForByte() {
+        val (base, trip, now) = input2()
+        val s = LiveTripV2.build(base, trip, now)
+        val json = String(FriendJson.encode(LiveState.serializer(), s), Charsets.UTF_8)
+        val x = vec["state2"]!!.jsonObject
+        val sealed = LiveCrypto.seal(FriendJson.encode(LiveState.serializer(), s), keyBytes, token, Hex.decode(x.s("nonce")!!)!!)
+        assertEquals(x.s("plain"), json)
+        assertEquals(x.s("data"), B64u.encode(sealed))
+        val legs = s.legs!!
+        assertNull("before the walk: none", legs[0].shape)
+        assertEquals(2, Polyline.decode(legs[1].shape!!).size)
+        val ic = Polyline.decode(legs[2].shape!!)
+        assertTrue(ic.size in 3..LiveTripV2.MAX_LEG_SHAPE)
+        assertEquals(51.44306, ic.first().lat, 1e-9)
+        assertEquals(4.78, ic.last().lon, 1e-9)
+        assertTrue(Polyline.decode(legs[3].shape!!).size > 2)
+        assertEquals(2, Polyline.decode(legs[4].shape!!).size)
+        assertEquals(2, s.pic)
+        assertEquals("phone", s.pos!!.src)
+        assertNull(s.shape)
+        assertNull(s.stops)
+        // with a road of its own the current ride sends none; a third ride ahead only its two ends
+        val own = LiveTripV2.build(base, trip.copy(stops = listOf(LiveTripV2.StopIn("A", 51.44, 5.47), LiveTripV2.StopIn("B", 51.59, 4.78))), now)
+        assertNull(own.legs!![2].shape)
+        assertTrue(Polyline.decode(own.legs!![3].shape!!).size > 2)
+        // the key changes with the picture
+        assertTrue(nl.haltewekker.friends.LiveRules.key(s) != nl.haltewekker.friends.LiveRules.key(s.copy(pic = 3)))
+    }
+
+    @Test fun faceByteForByte() {
+        val f = vec["face"]!!.jsonObject
+        val jpeg = B64u.decode(f.s("plain")!!)!!
+        val sealed = nl.haltewekker.friends.LiveFace.seal(jpeg, keyBytes, token, Hex.decode(f.s("nonce")!!)!!)
+        assertEquals(f.s("data"), B64u.encode(sealed))
+        assertTrue(jpeg.contentEquals(nl.haltewekker.friends.LiveFace.open(sealed, keyBytes, token)))
+        // its own AAD: not a trip state, not a message
+        assertTrue(runCatching { LiveCrypto.open(sealed, keyBytes, token) }.isFailure)
+        assertTrue(runCatching { LiveCrypto.openAs(LiveMessages.MSG, sealed, keyBytes, token) }.isFailure)
+        assertTrue(runCatching { nl.haltewekker.friends.LiveFace.open(B64u.decode(vec["state"]!!.jsonObject.s("data")!!)!!, keyBytes, token) }.isFailure)
+        // put when there's a picture the relay doesn't have; a failed try waits a minute
+        val st = nl.haltewekker.friends.LiveFace.stamp(jpeg)
+        assertEquals(32, st.length)
+        assertEquals("", nl.haltewekker.friends.LiveFace.stamp(null))
+        assertTrue(nl.haltewekker.friends.LiveFace.due(st, "", null, 100.0))
+        assertTrue(!nl.haltewekker.friends.LiveFace.due(st, st, null, 100.0))
+        assertTrue(!nl.haltewekker.friends.LiveFace.due("", "", null, 100.0))
+        assertTrue(!nl.haltewekker.friends.LiveFace.due(st, "", 70.0, 100.0))
+        assertTrue(nl.haltewekker.friends.LiveFace.due(st, "", 40.0, 100.0))
+    }
 }
