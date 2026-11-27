@@ -198,19 +198,21 @@ async function route() {
   assert.equal(j.side, "unknown");
   assert.equal(j.why, "osm_busy");
   assert.equal(j.retryAfter, 1800);
+  assert.equal(j.osm, "429,429");
+  assert.equal(asked[3].u, "https://overpass.private.coffee/api/interpreter");
   await go(other("HT"));
-  assert.equal(asked.length, 3);
+  assert.equal(asked.length, 4);
   clock += 31 * 60_000;
   answer = { status: 200, body: JSON.stringify(fixture("s-hertogenbosch")) };
   r = await go(other("HT"));
   assert.equal(r.status, 200);
-  assert.equal(asked.length, 4);
+  assert.equal(asked.length, 5);
   // nothing in OSM: kept too (unknown), not asked again
   answer = { status: 200, body: '{"elements":[]}' };
   r = await go(other("XYZ"));
   assert.equal((await r.json()).side, "unknown");
   await go(other("XYZ"));
-  assert.equal(asked.length, 5);
+  assert.equal(asked.length, 6);
 }
 
 async function live() {
