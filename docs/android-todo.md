@@ -13,20 +13,42 @@ judged on every look. Rules and numbers in
 
 - [x] **Rough GPS far from the stop** (`RideAccuracy`): 100 m and a fix every 300 m on a confirmed vehicle while the
       nearest you can be is beyond the wake distance + 2 km (+ 30 s at top speed) and the stop is more than 6 minutes
-      off; the best in a leg's first 2 minutes, a bus's last 3 km, on doubt, in the backstop region. **Android 0.10.6:**
+      off; the best in a leg's first 2 minutes, a bus's last 3 km, on doubt, in the backstop region. **Android 0.10.7:**
       `ride/RideSaver.kt` (`RideSaverTest`, every vector), `RideService.gpsTier` on each fix and each tick: the network
       provider every 20 s and the passive one, no GPS chip (only without a network provider, once a minute). Android
       has no repeated "still the same one?" look: found by GPS counts as confirmed (fresh).
 - [x] **Rough GPS while you wait at a change** (`ChangeWait`): stood 3 minutes, until 3 minutes before the next ride.
-      **Android 0.10.6:** after a leg with no vehicle yet, the stand from `noteWaitAnchor`, the next ride's departure.
-- [x] **Live Activity cadence** (`ActivityCadence`). **Android 0.10.6:** the ongoing ride notification (`notifyRide`).
-- [x] **The trip's live times every 2 minutes far away, 45 s near** (`RideNet`). **Android 0.10.6:** the tick's
+      **Android 0.10.7:** after a leg with no vehicle yet, the stand from `noteWaitAnchor`, the next ride's departure.
+- [x] **Live Activity cadence** (`ActivityCadence`). **Android 0.10.7:** the ongoing ride notification (`notifyRide`).
+- [x] **The trip's live times every 2 minutes far away, 45 s near** (`RideNet`). **Android 0.10.7:** the tick's
       arrival look.
-- [x] **Candidate prefilter** (`CandidatePrefilter`). **Android 0.10.6:** `OnBoardLook.look`.
-- [x] **Smaller plans** (`detailedLegs=false`). **Android 0.10.6:** `Transit.plan(detailed = false)` for the ride's
+- [x] **Candidate prefilter** (`CandidatePrefilter`). **Android 0.10.7:** `OnBoardLook.look`.
+- [x] **Smaller plans** (`detailedLegs=false`). **Android 0.10.7:** `Transit.plan(detailed = false)` for the ride's
       own plans (the home map still draws the shapes it gets).
 - [ ] Android: a Battery & data screen with the ride cost (iOS `BatteryLog`): Android has no battery log yet.
 - [ ] Android: a repeated "still the same one?" look, so the rough tier can expire and look again as on iOS.
+## iOS 0.42.9 (which side you get out)
+
+The request "I would like the app to also show which side you get out of the train". The relay's new
+`/rail/v1/side?station=BD&track=4&from=<lat,lon>&at=<lat,lon>` (`relay/rail.js`, tests `relay/test-rail.mjs`) says
+whether the platform of that track is on the left or the right of a train going from the stop before to the station,
+`both`, or `unknown`, with `confidence` high/low. It's worked out from OpenStreetMap (map data © OpenStreetMap
+contributors, ODbL): the platforms whose ref is the track (`railway=platform`/`platform_edge`, in the Netherlands one
+area per side of an island), the nearest rail to each, and the sign of (the way the train goes) × (platform − rail);
+one area for both sides of an island, or a train across the track: unknown. Overpass is asked once per station (a box
+400 m around it) and the trimmed platforms and rails are kept 30 days in the Durable Object `Rail`; on the trimmed OSM
+data of 's-Hertogenbosch, Eindhoven, Breda and Tilburg (`relay/test-rail/`) every numbered platform gets a side, the two
+sides of each island opposite, and 's-Hertogenbosch 1 (at the station hall, east) "right" going north. Rules in
+`ios/App/DoorSide.swift` (tests `DoorSideTests`, vectors `docs/door-side-vectors.json`), asked by `DoorSideStore`
+from `TripManager.noteRideDetails` (the leg's own train trip, its platform at your stop and the stop before; again only
+when those change, never while the alarm rings, a failed one again after 5 min).
+
+- [x] **"Exit on the left · platform 4".** Under "your stop" in Stops ahead, in the change card ("Get off at Den
+      Bosch: exit on the left · platform 3"), on the alarm screen, in the wake alarm's and the get-ready notification's
+      text, and on the lock screen's ride line ("platform 4 · exit on the left"). "Exit on both sides", "(estimate)" when
+      the relay isn't sure; nothing when it doesn't know. **Android 0.10.6:** `ride/DoorSide.kt` (`DoorSideTest`, the same
+      vectors), `TripStop.track` from the trip answer, `RideService.doorLook` on the ride's minute tick, `RideState.doorSide`
+      in the ride card, the change card, the ride notification, the alarm and the get-ready notification.
 
 ## iOS 0.42.8
 

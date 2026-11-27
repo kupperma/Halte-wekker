@@ -243,7 +243,7 @@ object TransitParse {
             val la = o.d("lat") ?: return null
             val lo = o.d("lon") ?: return null
             return TripStop(o.s("name") ?: "", GeoPoint(la, lo), o.t("arrival"), o.t("departure"), o.t("scheduledDeparture"), o.b("cancelled") ?: false,
-                o.t("scheduledArrival"))
+                o.t("scheduledArrival"), o.s("track") ?: o.s("scheduledTrack"))
         }
         var tripCancelled = false
         for (l in legs) {

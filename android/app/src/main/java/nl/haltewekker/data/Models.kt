@@ -118,7 +118,9 @@ data class TripStop(val name: String, val point: GeoPoint, val arrival: Double?,
                     /** (A4) The planned departure and whether the live data says it's cancelled there (the delay alarm). */
                     val scheduledDeparture: Double? = null, val cancelled: Boolean = false,
                     /** (A8.1, iOS 0.40.1) the planned arrival there (`BusFusion`'s timetable speed, timing points). */
-                    val scheduledArrival: Double? = null)
+                    val scheduledArrival: Double? = null,
+                    /** (0.10.6) the platform there (live, else planned): where you get out (`DoorSide`). */
+                    val track: String? = null)
 
 /** The kind of vehicle, for its colour (iOS `VehicleKind`). */
 enum class VehicleKind {

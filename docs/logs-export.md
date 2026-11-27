@@ -218,7 +218,7 @@ The same switches, words and rules, so the relay and the replay treat both alike
 ### Less battery and data on long rides (0.42.9)
 
 What's new in 0.42.9 (`ios/App/RideSaver.swift`, tests `RideSaverTests` against `docs/battery-vectors.json`; Android
-0.10.6 `ride/RideSaver.kt`, `RideSaverTest`, the same vectors). New lines in the ride log:
+0.10.7 `ride/RideSaver.kt`, `RideSaverTest`, the same vectors). New lines in the ride log:
 
 - `gps · rough on a long ride, the vehicle confirmed: 100 m, every 300 m (31.2 km from the stop · 24 min)`: the rough
   tier is on (`RideAccuracy`): two "still the same one?" looks in a row passed in the last 10 minutes, the nearest you

@@ -127,7 +127,7 @@ class RideService : Service() {
     private var tick: Job? = null
     private var lastNotify = 0.0
     private var lastPhase: Phase? = null
-    // (0.10.6, iOS 0.42.9 `RideSaver`) the notification's cadence: what it said, its meaningful part, the distance
+    // (0.10.7, iOS 0.42.9 `RideSaver`) the notification's cadence: what it said, its meaningful part, the distance
     private var shownSay = ""
     private var shownKey = ""
     private var shownLook = ""
@@ -292,7 +292,7 @@ class RideService : Service() {
         if (!hasLocation() || ms == intervalMs) return
         intervalMs = ms
         lm.removeUpdates(listener)
-        // (0.10.6, iOS 0.42.9 `RideAccuracy`) the rough tier: the network provider every 20 s (300 m), and the fixes
+        // (0.10.7, iOS 0.42.9 `RideAccuracy`) the rough tier: the network provider every 20 s (300 m), and the fixes
         // others ask for; the GPS chip only when there's no network provider (then once a minute)
         val reduced = ms == RideAccuracy.REDUCED_MS
         val minMetres = if (reduced) RideAccuracy.REDUCED_FILTER.toFloat() else if (ms > 5000) 75f else 0f
@@ -378,7 +378,7 @@ class RideService : Service() {
         notifyRide(force = false)
     }
 
-    /** (0.10.6, iOS 0.42.9) Where you stand, waiting for the next ride: a new spot once you move (iOS `TransferPolicy.update`). */
+    /** (0.10.7, iOS 0.42.9) Where you stand, waiting for the next ride: a new spot once you move (iOS `TransferPolicy.update`). */
     private fun noteWaitAnchor(f: Fix) {
         if (!f.accuracy.isFinite() || f.accuracy < 0 || f.accuracy >= 150) return
         val a = waitAnchor
@@ -482,7 +482,7 @@ class RideService : Service() {
                 // (A7, iOS 0.39.1) on another line than planned: is its own GPS with you (the wrong bus)?
                 wrongBusLook(now)
                 val v = RideStore.state.value?.vehicleTripId ?: leg.tripId
-                // (0.10.6, iOS 0.42.9 `RideNet`) its live times every 2 minutes far from the stop, every 45 s near it
+                // (0.10.7, iOS 0.42.9 `RideNet`) its live times every 2 minutes far from the stop, every 45 s near it
                 val tripEvery = RideStore.state.value?.let { cur ->
                     RideNet.tripEvery(RideNet.near(cur.legArrival?.let { it - now }, cur.distance,
                         WakeRule.gpsWakeMetres(cur.wakeMetres, WakeBookStore.effective(app.store.settings.value.wake), leg.isTrain), cur.phase != Phase.SLEEPING))
@@ -502,6 +502,7 @@ class RideService : Service() {
                         wakeLive = w.arrival?.takeIf { w.live && !w.saved }?.let { it to Iso.now() }
                         RideStore.update(this) { it.copy(eta = w.arrival ?: it.eta, nextStop = w.nextStop, delayMin = w.delayMin) }
                         wakeBeforeAt = w.beforeAt
+                        if (!w.saved && w.trip != null) doorLook(w.trip, leg)
                         checkGetReady(w, now)
                         if (!w.saved && w.trip != null) RideStore.state.value?.let { st -> if (RideCacheStore.due(v, now)) RideCacheStore.put(this, v, w.trip, st.startedAt, now) }
                     }
@@ -511,7 +512,7 @@ class RideService : Service() {
                     scope.launch { platformLook(now) }
                     scheduleBackup()
                 }
-                gpsTier(now)                    // (0.10.6: time brings the stop, or the next ride, near without a fix)
+                gpsTier(now)                    // (0.10.7: time brings the stop, or the next ride, near without a fix)
                 notifyRide(force = false)
                 // (A3) the ride's network tick: friends get your trip (and their trips and lines come in), no loop of its own
                 nl.haltewekker.friends.FriendTravelShare.tick(applicationContext)
@@ -597,7 +598,8 @@ class RideService : Service() {
         choice.clear(); chooseJob?.cancel(); chooseJob = null
         Notifications.cancelTag(this, Notifications.ASK_TAG, Notifications.NEWS_ID + 3)
         gpsRuns = emptyMap(); rivalAt = 0.0; departure = null
-        RideStore.update(this) { it.copy(choosing = emptyList(), ask = null, otherAtStop = null, wrongBus = null, readyTold = false, nextStop = null, delayMin = null) }
+        RideStore.update(this) { it.copy(choosing = emptyList(), ask = null, otherAtStop = null, wrongBus = null, readyTold = false, nextStop = null, delayMin = null,
+            doorSide = null, doorKey = null) }
         val s = RideStore.state.value ?: return
         look.reset()
         etaAt = 0.0
@@ -609,7 +611,7 @@ class RideService : Service() {
                     ringMinutes = null, reckoning = false, changeArrived = now, changeFromVehicle = s.vehicleTripId, quietLeg = false, legStartMetres = null)
             }
             requestLocation(RideGPS.intervalMs(false))
-            waitAnchor = null                   // (0.10.6) standing at the change counts from here
+            waitAnchor = null                   // (0.10.7) standing at the change counts from here
             scheduleBackup()
         } else {
             RideStore.update(this) { it.copy(phase = Phase.FINISHED) }
@@ -692,7 +694,7 @@ class RideService : Service() {
     }
 
     /**
-     * The ongoing notification, again (0.10.6, iOS 0.42.9 `ActivityCadence`): what it says (the phase, the change
+     * The ongoing notification, again (0.10.7, iOS 0.42.9 `ActivityCadence`): what it says (the phase, the change
      * miss) at once; a meaningful change (the arrival minute, the next stop, the delay, the vehicle, the change line)
      * at most once a minute far from the stop; the distance alone every 3 minutes; anything every 20 s in the last 5
      * minutes. A change held back goes later by itself.
@@ -1008,6 +1010,39 @@ class RideService : Service() {
 
     // MARK: (A8, iOS 0.39) get ready, the saved rides, the change guide
 
+    private var doorAsking = false
+    private var doorTried: Pair<String, Double>? = null      // a question that got no answer, and when: again after 5 min
+
+    /**
+     * (0.10.6) Which side you get out (`DoorSide`, the relay's `/rail/v1/side`): asked once this train leg's trip says
+     * the platform at your stop, again only when that (or the stop before) changes; never while the alarm rings.
+     */
+    private fun doorLook(t: TransitParse.LiveTrip, leg: nl.haltewekker.data.Ride) {
+        val s = RideStore.state.value ?: return
+        val to = leg.to ?: return
+        if (s.phase == Phase.ALARM || s.phase == Phase.FINISHED || doorAsking) return
+        val codes = nl.haltewekker.friends.NSCodes.get(this)
+        val code = codes.code(leg.toStop) ?: codes.nearest(to, 600.0)?.code
+        val a = DoorSide.ask(leg.isTrain, t.stops, to, code) ?: return
+        if (a.key == s.doorKey) return
+        val now = Iso.now()
+        doorTried?.let { (k, at) -> if (k == a.key && now - at < 300) return }
+        doorTried = a.key to now
+        doorAsking = true
+        val index = s.index
+        scope.launch {
+            try {
+                val r = nl.haltewekker.data.Net.get("${nl.haltewekker.friends.FriendRelay.BASE}/rail/v1/side?${a.query()}")
+                val line = if (r.ok) DoorSide.line(DoorSide.parse(r.text), a.track) else null
+                // a busy relay or no network: asked again on a later tick
+                if (r.ok || r.status in 400..499) RideStore.update(this@RideService) { cur ->
+                    if (cur.index != index) cur else cur.copy(doorSide = line, doorKey = a.key)
+                }
+                if (r.ok) FieldLog.ride("exit side · ${a.station} platform ${a.track}: ${line ?: "not known"}")
+            } finally { doorAsking = false }
+        }
+    }
+
     /** The quiet "Get ready" once the vehicle is at the stop before yours, before the alarm rang (`GetReady`). */
     private fun checkGetReady(w: OnBoardLook.WakeTrip, now: Double) {
         val s = RideStore.state.value ?: return
@@ -1018,7 +1053,7 @@ class RideService : Service() {
         RideStore.update(this) { it.copy(readyTold = true) }
         val (t, b) = GetReady.words(leg.toStop, w.arrival?.let { it - now })
         FieldLog.ride("get ready · at ${w.before ?: "the stop before yours"} · ${leg.toStop} next")
-        Notifications.quiet(this, GetReady.id(s.startedAt, s.index), t, b, s)
+        Notifications.quiet(this, GetReady.id(s.startedAt, s.index), t, DoorSide.withLine(b, s.doorSide), s)
     }
 
     /** Each planned ride's trip answer saved on the phone (at most every 2 minutes a ride, 4 rides). */

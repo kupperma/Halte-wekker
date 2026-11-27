@@ -1451,3 +1451,42 @@ stores `MusicShareStore` on each.
   and a link get, the `music` JSON, a travel state with it (`{"eta":1800000960,…,"music":{…},"state":"riding",…}`),
   three iTunes queries and five picks from one answer, and the relay's answer to a Last.fm reply (playing, and not).
 
+
+## As built: the live page's sheet, the rest of the trip, your picture (relay 2026-11-27, Android 0.10.6, iOS 0.42.9)
+
+### The page (`relay/live.js`, `relay/live-app.js`)
+- On a phone the card is a bottom sheet with three snaps: **peek** (the header and the big time, about 35 % of the
+  visible height), **half** (55 %) and **full** (92 %, the map still showing above). The whole header (handle, picture,
+  name; at least 56 px) drags it, a flick goes on to the next snap, it stops softly past the ends, and a tap on it
+  steps peek → half → full → peek. Until it's full a swipe on the body moves the sheet; at full the body scrolls inside
+  it (and a pull down from its top moves the sheet again). The page itself never scrolls: `body` is fixed, the sheet
+  sizes itself from `visualViewport` (100dvh without it), and the message box is the sheet's bottom bar, kept above the
+  keyboard. The (i) and "Open in Haltewekker" sit below the browser's own bar (`env(safe-area-inset-top)` + 10 px).
+  From 900 px it stays the side panel.
+- The map draws the rest of the trip: the current ride (the state's `shape` or stops, else its leg's own `shape`), each
+  later ride in its colour from its leg's `shape` (dashed when that is only its two ends), walks as grey dots, the gaps
+  between known legs dotted (dashed in a ride's colour across a ride with no road), change points as rings, the end of
+  the last known leg as the green dot with its name. Waiting or at a change, a `pos` with `src` "phone" is the sharer:
+  a dot with their picture or initial, the stop they walk to ringed; a "gps" `pos` is the vehicle. Framed together on
+  each new leg; "⌖" frames it again.
+
+### Payload v2 additions (each optional; older pages ignore them)
+- `legs[i].shape`: that leg's road, encoded as `shape`, from the walk before the current ride on: the current ride's
+  (only when the state has no `shape` or `stops`) and the next two rides' cut from their saved road between the leg's
+  two ends (nearest points, as the state's road) and simplified to ≤ 80 points (the same Douglas–Peucker, tolerance
+  doubled); every other leg with known ends: those two points. Over 12 000 bytes the farthest full road goes first
+  (back to its two ends), then all legs' roads, then the state's road, then the stops.
+- `pic`: the version (1, 2, …) of your picture the relay has; the page fetches it once per version.
+
+### Your picture
+- Your Friends picture, when you have one: 128 px, centred square, JPEG at quality 0.7 down to 0.3 until it is at most
+  12 KB, locked with the link's key under AAD `"hw-live-face-v1\n" + token`, put with `POST /live/v1/face
+  {"secret","data"}` (≤ 24 KB; 20 an hour, 5 s apart) when the link is made and again when the picture changes (a failed
+  put waits a minute); then `pic` goes up by one. `GET /live/v1/face?t=<token>&v=<pic>` gives the locked bytes
+  (`application/octet-stream`, an ETag, a day in the browser's cache); gone when the link ends. No picture: nothing.
+
+### Test vectors (`docs/live-link-vectors.json`)
+- `input2` → `state2`: at a change (leg 2, the IC) with no stops of its own, each leg's ends and the saved roads of the
+  rides ahead, the phone's fix and `pic` 2, locked with nonce `909192…9b`; `page2` what the page says. `face`: a
+  66-byte JPEG locked with nonce `808182…8b`. Checked by `relay/test-live.mjs`, `LiveTripV2Test.kt` and
+  `LiveTripV2Tests.swift`.
