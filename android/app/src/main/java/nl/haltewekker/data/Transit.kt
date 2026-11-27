@@ -97,12 +97,22 @@ object Transit {
         }
 
     /** Trips from a spot to a place, soonest first, without the ones a later trip beats. */
-    suspend fun tripsFrom(here: GeoPoint, to: String, keep: Int = 5): List<DoorTrip> {
+    suspend fun tripsFrom(here: GeoPoint, to: String, keep: Int = 5, homeStops: List<NearStop> = emptyList(), home: GeoPoint? = null): List<DoorTrip> {
         val now = Iso.now()
         // (iOS 0.42.8) from 15 minutes back: a late train or bus whose timetable time has passed is in the answer
         val all = plan("${here.lat},${here.lon}", to, LiveKeep.askAt(now, true), count = LiveKeep.count(5, true))
         val speed = nl.haltewekker.travel.HabitStore.pedestrianSpeed() ?: WalkFirst.PLANNER_SPEED
-        return TransitParse.keepUseful(all, now, keep, here, speed) { nl.haltewekker.logs.FieldLog.add(nl.haltewekker.logs.FieldEntry.Kind.NET, it) }
+        val kept = TransitParse.keepUseful(all, now, keep, here, speed) { nl.haltewekker.logs.FieldLog.add(nl.haltewekker.logs.FieldEntry.Kind.NET, it) }
+        // (iOS 0.42.9) home: off at your own home stop when the last ride calls there
+        if (home == null || homeStops.isEmpty()) return kept
+        val own = homeStops.map { HomeAlight.Own(it.id, GeoPoint(it.lat, it.lon)) }
+        return kept.mapIndexed { i, t ->
+            if (i >= 4 || t.last.fromId == "onboard") return@mapIndexed t
+            val stops = try { trip(t.last.tripId)?.stops } catch (_: Exception) { null } ?: return@mapIndexed t
+            HomeAlight.apply(t, stops, own, home, speed)?.also {
+                nl.haltewekker.logs.FieldLog.add(nl.haltewekker.logs.FieldEntry.Kind.NET, "home · off at ${it.last.toStop} (your stop) instead of ${t.last.toStop}")
+            } ?: t
+        }
     }
 
     suspend fun findPlaces(text: String, near: GeoPoint?): List<PlaceHit> {
