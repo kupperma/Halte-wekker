@@ -17,7 +17,12 @@ final class TravelNotes: ObservableObject {
 
     // MARK: settings
 
-    @Published var checkOut: Bool { didSet { d.set(checkOut, forKey: "notes.checkOut") } }
+    @Published var checkOut: Bool {
+        didSet {
+            d.set(checkOut, forKey: CheckOut.settingKey)
+            if !checkOut { clearPending(prefix: "checkout-") }      // (0.42.4) off: nothing still to come
+        }
+    }
     @Published var delayClaim: Bool { didSet { d.set(delayClaim, forKey: "notes.delayClaim") } }
     @Published var works: Bool {
         didSet {
@@ -43,7 +48,10 @@ final class TravelNotes: ObservableObject {
 
     private init() {
         let d = UserDefaults.standard
-        checkOut = d.object(forKey: "notes.checkOut") as? Bool ?? true
+        // (0.42.4) off for everyone, once; on again only by its switch (`CheckOut.atLaunch`)
+        let co = CheckOut.atLaunch(stored: d.object(forKey: CheckOut.settingKey) as? Bool, movedOff: d.bool(forKey: CheckOut.movedOffKey))
+        checkOut = co.on
+        if co.moveOff { d.set(false, forKey: CheckOut.settingKey); d.set(true, forKey: CheckOut.movedOffKey) }
         delayClaim = d.object(forKey: "notes.delayClaim") as? Bool ?? true
         works = d.object(forKey: "notes.works") as? Bool ?? true
         lastHome = d.object(forKey: "notes.lastHome") as? Bool ?? true
@@ -55,6 +63,7 @@ final class TravelNotes: ObservableObject {
         dismissedWorks = Set(d.stringArray(forKey: "notes.worksDismissed") ?? [])
         if let data = d.data(forKey: "notes.worksData") { items = RailWorks.parse(data) }
         recomputeImpacts()
+        if !checkOut { clearPending(prefix: "checkout-") }          // (0.42.4) none left from before, while it's off
     }
 
     // MARK: where you are
@@ -389,7 +398,7 @@ final class TravelNotes: ObservableObject {
 
     /// Reset everything.
     func reset() {
-        student = .none; checkOut = true; delayClaim = true
+        student = .none; checkOut = false; delayClaim = true
         for k in ["notes.checkOut", "notes.delayClaim", "notes.works", "notes.lastHome", "notes.student", "notes.prices", "notes.priceDay",
                   "notes.rides", "notes.worksAt", "notes.worksData", "notes.worksDismissed", "notes.worksTold"] { d.removeObject(forKey: k) }
         rideSeen = [:]; items = []; impacts = []; prices = [:]; lastWay = nil; earlier = [:]; dismissedWorks = []

@@ -3,6 +3,65 @@
 The rules and numbers for each are in [logs-export.md](logs-export.md) › For Android (parity), with the iOS files and
 their tests.
 
+## iOS 0.42.4
+
+From the field report of 27 November ("The on-board detection became worse with the new update. I got on the bus at
+Veghel busstation and expected it to start a trip the moment I got on"): Fastest trip watched the 09:52 305 from
+Biezendijk; you got on an earlier 305 at the bus station, a stop or two before it, and the trip never started while the
+screen kept saying "Go to Veghel, Biezendijk · 2 min walk" with you on the bus past it. Rules in `ios/App/WaitStart.swift`
+(tests `WaitStartTests`); the iOS wiring in `GoStore.checkBoarding` (`ios/App/Go.swift`) and
+`TripManager.boardedHere`; the log lines in [logs-export.md](logs-export.md) › 0.42.4.
+
+What was wrong on iOS (check the same on Android's wait state, `RideService`/`RideChoice`):
+- A bus that wasn't among the ways on screen (an earlier 305) needed the same best fit on two looks in a row **and** a
+  second, independent on-board look (no planned-ride nudge, no stop-departure nudge, sometimes a single fix) to agree on
+  exactly that trip. With the 305 and the 306 on the same road out of Veghel the best flipped between them, and one look
+  without an answer started the count again: it never started.
+- Nothing was looked at while the bus stood at a stop (your GPS speed under 3.5 m/s at that moment).
+- The screen only took "you're moving" from 8 m/s: a bus through town is slower, so it went on planning a walk back to
+  the stop it had passed (and the stops-around-you overview searched again every 250 m on the bus, its requests queued
+  in front of the look at what you're on). Motion & Fitness's live updates belonged to the home screen and stopped
+  while Fastest trip was open.
+
+- [ ] **Moving like a bus or train while waiting** (`WaitStart.moving`/`movingRule`): 30 s at 6 m/s or more in the last
+      2 minutes (a step's speed is the GPS's own, else the distance over the time when it's more than the fixes'
+      accuracy; a gap over 30 s says nothing), so a stop on the way still counts; 10 s with Motion & Fitness saying
+      automotive; never while it says walking, running or cycling under 12 m/s; standing (no step at speed, speed < 2)
+      is "standing".
+- [ ] **Each look** (every 6 s; the 4/8/15/30 s back-off only after 3 minutes at speed with nothing on its way to
+      starting): the matcher's 4 best; for those within `close` (60 s) of the best, whether the trip takes you on
+      (`WaitStart.reaches`: one of its stops from the one nearest to you on, not passed over 2 min ago, within 600 m of
+      the watched ride's stop, a later ride's boarding stop of any way on screen, or the destination; kept 2 min per
+      trip). Looks are counted per trip while it stays within `close` of the best (the 305 counts on while the 306 is
+      best for a look). The pick among those that take you on: the watched ride, then any ride of its line (another
+      departure), then the best fit. Looks needed: by its own GPS (≤ 90 s old) 1 for the watched ride or its line when
+      under `oneLookWatched` (20 s), else 2; by its times alone 1 for the watched ride that close, 2 for its line, 3 for
+      another line.
+- [ ] **Start on the vehicle found** (any departure of the line, any line that gets you there): the way on screen that
+      rides it, else plan on from it (from its next stop at its time there: an earlier bus can mean an earlier train);
+      another line more than 30 min slower than the watched way: not started ("a long way round"). The leg starts where
+      you got on (`WaitStart.repoint`): of its trip's stops up to the one nearest to you, the one nearest to where you
+      started moving at bus speed (a run with a slower fix before it, within 400 m), unless that's within 150 m of the
+      planned stop; the ride's time there; where you get off and the rest stay. During a ride too (a vehicle found after
+      "I'm on it"), never when that would make the leg short (no alarm) where it wasn't.
+- [ ] **The planned ride's time (`TimetableStart`, 2 min before its live departure) never holds a vehicle that was
+      found**: it holds only a start by the timetable alone.
+- [ ] **Sure of one that doesn't take you on** (none within `close` does, the best by its own GPS for 75 s,
+      `WrongBus.gpsFor`): the wrong-bus notification "You’re on the 154 to Schijndel, not your 305" · "It doesn’t go to
+      <destination>. Get off at the next stop, and plan again from there." once for that trip.
+- [ ] **The look belongs to the watching, not to a screen**: it runs while Fastest trip watches whatever is in front
+      (the cards, the stops around you, a sheet, the home) and with the phone locked; Motion & Fitness live while it
+      watches; the stops-around-you overview closes (and doesn't search) once you're at bus speed. A log line when the
+      watching starts and stops, and why.
+- [ ] **The check-out reminder ("Did you check out?", the `checkout-` notifications, also between train companies) is
+      off for everyone** (from the request "Stop giving the 'Did you check out?' notification, it's useless"): off by
+      default, and existing users moved to off once (iOS: `notes.checkOut` set to false under the one-time flag
+      `notes.checkOut.off-0.42.4`, `CheckOut.atLaunch`, tests in `TravelHelpTests`); the switch stays in Settings › Trips
+      & alarm ("Check-out reminder", off) and in the settings search for anyone who wants it back. While it's off nothing
+      is scheduled, and pending ones are taken away at launch and when it's turned off.
+- [ ] **"Walk there" opens the walk with arrows at once** (on the Go to card, at a change, on the boards): Android's
+      `WalkScreen` directly, no map sheet with the turns first; Apple Maps (Android: the maps app) stays in the guide.
+
 ## iOS 0.42.3
 
 From a field log of 27 November. Rules in `ios/App/MissCall.swift` (with `ChangeGuide.swift`) and

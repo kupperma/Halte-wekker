@@ -34,6 +34,16 @@ final class TravelHelpTests: XCTestCase {
         XCTAssertEqual(CheckOut.after, 60)
     }
 
+    func test_checkOut_offForEveryone_once() {
+        // 0.42.4: everyone moves to off once, whatever was stored (on by default before)
+        XCTAssertTrue(CheckOut.atLaunch(stored: nil, movedOff: false) == (on: false, moveOff: true))
+        XCTAssertTrue(CheckOut.atLaunch(stored: true, movedOff: false) == (on: false, moveOff: true))
+        // after the move: off unless you turned it on again yourself
+        XCTAssertTrue(CheckOut.atLaunch(stored: false, movedOff: true) == (on: false, moveOff: false))
+        XCTAssertTrue(CheckOut.atLaunch(stored: true, movedOff: true) == (on: true, moveOff: false))
+        XCTAssertTrue(CheckOut.atLaunch(stored: nil, movedOff: true) == (on: false, moveOff: false))
+    }
+
     func test_checkOut_words() {
         XCTAssertEqual(CheckOut.text(at: "Breda").title, "Did you check out?")
         XCTAssertTrue(CheckOut.text(at: "Breda").body.contains("You’re at Breda"))

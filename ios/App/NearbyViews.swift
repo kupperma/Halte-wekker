@@ -29,7 +29,8 @@ struct NearbyOverview: View {
 
     /// Fastest trip opens on this (not on board, not there yet, not a planned trip, not the demo).
     @MainActor static func opensOn(_ go: GoStore) -> Bool {
-        go.isOpen && !go.arrived && !go.demo && go.onBoard == nil && !go.movingUnknown && go.deadline == nil
+        let riding: Bool = go.movingUnknown || go.atVehicleSpeed           // (0.42.4: at bus speed, not the stops around you)
+        return go.isOpen && !go.arrived && !go.demo && go.onBoard == nil && !riding && go.deadline == nil
             && go.best?.first.fromId != "onboard"
     }
 
