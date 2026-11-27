@@ -336,7 +336,9 @@ struct SettingsTopicPage: View {
         case .trips: TripsSettingsRows()
         case .places: PlacesSettingsRows()
         case .school: SchoolSettingsRows(dismissSettings: dismissSettings)
-        case .friends: FriendsSettingsSection()
+        case .friends:
+            FriendsSettingsSection()
+            MusicShareSection()
         case .map: MapSettingsRows()
         case .notifications: NoticesSettingsRows()
         case .battery: BatterySettingsRows()

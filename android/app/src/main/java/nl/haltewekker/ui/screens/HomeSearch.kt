@@ -115,7 +115,7 @@ fun SearchSheet(s: SearchState, canStart: Boolean, onStart: (DoorTrip, String) -
             val from = Locator.last(context) ?: profile.home?.point ?: break
             s.loading = true
             val n = Iso.now()
-            val got = TransitParse.keepUseful(Transit.plan("${from.lat},${from.lon}", d.planId, n - 120, count = 6), n, 6)
+            val got = TransitParse.keepUseful(Transit.plan("${from.lat},${from.lon}", d.planId, nl.haltewekker.data.LiveKeep.askAt(n, true), count = 9), n, 6)
             s.loading = false; s.asked = true; s.now = Iso.now()
             if (got.isNotEmpty() || s.trips.isEmpty()) s.trips = got
             delay(40_000)

@@ -35,7 +35,7 @@ struct LiveStop: Codable, Equatable {
     var t: Int? = nil
 }
 
-/// (Reserved for "listening now") What you listen to: shown on the page while it's under 10 minutes old.
+/// "Listening now" (`MusicShare`): what you listen to, shown on the page while it’s under 10 minutes old.
 struct LiveMusic: Codable, Equatable {
     var title: String
     var artist: String? = nil

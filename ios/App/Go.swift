@@ -544,7 +544,7 @@ final class GoStore: ObservableObject {
            let la = cur.first.fromLat, let lo = cur.first.fromLon,
            loc.distance(from: CLLocation(latitude: la, longitude: lo)) < 200, (trip?.currentSpeed ?? 0) < 2.5 {
             overdue = true
-            others = Array(ok.filter { $0.first.tripId != cur.first.tripId }.sorted(by: Self.sooner).prefix(5))
+            others = Self.nextOnes(ok.filter { $0.first.tripId != cur.first.tripId })
             error = nil
             updated = now
             return
@@ -558,7 +558,7 @@ final class GoStore: ObservableObject {
             let left = cur.first.departure.timeIntervalSince(now)
             if left > 60, m > 60, m * 1.3 / 1.7 <= left {
                 hurry = (Int(m), Int(left / 60))
-                others = Array(ok.filter { $0.first.tripId != cur.first.tripId }.sorted(by: Self.sooner).prefix(5))
+                others = Self.nextOnes(ok.filter { $0.first.tripId != cur.first.tripId })
                 error = nil
                 updated = now
                 return
@@ -609,7 +609,7 @@ final class GoStore: ObservableObject {
         }
         let prev = best
         best = p
-        others = Array(ok.filter { $0.first.tripId != p.first.tripId }.sorted(by: Self.sooner).prefix(5))
+        others = Self.nextOnes(ok.filter { $0.first.tripId != p.first.tripId })
         error = nil
         if quiet { return }
         if watchedFirst == nil { watchedFirst = p.first.departure }
@@ -700,6 +700,12 @@ final class GoStore: ObservableObject {
         earlierCache = earlierCache.filter { now.timeIntervalSince($0.value.at) < 90 }
         earlierCache[t.id] = (now, list)
         return list
+    }
+
+    /// (0.42.8) The next ones under the card: the five that get you there soonest, shown by when they leave (live).
+    static func nextOnes(_ l: [DoorTrip]) -> [DoorTrip] {
+        let five: [DoorTrip] = Array(l.sorted(by: sooner).prefix(5))
+        return five.sorted { $0.first.departure < $1.first.departure }
     }
 
     /// Which gets you there first: the earliest arrival; the same arrival, then fewer changes, then the one that leaves later
@@ -833,7 +839,7 @@ final class GoStore: ObservableObject {
         chosen = t; chosenMisses = 0; chosenByHand = true; toldBeats = []
         var rest: [DoorTrip] = others
         if let p = best, p.id != t.id { rest.insert(p, at: 0) }
-        others = Array(rest.filter { $0.first.tripId != t.first.tripId }.sorted(by: Self.sooner).prefix(5))
+        others = Self.nextOnes(rest.filter { $0.first.tripId != t.first.tripId })
         best = t
         overdue = false; hurry = nil; missed = nil; error = nil
         told[t.first.tripId] = t.first.live ? t.first.delay : 0

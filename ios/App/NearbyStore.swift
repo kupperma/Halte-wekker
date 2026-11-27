@@ -102,6 +102,10 @@ final class NearbyStore: ObservableObject {
     // at most `Nearby.maxConcurrent` requests from here at once
     private var inFlight = 0
     private var waiting: [CheckedContinuation<Void, Never>] = []
+    // (0.42.8) newer live times of the trips (the stops' boards, Fastest trip's own ways), and when each departure's
+    // own answer came (an update older than that doesn't count)
+    private var updates: [String: NearbyLive.Update] = [:]
+    private var answered: [String: Date] = [:]
 
     /// Asked again after this long on screen.
     static let refreshAfter: TimeInterval = 300
@@ -166,6 +170,8 @@ final class NearbyStore: ObservableObject {
             ways = []
             boards = [:]
             boardAt = [:]
+            updates = [:]
+            answered = [:]
             radius = Nearby.searchRadii[0]
         }
         busy = true
@@ -340,6 +346,9 @@ final class NearbyStore: ObservableObject {
             }
             exit()
             boardAt[id] = Date()
+            // (0.42.8) the board's live times freshen the stop's own departures too (by trip id), not only the others
+            let asOf = Date()
+            freshen(all.map { NearbyLive.update(board: $0.tripId, time: $0.time, scheduled: $0.scheduled, live: $0.live, asOf: asOf) })
             let trips: [DoorTrip] = ways.first { $0.id == id }?.trips ?? []
             boards[id] = Self.sameWay(all, as: trips)
             boardCount = boards[id]?.count
@@ -379,8 +388,10 @@ final class NearbyStore: ObservableObject {
     /// spot (`planned` nil) its walk is the planner's; planned from a stop (`planned`: that stop), the walk to the stop
     /// it gets on at is put first. One per departure: the newest answer.
     @discardableResult
-    private func put(_ t: DoorTrip, planned gid: String?) -> Int? {
-        guard !t.rides.isEmpty, let h = here else { return nil }
+    private func put(_ t0: DoorTrip, planned gid: String?) -> Int? {
+        guard !t0.rides.isEmpty, let h = here else { return nil }
+        // (0.42.8) from your spot: the walk by its distance, a short first hop swapped for the walk to the next stop
+        let t: DoorTrip = gid == nil ? Transit.walkFixed(t0, here: h, now: Date()).trip : t0
         let f: Ride = t.first
         guard f.fromId != "onboard" else { return nil }
         let b = Nearby.Boarding(id: f.fromId, name: f.fromStop, lat: f.fromLat, lon: f.fromLon, rail: f.isTrain)
@@ -400,6 +411,7 @@ final class NearbyStore: ObservableObject {
         } else if f.walkBefore > 0 {
             ways[i].walked = min(ways[i].walked ?? Int.max, f.walkBefore)
         }
+        answered[f.tripId] = Date()
         if let j = ways[i].trips.firstIndex(where: { $0.first.tripId == f.tripId }) {
             ways[i].trips[j] = mine
         } else {
@@ -407,6 +419,48 @@ final class NearbyStore: ObservableObject {
         }
         if ways[i].check == .unasked || ways[i].check == .failed { ways[i].check = .done }
         return i
+    }
+
+    // MARK: (0.42.8) live times
+
+    /// Newer live times (by trip id): every way with one of those trips is freshened, and the ranking, the colours,
+    /// Fastest and Surest, the leave-in and the whole-trip bars follow.
+    func freshen(_ more: [NearbyLive.Update]) {
+        let merged: [String: NearbyLive.Update] = NearbyLive.merge(updates, more)
+        guard merged != updates else { return }
+        updates = merged
+        var changed = false
+        for i in ways.indices {
+            let before: [DoorTrip] = ways[i].trips
+            let after: [DoorTrip] = before.map { fresh($0) }
+            if after != before { ways[i].trips = after; changed = true }
+        }
+        guard changed else { return }
+        sures = [:]
+        recompute()
+    }
+
+    /// Fastest trip's own ways (fresher: it looks every minute or so), as live times of their trips.
+    func freshen(from trips: [DoorTrip], asOf: Date) {
+        var more: [NearbyLive.Update] = []
+        for t in trips {
+            for r in t.rides where r.fromId != "onboard" { more.append(NearbyLive.update(Self.leg(r), asOf: asOf)) }
+        }
+        freshen(more)
+    }
+
+    private static func leg(_ r: Ride) -> NearbyLive.Leg {
+        NearbyLive.Leg(tripId: r.tripId, departure: r.departure, scheduledDeparture: r.scheduledDeparture, arrival: r.arrival,
+                       scheduledArrival: r.scheduledArrival, live: r.live, toStop: r.toStop)
+    }
+
+    /// A way with the live times known now.
+    private func fresh(_ t: DoorTrip) -> DoorTrip {
+        guard !t.rides.isEmpty, t.rides.contains(where: { updates[$0.tripId] != nil }) else { return t }
+        let legs: [NearbyLive.Leg] = t.rides.map { Self.leg($0) }
+        let r = NearbyLive.trip(start: t.start, end: t.end, legs: legs, updates: updates, answered: answered[t.first.tripId])
+        let rides: [Ride] = zip(t.rides, r.legs).map { pair in pair.0.retimed(departure: pair.1.departure, arrival: pair.1.arrival, live: pair.1.live) }
+        return DoorTrip(rides: rides, start: r.start, end: r.end)
     }
 
     // MARK: what's shown
@@ -535,5 +589,16 @@ final class NearbyStore: ObservableObject {
         s.fallback = fallback
         s.cooling = cooling
         return s
+    }
+}
+
+extension Ride {
+    /// (0.42.8) The same ride at other (live) times.
+    func retimed(departure d: Date, arrival a: Date, live l: Bool) -> Ride {
+        if d == departure && a == arrival && l == live { return self }
+        return Ride(tripId: tripId, line: line, name: name, isTrain: isTrain, departure: d, scheduledDeparture: scheduledDeparture,
+                    arrival: a, scheduledArrival: scheduledArrival, fromStop: fromStop, fromId: fromId, toStop: toStop, platform: platform,
+                    live: l, cancelled: cancelled, walkBefore: walkBefore, num: num, headsign: headsign, plannedPlatform: plannedPlatform,
+                    fromLat: fromLat, fromLon: fromLon, toLat: toLat, toLon: toLon, agency: agency, walkMetres: walkMetres)
     }
 }

@@ -236,6 +236,15 @@ What's new in 0.42.9 (`ios/App/TrainRules.swift` `stayOn`/`headline`, `ios/App/B
 - Without headphones the alarm no longer goes out loud after a minute (only with Settings › Trips & alarm › "Out loud
   if I don't stop it (after 1 min)", off for everyone).
 
+### Live times on the stops around you, late trains kept, walks by their distance (0.42.8)
+
+What's new in 0.42.8 (`ios/App/NearbyLive.swift`, `ios/App/PlanFix.swift`; tests `NearbyLiveTests`, `PlanFixTests`;
+Android parity in [android-todo.md](android-todo.md) › iOS 0.42.8). New lines in the net log:
+
+- `walk · planner 10 min (780 m) · yours 4 min (1.35 m/s) · used yours` (or `used the planner's`): once per plan, the
+  first way's walk to its first stop as the planner timed it and by its distance.
+- `walk · straight to Veghel, Busstation (7 min) instead of the 1 there`: a short first hop swapped for the walk.
+
 ### The school wake-up when you're already going, and "Be there at …" per day (0.42.6)
 
 What's new in 0.42.6 (`ios/App/SchoolArrive.swift`, `ios/App/School.swift`; tests `SchoolArriveTests`; Android parity
