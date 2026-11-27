@@ -1452,7 +1452,7 @@ stores `MusicShareStore` on each.
   three iTunes queries and five picks from one answer, and the relay's answer to a Last.fm reply (playing, and not).
 
 
-## As built: the live page's sheet, the rest of the trip, your picture (relay 2026-11-27, Android 0.10.6, iOS 0.42.9)
+## As built: the live page's sheet, the rest of the trip, your picture (relay 2026-11-27, Android 0.10.8, iOS 0.42.10)
 
 ### The page (`relay/live.js`, `relay/live-app.js`)
 - On a phone the card is a bottom sheet with three snaps: **peek** (the header and the big time, about 35 % of the
