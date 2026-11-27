@@ -112,6 +112,8 @@ fun RideScreen(s: RideState, onBack: () -> Unit) {
                 LinePill(s.vehicleLine ?: leg.line, leg.kind); Spacer(Modifier.width(8.dp))
                 Text("to ${leg.toStop}", color = DS.t.text, fontWeight = FontWeight.SemiBold)
             }
+            // (0.10.6) which side you get out at your stop
+            s.doorSide?.let { Text(it, color = DS.t.accentText, fontWeight = FontWeight.SemiBold) }
             val d = s.distance
             Text(if (d != null) "${Fmt.metres(d)} to go" else "Waiting for GPS…", style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold, color = DS.t.text)
@@ -143,6 +145,8 @@ fun RideScreen(s: RideState, onBack: () -> Unit) {
         // (A8, iOS 0.39) the change ahead: platforms, walk, minutes; a miss with the one you make instead
         if (s.changeLine != null || s.changeMiss != null || s.platformNote != null) Card {
             Header("Your change")
+            // (0.10.6) getting off for it: which side
+            if (!(s.index > 0 && s.vehicleTripId == null && s.phase == Phase.SLEEPING)) s.doorSide?.let { Text("Get off at ${leg?.toStop ?: "your stop"}: ${it.replaceFirstChar { c -> c.lowercase() }}", color = DS.t.text) }
             // (0.10.1) a train of the trip got another platform, or is cancelled
             s.platformNote?.let { Text(it, color = DS.t.warning, fontWeight = FontWeight.SemiBold) }
             s.changeMiss?.let { Text(it, color = DS.t.warning, fontWeight = FontWeight.SemiBold) }

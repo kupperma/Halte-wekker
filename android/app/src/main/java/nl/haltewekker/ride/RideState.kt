@@ -87,6 +87,10 @@ data class RideState(
      *  how far from its stop this leg started (its first good fix). */
     val quietLeg: Boolean = false,
     val legStartMetres: Double? = null,
+    /** (0.10.6) which side you get out at this leg's stop ("Exit on the left · platform 4", `DoorSide`), and what was
+     *  asked for it (the station, platform and stop before: asked again only when that changes). */
+    val doorSide: String? = null,
+    val doorKey: String? = null,
 ) {
     val leg: Ride? get() = trip.rides.getOrNull(index)
     val wakeMetres: Double get() = (wakeKm.getOrNull(index) ?: WakeRules.BUS_KM) * 1000
