@@ -250,7 +250,9 @@ minute while it says the same):
   started, but couldn't plan on from it.
 - In the ride log: `ride wait · watching on · its look at what you get on runs (in front)` (`again`, `behind the
   screen`) and `ride wait · watching off · closed` (`you're there`, `the trip you waited for has gone`, `after 3 hours`):
-  the look runs from one to the other whatever is on screen, and with the phone locked.
+  the look runs from one to the other whatever is on screen, and with the phone locked. Android 0.10.3 writes the same
+  lines (from `RideService`), with `the trip started`, `stopped from the notification` and `the service ended` as
+  reasons too, and `no candidates · held by standing` while you stand (it asks nothing then).
 - `ride platform · 08:02 Intercity to Breda at Eindhoven: 7 (was 5)` (or `: cancelled`): a watched train of your trip
   (any train of it, `PlatformWatch`) changed platform against the plan or was cancelled; told at once (quietly while
   you're asleep on the ride). Unchanged platforms aren't logged.

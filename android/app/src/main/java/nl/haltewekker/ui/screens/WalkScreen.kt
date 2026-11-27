@@ -88,7 +88,7 @@ object WalkNav {
     fun open(t: WalkTarget) { target.value = t }
     fun close() { target.value = null }
 
-    /** The phone's maps app at the stop (the walk sheet's "Open in maps", kept beside the arrows). */
+    /** The phone's maps app at the stop ("Open in maps", inside the walk). */
     fun openInMaps(context: Context, t: WalkTarget) {
         val q = Uri.encode(t.name)
         val uri = Uri.parse("geo:${t.to.lat},${t.to.lon}?q=${t.to.lat},${t.to.lon}($q)")
@@ -99,14 +99,13 @@ object WalkNav {
 /** "your bus", "your train" for the walk's "Your bus leaves in 6 min". */
 fun walkWhat(r: nl.haltewekker.data.Ride) = if (r.isTrain) "your train" else "your bus"
 
-/** The walk sheet's two buttons: "Walk with arrows" above "Open in maps" (iOS 0.41). */
+/**
+ * "Walk there" (Fastest trip's chosen card, at a change, a nearby stop's sheet): (0.10.3, iOS 0.42.4) the walk with
+ * arrows at once (`WalkScreen`), no sheet first; "Open in maps" stays inside the walk.
+ */
 @Composable
 fun WalkThere(t: WalkTarget, modifier: Modifier = Modifier) {
-    val context = LocalContext.current
-    Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Button(onClick = { WalkNav.open(t) }, modifier = Modifier.weight(1f)) { Text("↑ Walk with arrows") }
-        OutlinedButton(onClick = { WalkNav.openInMaps(context, t) }) { Text("Open in maps") }
-    }
+    Button(onClick = { WalkNav.open(t) }, modifier = modifier.fillMaxWidth()) { Text("↑ Walk there") }
 }
 
 /**

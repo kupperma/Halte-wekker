@@ -244,6 +244,70 @@ byte for byte, and its test vectors as JUnit tests before any screen:
 
 ### A10 — the nearby stops, walking with arrows, Transitous's cool-down (0.10.0, code 13) — built ("As built A10" says how)
 
+### A10.3 — getting on wherever you get on, iOS 0.42.4's boarding fix (0.10.3, code 16) — built ("As built A10.3" says how)
+
+## As built A10.3 (0.10.3, version code 16): getting on wherever you get on
+
+From iOS 0.42.4 (the field report of 27 November: on an earlier 305 at Veghel bus station, a stop before the planned
+Biezendijk, and the trip never started). Before this Android had no watching on Fastest trip at all: a trip started
+only by "I'm on it" (or by itself after leaving a home stop or School).
+
+**The rules (`ride/WaitStart.kt`, `WaitStartTest` with every iOS `WaitStartTests` vector).** `moving` (30 s at 6 m/s or
+more in the last 2 minutes, a stop on the way included; a step's speed is the GPS's own, else the distance over the
+time when it's more than the fixes' accuracy; a gap over 30 s says nothing), `movingRule` (never while the step
+detector says walking under 12 m/s; standing is "standing"; 10 s with "automotive", which Android never says: no Play
+Services, so by speed only), `step` (looks counted per trip while it fits within 60 s of the best; the pick among those
+that take you on: the watched ride, then any ride of its line, then the best; 1 look by its own GPS for the watched ride
+or its line under 20 s, else 2; by its times 1 / 2 / 3; sure of one that doesn't take you on by its own GPS for 75 s:
+the wrong bus once), `reaches`, `startedMoving`, `boardedAt`, `repoint`, `logLine`, `onLine`/`offLine`, `logDue`.
+
+**The watching belongs to `RideService`, not to a screen (`ride/WaitWatch.kt`, `WaitWatchTest`; `ride/WaitLook.kt`).**
+Fastest trip (`PlanScreen`) puts the ways on screen in `WaitStore` (the chosen card first) and starts the service once
+with `ACTION_WATCH` while the app is in front (a location foreground service, the same type and permissions as a ride;
+nothing new in the manifest). From then on it watches whatever is in front (the cards, the stops around you, the walk,
+another screen) and with the phone locked: GPS every 3 s, a look every 6 s (`WaitWatch.nextLook`: the back-off 4/8/15/30
+s only after 3 minutes at bus speed with nothing on its way to starting), and no request while you stand (the call is
+"standing" whatever is around). Each look (`WaitLook`): Transitous's live map around you, each vehicle's own GPS (OVapi,
+NS for a planned train), the matcher, the 4 best with how old their GPS is and how long it has been with you, and for
+those within 60 s of the best whether their trip takes you on (to the watched ride's stop, a later ride's stop of any way
+on screen, or the destination; kept 2 minutes per trip). Started: the way on screen that rides it, else the planner
+from its next stop at its time there (else from here) for a way that rides it; another line more than 30 min later than
+the watched way: not started ("a long way round"); its stop where you are: not started. The first leg starts where you
+got on (`repoint`: "On board" at its stop, its time there), then the ride as after "I'm on it" with the vehicle known
+(`auto`), the others within 60 s still chosen between (`RideChoice`), and a notification "You’re on the bus 305 · Your
+trip to School started by itself. It rings before …". It stops: back from Fastest trip (`closed`), a trip starts (`the
+trip started`), `you're there` (400 m), `the trip you waited for has gone` (20 min after the watched departure, under
+300 m moved), `after 3 hours`, or the notification's Stop watching; stopped by itself it doesn't start again until
+Fastest trip opens again. The auto-start's look after leaving a stop doesn't run while it watches.
+
+**During a ride (`RideService.boardedHere`, iOS `TripManager.boardedHere`).** A vehicle found after "I'm on it" on the
+first leg: got on at another stop of its trip than planned (more than 150 m), the leg starts there (its time there);
+never when that would make a normal leg short (no alarm). `ride board · bus 305·2718 got on at its stop 2 of 18, 1040 m
+from where the leg was planned from`.
+
+**The planned ride's time (`TimetableStart`)** already held only a start by the timetable alone (`!f.live`): a vehicle
+found live or by its GPS was never held. Unchanged.
+
+**The screens.** At bus speed (`WaitStore.atVehicleSpeed`) the stops around you close and don't search
+(`WaitWatch.nearbySearches`), Fastest trip doesn't plan a walk from where you are and says "You’re moving like a bus or
+train: finding the one you’re on…"; otherwise "Watching: the trip starts by itself once you’re on board, wherever you
+get on." "Walk there" (Fastest trip's chosen card, at a change, a nearby stop's sheet) opens `WalkScreen` at once;
+"Open in maps" is inside the walk.
+
+**The log.** `wait · moving 9 m/s 40 s · candidates bus 305·2718 gps 12 s fits, … · start bus 305·2718` once per look
+while something moves (else once a minute while the call stays), `wait · bus 305·2718 · got on at its stop 2 of 18, …`,
+`wait · bus 305·2718 · not started: …`, `wait · wrong bus · on bus 154·0855 to Schijndel, planned 305 · …`, and in the
+ride log `wait · watching on · its look at what you get on runs (in front)` / `wait · watching off · <why>`.
+
+### Calls made in A10.3 (the user can correct)
+
+- The watching is Android's first: started by Fastest trip having a way on screen, stopped by going back from it. A
+  persistent notification "Watching your way to School" with Stop watching shows meanwhile (Android's foreground
+  service needs one).
+- While you stand nothing is asked of Transitous (iOS's look lists the candidates then too); the log line says
+  "no candidates · held by standing".
+- The wrong bus while watching is a notification only (`wrongbus-wait-…`), no card: no ride screen runs yet.
+
 ## As built A10 (0.10.0, version code 13): the stops around you, walking with arrows, the cool-down
 
 **Transitous's cool-down (`data/Polite.kt`, `PoliteTest`; iOS `Net.Polite`).** Every `Transit.ask` takes a place: at

@@ -120,6 +120,8 @@ private fun Root() {
     var friendsFull by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(ride == null) { if (ride == null && screen == Screen.RIDE) screen = Screen.HOME }
+    // (0.10.3, iOS 0.42.4) the trip started by itself while Fastest trip watched: the ride screen takes over
+    LaunchedEffect(ride?.startedAt) { if (ride?.auto == true && screen == Screen.PLAN) screen = Screen.RIDE }
     // made smaller holds while it doesn't ring: the alarm opens the ride full again (iOS RideBar.keepsSmall)
     LaunchedEffect(ride?.phase) { if (ride?.phase == Phase.ALARM && screen != Screen.SETUP && screen != Screen.TEST_SETUP) screen = Screen.RIDE }
     LaunchedEffect(asked) {
