@@ -144,6 +144,9 @@ final class GoStore: ObservableObject {
     /// Out of the screen: everything stops, and its notifications go.
     func close() {
         stopWatching(why: isOpen ? "closed" : "not open")
+        // (no trip from it: the trains it watched for you go; a trip that started watches its own)
+        if trip?.phase == .idle { WatchStore.shared.setRideWatches([]) }
+        trainsWatched = nil
         if let k = planKey { UserDefaults.standard.set(k, forKey: "go.closedPlan") }
         planKey = nil; deadline = nil; deadlineLabel = nil; chosen = nil; chosenByHand = false
         isOpen = false
@@ -167,6 +170,7 @@ final class GoStore: ObservableObject {
     private var reachKnown: [String: (goes: Bool, at: Date)] = [:]   // a trip takes you on (from where you were then)
     private var lastWatched: DoorTrip?                 // the last live trip it watched (kept while the screen says "moving")
     private var fastSince: Date?                   // at bus speed since (for the pace of the looks)
+    private var trainsWatched: String?             // the way whose trains are watched for a platform change
     private var waitLogged: (key: String, at: Date)?                  // the last look's call in the field log, and when
     /// Moving at bus or train speed for half a minute (`WaitStart.movingRule`): the stops around you make no sense now.
     @Published private(set) var atVehicleSpeed = false
@@ -254,6 +258,9 @@ final class GoStore: ObservableObject {
                     unsure = LookBackoff.State(); nextAt = .distantPast
                 }
                 last = await self.checkBoarding(last)
+                // (0.42.4) the trains of the way it watches, for a platform change, also before the trip starts
+                self.watchTrains()
+                await WatchStore.shared.check()
                 if self.movingUnknown {
                     unsure = LookBackoff.step(unsure, key: last)
                     nextAt = Date().addingTimeInterval(LookBackoff.wait(unsure) - 1)
@@ -1082,6 +1089,14 @@ final class GoStore: ObservableObject {
         FieldLog.shared.add(.match, "wait · " + WrongBus.logLine(label: TripManager.logLabel(v), to: to, planned: mine, fix: WrongBus.noFix))
         guard watching, trip?.phase == .idle else { return }
         tell(title, body, kind: "info")
+    }
+
+    /// (0.42.4) Every train of the way it watches (not only a first ride that's a train) is watched for a platform change
+    /// or a cancellation while you wait for it (`WatchStore.rideWatches`); again when it watches another way.
+    private func watchTrains() {
+        guard watching, !demo, trip?.phase == .idle, asOf == nil, let b = best, b.id != trainsWatched else { return }
+        trainsWatched = b.id
+        WatchStore.shared.setRideWatches(WatchStore.rideWatches(b))
     }
 
     /// A look's line in the field log (`WaitStart.logDue`).

@@ -36,7 +36,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
             else if oldValue != .idle, phase == .idle, UIApplication.shared.applicationState != .background { StillCache.shared.warm() }
         }
     }
-    @Published private(set) var route: RoutePlan?
+    @Published private(set) var route: RoutePlan? { didSet { if route != oldValue { watchTrains() } } }
     @Published private(set) var legs: [Leg] = []
     @Published private(set) var index = 0
     @Published private(set) var distance: Double?
@@ -466,6 +466,12 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         sound.pauseMusic = pauseMusic
         sound.headphonesOnly = headphonesOnly
         WatchStore.shared.holdAlerts = { [weak self] in self?.phase == .sleeping }
+        // (0.42.4) a platform change of a train of this trip: on the change card and the lock screen at once
+        WatchStore.shared.onChange = { [weak self] in
+            guard let self, self.phase != .idle else { return }
+            self.updateChangeGuide()
+            self.pushActivity(force: true)
+        }
         WatchStore.shared.chime = { [weak self] in
             guard let self else { return }
             self.sound.play(preview: self.soundKind)
@@ -575,6 +581,31 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
 
     /// "bus 321·1280" in the field log.
     nonisolated static func logLabel(_ v: Vehicle) -> String { FieldFormat.vehicle(line: v.line, tripId: v.tripId, isTrain: v.isTrain) }
+
+    /// (0.42.4) Every train of the trip is watched for a platform change or a cancellation, not only a first ride that is
+    /// a train (bus 305, then the Intercity at Eindhoven): its station, number and planned time (`PlatformWatch`), again
+    /// whenever the trip is planned again. No trip: none of the trip's watches.
+    private func watchTrains() {
+        guard !demo, let r = route, let custom = r.custom, let planned = r.planned, planned.count == custom.count else {
+            if route == nil || demo { WatchStore.shared.setRideWatches([]) }
+            return
+        }
+        let now = Date()
+        let list: [PlatformWatch.Leg] = custom.indices.map { k in
+            let p: PlannedRide = planned[k]
+            let code: String? = p.isTrain ? NSStore.code(custom[k].from) : nil
+            return PlatformWatch.Leg(train: p.isTrain, num: p.num, code: code, planned: p.scheduled ?? p.departure)
+        }
+        let rides: [WatchStore.RideWatch] = PlatformWatch.toWatch(list, now: now).compactMap { k -> WatchStore.RideWatch? in
+            guard let c = list[k].code else { return nil }
+            let p: PlannedRide = planned[k]
+            let name: String = p.line == "IC" ? "Intercity" : p.line
+            let label: String = "\(Fmt.hhmm(list[k].planned)) \(name) to \(custom[k].to.short)"
+            return WatchStore.RideWatch(code: c, num: p.num, planned: list[k].planned, label: label, from: custom[k].from.short,
+                                        platform: p.platform)
+        }
+        WatchStore.shared.setRideWatches(rides)
+    }
 
     /// (0.42.4) How old a vehicle's own GPS fix was in the matcher's last look (nil: judged by its times there, or not in
     /// it), for Fastest trip's look at what you got on (`WaitStart`).
@@ -1211,6 +1242,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         if phase == .transfer {
             transferAnchor = TransferPolicy.update(transferAnchor, with: Fix(loc))     // (standing at the change: for the hour's end)
             if tick { Task { await loadUpcoming() }; refreshPlannedNext(); updateChangeGuide(); checkOtherAtStop(); pushActivity(force: false) }
+            // (0.42.4) the next train's platform at a change too (`WatchStore.check` asks at most once a minute)
+            if tick { Task { await WatchStore.shared.check() } }
         }
         // Fastest trip: rough GPS while you stand with long to go, the best as soon as you move (`GoGPS`)
         if phase == .idle, going { applyGPS() }
@@ -2732,7 +2765,9 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
 
     /// A ride as the change guide takes it: its platform by NS's live one when there is.
     private func guideRide(_ r: Ride) -> ChangeGuide.Ride {
-        let plat: String? = NSStore.shared.rail(r)?.track ?? r.platform
+        var plat: String? = NSStore.shared.rail(r)?.track ?? r.platform
+        // (0.42.4) a watched train's platform as NS has it now, the moment it changes
+        if r.isTrain, let w = WatchStore.shared.liveTrack(num: r.num, planned: r.scheduledDeparture) { plat = w }
         var g = ChangeGuide.Ride(tripId: r.tripId, line: r.line, isTrain: r.isTrain, departure: r.departure, platform: plat, walk: r.walkBefore)
         if let a = r.fromLat, let o = r.fromLon { g.from = GeoPoint(lat: a, lon: o) }      // (0.42.3: where it leaves from)
         return g
@@ -2757,6 +2792,8 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
            let k = RideCache.stop(near: GeoPoint(l.from.coordinate), in: sr) {
             plat = sr.stops[k].platform
         }
+        // (0.42.4) a watched train's platform as NS has it now, the moment it changes
+        if p.isTrain, let w = WatchStore.shared.liveTrack(num: p.num, planned: p.scheduled ?? p.departure) { plat = w }
         let walk: Int = found?.walkBefore ?? next?.walkBefore ?? 0
         let ride = ChangeGuide.Ride(tripId: p.tripId, line: p.line, isTrain: p.isTrain, departure: d.at, platform: plat, walk: walk)
         return (ride: ride, live: d.live)

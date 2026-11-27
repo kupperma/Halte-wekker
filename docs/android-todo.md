@@ -59,6 +59,17 @@ What was wrong on iOS (check the same on Android's wait state, `RideService`/`Ri
       `notes.checkOut.off-0.42.4`, `CheckOut.atLaunch`, tests in `TravelHelpTests`); the switch stays in Settings › Trips
       & alarm ("Check-out reminder", off) and in the settings search for anyone who wants it back. While it's off nothing
       is scheduled, and pending ones are taken away at launch and when it's turned off.
+- [ ] **Every train of the trip is watched for a platform change** (from "The platform changed but it didn't send a
+      notification"; `ios/App/PlatformWatch.swift`, tests `PlatformWatchTests`, wiring in `WatchStore`). On iOS only a
+      first ride that was a train was ever watched (bus 305 → Intercity at Eindhoven: never), and only for a Be there by
+      plan. Now: each train ride of the trip you're on (from its plan, again after every replan) and of the way Fastest
+      trip watches, from an NS station, leaving within 3 h (up to 10 min after its planned time), by station code +
+      train number + planned time. A new watch starts from the plan's platform (else NS's live one): a change against it
+      is told, also one made before NS's first answer; with none, NS's own planned platform is what it was ("5" and
+      "5b" are the same platform). Asleep on the ride: the notification at once without sound (time sensitive), the
+      card and the chime once awake. The change card and the lock screen take the new platform at once. Checked at most
+      once a minute while riding, at a change and while Fastest trip watches. Android: check whether its platform watch
+      has the same first-ride limit (and the silent first fill).
 - [ ] **"Walk there" opens the walk with arrows at once** (on the Go to card, at a change, on the boards): Android's
       `WalkScreen` directly, no map sheet with the turns first; Apple Maps (Android: the maps app) stays in the guide.
 

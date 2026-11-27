@@ -239,6 +239,9 @@ minute while it says the same):
 - In the ride log: `ride wait · watching on · its look at what you get on runs (in front)` (`again`, `behind the
   screen`) and `ride wait · watching off · closed` (`you're there`, `the trip you waited for has gone`, `after 3 hours`):
   the look runs from one to the other whatever is on screen, and with the phone locked.
+- `ride platform · 08:02 Intercity to Breda at Eindhoven: 7 (was 5)` (or `: cancelled`): a watched train of your trip
+  (any train of it, `PlatformWatch`) changed platform against the plan or was cancelled; told at once (quietly while
+  you're asleep on the ride). Unchanged platforms aren't logged.
 - `ride check-out reminder in 60 s …` no longer comes unless the check-out reminder is turned on again (Settings › Trips
   & alarm): 0.42.4 turns it off for everyone, once.
 
