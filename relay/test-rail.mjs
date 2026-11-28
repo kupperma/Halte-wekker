@@ -6,7 +6,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { trim, sideOf, refMatch, normTrack, parsePoint, overpassQuery, stationKey, rail, RailCore, USER_AGENT } from "./rail.js";
+import { trim, sideOf, refMatch, normTrack, parsePoint, overpassQuery, stationKey, seedFor, rail, RailCore, USER_AGENT, OVERPASS_ALL } from "./rail.js";
+import { SEED } from "./rail-seed/index.js";
 
 const LIVE = process.argv[2] || null;
 const here = dirname(fileURLToPath(import.meta.url));
@@ -38,7 +39,9 @@ function rules() {
   assert.equal(parsePoint("95,5"), null);
   assert.equal(stationKey("bd", P(51.5955, 4.7799)), "st:BD@51.60,4.78");
   assert.equal(stationKey("Den Bosch", P(51.69, 5.29)), "st:den bosch@51.69,5.29");
-  assert.ok(overpassQuery(P(51.5955, 4.7799)).startsWith("[out:json][timeout:25][bbox:51.59188,4.77412,51.59912,4.78568];("));
+  const oq = overpassQuery(P(51.5955, 4.7799));
+  assert.ok(oq.startsWith("[out:json][timeout:15][bbox:51.59188,4.77412,51.59912,4.78568];("), oq);
+  assert.ok(oq.endsWith(";);out tags geom(51.59007,4.77122,51.60093,4.78858);"), oq);
 }
 
 /** Each station: [track, from, side, confidence]. The two sides of an island give opposite answers, and the other
@@ -157,7 +160,8 @@ async function route() {
     idFromName: (n) => n,
     get: (id) => ({
       fetch: (u, init) => {
-        if (!objects.has(id)) objects.set(id, new RailCore({ storage: new FakeStorage() }, {}, overpass, () => clock));
+        // no bundled stations here: this is Overpass and what is kept (the seed has its own checks below)
+        if (!objects.has(id)) objects.set(id, new RailCore({ storage: new FakeStorage() }, {}, overpass, () => clock, [], 50));
         return objects.get(id).fetch(new Request(u, init));
       },
     }),
@@ -181,7 +185,7 @@ async function route() {
   assert.ok(asked[0].u.startsWith("https://overpass-api.de/api/interpreter?data=%5Bout%3Ajson%5D"));
   assert.equal(asked[0].init.method, "GET");
   assert.equal(asked[0].init.headers["User-Agent"], USER_AGENT);
-  assert.ok(decodeURIComponent(asked[0].u).includes('way["railway"="rail"];);out tags geom;'));
+  assert.ok(decodeURIComponent(asked[0].u).includes('way["railway"~"^(rail|platform|platform_edge)$"]'));
   assert.equal((await (await go(q("8", FROM.ettenLeur))).json()).side, "right");
   assert.equal(asked.length, 1);
   // 30 days later: asked again
@@ -216,6 +220,115 @@ async function route() {
   assert.equal(asked.length, 7);
 }
 
+// MARK: the bundled seed
+
+/** The stop before on each side of each seeded station (public stations; a few just off the seed). */
+const ST = Object.fromEntries(SEED.map((st) => [st.code, P(...st.at)]));
+const NEXT = {
+  BD: [P(51.6057, 4.7214), "GZ"], GZ: ["BD", "TBR"], TBR: ["GZ", "TBU"], TBU: ["TBR", "TB"], TB: ["TBU", "OT"], OT: ["TB", "BTL"],
+  BTL: ["OT", "VG"], VG: ["BTL", "HT"], HT: ["VG", P(51.7152, 5.3696)], BET: ["BTL", "EHS"], EHS: ["BET", "EHV"], EHV: ["EHS", P(51.4756, 5.6617)],
+};
+const flip = { left: "right", right: "left", both: "both" };
+
+function seed() {
+  const codes = SEED.map((st) => st.code).sort();
+  assert.deepEqual(codes, ["BD", "BET", "BTL", "EHS", "EHV", "GZ", "HT", "OT", "TB", "TBR", "TBU", "VG"]);
+  let n = 0;
+  for (const st of SEED) {
+    assert.match(st.attribution, /OpenStreetMap contributors, ODbL/);
+    const at = ST[st.code];
+    const [a, b] = NEXT[st.code].map((x) => (typeof x === "string" ? ST[x] : x));
+    // found by the station's place, even a few hundred metres off; not by a place far away
+    const data = seedFor(P(at.lat + 0.003, at.lon));
+    assert.ok(data && data.platforms === st.platforms, st.code);
+    const tracks = [...new Set(st.platforms.flatMap((p) => p.refs.split(";")))].filter((r) => /^\d/.test(r));
+    assert.ok(tracks.length >= 2, st.code);
+    const sideAt = {};
+    for (const track of tracks) {
+      const one = sideOf(data, track, a, at), other = sideOf(data, track, b, at);
+      assert.ok(["left", "right", "both"].includes(one.side), `${st.code} ${track} from one side: ${JSON.stringify(one)}`);
+      assert.equal(other.side, flip[one.side], `${st.code} ${track}: the other way round`);
+      sideAt[track] = one.side;
+      n++;
+    }
+    // the two sides of an island (two platform areas side by side, one track each): opposite
+    const xy = (p) => [(p[1] - at.lon) * 111320 * Math.cos((at.lat * Math.PI) / 180), (p[0] - at.lat) * 110540];
+    const mid = (pl) => { const q = pl.pts.map(xy); return q.reduce((s, v) => [s[0] + v[0] / q.length, s[1] + v[1] / q.length], [0, 0]); };
+    for (const p of st.platforms) for (const q of st.platforms) {
+      if (p === q || p.refs.includes(";") || q.refs.includes(";")) continue;
+      const [x0, y0] = mid(p), [x1, y1] = mid(q);
+      if (Math.hypot(x1 - x0, y1 - y0) > 12 || p.refs[0] === q.refs[0] && p.refs.length !== q.refs.length) continue;
+      if (sideAt[p.refs] && sideAt[q.refs] && p.refs.replace(/[a-z]$/, "") !== q.refs.replace(/[a-z]$/, ""))
+        assert.equal(sideAt[q.refs], flip[sideAt[p.refs]], `${st.code} island ${p.refs}/${q.refs}`);
+    }
+  }
+  assert.equal(seedFor(P(52.3791, 4.9003)), null);           // Amsterdam: not bundled
+  // the known answers hold on the seed too (Breda: the same as on the fixture)
+  const bd = seedFor(AT.breda);
+  for (const [track, from, side] of CASES.breda) assert.equal(sideOf(bd, track, FROM[from], AT.breda).side, side, `seed BD ${track}`);
+  return n;
+}
+
+/** What is kept, then the seed, then Overpass (here failing every time). */
+async function lookupOrder() {
+  let clock = 5_000_000;
+  const asked = [];
+  const failing = async (u) => { asked.push(u); return new Response("<html>521</html>", { status: 521 }); };
+  const store = new FakeStorage();
+  const core = new RailCore({ storage: store }, {}, failing, () => clock, SEED, 5);
+  const ask = async (at) => (await core.fetch(new Request("https://rail.internal/data", { method: "POST", body: JSON.stringify(at) }))).json();
+
+  // Breda after Overpass failed for it before (as live): the seed answers, Overpass isn't asked, it's kept
+  await store.put("d", { retryAt: clock + 600_000, osm: "timeout@20000,521,521" });
+  let got = await ask(AT.breda);
+  assert.ok(got.data && got.data.platforms.length >= 6);
+  assert.equal(asked.length, 0);
+  assert.equal((await store.get("d")).from, "seed");
+  assert.equal(sideOf(got.data, "3", FROM.tilburgToBreda, AT.breda).side, "right");
+  // kept first: what the Durable Object has wins over the seed
+  const mine = { platforms: [{ refs: "9", pts: [[51.5955, 4.7799]], edge: false }], rails: [] };
+  await store.put("d", { data: mine, exp: clock + 1000 });
+  assert.deepEqual((await ask(AT.breda)).data, mine);
+  // an empty answer kept from Overpass doesn't hide the seed
+  await store.put("d", { data: { platforms: [], rails: [] }, exp: clock + 1000 });
+  assert.ok((await ask(AT.breda)).data.platforms.length >= 6);
+  assert.equal(asked.length, 0);
+
+  // not bundled: Overpass, every instance (raced), all failing: no data, kept as busy, not asked again for a while
+  const ams = P(52.3791, 4.9003);
+  const s2 = new FakeStorage();
+  const c2 = new RailCore({ storage: s2 }, {}, failing, () => clock, SEED, 5);
+  const ask2 = async () => (await c2.fetch(new Request("https://rail.internal/data", { method: "POST", body: JSON.stringify(ams) }))).json();
+  got = await ask2();
+  assert.equal(got.data, undefined);
+  assert.equal(got.osm, "521,521,521");
+  assert.equal(got.retryAfter, 600);
+  assert.equal(asked.length, 3);
+  assert.deepEqual(asked.map((u) => u.split("?")[0]), OVERPASS_ALL);
+  await ask2();
+  assert.equal(asked.length, 3);
+
+  // the race: a slow first instance doesn't hold up a quick second one, and is stopped once that answered
+  const slowFast = async (u, init) => {
+    asked.push(u);
+    if (u.startsWith(OVERPASS_ALL[0])) {
+      return await new Promise((res, rej) => init.signal.addEventListener("abort", () => rej(Object.assign(new Error("stop"), { name: "AbortError" }))));
+    }
+    return new Response(JSON.stringify(fixture("tilburg")), { status: 200 });
+  };
+  const c3 = new RailCore({ storage: new FakeStorage() }, {}, slowFast, () => clock, [], 5);
+  const t0 = Date.now();
+  got = await (await c3.fetch(new Request("https://rail.internal/data", { method: "POST", body: JSON.stringify(AT.tilburg) }))).json();
+  assert.ok(got.data && got.data.platforms.length >= 3);
+  assert.ok(Date.now() - t0 < 2000);
+  assert.equal(asked.length, 5);      // the first and the second; the third never started
+  // a 200 that ran out of time (a "remark", part of the data) is no answer
+  const partial = async () => new Response('{"elements":[],"remark":"runtime error: Query timed out in \\"query\\" at line 1"}', { status: 200 });
+  const c4 = new RailCore({ storage: new FakeStorage() }, {}, partial, () => clock, [], 5);
+  got = await (await c4.fetch(new Request("https://rail.internal/data", { method: "POST", body: JSON.stringify(ams) }))).json();
+  assert.equal(got.osm, "partial,partial,partial");
+}
+
 async function live() {
   const q = `station=BD&track=4&from=${FROM.tilburgToBreda.lat},${FROM.tilburgToBreda.lon}&at=${AT.breda.lat},${AT.breda.lon}`;
   for (let i = 0; i < 3; i++) {
@@ -242,6 +355,8 @@ rules();
 vectors();
 const n = fixtures();
 madeUp();
+const ns = seed();
 await route();
-console.log(`rail: ok (${n} station cases on OSM data, made-up cases, the route)`);
+await lookupOrder();
+console.log(`rail: ok (${n} station cases on OSM data, ${ns} seeded tracks both ways, made-up cases, the route, the lookup order)`);
 if (LIVE) await live();

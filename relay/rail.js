@@ -15,22 +15,31 @@
 //  3. The way the train goes: the stop before → the station, along that rail's direction there.
 //  4. The side: the sign of (direction) × (platform centre − nearest rail point): positive = left.
 //  A platform with another rail about as near on its other side (one area for both sides of an island) can't say which
-//  track is which: skipped. Platforms on both sides: "both". Nothing found or nothing sure: "unknown" (the app shows
+//  track is which: skipped, unless a platform of another track lies next to it on that side (the island's other half).
+//  A bundled station may say where a line really comes in from ("approach": Boxtel from Tilburg comes in from the
+//  south-east), used instead of the stop before. Platforms on both sides: "both". Nothing found or nothing sure: "unknown" (the app shows
 //  nothing). "low": the line bends between the two stops, or the match was loose.
 //
-// OSM data: one Overpass request per station on a miss (the next instance only when one can't answer; a descriptive
-// User-Agent, 20 s each, nothing personal), trimmed to
-// the platforms and rails in a box 400 m around it and kept 30 days in a Durable Object ("Rail", one per station); a busy Overpass
-// (429/504/no answer) is asked again only after 10 minutes. Map data © OpenStreetMap contributors, ODbL.
+// OSM data, in this order: what the station's Durable Object ("Rail", one per station) keeps; else the bundled seed
+// (rail-seed/: the stations on the Breda ⇄ Tilburg ⇄ 's-Hertogenbosch ⇄ Eindhoven lines, trimmed the same way, so
+// they never wait on Overpass); else one Overpass request (the instances raced, each a little after the one before
+// or as soon as it fails; a descriptive User-Agent, [timeout:15], nothing personal). What is found is trimmed to the
+// platforms and rails in a box 400 m around the station and kept 30 days in the Durable Object; a busy Overpass
+// (429/5xx/no answer) is asked again only after 10 minutes (30 after a 429). Map data © OpenStreetMap contributors, ODbL.
+
+import { SEED } from "./rail-seed/index.js";
 
 export const OVERPASS = "https://overpass-api.de/api/interpreter";
-/** Asked in turn only while the one before can't answer (at most these three for a station's miss). */
+/** Raced for a station's miss: each starts STAGGER_MS after the one before, or at once when that one fails. */
 export const OVERPASS_ALL = [OVERPASS, "https://maps.mail.ru/osm/tools/overpass/api/interpreter", "https://overpass.private.coffee/api/interpreter"];
 export const USER_AGENT = "Haltewekker-relay/1.0 (+https://github.com/kupperma/Halte-wekker)";
 export const RADIUS = 400;                      // m around the station
 export const KEEP_MS = 30 * 24 * 3600 * 1000;   // a station's OSM data
 export const EMPTY_KEEP_MS = 7 * 24 * 3600 * 1000;   // a station where OSM had nothing
 export const RETRY_MS = 10 * 60 * 1000;          // after a busy Overpass
+export const STAGGER_MS = 1500;                  // between the raced Overpass instances
+export const ASK_MS = 18000;                     // one Overpass instance at most
+export const SEED_NEAR = 800;                    // m: a bundled station this near the asked place is that station
 const NEAR_RAIL = 25;                            // m: a platform this far from its track at most
 const OTHER_SIDE = 1.6;                          // another rail this much as near on the other side: can't tell
 
@@ -166,6 +175,11 @@ export function sideOf(data, track, from, at) {
   const t = normTrack(track);
   if (!data || !t) return none("no_data");
   const xy = project(at);
+  // a line that comes in from another side than the stop before is (seeded stations: a point on the line instead)
+  for (const a of data.approach || []) {
+    const [ax, ay] = xy(a.from), [fx, fy] = xy([from.lat, from.lon]);
+    if (Math.hypot(fx - ax, fy - ay) <= a.within) { from = { lat: a.via[0], lon: a.via[1] }; break; }
+  }
   const f = xy([from.lat, from.lon]);                 // the station is (0, 0)
   const travel = Math.hypot(f[0], f[1]);
   if (travel < 300) return none("no_direction");
@@ -175,13 +189,21 @@ export function sideOf(data, track, from, at) {
   let plats = data.platforms.map((p) => ({ ...p, m: refMatch(p.refs, t) })).filter((p) => p.m > 0);
   if (plats.some((p) => p.m === 2)) plats = plats.filter((p) => p.m === 2);
   if (!plats.length) return none("no_platform");
+  // the other half of an island: a platform of another track, close by, nearer the other rail than this one is
+  const others = data.platforms.filter((p) => refMatch(p.refs, t) === 0).map((p) => centre(p.pts.map(xy)));
+  const otherHalf = (c, near, other) => others.some((o) => {
+    if (Math.hypot(o[0] - c[0], o[1] - c[1]) > 20) return false;
+    const toOther = nearest(other.line, o), toNear = nearest(near.line, o);
+    return toOther && toNear && toOther.d < other.d && toNear.d > near.d;
+  });
 
   const sides = [];
   let loose = plats[0].m < 2, skipped = 0, ref = null;
   for (const p of plats) {
     const c = centre(p.pts.map(xy));
     if (Math.hypot(c[0], c[1]) > RADIUS + 300) continue;
-    const pick = (list) => list.map((r) => nearest(r.line, c)).filter(Boolean).sort((a, b) => a.d - b.d);
+    const pick = (list) => list.map((r) => { const n = nearest(r.line, c); return n && { ...n, line: r.line }; })
+      .filter(Boolean).sort((a, b) => a.d - b.d);
     const mine = own.length ? pick(own)[0] : null;
     const all = pick(rails);
     const near = mine || all[0];
@@ -191,7 +213,7 @@ export function sideOf(data, track, from, at) {
     if (!mine && !p.edge) {
       // one area for both sides of an island (or a platform between two tracks): which is this track can't be told
       const other = all.find((o) => Math.sign(cross(near.dir, [c[0] - o.at[0], c[1] - o.at[1]])) === -s);
-      if (other && other.d < near.d * OTHER_SIDE && other.d <= NEAR_RAIL) { skipped++; continue; }
+      if (other && other.d < near.d * OTHER_SIDE && other.d <= NEAR_RAIL && !otherHalf(c, near, other)) { skipped++; continue; }
     }
     const along = near.dir[0] * v[0] + near.dir[1] * v[1];
     if (Math.abs(along) < 0.2) { skipped++; continue; }
@@ -207,14 +229,28 @@ export function sideOf(data, track, from, at) {
   return { side, confidence: sure ? "high" : "low", platformRef: refs.length === 1 ? refs[0] : t };
 }
 
-/** The Overpass question for a station at {lat, lon}: a box 400 m around it (a box is what Overpass finds fast). */
+/** The Overpass question for a station at {lat, lon}: a box 400 m around it (a box is what Overpass finds fast), only
+ *  the ways `trim` keeps, their geometry clipped to a slightly larger box. */
 export function overpassQuery(at) {
-  const dLat = RADIUS / R_LAT, dLon = RADIUS / (R_LON * Math.cos((at.lat * Math.PI) / 180));
-  const b = `(${(at.lat - dLat).toFixed(5)},${(at.lon - dLon).toFixed(5)},${(at.lat + dLat).toFixed(5)},${(at.lon + dLon).toFixed(5)})`;
-  return `[out:json][timeout:25][bbox:${b.slice(1, -1)}];(` +
-    `way["railway"="platform"];way["railway"="platform_edge"];relation["railway"="platform"];` +
-    `way["public_transport"="platform"]["train"="yes"];node["railway"="platform"];` +
-    `way["railway"="rail"];);out tags geom;`;
+  const box = (r) => {
+    const dLat = r / R_LAT, dLon = r / (R_LON * Math.cos((at.lat * Math.PI) / 180));
+    return `${(at.lat - dLat).toFixed(5)},${(at.lon - dLon).toFixed(5)},${(at.lat + dLat).toFixed(5)},${(at.lon + dLon).toFixed(5)}`;
+  };
+  return `[out:json][timeout:15][bbox:${box(RADIUS)}];(` +
+    `way["railway"~"^(rail|platform|platform_edge)$"];relation["railway"="platform"];` +
+    `way["public_transport"="platform"]["train"="yes"];);out tags geom(${box(RADIUS + 200)});`;
+}
+
+/** The bundled station nearest to `at` (within SEED_NEAR), or null. */
+export function seedFor(at, seed = SEED) {
+  const xy = project(at);
+  let best = null, bd = SEED_NEAR;
+  for (const st of seed) {
+    const [x, y] = xy(st.at);
+    const d = Math.hypot(x, y);
+    if (d <= bd) { best = st; bd = d; }
+  }
+  return best ? { platforms: best.platforms, rails: best.rails, ...(best.approach ? { approach: best.approach } : {}) } : null;
 }
 
 const STATION = /^[A-Za-z0-9][A-Za-z0-9 '’.()\-]{0,39}$/;
@@ -251,12 +287,15 @@ export async function rail(request, env, url, cors) {
   return reply(ans, 200, cors, 86400);
 }
 
-/** One station's OSM data, asked once and kept (the Durable Object "Rail"). `fetchImpl` and `now` for the tests. */
+/** One station's OSM data, asked once and kept (the Durable Object "Rail"). `fetchImpl`, `now`, `seed` and `stagger`
+ *  for the tests. */
 export class RailCore {
-  constructor(ctx, env, fetchImpl = (u, i) => fetch(u, i), now = () => Date.now()) {
+  constructor(ctx, env, fetchImpl = (u, i) => fetch(u, i), now = () => Date.now(), seed = SEED, stagger = STAGGER_MS) {
     this.store = ctx.storage;
     this.fetchImpl = fetchImpl;
     this.now = now;
+    this.seed = seed;
+    this.stagger = stagger;
     this.pending = null;
   }
 
@@ -267,7 +306,13 @@ export class RailCore {
       if (!Number.isFinite(at.lat) || !Number.isFinite(at.lon)) return reply({ error: "bad_request" }, 400, {});
       const kept = await this.store.get("d");
       const t = this.now();
-      if (kept && kept.data && kept.exp > t) return reply({ data: kept.data }, 200, {});
+      const seeded = seedFor(at, this.seed);
+      // what is kept; but an empty answer kept from Overpass doesn't hide a bundled station
+      if (kept && kept.data && kept.exp > t && (kept.data.platforms.length || !seeded)) return reply({ data: kept.data }, 200, {});
+      if (seeded) {
+        await this.store.put("d", { data: seeded, exp: t + KEEP_MS, from: "seed" });
+        return reply({ data: seeded }, 200, {});
+      }
       if (kept && kept.retryAt > t) return reply({ retryAfter: Math.ceil((kept.retryAt - t) / 1000), osm: kept.osm }, 200, {});
       if (!this.pending) this.pending = this.ask(at).finally(() => { this.pending = null; });
       return reply(await this.pending, 200, {});
@@ -276,42 +321,61 @@ export class RailCore {
     }
   }
 
-  /** One Overpass instance: its answer, or why there was none. */
-  async askOne(endpoint, at) {
+  /** One Overpass instance: {data} (trimmed), or {osm} why there was none. `signal` stops it once another answered. */
+  async askOne(endpoint, at, signal) {
     const ctl = new AbortController();
-    const timer = setTimeout(() => ctl.abort(), 20000);
+    const stop = () => ctl.abort();
+    signal.addEventListener("abort", stop);
+    const timer = setTimeout(stop, ASK_MS);
     const t0 = Date.now();
     try {
       const r = await this.fetchImpl(`${endpoint}?data=${encodeURIComponent(overpassQuery(at))}`, {
         method: "GET", signal: ctl.signal, headers: { "User-Agent": USER_AGENT, Accept: "application/json" },
       });
-      return { r, osm: String(r.status) };
+      if (r.status !== 200) return { osm: String(r.status) };
+      const json = await r.json();
+      // a query that ran out of time still answers 200, with a "remark" and part of the data
+      if (!json || !Array.isArray(json.elements) || /error|timed out/i.test(String(json.remark || ""))) return { osm: "partial" };
+      return { data: trim(json), osm: "200" };
     } catch (e) {
-      return { r: null, osm: (e && e.name === "AbortError" ? "timeout" : "no_answer") + "@" + (Date.now() - t0) };
-    } finally { clearTimeout(timer); }
+      if (signal.aborted) return { osm: "-" };
+      return { osm: (e && e.name === "AbortError" ? "timeout" : e instanceof SyntaxError ? "not_json" : "no_answer") + "@" + (Date.now() - t0) };
+    } finally { clearTimeout(timer); signal.removeEventListener("abort", stop); }
+  }
+
+  /** All instances raced: the first good answer wins, the others are stopped. */
+  async race(at) {
+    const all = new AbortController();
+    const seen = OVERPASS_ALL.map(() => "-");
+    let started = 0;
+    return await new Promise((resolve) => {
+      let done = false, left = OVERPASS_ALL.length, timer = null;
+      const next = () => {
+        if (done || started >= OVERPASS_ALL.length) return;
+        const i = started++;
+        clearTimeout(timer);
+        if (started < OVERPASS_ALL.length) timer = setTimeout(next, this.stagger);
+        this.askOne(OVERPASS_ALL[i], at, all.signal).then((one) => {
+          if (done) return;
+          seen[i] = one.osm;
+          if (one.data) { done = true; clearTimeout(timer); all.abort(); resolve({ data: one.data, osm: seen.join(",") }); return; }
+          if (--left === 0) { done = true; resolve({ osm: seen.join(",") }); return; }
+          next();    // this one can't answer: the next at once
+        });
+      };
+      next();
+    });
   }
 
   async ask(at) {
     const t = this.now();
-    // the main instance; only when it can't answer, the next one
-    let r = null;
-    const seen = [];
-    for (const endpoint of OVERPASS_ALL) {
-      const one = await this.askOne(endpoint, at);
-      seen.push(one.osm);
-      if (one.r && one.r.status === 200) { r = one.r; break; }
+    const got = await this.race(at);
+    if (!got.data) {
+      const wait = got.osm.includes("429") ? 3 * RETRY_MS : RETRY_MS;
+      await this.store.put("d", { retryAt: t + wait, osm: got.osm });
+      return { retryAfter: Math.ceil(wait / 1000), osm: got.osm };
     }
-    const osm = seen.join(",");
-    if (!r || r.status !== 200) {
-      const wait = osm.includes("429") ? 3 * RETRY_MS : RETRY_MS;
-      await this.store.put("d", { retryAt: t + wait, osm });
-      return { retryAfter: Math.ceil(wait / 1000), osm };
-    }
-    let data;
-    try { data = trim(await r.json()); } catch (e) {
-      await this.store.put("d", { retryAt: t + RETRY_MS });
-      return { retryAfter: RETRY_MS / 1000 };
-    }
+    const data = got.data;
     const empty = !data.platforms.length || !data.rails.length;
     await this.store.put("d", { data, exp: t + (empty ? EMPTY_KEEP_MS : KEEP_MS) });
     return { data };
