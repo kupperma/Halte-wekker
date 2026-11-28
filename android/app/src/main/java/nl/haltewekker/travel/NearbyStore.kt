@@ -207,14 +207,10 @@ class NearbyStore(val destId: String, private val seed: List<DoorTrip>) {
          *  apart), else the model by the time of day (`NearbySlot.period`: rush hours worst) and its live delay. */
         fun sure(t: DoorTrip, rides: List<RideRecord>, now: Double): Nearby.Sure {
             val last = t.last
-            val zone = java.time.ZoneId.of("Europe/Amsterdam")
-            fun slotOf(at: Double): Pair<Int, Boolean> {
-                val z = java.time.Instant.ofEpochSecond(at.toLong()).atZone(zone)
-                return (z.hour * 60 + z.minute) to (z.dayOfWeek == java.time.DayOfWeek.SATURDAY || z.dayOfWeek == java.time.DayOfWeek.SUNDAY)
-            }
+            // (0.10.12) filed by the minute each ride was due, not when it got there (iOS DelayBook)
             val entries = rides.filter { it.to == last.toStop && (it.label.endsWith(" " + last.line) || it.label == last.line || it.label == last.name) }
-                .mapNotNull { r -> r.late?.let { l -> slotOf(r.arr).let { (m, we) -> NearbySlot.Entry(m, we, l) } } }
-            val (mm, weekend) = slotOf(last.scheduledArrival)
+                .mapNotNull { r -> r.late?.let { l -> NearbySlot.ownEntry(r.arr, l) } }
+            val (mm, weekend) = NearbySlot.slotOf(last.scheduledArrival)
             val (own, window) = NearbySlot.pick(entries, mm, weekend)
             // the model: a live delay at the end already says a lot; else by the time of day (rush hours later more often)
             val p = NearbySlot.period(mm / 60.0, weekend)
@@ -233,14 +229,13 @@ class NearbyStore(val destId: String, private val seed: List<DoorTrip>) {
             return if (s.source is Nearby.Source.Yours) s.copy(window = window) else s
         }
 
-        /** (iOS 0.42.15) Where a trip's % comes from, for the sheet (`NearbySlot.explain`). */
-        fun explain(t: DoorTrip, rides: List<RideRecord>, now: Double): String {
+        /** (iOS 0.42.15) Where a trip's % (`s`, from `sure`) comes from, for the sheet (`NearbySlot.explain`); a train
+         *  by its label ("IC", "SPR"), like iOS (0.10.12). */
+        fun explain(t: DoorTrip, s: Nearby.Sure): String {
             val last = t.last
-            val z = java.time.Instant.ofEpochSecond(last.scheduledArrival.toLong()).atZone(java.time.ZoneId.of("Europe/Amsterdam"))
-            val m = z.hour * 60 + z.minute
-            val we = z.dayOfWeek == java.time.DayOfWeek.SATURDAY || z.dayOfWeek == java.time.DayOfWeek.SUNDAY
-            return NearbySlot.explain(sure(t, rides, now), last.line, last.toStop, NearbySlot.slotWords(m, we),
-                NearbySlot.period(m / 60.0, we).name, t.rides.size - 1)
+            val (m, we) = NearbySlot.slotOf(last.scheduledArrival)
+            val line = if (last.isTrain) nl.haltewekker.data.TransitParse.trainLabel(last.name.ifEmpty { last.line }) else last.line
+            return NearbySlot.explain(s, line, last.toStop, NearbySlot.slotWords(m, we), NearbySlot.period(m / 60.0, we).name, t.rides.size - 1)
         }
     }
 }

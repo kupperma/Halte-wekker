@@ -160,6 +160,21 @@ class NearbyCardsTest {
         assertNull(got[0].leader); assertEquals(500 - NearbyCards.GAP, got[0].rect.maxY, 1e-9)
     }
 
+    /** (0.10.12) Stops off the map don't use up the card slots: the top two out of bounds, the next four get cards. */
+    @Test fun layout_offTheMapDoesNotUseCardSlots() {
+        val out = listOf(NearbyCards.Item("o0", Point(1200.0, 10.0), true), NearbyCards.Item("o1", Point(-50.0, 500.0), false))
+        val inside = (0 until 5).map { NearbyCards.Item("s$it", Point(100.0 + it * 200, 500.0), false) }
+        val got = NearbyCards.layout(out + inside, Rect(0.0, 0.0, 1000.0, 1000.0), null)
+        assertEquals(listOf("hidden", "hidden", "card", "card", "card", "card", "pill"), got.map { it.kind.raw })
+    }
+
+    /** (0.10.12) No card on the map's credit. */
+    @Test fun layout_keepsOffTheCredit() {
+        val credit = Rect(380.0, 400.0, 240.0, 90.0)
+        val got = NearbyCards.layout(listOf(NearbyCards.Item("s", Point(500.0, 500.0), false)), Rect(0.0, 0.0, 1000.0, 1000.0), null, avoid = listOf(credit))
+        assertEquals(NearbyCards.Kind.CARD, got[0].kind); assertFalse(got[0].rect.touches(credit, 0.0))
+    }
+
     private fun entries() = v["slotEntries"]!!.jsonArray.map { val e = it.jsonObject
         NearbySlot.Entry(e["minute"]!!.jsonPrimitive.int, e["weekend"]!!.jsonPrimitive.boolean, e["delay"]!!.jsonPrimitive.double) }
 
@@ -195,6 +210,19 @@ class NearbyCardsTest {
         val evening = NearbySlot.lateChance(NearbySlot.period(19.0, false).bus, 3.0)
         val rush = NearbySlot.lateChance(NearbySlot.period(17.5, false).bus, 3.0)
         assertTrue(evening > day); assertTrue(rush > evening)
+    }
+
+    /** (0.10.12) Your own rides go by the minute they were due (like iOS DelayBook), not when they got there. */
+    @Test fun ownEntry_byScheduledTime() {
+        val zone = java.time.ZoneId.of("Europe/Amsterdam")
+        fun t(d: Int, h: Int, m: Int) = java.time.ZonedDateTime.of(2026, 11, d, h, m, 0, 0, zone).toEpochSecond().toDouble()
+        // a Friday 17:50 ride 40 min late (got there 18:30): at 17:50, a weekday
+        assertEquals(NearbySlot.Entry(17 * 60 + 50, false, 40.0), NearbySlot.ownEntry(t(27, 18, 30), 40.0))
+        // a Friday 23:50 ride 40 min late (got there Saturday 00:30): still Friday 23:50, not a weekend 00:30
+        assertEquals(NearbySlot.Entry(23 * 60 + 50, false, 40.0), NearbySlot.ownEntry(t(28, 0, 30), 40.0))
+        // early by 2 min: due 10:00, there 09:58
+        assertEquals(NearbySlot.Entry(600, true, -2.0), NearbySlot.ownEntry(t(28, 9, 58), -2.0))
+        assertEquals(17 * 60 + 50 to false, NearbySlot.slotOf(t(27, 17, 50)))
     }
 
     @Test fun slot_widens_weekendsApart() {

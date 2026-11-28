@@ -123,19 +123,21 @@ object NearbyCards {
 
     private fun box(p: Point, r: Double) = Rect(p.x - r, p.y - r, 2 * r, 2 * r)
 
-    /** iOS `NearbyCards.layout`: each in order at the first spot clear of everything, else a pill, else none. */
-    fun layout(items: List<Item>, bounds: Rect, you: Point?, dots: List<Point> = emptyList()): List<Placed> {
-        val blocks = mutableListOf<Rect>()
+    /** iOS `NearbyCards.layout`: each in order at the first spot clear of everything, else a pill, else none. Only the
+     *  cards actually placed count toward `MAX_CARDS`, and none goes on `avoid` (the map's © credit) (0.10.12). */
+    fun layout(items: List<Item>, bounds: Rect, you: Point?, dots: List<Point> = emptyList(), avoid: List<Rect> = emptyList()): List<Placed> {
+        val blocks = avoid.toMutableList()
         if (you != null) blocks += box(you, YOU_RADIUS)
         for (p in dots) blocks += box(p, DOT_RADIUS)
         for (i in items) blocks += box(i.at, DOT_RADIUS)
         val placed = mutableListOf<Rect>()
         val leaders = mutableListOf<Pair<Point, Point>>()
         val out = mutableListOf<Placed>()
-        for ((n, item) in items.withIndex()) {
+        var cards = 0  // only cards actually placed use a slot (not a stop off the map, a pill or none)
+        for (item in items) {
             if (!bounds.contains(item.at)) { out += Placed(item.id, Kind.HIDDEN, Rect(item.at.x, item.at.y, 0.0, 0.0), null); continue }
             val tries = mutableListOf<Triple<Kind, Double, Double>>()
-            if (n < MAX_CARDS) tries += Triple(Kind.CARD, CARD_WIDTH, if (item.tagged) TAGGED_HEIGHT else CARD_HEIGHT)
+            if (cards < MAX_CARDS) tries += Triple(Kind.CARD, CARD_WIDTH, if (item.tagged) TAGGED_HEIGHT else CARD_HEIGHT)
             tries += Triple(Kind.PILL, PILL_WIDTH, PILL_HEIGHT)
             var done = false
             loop@ for ((kind, w, h) in tries) {
@@ -153,6 +155,7 @@ object NearbyCards {
                     if (far) leaders += near to item.at
                     placed += r
                     out += Placed(item.id, kind, r, if (far) near else null)
+                    if (kind == Kind.CARD) cards++
                     done = true
                     break@loop
                 }

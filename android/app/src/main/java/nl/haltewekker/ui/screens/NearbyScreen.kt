@@ -182,12 +182,13 @@ fun NearbyView(destId: String, destName: String, seed: List<DoorTrip>, onTrip: (
         val vehicles = remember { mutableStateOf<List<Pair<GeoPoint, Int>>>(emptyList()) }
         // (0.10.11, iOS 0.42.15) each stop with a way a small dot (gold, green, grey) and a mini card by it, most
         // important first (`NearbyCards.layout` places them, never on top of anything)
+        val tk = DS.t  // (0.10.12) the line colours of the current theme, not always the light one
         val cards = Nearby.ordered(options).map { o ->
             val s = shown.first { it.group.id == o.id }
             val t = s.trips[s.best!!.index]
             val b = badges[o.id] ?: NearbyCards.Badge()
             val day = Nearby.dayWord(o.arrival, now, ZONE)
-            MiniCard(o.id, s.group.point, b, NearbyCards.edge(b), t.rides.distinctBy { it.line }.take(2).map { it.line to Tokens.light.kind(it.kind).toArgb() },
+            MiniCard(o.id, s.group.point, b, NearbyCards.edge(b), t.rides.distinctBy { it.line }.take(2).map { it.line to tk.kind(it.kind).toArgb() },
                 NearbyCards.leaveWords(Fmt.time(o.departure), o.walk), (day?.let { "$it " } ?: "") + Fmt.time(o.arrival), Fmt.time(o.arrival),
                 o.sure?.let(NearbyCards::onTimeWords), o.sure?.let(NearbyCards::estimateWord), o.ranked)
         }
@@ -277,7 +278,8 @@ private fun StopSheet(s: Shown, store: NearbyStore, w: Nearby.Window, now: Doubl
     val idx = Nearby.shown(deps, w)
     val (normal, late) = Nearby.split(deps, w).let { (a, b) -> idx.filter { it in a } to idx.filter { it in b } }
     // on the line now: the next 3 of those departures with their own GPS, drawn on the map
-    LaunchedEffect(s.group.id, trips.size) {
+    val tk = DS.t
+    LaunchedEffect(s.group.id, trips.size, tk) {
         while (true) {
             val buses = try { LiveFeeds.busFixes() } catch (_: Exception) { emptyMap() }
             val trains = if (trips.any { it.first.isTrain }) try { LiveFeeds.trainFixes() } catch (_: Exception) { emptyMap() } else emptyMap()
@@ -285,7 +287,7 @@ private fun StopSheet(s: Shown, store: NearbyStore, w: Nearby.Window, now: Doubl
                 val f = trips[i].first
                 val g = if (f.isTrain) RealPositions.trainNumber(f.num)?.let { trains[it] }?.let { RealPositions.usable(it, f.tripId, Iso.now()) }
                     else RealPositions.usable(buses, f.tripId, Iso.now())
-                g?.let { it.point to Tokens.light.kind(f.kind).toArgb() }
+                g?.let { it.point to tk.kind(f.kind).toArgb() }
             }
             delay(30_000)
         }
@@ -303,14 +305,16 @@ private fun StopSheet(s: Shown, store: NearbyStore, w: Nearby.Window, now: Doubl
             TextButton(onClick = onClose) { Text("All stops") }
         }
         s.best?.let { b -> trips.getOrNull(b.index) }?.let { t ->
+            // (0.10.12) worked out once per trip, not on every recomposition; the line and the explanation share it
+            val sure = remember(t, rides, now) { NearbyStore.sure(t, rides, now) }
             // (iOS 0.42.15) tap it (or the i) for where the % comes from: your own rides around this time, or the estimate
             Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).clickable { why = !why }, verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Arrive ${Fmt.time(t.end)}: " + Nearby.sureWords(NearbyStore.sure(t, rides, now)), color = DS.t.text,
+                Text("Arrive ${Fmt.time(t.end)}: " + Nearby.sureWords(sure), color = DS.t.text,
                     style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
                 Icon(Icons.Outlined.Info, contentDescription = if (why) "Hide where this comes from" else "Where this comes from", tint = DS.t.accent)
             }
-            if (why) Text(NearbyStore.explain(t, rides, now), color = DS.t.text, style = MaterialTheme.typography.bodySmall,
+            if (why) Text(NearbyStore.explain(t, sure), color = DS.t.text, style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.fillMaxWidth().background(DS.t.secondary.copy(alpha = 0.12f), RoundedCornerShape(12.dp)).padding(12.dp))
         }
         val i0 = info
@@ -490,7 +494,11 @@ private fun NearbyMap(modifier: Modifier, me: GeoPoint?, cards: List<MiniCard>, 
                 m.uiSettings.isRotateGesturesEnabled = false
                 m.uiSettings.isTiltGesturesEnabled = false
                 m.uiSettings.isLogoEnabled = false
-                m.uiSettings.isAttributionEnabled = false
+                // (0.10.12) the © OpenStreetMap / OpenFreeMap credit stays (required): its "i" bottom right, kept
+                // clear of the cards (`ATTRIBUTION` is left out of their room)
+                m.uiSettings.isAttributionEnabled = true
+                m.uiSettings.attributionGravity = android.view.Gravity.BOTTOM or android.view.Gravity.END
+                m.uiSettings.setAttributionMargins(0, 0, (ATTRIBUTION_MARGIN * density).toInt(), (ATTRIBUTION_MARGIN * density).toInt())
                 m.cameraPosition = CameraPosition.Builder().target(LatLng(me?.lat ?: 52.09, me?.lon ?: 5.12)).zoom(14.0).build()
                 m.setStyle(Style.Builder().fromUri(nl.haltewekker.map.MapStyle.STYLE_URL)) { s ->
                     for (id in listOf("greys", "dots", "me", "vehicles")) s.addSource(GeoJsonSource(id))
@@ -572,7 +580,10 @@ private fun NearbyMap(modifier: Modifier, me: GeoPoint?, cards: List<MiniCard>, 
             val bounds = NearbyCards.Rect(6.0, 6.0, max(0.0, wDp - 12), max(0.0, hDp - 12))
             val items = cards.map { NearbyCards.Item(it.id, screen(it.p), it.badge.tagged) }
             val you = me?.let(::screen)
-            val placed = NearbyCards.layout(items, bounds, you, greys.map { screen(it.second) })
+            // the map's credit (bottom right) and the room around it stay clear of the cards
+            val credit = NearbyCards.Rect(wDp - ATTRIBUTION_MARGIN - ATTRIBUTION_SIZE, hDp - ATTRIBUTION_MARGIN - ATTRIBUTION_SIZE,
+                ATTRIBUTION_SIZE, ATTRIBUTION_SIZE)
+            val placed = NearbyCards.layout(items, bounds, you, greys.map { screen(it.second) }, avoid = listOf(credit))
             val byId = cards.associateBy { it.id }
             ComposeCanvas(Modifier.fillMaxSize()) {
                 val d = density
@@ -606,6 +617,10 @@ private fun NearbyMap(modifier: Modifier, me: GeoPoint?, cards: List<MiniCard>, 
         }
     }
 }
+
+/** (0.10.12) The map's attribution "i": its margin from the bottom right and its size (dp), with room to tap it. */
+private const val ATTRIBUTION_MARGIN = 6.0
+private const val ATTRIBUTION_SIZE = 28.0
 
 /** Text sizes that don't grow with the font size setting: the layout's boxes (`NearbyCards` sizes) must hold. */
 @Composable

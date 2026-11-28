@@ -3,6 +3,19 @@
 The rules and numbers for each are in [logs-export.md](logs-export.md) › For Android (parity), with the iOS files and
 their tests.
 
+## iOS 0.42.16 (review fixes to the stop cards)
+
+- [x] **Card slots:** only cards actually placed count toward the 4 (`NearbyCards.layout`); a stop off the map, or
+      one that got a pill because no card fitted, leaves its slot to the next. Vector "eight scattered" updated (s4 a
+      card now). **Android 0.10.12:** the same (`NearbyCardsTest.layout_offTheMapDoesNotUseCardSlots`).
+- [x] **Map credits kept:** the layout takes `avoid` boxes. iOS keeps Apple's logo and Legal above the list's round
+      corners (`safeAreaPadding`) and the cards off them; **Android 0.10.12** shows the © OpenStreetMap / OpenFreeMap
+      "i" again, bottom right, with the cards off it.
+- [x] **Card lines** from the best trip's own rides (as Android), not every departure's first ride.
+- [x] Old hour buckets moved to the slot book in a stable order. **Android 0.10.12:** own rides filed by the minute
+      they were due (arrival less the delay, as iOS `DelayBook`), so a late 23:50 ride stays on its day
+      (`NearbySlot.ownEntry`); the explanation names a train by its label; the line colours follow the theme.
+
 ## iOS 0.42.15 (stop cards on "Fastest trip, zoomed out")
 
 Approved design M4b: the coloured number circles on the map are now mini cards by each stop, and how sure a way is
@@ -19,7 +32,7 @@ goes by the time you take it. Rules in `ios/App/NearbyCards.swift` and `ios/App/
 - [x] **Never on top of anything** (`NearbyCards.layout`): in order (Fastest, Surest, then by arrival) each card at the
       first spot by its dot (above, below, diagonals, sides, then up to three steps further) that's inside the map's
       free part and clear (by 4 pt) of every card and pill before it, of you (20 pt), of every dot (7 pt) and of every
-      leader line; from the 5th, or when no card fits, a pill "12:31"; when no pill fits, none (its dot stays, it's in
+      leader line; once 4 cards are placed (0.42.16: stops off the map and pills don't count), or when no card fits, a pill "12:31"; when no pill fits, none (its dot stays, it's in
       the list). A spot not right by its dot gets a leader line (at most 120 pt, through no other card). Card 196 x 58
       (76 with tags), pill 56 x 26, 12 pt from the dot. Text sizes on the cards are fixed so the boxes hold. Tested on
       the vectors and on clusters of 2, 3, 5 and 8 stops at random places (edges, you under a spot).

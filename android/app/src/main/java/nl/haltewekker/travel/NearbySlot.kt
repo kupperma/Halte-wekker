@@ -17,6 +17,21 @@ object NearbySlot {
 
     val WINDOWS = listOf(60, 90, 120)
 
+    private val ZONE: java.time.ZoneId = java.time.ZoneId.of("Europe/Amsterdam")
+
+    /** The minute of the day at `at` (Amsterdam time), and whether it's a weekend day. */
+    fun slotOf(at: Double): Pair<Int, Boolean> {
+        val z = java.time.Instant.ofEpochSecond(at.toLong()).atZone(ZONE)
+        return (z.hour * 60 + z.minute) to (z.dayOfWeek == java.time.DayOfWeek.SATURDAY || z.dayOfWeek == java.time.DayOfWeek.SUNDAY)
+    }
+
+    /** (0.10.12) One of your own rides filed by the minute it was due (`arr` less `late` minutes), like iOS
+     *  `DelayBook`: a 17:50 ride 40 min late counts at 17:50, and a late 23:50 one stays on its own day. */
+    fun ownEntry(arr: Double, late: Double): Entry {
+        val (m, we) = slotOf(arr - late * 60)
+        return Entry(m, we, late)
+    }
+
     fun apart(a: Int, b: Int): Int {
         val d = abs(((a - b) % 1440 + 1440) % 1440)
         return min(d, 1440 - d)

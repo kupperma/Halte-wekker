@@ -29,7 +29,9 @@ final class DelayBook {
     /// The hour buckets as rides at half past that hour (what was kept before 0.42.15; your own rides only).
     private static func slotsFrom(_ b: [String: [Double]]) -> [String: [NearbySlot.Entry]] {
         var out: [String: [NearbySlot.Entry]] = [:]
-        for (k, list) in b {
+        // (0.42.16) in key order: a Dictionary's own order changes from run to run, and "your last 20" must not
+        for k in b.keys.sorted() {
+            let list: [Double] = b[k] ?? []
             let p = k.split(separator: "|", omittingEmptySubsequences: false)
             guard p.count == 3, p[1] != "*" else { continue }
             let slot = String(p[2])

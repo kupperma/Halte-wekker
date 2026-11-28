@@ -181,6 +181,9 @@ struct NearbyOverview: View {
                 }
             }
             .mapStyle(.standard(pointsOfInterest: .excludingAll))
+            // (0.42.16) Apple's logo and Legal stay above the list's round corners (they'd be under them), and the
+            // cards keep off them (`credits`)
+            .safeAreaPadding(.bottom, 24)
             .onMapCameraChange(frequency: .continuous) { _ in moved &+= 1 }
             .overlay {
                 if !following {
@@ -195,6 +198,14 @@ struct NearbyOverview: View {
         let top: Double = 4 + Double(DS.hit) + 6
         let bottom: Double = Double(height) - 24 - 6
         return NearbyCards.Rect(x: 8, y: top, w: max(0, Double(width) - 16), h: max(0, bottom - top))
+    }
+
+    /// (0.42.16) Where the map's credits are (Apple's logo bottom left, Legal bottom right, over the last 24 under
+    /// the list), with room around them: no card goes there.
+    private func credits(width: CGFloat, height: CGFloat) -> [NearbyCards.Rect] {
+        let y: Double = Double(height) - 24 - 34
+        return [NearbyCards.Rect(x: 0, y: y, w: 96, h: 34),
+                NearbyCards.Rect(x: max(0, Double(width) - 72), y: y, w: 72, h: 34)]
     }
 
     private func screen(_ proxy: MapProxy, _ c: CLLocationCoordinate2D) -> NearbyCards.Point? {
@@ -220,7 +231,8 @@ struct NearbyOverview: View {
         let others: [NearbyCards.Point] = ms.filter { spotOf[$0.id] == nil }.compactMap { screen(proxy, $0.coordinate) }
         let you: NearbyCards.Point? = here.flatMap { screen(proxy, $0.coordinate) }
         let bounds: NearbyCards.Rect = cardBounds(width: width, height: height)
-        let placed: [NearbyCards.Placed] = NearbyCards.layout(items, bounds: bounds, you: you, dots: others)
+        let placed: [NearbyCards.Placed] = NearbyCards.layout(items, bounds: bounds, you: you, dots: others,
+                                                               avoid: credits(width: width, height: height))
         return ZStack(alignment: .topLeading) {
             NearbyCardLines(you: you, items: items, placed: placed, edges: edges(items))
                 .allowsHitTesting(false)
@@ -242,8 +254,9 @@ struct NearbyOverview: View {
     private func cardButton(_ p: NearbyCards.Placed, _ o: Nearby.Option) -> some View {
         let name: String = store.way(o.id).map { Fmt.stop($0.group.name) } ?? ""
         let badge: NearbyCards.Badge = store.badges[o.id] ?? NearbyCards.Badge()
+        // (0.42.16) the lines of the way shown (its best trip's own rides), like Android; not every departure's first
         var seen = Set<String>()
-        let rides: [Ride] = store.departures(o.id).map(\.first).filter { seen.insert($0.line).inserted }
+        let rides: [Ride] = (store.bestTrip(o.id)?.rides ?? []).filter { seen.insert($0.line).inserted }
         let lines: [(String, Bool)] = rides.prefix(2).map { r -> (String, Bool) in
             let label: String = r.isTrain ? Transit.trainLabel(r.line) : r.line
             return (label, r.isTrain)

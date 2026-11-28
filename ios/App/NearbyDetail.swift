@@ -456,7 +456,7 @@ struct NearbyTimelineRow: View {
                 ForEach(Array(legs.enumerated()), id: \.offset) { _, l in DSLinePill(line: l.line, train: l.train) }
                 Spacer(minLength: 4)
                 if fastest { NearbyTagChip(tag: .fastest) }
-            if surest { NearbyTagChip(tag: .surest) }
+                if surest { NearbyTagChip(tag: .surest) }
             }
             GeometryReader { g in
                 let w: CGFloat = g.size.width

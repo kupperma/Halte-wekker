@@ -188,25 +188,28 @@ enum NearbyCards {
 
     /// The cards of `items` (most important first: `Nearby.ordered`) inside `bounds` (the map less its buttons and
     /// the sheet over it), each at the first spot (`offsets`, kept inside) that's clear of every card and pill placed
-    /// before, of you (`you`) and of every dot (the stops', and `dots`, the others drawn), by `pad`. From `maxCards`
-    /// on, or when no card fits, a pill; when no pill fits either (or the dot is off the map), none: its dot stays,
+    /// before, of you (`you`) and of every dot (the stops', and `dots`, the others drawn), by `pad`. Once `maxCards`
+    /// cards are placed (stops off the map and pills don't count), or when no card fits, a pill; when no pill fits
+    /// either (or the dot is off the map), none: its dot stays,
     /// and it's in the list. A spot not right by its dot gets a leader line, at most `maxLeader` long, through no
     /// other card or pill; and no card goes over a leader line drawn before.
-    static func layout(_ items: [Item], bounds: Rect, you: Point?, dots: [Point] = []) -> [Placed] {
-        var blocks: [Rect] = []
+    /// (0.42.16) Nor on `avoid`: the map's credits (Apple's logo and Legal), which must stay readable.
+    static func layout(_ items: [Item], bounds: Rect, you: Point?, dots: [Point] = [], avoid: [Rect] = []) -> [Placed] {
+        var blocks: [Rect] = avoid
         if let you { blocks.append(box(you, youRadius)) }
         for p in dots { blocks.append(box(p, dotRadius)) }
         for i in items { blocks.append(box(i.at, dotRadius)) }
         var placed: [Rect] = []
         var leaders: [(Point, Point)] = []
         var out: [Placed] = []
-        for (n, item) in items.enumerated() {
+        var cards = 0  // 0.42.16: only cards actually placed use a slot (not a stop off the map, a pill or none)
+        for item in items {
             guard bounds.contains(item.at) else {
                 out.append(Placed(id: item.id, kind: .hidden, rect: Rect(x: item.at.x, y: item.at.y, w: 0, h: 0), leader: nil))
                 continue
             }
             var tries: [(Kind, Double, Double)] = []
-            if n < maxCards { tries.append((.card, cardWidth, item.tagged ? taggedHeight : cardHeight)) }
+            if cards < maxCards { tries.append((.card, cardWidth, item.tagged ? taggedHeight : cardHeight)) }
             tries.append((.pill, pillWidth, pillHeight))
             var done = false
             for (kind, w, h) in tries where !done {
@@ -224,6 +227,7 @@ enum NearbyCards {
                     if far { leaders.append((near, item.at)) }
                     placed.append(r)
                     out.append(Placed(id: item.id, kind: kind, rect: r, leader: far ? near : nil))
+                    if kind == .card { cards += 1 }
                     done = true
                     break
                 }

@@ -188,6 +188,25 @@ final class NearbyCardsTests: XCTestCase {
         XCTAssertEqual(got[0].rect.maxY, 500 - NearbyCards.gap, accuracy: 1e-9)
     }
 
+    /// 0.42.16: stops off the map don't use up the card slots: the top two out of bounds, the next four get cards.
+    func test_layout_offTheMapDoesNotUseCardSlots() {
+        let bounds = NearbyCards.Rect(x: 0, y: 0, w: 1000, h: 1000)
+        let out: [NearbyCards.Item] = [NearbyCards.Item(id: "o0", at: NearbyCards.Point(x: 1200, y: 10), tagged: true),
+                                       NearbyCards.Item(id: "o1", at: NearbyCards.Point(x: -50, y: 500), tagged: false)]
+        let inside: [NearbyCards.Item] = (0..<5).map { NearbyCards.Item(id: "s\($0)", at: NearbyCards.Point(x: 100 + Double($0) * 200, y: 500), tagged: false) }
+        let got: [NearbyCards.Placed] = NearbyCards.layout(out + inside, bounds: bounds, you: nil)
+        XCTAssertEqual(got.map(\.kind), [.hidden, .hidden, .card, .card, .card, .card, .pill])
+    }
+
+    /// 0.42.16: no card on the map's credits.
+    func test_layout_keepsOffTheCredits() {
+        let credit = NearbyCards.Rect(x: 380, y: 400, w: 240, h: 90)
+        let got: [NearbyCards.Placed] = NearbyCards.layout([NearbyCards.Item(id: "s", at: NearbyCards.Point(x: 500, y: 500), tagged: false)],
+                                                           bounds: NearbyCards.Rect(x: 0, y: 0, w: 1000, h: 1000), you: nil, avoid: [credit])
+        XCTAssertEqual(got[0].kind, .card)
+        XCTAssertFalse(got[0].rect.touches(credit, pad: 0))
+    }
+
     // MARK: how sure, by the time of day
 
     private func entries() throws -> [NearbySlot.Entry] {
