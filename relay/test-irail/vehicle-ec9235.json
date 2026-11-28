@@ -1,0 +1,219 @@
+{
+ "version": "1.4",
+ "timestamp": "1795864975",
+ "vehicle": "BE.NMBS.EC9235",
+ "vehicleinfo": {
+  "name": "BE.NMBS.EC9235",
+  "shortname": "EC 9235",
+  "number": "9235",
+  "type": "EC",
+  "locationX": "4.482076",
+  "locationY": "50.896456",
+  "@id": "http://irail.be/vehicle/EC9235"
+ },
+ "stops": {
+  "number": "6",
+  "stop": [
+   {
+    "id": "0",
+    "station": "Brussels-North",
+    "stationinfo": {
+     "@id": "http://irail.be/stations/NMBS/008812005",
+     "id": "BE.NMBS.008812005",
+     "name": "Brussels-North",
+     "locationX": "4.360846",
+     "locationY": "50.859663",
+     "standardname": "Brussel-Noord/Bruxelles-Nord"
+    },
+    "time": "1795862160",
+    "platform": "5",
+    "platforminfo": {
+     "name": "5",
+     "normal": "1"
+    },
+    "scheduledDepartureTime": "1795862160",
+    "scheduledArrivalTime": "1795862160",
+    "delay": "60",
+    "canceled": "0",
+    "departureDelay": "60",
+    "departureCanceled": "0",
+    "arrivalDelay": "0",
+    "arrivalCanceled": "0",
+    "left": "1",
+    "arrived": "1",
+    "isExtraStop": "0",
+    "occupancy": {
+     "@id": "http://api.irail.be/terms/unknown",
+     "name": "unknown"
+    },
+    "departureConnection": "http://irail.be/connections/8812005/20261128/EC9235"
+   },
+   {
+    "id": "1",
+    "station": "Brussels Airport - Zaventem",
+    "stationinfo": {
+     "@id": "http://irail.be/stations/NMBS/008819406",
+     "id": "BE.NMBS.008819406",
+     "name": "Brussels Airport - Zaventem",
+     "locationX": "4.482076",
+     "locationY": "50.896456",
+     "standardname": "Brussels Airport - Zaventem"
+    },
+    "time": "1795863060",
+    "platform": "3",
+    "platforminfo": {
+     "name": "3",
+     "normal": "1"
+    },
+    "scheduledDepartureTime": "1795863060",
+    "scheduledArrivalTime": "1795862940",
+    "delay": "0",
+    "canceled": "0",
+    "departureDelay": "0",
+    "departureCanceled": "0",
+    "arrivalDelay": "0",
+    "arrivalCanceled": "0",
+    "left": "1",
+    "arrived": "1",
+    "isExtraStop": "0",
+    "occupancy": {
+     "@id": "http://api.irail.be/terms/unknown",
+     "name": "unknown"
+    },
+    "departureConnection": "http://irail.be/connections/8819406/20261128/EC9235"
+   },
+   {
+    "id": "2",
+    "station": "Antwerp-Berchem",
+    "stationinfo": {
+     "@id": "http://irail.be/stations/NMBS/008821121",
+     "id": "BE.NMBS.008821121",
+     "name": "Antwerp-Berchem",
+     "locationX": "4.432221",
+     "locationY": "51.19923",
+     "standardname": "Antwerpen-Berchem"
+    },
+    "time": "1795865880",
+    "platform": "10",
+    "platforminfo": {
+     "name": "10",
+     "normal": "1"
+    },
+    "scheduledDepartureTime": "1795865880",
+    "scheduledArrivalTime": "1795865760",
+    "delay": "0",
+    "canceled": "0",
+    "departureDelay": "0",
+    "departureCanceled": "0",
+    "arrivalDelay": "0",
+    "arrivalCanceled": "0",
+    "left": "0",
+    "arrived": "0",
+    "isExtraStop": "0",
+    "occupancy": {
+     "@id": "http://api.irail.be/terms/unknown",
+     "name": "unknown"
+    },
+    "departureConnection": "http://irail.be/connections/8821121/20261128/EC9235"
+   },
+   {
+    "id": "3",
+    "station": "Antwerp-Central",
+    "stationinfo": {
+     "@id": "http://irail.be/stations/NMBS/008821006",
+     "id": "BE.NMBS.008821006",
+     "name": "Antwerp-Central",
+     "locationX": "4.421101",
+     "locationY": "51.2172",
+     "standardname": "Antwerpen-Centraal"
+    },
+    "time": "1795866300",
+    "platform": "22",
+    "platforminfo": {
+     "name": "22",
+     "normal": "1"
+    },
+    "scheduledDepartureTime": "1795866300",
+    "scheduledArrivalTime": "1795866120",
+    "delay": "0",
+    "canceled": "0",
+    "departureDelay": "0",
+    "departureCanceled": "0",
+    "arrivalDelay": "0",
+    "arrivalCanceled": "0",
+    "left": "0",
+    "arrived": "0",
+    "isExtraStop": "0",
+    "occupancy": {
+     "@id": "http://api.irail.be/terms/unknown",
+     "name": "unknown"
+    },
+    "departureConnection": "http://irail.be/connections/8821006/20261128/EC9235"
+   },
+   {
+    "id": "4",
+    "station": "Noorderkempen (brecht)",
+    "stationinfo": {
+     "@id": "http://irail.be/stations/NMBS/008821105",
+     "id": "BE.NMBS.008821105",
+     "name": "Noorderkempen (brecht)",
+     "locationX": "4.632204",
+     "locationY": "51.356838",
+     "standardname": "Noorderkempen"
+    },
+    "time": "1795867260",
+    "platform": "1",
+    "platforminfo": {
+     "name": "1",
+     "normal": "1"
+    },
+    "scheduledDepartureTime": "1795867260",
+    "scheduledArrivalTime": "1795867140",
+    "delay": "0",
+    "canceled": "0",
+    "departureDelay": "0",
+    "departureCanceled": "0",
+    "arrivalDelay": "0",
+    "arrivalCanceled": "0",
+    "left": "0",
+    "arrived": "0",
+    "isExtraStop": "0",
+    "occupancy": {
+     "@id": "http://api.irail.be/terms/unknown",
+     "name": "unknown"
+    },
+    "departureConnection": "http://irail.be/connections/8821105/20261128/EC9235"
+   },
+   {
+    "id": "5",
+    "station": "Breda",
+    "stationinfo": {
+     "@id": "http://irail.be/stations/NMBS/008400131",
+     "id": "BE.NMBS.008400131",
+     "name": "Breda",
+     "locationX": "4.7764",
+     "locationY": "51.594459",
+     "standardname": "Breda"
+    },
+    "time": "1795868340",
+    "platform": "?",
+    "platforminfo": {
+     "name": "?",
+     "normal": "1"
+    },
+    "scheduledDepartureTime": "1795868340",
+    "scheduledArrivalTime": "1795868340",
+    "delay": "0",
+    "canceled": "0",
+    "departureDelay": "0",
+    "departureCanceled": "0",
+    "arrivalDelay": "0",
+    "arrivalCanceled": "0",
+    "left": "0",
+    "arrived": "0",
+    "isExtraStop": "0"
+   }
+  ]
+ },
+ "_note": "iRail vehicle EC 9235 Brussel-Noord to Breda, 2026-11-28, as it came."
+}

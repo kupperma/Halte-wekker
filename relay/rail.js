@@ -253,7 +253,7 @@ export function seedFor(at, seed = SEED) {
   return best ? { platforms: best.platforms, rails: best.rails, ...(best.approach ? { approach: best.approach } : {}) } : null;
 }
 
-const STATION = /^[A-Za-z0-9][A-Za-z0-9 '’.()\-]{0,39}$/;
+const STATION = /^[\p{L}0-9][\p{L}0-9 '’.()\/\-]{0,39}$/u;     // (2026-11-28: accents and "/", Belgian names)
 const TRACK = /^[0-9]{1,2}[a-zA-Z]?$/;
 
 const reply = (o, status, cors, maxAge) =>

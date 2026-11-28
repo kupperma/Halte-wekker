@@ -19,6 +19,8 @@
 //    Needs a free Last.fm API key saved as the secret LASTFM_API_KEY; without it the route answers 503 not_configured.
 // 12. (2026-11-27) Which side you get out of the train, from OpenStreetMap (Overpass), kept 30 days per station in the
 //    Durable Object "Rail": /rail/v1/side?station=BD&track=4&from=<lat,lon>&at=<lat,lon> (see rail.js).
+// 13. (2026-11-28) Trains in Belgium from iRail (open, no key): /be/liveboard?station=…|id=<UIC>, /be/vehicle?id=<train>,
+//    /be/composition?id=<train>, trimmed and kept 30 s (see irail.js).
 import { DurableObject } from "cloudflare:workers";
 import { friends, FriendsCore } from "./friends.js";
 import { logs, LogsCore } from "./logs.js";
@@ -26,6 +28,7 @@ import { live, LiveCore } from "./live.js";
 import { nsExtra } from "./ns-extra.js";
 import { music } from "./music.js";
 import { rail, RailCore } from "./rail.js";
+import { be } from "./irail.js";
 
 export class Friends extends DurableObject {
   constructor(ctx, env) {
@@ -86,6 +89,9 @@ export default {
     }
     if (url.pathname.startsWith("/rail/")) {
       try { return await rail(request, env, url, cors); } catch (e) { return new Response("relay error", { status: 500, headers: cors }); }
+    }
+    if (url.pathname.startsWith("/be/")) {
+      try { return await be(url, cors); } catch (e) { return new Response("relay error", { status: 500, headers: cors }); }
     }
     // The key may be saved as NS_KEY or NS-KEY.
     const NS_KEY = env.NS_KEY || env["NS-KEY"];

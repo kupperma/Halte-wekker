@@ -1,0 +1,213 @@
+{
+ "version": "1.4",
+ "timestamp": "1795865303",
+ "composition": {
+  "segments": {
+   "number": "1",
+   "segment": [
+    {
+     "id": "0",
+     "origin": {
+      "@id": "http://irail.be/stations/NMBS/008821006",
+      "id": "BE.NMBS.008821006",
+      "name": "Antwerp-Central",
+      "locationX": "4.421101",
+      "locationY": "51.2172",
+      "standardname": "Antwerpen-Centraal"
+     },
+     "destination": {
+      "@id": "http://irail.be/stations/NMBS/008833001",
+      "id": "BE.NMBS.008833001",
+      "name": "Leuven",
+      "locationX": "4.715866",
+      "locationY": "50.88228",
+      "standardname": "Leuven"
+     },
+     "composition": {
+      "source": "",
+      "units": {
+       "number": "6",
+       "unit": [
+        {
+         "id": "0",
+         "materialType": {
+          "parent_type": "AM80M",
+          "sub_type": "a",
+          "orientation": "LEFT"
+         },
+         "hasToilets": "0",
+         "hasSecondClassOutlets": "1",
+         "hasFirstClassOutlets": "0",
+         "hasHeating": "1",
+         "hasAirco": "0",
+         "materialNumber": "428",
+         "tractionType": "HV",
+         "canPassToNextUnit": "0",
+         "seatsFirstClass": "0",
+         "seatsCoupeFirstClass": "0",
+         "standingPlacesFirstClass": "0",
+         "seatsSecondClass": "99",
+         "seatsCoupeSecondClass": "0",
+         "standingPlacesSecondClass": "30",
+         "lengthInMeter": "25",
+         "hasSemiAutomaticInteriorDoors": "1",
+         "materialSubTypeName": "AM80M_a",
+         "tractionPosition": "1",
+         "hasPrmSection": "0",
+         "hasPriorityPlaces": "0",
+         "hasBikeSection": "0"
+        },
+        {
+         "id": "1",
+         "materialType": {
+          "parent_type": "AM80M",
+          "sub_type": "b",
+          "orientation": "LEFT"
+         },
+         "hasToilets": "0",
+         "hasSecondClassOutlets": "1",
+         "hasFirstClassOutlets": "0",
+         "hasHeating": "1",
+         "hasAirco": "0",
+         "materialNumber": "428",
+         "tractionType": "HV",
+         "canPassToNextUnit": "0",
+         "seatsFirstClass": "0",
+         "seatsCoupeFirstClass": "0",
+         "standingPlacesFirstClass": "0",
+         "seatsSecondClass": "77",
+         "seatsCoupeSecondClass": "0",
+         "standingPlacesSecondClass": "40",
+         "lengthInMeter": "25",
+         "hasSemiAutomaticInteriorDoors": "1",
+         "materialSubTypeName": "AM80M_b",
+         "tractionPosition": "1",
+         "hasPrmSection": "1",
+         "hasPriorityPlaces": "0",
+         "hasBikeSection": "1"
+        },
+        {
+         "id": "2",
+         "materialType": {
+          "parent_type": "AM80M",
+          "sub_type": "c",
+          "orientation": "RIGHT"
+         },
+         "hasToilets": "1",
+         "hasSecondClassOutlets": "1",
+         "hasFirstClassOutlets": "0",
+         "hasHeating": "1",
+         "hasAirco": "0",
+         "materialNumber": "428",
+         "tractionType": "HV",
+         "canPassToNextUnit": "0",
+         "seatsFirstClass": "32",
+         "seatsCoupeFirstClass": "0",
+         "standingPlacesFirstClass": "9",
+         "seatsSecondClass": "40",
+         "seatsCoupeSecondClass": "0",
+         "standingPlacesSecondClass": "15",
+         "lengthInMeter": "25",
+         "hasSemiAutomaticInteriorDoors": "1",
+         "materialSubTypeName": "AM80M_c",
+         "tractionPosition": "1",
+         "hasPrmSection": "0",
+         "hasPriorityPlaces": "0",
+         "hasBikeSection": "0"
+        },
+        {
+         "id": "3",
+         "materialType": {
+          "parent_type": "AM80M",
+          "sub_type": "a",
+          "orientation": "LEFT"
+         },
+         "hasToilets": "0",
+         "hasSecondClassOutlets": "1",
+         "hasFirstClassOutlets": "0",
+         "hasHeating": "1",
+         "hasAirco": "0",
+         "materialNumber": "430",
+         "tractionType": "HV",
+         "canPassToNextUnit": "0",
+         "seatsFirstClass": "0",
+         "seatsCoupeFirstClass": "0",
+         "standingPlacesFirstClass": "0",
+         "seatsSecondClass": "99",
+         "seatsCoupeSecondClass": "0",
+         "standingPlacesSecondClass": "30",
+         "lengthInMeter": "25",
+         "hasSemiAutomaticInteriorDoors": "1",
+         "materialSubTypeName": "AM80M_a",
+         "tractionPosition": "2",
+         "hasPrmSection": "0",
+         "hasPriorityPlaces": "0",
+         "hasBikeSection": "0"
+        },
+        {
+         "id": "4",
+         "materialType": {
+          "parent_type": "AM80M",
+          "sub_type": "b",
+          "orientation": "LEFT"
+         },
+         "hasToilets": "0",
+         "hasSecondClassOutlets": "1",
+         "hasFirstClassOutlets": "0",
+         "hasHeating": "1",
+         "hasAirco": "0",
+         "materialNumber": "430",
+         "tractionType": "HV",
+         "canPassToNextUnit": "0",
+         "seatsFirstClass": "0",
+         "seatsCoupeFirstClass": "0",
+         "standingPlacesFirstClass": "0",
+         "seatsSecondClass": "77",
+         "seatsCoupeSecondClass": "0",
+         "standingPlacesSecondClass": "40",
+         "lengthInMeter": "25",
+         "hasSemiAutomaticInteriorDoors": "1",
+         "materialSubTypeName": "AM80M_b",
+         "tractionPosition": "2",
+         "hasPrmSection": "1",
+         "hasPriorityPlaces": "0",
+         "hasBikeSection": "1"
+        },
+        {
+         "id": "5",
+         "materialType": {
+          "parent_type": "AM80M",
+          "sub_type": "c",
+          "orientation": "RIGHT"
+         },
+         "hasToilets": "1",
+         "hasSecondClassOutlets": "1",
+         "hasFirstClassOutlets": "0",
+         "hasHeating": "1",
+         "hasAirco": "0",
+         "materialNumber": "430",
+         "tractionType": "HV",
+         "canPassToNextUnit": "0",
+         "seatsFirstClass": "32",
+         "seatsCoupeFirstClass": "0",
+         "standingPlacesFirstClass": "9",
+         "seatsSecondClass": "40",
+         "seatsCoupeSecondClass": "0",
+         "standingPlacesSecondClass": "15",
+         "lengthInMeter": "25",
+         "hasSemiAutomaticInteriorDoors": "1",
+         "materialSubTypeName": "AM80M_c",
+         "tractionPosition": "2",
+         "hasPrmSection": "0",
+         "hasPriorityPlaces": "0",
+         "hasBikeSection": "0"
+        }
+       ]
+      }
+     }
+    }
+   ]
+  }
+ },
+ "_note": "iRail composition IC 2912 Antwerpen-Centraal to Leuven, 2026-11-28, as it came (two AM80 units)."
+}

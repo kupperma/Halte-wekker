@@ -1,0 +1,204 @@
+{
+ "version": "1.4",
+ "timestamp": "1795864920",
+ "station": "Antwerp-Central",
+ "stationinfo": {
+  "@id": "http://irail.be/stations/NMBS/008821006",
+  "id": "BE.NMBS.008821006",
+  "name": "Antwerp-Central",
+  "locationX": "4.421101",
+  "locationY": "51.2172",
+  "standardname": "Antwerpen-Centraal"
+ },
+ "departures": {
+  "number": "5",
+  "departure": [
+   {
+    "id": "0",
+    "station": "Herentals",
+    "stationinfo": {
+     "@id": "http://irail.be/stations/NMBS/008821717",
+     "id": "BE.NMBS.008821717",
+     "name": "Herentals",
+     "locationX": "4.829535",
+     "locationY": "51.181513",
+     "standardname": "Herentals"
+    },
+    "time": "1795864980",
+    "delay": "0",
+    "canceled": "0",
+    "left": "0",
+    "isExtra": "0",
+    "vehicle": "BE.NMBS.S332962",
+    "vehicleinfo": {
+     "name": "BE.NMBS.S332962",
+     "shortname": "S33 2962",
+     "number": "2962",
+     "type": "S33",
+     "locationX": "0",
+     "locationY": "0",
+     "@id": "http://irail.be/vehicle/S332962"
+    },
+    "platform": "1",
+    "platforminfo": {
+     "name": "1",
+     "normal": "1"
+    },
+    "occupancy": {
+     "@id": "http://api.irail.be/terms/low",
+     "name": "low"
+    },
+    "departureConnection": "http://irail.be/connections/8821006/20261128/S332962"
+   },
+   {
+    "id": "3",
+    "station": "Charleroi-Central",
+    "stationinfo": {
+     "@id": "http://irail.be/stations/NMBS/008872009",
+     "id": "BE.NMBS.008872009",
+     "name": "Charleroi-Central",
+     "locationX": "4.438567",
+     "locationY": "50.40471",
+     "standardname": "Charleroi-Central"
+    },
+    "time": "1795865760",
+    "delay": "0",
+    "canceled": "0",
+    "left": "0",
+    "isExtra": "0",
+    "vehicle": "BE.NMBS.IC3334",
+    "vehicleinfo": {
+     "name": "BE.NMBS.IC3334",
+     "shortname": "IC 3334",
+     "number": "3334",
+     "type": "IC",
+     "locationX": "0",
+     "locationY": "0",
+     "@id": "http://irail.be/vehicle/IC3334"
+    },
+    "platform": "24",
+    "platforminfo": {
+     "name": "24",
+     "normal": "0"
+    },
+    "occupancy": {
+     "@id": "http://api.irail.be/terms/low",
+     "name": "low"
+    },
+    "departureConnection": "http://irail.be/connections/8821006/20261128/IC3334"
+   },
+   {
+    "id": "5",
+    "station": "Breda",
+    "stationinfo": {
+     "@id": "http://irail.be/stations/NMBS/008400131",
+     "id": "BE.NMBS.008400131",
+     "name": "Breda",
+     "locationX": "4.7764",
+     "locationY": "51.594459",
+     "standardname": "Breda"
+    },
+    "time": "1795866300",
+    "delay": "0",
+    "canceled": "0",
+    "left": "0",
+    "isExtra": "0",
+    "vehicle": "BE.NMBS.EC9235",
+    "vehicleinfo": {
+     "name": "BE.NMBS.EC9235",
+     "shortname": "EC 9235",
+     "number": "9235",
+     "type": "EC",
+     "locationX": "0",
+     "locationY": "0",
+     "@id": "http://irail.be/vehicle/EC9235"
+    },
+    "platform": "22",
+    "platforminfo": {
+     "name": "22",
+     "normal": "1"
+    },
+    "occupancy": {
+     "@id": "http://api.irail.be/terms/unknown",
+     "name": "unknown"
+    },
+    "departureConnection": "http://irail.be/connections/8821006/20261128/EC9235"
+   },
+   {
+    "id": "7",
+    "station": "Roosendaal",
+    "stationinfo": {
+     "@id": "http://irail.be/stations/NMBS/008400526",
+     "id": "BE.NMBS.008400526",
+     "name": "Roosendaal",
+     "locationX": "4.458692",
+     "locationY": "51.540834",
+     "standardname": "Roosendaal"
+    },
+    "time": "1795866600",
+    "delay": "60",
+    "canceled": "0",
+    "left": "0",
+    "isExtra": "0",
+    "vehicle": "BE.NMBS.S322562",
+    "vehicleinfo": {
+     "name": "BE.NMBS.S322562",
+     "shortname": "S32 2562",
+     "number": "2562",
+     "type": "S32",
+     "locationX": "0",
+     "locationY": "0",
+     "@id": "http://irail.be/vehicle/S322562"
+    },
+    "platform": "21",
+    "platforminfo": {
+     "name": "21",
+     "normal": "1"
+    },
+    "occupancy": {
+     "@id": "http://api.irail.be/terms/low",
+     "name": "low"
+    },
+    "departureConnection": "http://irail.be/connections/8821006/20261128/S322562"
+   },
+   {
+    "id": "6",
+    "station": "Leuven",
+    "stationinfo": {
+     "@id": "http://irail.be/stations/NMBS/008833001",
+     "id": "BE.NMBS.008833001",
+     "name": "Leuven",
+     "locationX": "4.715866",
+     "locationY": "50.88228",
+     "standardname": "Leuven"
+    },
+    "time": "1795866360",
+    "delay": "0",
+    "canceled": "1",
+    "left": "0",
+    "isExtra": "0",
+    "vehicle": "BE.NMBS.L2862",
+    "vehicleinfo": {
+     "name": "BE.NMBS.L2862",
+     "shortname": "L 2862",
+     "number": "2862",
+     "type": "L",
+     "locationX": "0",
+     "locationY": "0",
+     "@id": "http://irail.be/vehicle/L2862"
+    },
+    "platform": "13",
+    "platforminfo": {
+     "name": "13",
+     "normal": "1"
+    },
+    "occupancy": {
+     "@id": "http://api.irail.be/terms/low",
+     "name": "low"
+    },
+    "departureConnection": "http://irail.be/connections/8821006/20261128/L2862"
+   }
+  ]
+ },
+ "_note": "iRail liveboard of Antwerpen-Centraal, 2026-11-28, trimmed to 5 departures; L 2862 marked canceled by hand (no real cancellation that day)."
+}

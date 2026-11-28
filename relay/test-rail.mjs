@@ -174,6 +174,9 @@ async function route() {
   for (const bad of ["station=BD&track=4", "station=BD&track=4&from=1,2&at=x", "station=<b>&track=4&from=1,2&at=1,2",
     "station=BD&track=444&from=1,2&at=1,2", q("4") + "&me=1"]) assert.equal((await go(bad)).status, 400, bad);
   assert.equal((await go(q("4"), {})).status, 503);
+  // (2026-11-28) a Belgian station by its name, accents and all: a good question (no RAIL here: 503, not 400)
+  for (const be of ["Li%C3%A8ge-Guillemins", "Antwerpen-Centraal", "Brussel-Noord%2FBruxelles-Nord"])
+    assert.equal((await go(`station=${be}&track=4&from=1,2&at=1,2`, {})).status, 503, be);
 
   // two at once: one Overpass request; then from what's kept
   const [a, b] = await Promise.all([go(q("4")), go(q("3"))]);

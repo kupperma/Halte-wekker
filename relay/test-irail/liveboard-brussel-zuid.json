@@ -1,0 +1,130 @@
+{
+ "version": "1.4",
+ "timestamp": "1795864982",
+ "station": "Brussels-South/Brussels-Midi",
+ "stationinfo": {
+  "@id": "http://irail.be/stations/NMBS/008814001",
+  "id": "BE.NMBS.008814001",
+  "name": "Brussels-South/Brussels-Midi",
+  "locationX": "4.336531",
+  "locationY": "50.835707",
+  "standardname": "Brussel-Zuid/Bruxelles-Midi"
+ },
+ "departures": {
+  "number": "3",
+  "departure": [
+   {
+    "id": "0",
+    "station": "Paris Nord",
+    "stationinfo": {
+     "@id": "http://irail.be/stations/NMBS/008727100",
+     "id": "BE.NMBS.008727100",
+     "name": "Paris Nord",
+     "locationX": "2.333333",
+     "locationY": "48.866667",
+     "standardname": "Paris Nord"
+    },
+    "time": "1795864380",
+    "delay": "0",
+    "canceled": "0",
+    "left": "0",
+    "isExtra": "0",
+    "vehicle": "BE.NMBS.EUR9334",
+    "vehicleinfo": {
+     "name": "BE.NMBS.EUR9334",
+     "shortname": "EUR 9334",
+     "number": "9334",
+     "type": "EUR",
+     "locationX": "0",
+     "locationY": "0",
+     "@id": "http://irail.be/vehicle/EUR9334"
+    },
+    "platform": "4",
+    "platforminfo": {
+     "name": "4",
+     "normal": "0"
+    },
+    "occupancy": {
+     "@id": "http://api.irail.be/terms/unknown",
+     "name": "unknown"
+    },
+    "departureConnection": "http://irail.be/connections/8814001/20261128/EUR9334"
+   },
+   {
+    "id": "6",
+    "station": "Blankenberge",
+    "stationinfo": {
+     "@id": "http://irail.be/stations/NMBS/008891405",
+     "id": "BE.NMBS.008891405",
+     "name": "Blankenberge",
+     "locationX": "3.133864",
+     "locationY": "51.312432",
+     "standardname": "Blankenberge"
+    },
+    "time": "1795865280",
+    "delay": "60",
+    "canceled": "0",
+    "left": "0",
+    "isExtra": "0",
+    "vehicle": "BE.NMBS.IC1533",
+    "vehicleinfo": {
+     "name": "BE.NMBS.IC1533",
+     "shortname": "IC 1533",
+     "number": "1533",
+     "type": "IC",
+     "locationX": "0",
+     "locationY": "0",
+     "@id": "http://irail.be/vehicle/IC1533"
+    },
+    "platform": "15",
+    "platforminfo": {
+     "name": "15",
+     "normal": "1"
+    },
+    "occupancy": {
+     "@id": "http://api.irail.be/terms/high",
+     "name": "high"
+    },
+    "departureConnection": "http://irail.be/connections/8814001/20261128/IC1533"
+   },
+   {
+    "id": "12",
+    "station": "Charleroi-Central",
+    "stationinfo": {
+     "@id": "http://irail.be/stations/NMBS/008872009",
+     "id": "BE.NMBS.008872009",
+     "name": "Charleroi-Central",
+     "locationX": "4.438567",
+     "locationY": "50.40471",
+     "standardname": "Charleroi-Central"
+    },
+    "time": "1795865820",
+    "delay": "180",
+    "canceled": "0",
+    "left": "0",
+    "isExtra": "0",
+    "vehicle": "BE.NMBS.IC3333",
+    "vehicleinfo": {
+     "name": "BE.NMBS.IC3333",
+     "shortname": "IC 3333",
+     "number": "3333",
+     "type": "IC",
+     "locationX": "0",
+     "locationY": "0",
+     "@id": "http://irail.be/vehicle/IC3333"
+    },
+    "platform": "18",
+    "platforminfo": {
+     "name": "18",
+     "normal": "1"
+    },
+    "occupancy": {
+     "@id": "http://api.irail.be/terms/low",
+     "name": "low"
+    },
+    "departureConnection": "http://irail.be/connections/8814001/20261128/IC3333"
+   }
+  ]
+ },
+ "_note": "iRail liveboard of Brussel-Zuid, 2026-11-28, trimmed to 3 departures."
+}
