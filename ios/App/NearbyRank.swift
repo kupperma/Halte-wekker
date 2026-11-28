@@ -325,6 +325,12 @@ enum Nearby {
         let percent: Int            // on time at the destination, 1…99
         let source: Source
         let usual: Int?             // your rides: the usual minutes late (median), when it's 1 or more
+        /// (0.42.15) Your rides: how many of them were on time.
+        var onTime: Int? = nil
+        /// The chance you make each change, multiplied in (1: no change).
+        var made: Double = 1
+        /// Your rides: the minutes either side of this way's time they were counted within (`NearbySlot.pick`).
+        var window: Int? = nil
     }
 
     /// How sure: of your own last rides (`ownNeeded` at least, the last `ownKept`) the share less than `lateBy`
@@ -338,10 +344,10 @@ enum Nearby {
             let share: Double = Double(onTime) / Double(mine.count)
             let med: Double = median(mine)
             let usual: Int? = med >= 0.5 ? Int(med.rounded()) : nil
-            return Sure(percent: clampPercent(share * m), source: .yours(rides: mine.count), usual: usual)
+            return Sure(percent: clampPercent(share * m), source: .yours(rides: mine.count), usual: usual, onTime: onTime, made: m)
         }
         let late: Double = modelLate.isFinite ? min(1, max(0, modelLate)) : 0.3
-        return Sure(percent: clampPercent((1 - late) * m), source: live ? .live : .estimate, usual: nil)
+        return Sure(percent: clampPercent((1 - late) * m), source: live ? .live : .estimate, usual: nil, made: m)
     }
 
     private static func clampPercent(_ p: Double) -> Int { min(99, max(1, Int((p * 100).rounded()))) }

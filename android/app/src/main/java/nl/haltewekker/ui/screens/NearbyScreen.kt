@@ -1,10 +1,5 @@
 package nl.haltewekker.ui.screens
 
-import android.graphics.Bitmap
-import android.graphics.Canvas
-import android.graphics.DashPathEffect
-import android.graphics.Paint
-import android.graphics.Typeface
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -15,13 +10,20 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.Canvas as ComposeCanvas
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -40,7 +42,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.toArgb
@@ -61,6 +62,7 @@ import nl.haltewekker.data.DoorTrip
 import nl.haltewekker.live.LiveFeeds
 import nl.haltewekker.live.RealPositions
 import nl.haltewekker.travel.Nearby
+import nl.haltewekker.travel.NearbyCards
 import nl.haltewekker.travel.NearbyLive
 import nl.haltewekker.travel.NearbyStore
 import nl.haltewekker.travel.TripTimeline
@@ -83,15 +85,12 @@ import org.maplibre.android.maps.Style
 import org.maplibre.android.style.expressions.Expression
 import org.maplibre.android.style.layers.CircleLayer
 import org.maplibre.android.style.layers.PropertyFactory
-import org.maplibre.android.style.layers.SymbolLayer
 import org.maplibre.android.style.sources.GeoJsonSource
 import org.maplibre.geojson.Feature
 import org.maplibre.geojson.FeatureCollection
 import org.maplibre.geojson.Point
 import java.time.ZoneId
-import kotlin.math.cos
 import kotlin.math.max
-import kotlin.math.pow
 import kotlin.math.roundToInt
 
 private val ZONE: ZoneId = ZoneId.of("Europe/Amsterdam")
@@ -166,12 +165,9 @@ fun NearbyView(destId: String, destName: String, seed: List<DoorTrip>, onTrip: (
         }
     } ?: emptyList()
     val options = shown.mapNotNull { it.option }
-    val tags = Nearby.tags(options)
+    // (0.10.11, iOS 0.42.15) Fastest and Surest, both on one when one way is both ("Slower" isn't shown any more)
+    val badges = NearbyCards.badges(options)
     val ranked = options.filter { it.ranked }
-    val earliest = ranked.minOfOrNull { it.arrival }
-    val latest = ranked.maxOfOrNull { it.arrival }?.let { l -> earliest?.let { max(l, it + Nearby.MIN_SPREAD) } }
-    fun colour(o: Nearby.Option?): Int =
-        if (o == null || !o.ranked || earliest == null || latest == null) 0x9AA1A8 else Nearby.color(Nearby.fraction(o.arrival, earliest, latest))
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -182,60 +178,60 @@ fun NearbyView(destId: String, destName: String, seed: List<DoorTrip>, onTrip: (
             Nearby.Leave.entries.forEach { l -> FilterChip(leave == l, { if (leave != l) { leave = l; switched++ } }, label = { Text(l.title) }) }
         }
         val me = r?.here ?: Locator.last(context)
-        val metresPerDp = 78271.5 * cos((me?.lat ?: 52.0) * Math.PI / 180) / 2.0.pow(zoom)
-        val pins = shown.filter { it.option != null }.map { Nearby.Pin(it.group.id, it.group.lat, it.group.lon, it.option?.arrival) }
-        val clusters = Nearby.merge(pins, Nearby.PIN_POINTS * metresPerDp)
-        val greys = shown.filter { it.option == null && clusters.none { c -> Geo.metres(GeoPoint(c.lat, c.lon), it.group.point) < Nearby.PIN_POINTS * metresPerDp } }
+        val greys = shown.filter { it.option == null }
         val vehicles = remember { mutableStateOf<List<Pair<GeoPoint, Int>>>(emptyList()) }
-        val circles = clusters.map { c ->
-            val s = shown.first { it.group.id == c.id }
-            val o = s.option!!
-            Circle(c.id, GeoPoint(c.lat, c.lon), colour(o), max(1, ((o.arrival - now) / 60).roundToInt()), Nearby.ring(o.sure), c.members.size - 1, o.ranked)
+        // (0.10.11, iOS 0.42.15) each stop with a way a small dot (gold, green, grey) and a mini card by it, most
+        // important first (`NearbyCards.layout` places them, never on top of anything)
+        val cards = Nearby.ordered(options).map { o ->
+            val s = shown.first { it.group.id == o.id }
+            val t = s.trips[s.best!!.index]
+            val b = badges[o.id] ?: NearbyCards.Badge()
+            val day = Nearby.dayWord(o.arrival, now, ZONE)
+            MiniCard(o.id, s.group.point, b, NearbyCards.edge(b), t.rides.distinctBy { it.line }.take(2).map { it.line to Tokens.light.kind(it.kind).toArgb() },
+                NearbyCards.leaveWords(Fmt.time(o.departure), o.walk), (day?.let { "$it " } ?: "") + Fmt.time(o.arrival), Fmt.time(o.arrival),
+                o.sure?.let(NearbyCards::onTimeWords), o.sure?.let(NearbyCards::estimateWord), o.ranked)
         }
         val frame = me?.let { y -> Nearby.frame(y, shown.filter { it.option?.ranked == true }.map { it.group.point }) }
-        NearbyMap(Modifier.fillMaxWidth().height(320.dp), me, circles, greys.map { it.group.id to it.group.point }, vehicles.value, frame,
-            onTap = { picked = it }, onZoom = { zoom = it })
-        if (earliest != null && latest != null) Legend(earliest, ranked.maxOf { it.arrival })
+        NearbyMap(Modifier.fillMaxWidth().height(320.dp), me, cards, greys.map { it.group.id to it.group.point }, vehicles.value, frame,
+            showCards = picked == null, onTap = { picked = it }, onZoom = { zoom = it })
         Nearby.statusLine(Nearby.Situation(located = me != null, stopsFailed = r?.stopsFailed == true, busy = busy || (r == null && me != null),
             options = ranked.size, planFailed = r?.planFailed == true, seed = seed.isNotEmpty(), cooling = nl.haltewekker.data.Transit.cooling), "1.6 km")
             ?.let { (text, _) -> Text(text, color = DS.t.secondary, style = MaterialTheme.typography.bodySmall) }
         val p = picked?.let { id -> shown.firstOrNull { it.group.id == id } }
-        if (p != null) StopSheet(p, store, w, now, tags[p.group.id] ?: emptyList(), rides, vehicles, onClose = { picked = null; vehicles.value = emptyList() }, onGo = onGo)
+        if (p != null) StopSheet(p, store, w, now, badges[p.group.id]?.tags ?: emptyList(), rides, vehicles, onClose = { picked = null; vehicles.value = emptyList() }, onGo = onGo)
         else Nearby.ordered(options).forEach { o ->
             val s = shown.first { it.group.id == o.id }
-            OptionRow(s, o, tags[o.id] ?: emptyList(), colour(o), now) { picked = o.id }
+            OptionRow(s, o, badges[o.id]?.tags ?: emptyList(), now) { picked = o.id }
         }
         Text("To $destName. Walks are the planner's from where you are; how sure: ${if (rides.isEmpty()) "by live times and the time of day" else "your own rides when there are enough, else by live times and the time of day"}.",
             color = DS.t.secondary, style = MaterialTheme.typography.labelSmall)
     }
 }
 
-private data class Circle(val id: String, val p: GeoPoint, val color: Int, val minutes: Int, val ring: Nearby.Ring, val more: Int, val ranked: Boolean)
+/** (iOS 0.42.15) A stop's mini card: where it is, its tags and edge, its lines, the words, its pill ("12:31"). */
+private data class MiniCard(val id: String, val p: GeoPoint, val badge: NearbyCards.Badge, val edge: NearbyCards.Edge,
+                            val lines: List<Pair<String, Int>>, val leave: String, val arrive: String, val pill: String,
+                            val onTime: String?, val estimate: String?, val ranked: Boolean)
 
-@Composable
-private fun Legend(earliest: Double, latest: Double) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("arrive ${Fmt.time(earliest)}", color = DS.t.secondary, style = MaterialTheme.typography.labelMedium)
-        Box(Modifier.width(120.dp).height(8.dp).background(Brush.horizontalGradient(Nearby.SCALE.map { Color(0xFF000000 or it.toLong()) }), RoundedCornerShape(4.dp)))
-        Text(Fmt.time(latest), color = DS.t.secondary, style = MaterialTheme.typography.labelMedium)
-    }
+private fun rgb(c: Int) = Color(0xFF000000 or (c.toLong() and 0xFFFFFF))
+
+private fun tagColor(t: Nearby.Tag) = when (t) {
+    Nearby.Tag.FASTEST -> rgb(NearbyCards.color(NearbyCards.Edge.FASTEST)); Nearby.Tag.SUREST -> rgb(NearbyCards.color(NearbyCards.Edge.SUREST)); Nearby.Tag.SLOWER -> Color(0xFF9AA1A8)
 }
-
-private fun tagColor(t: Nearby.Tag) = when (t) { Nearby.Tag.FASTEST -> Color(0xFFC9A227); Nearby.Tag.SUREST -> Color(0xFF3DD598); Nearby.Tag.SLOWER -> Color(0xFF9AA1A8) }
 
 @Composable
 private fun TagChip(t: Nearby.Tag) {
     // (iOS 0.42.8) never "Fastes / t": one line, the row's other text gives way
-    Text(t.title, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false,
+    Text(t.title, color = Color(0xFF10140F), fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false,
         modifier = Modifier.background(tagColor(t), RoundedCornerShape(6.dp)).padding(horizontal = 6.dp, vertical = 2.dp))
 }
 
 @Composable
-private fun OptionRow(s: Shown, o: Nearby.Option, tags: List<Nearby.Tag>, colour: Int, now: Double, onClick: () -> Unit) {
+private fun OptionRow(s: Shown, o: Nearby.Option, tags: List<Nearby.Tag>, now: Double, onClick: () -> Unit) {
     val t = s.trips[s.best!!.index]
+    // (iOS 0.42.15, design M4b) name and tags; "9 min walk · 305 · leaves 10:41"; the arrival big, "92% on time"
     Card(Modifier.clickable(onClick = onClick), padding = 12) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Box(Modifier.width(12.dp).height(12.dp).background(Color(0xFF000000 or colour.toLong()), RoundedCornerShape(6.dp)))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(s.group.name, fontWeight = FontWeight.SemiBold, color = DS.t.text, maxLines = 1,
@@ -243,16 +239,21 @@ private fun OptionRow(s: Shown, o: Nearby.Option, tags: List<Nearby.Tag>, colour
                     tags.forEach { TagChip(it) }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("🚶 ${t.first.walkBefore} min", color = DS.t.secondary, style = MaterialTheme.typography.bodySmall)
+                    Text(NearbyCards.walkWords(o.walk) + " ·", color = DS.t.secondary, style = MaterialTheme.typography.bodySmall, maxLines = 1, softWrap = false)
                     t.rides.take(3).forEach { RidePill(it) }
                     val sh = NearbyLive.shown(t.first.departure, t.first.scheduledDeparture, t.first.live, t.first.cancelled)
-                    Text("leaves ${Fmt.time(sh.time)}" + if (sh.late) " ${sh.word}" else "", color = if (sh.late) DS.t.warning else DS.t.secondary,
-                        style = MaterialTheme.typography.bodySmall, maxLines = 1)
+                    Text("· leaves ${Fmt.time(sh.time)}" + if (sh.late) " ${sh.word}" else "", color = if (sh.late) DS.t.warning else DS.t.secondary,
+                        style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                 }
                 if (!o.ranked) Text("later" + (Nearby.dayWord(t.first.departure, now, ZONE)?.let { " · $it" } ?: ""), color = DS.t.secondary, style = MaterialTheme.typography.bodySmall)
-                o.sure?.let { Text(Nearby.sureWords(it), color = DS.t.secondary, style = MaterialTheme.typography.bodySmall) }
             }
-            Text(Fmt.time(t.end), fontWeight = FontWeight.Bold, fontSize = 22.sp, color = DS.t.text)
+            Column(horizontalAlignment = Alignment.End) {
+                Text(Fmt.time(t.end), fontWeight = FontWeight.Bold, fontSize = 22.sp, color = if (o.ranked) DS.t.text else DS.t.secondary, maxLines = 1, softWrap = false)
+                o.sure?.let { sure ->
+                    Text(NearbyCards.onTimeWords(sure), color = DS.t.secondary, style = MaterialTheme.typography.bodySmall, maxLines = 1, softWrap = false)
+                    NearbyCards.estimateWord(sure)?.let { Text(it, color = DS.t.secondary, style = MaterialTheme.typography.labelSmall, maxLines = 1, softWrap = false) }
+                }
+            }
         }
     }
 }
@@ -264,6 +265,7 @@ private fun StopSheet(s: Shown, store: NearbyStore, w: Nearby.Window, now: Doubl
     var info by remember(s.group.id) { mutableStateOf<NearbyStore.StopInfo?>(null) }
     var again by remember(s.group.id) { mutableIntStateOf(0) }
     var selected by remember(s.group.id) { mutableStateOf<String?>(null) }
+    var why by remember(s.group.id) { mutableStateOf(false) }
     val walk = s.trips.firstOrNull()?.first?.walkBefore ?: Nearby.plannedWalk(s.group.metres)
     LaunchedEffect(s.group.id, again) {
         info = null
@@ -296,12 +298,20 @@ private fun StopSheet(s: Shown, store: NearbyStore, w: Nearby.Window, now: Doubl
                     Text(s.group.name, fontWeight = FontWeight.Bold, color = DS.t.text, style = MaterialTheme.typography.titleMedium)
                     tags.forEach { TagChip(it) }
                 }
-                Text("🚶 $walk min walk", color = DS.t.secondary, style = MaterialTheme.typography.bodySmall)
+                Text(NearbyCards.walkWords(walk), color = DS.t.secondary, style = MaterialTheme.typography.bodySmall)
             }
             TextButton(onClick = onClose) { Text("All stops") }
         }
         s.best?.let { b -> trips.getOrNull(b.index) }?.let { t ->
-            Text("Arrive ${Fmt.time(t.end)}: " + Nearby.sureWords(NearbyStore.sure(t, rides, now)), color = DS.t.text, style = MaterialTheme.typography.bodyMedium)
+            // (iOS 0.42.15) tap it (or the i) for where the % comes from: your own rides around this time, or the estimate
+            Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).clickable { why = !why }, verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Arrive ${Fmt.time(t.end)}: " + Nearby.sureWords(NearbyStore.sure(t, rides, now)), color = DS.t.text,
+                    style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                Icon(Icons.Outlined.Info, contentDescription = if (why) "Hide where this comes from" else "Where this comes from", tint = DS.t.accent)
+            }
+            if (why) Text(NearbyStore.explain(t, rides, now), color = DS.t.text, style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.fillMaxWidth().background(DS.t.secondary.copy(alpha = 0.12f), RoundedCornerShape(12.dp)).padding(12.dp))
         }
         val i0 = info
         if (i0 == null && trips.isEmpty()) Text("Checking this stop…", color = DS.t.secondary)
@@ -317,7 +327,7 @@ private fun StopSheet(s: Shown, store: NearbyStore, w: Nearby.Window, now: Doubl
             if (idx.isEmpty()) Text("Nothing from here for that time.", color = DS.t.secondary)
             if (tab == 0) normal.take(6).forEach { i -> TimeRow(trips[i], now) }
             else {
-                val surest = Nearby.surestOf(normal.map { NearbyStore.sure(trips[it], rides, now).percent },
+                val surest = NearbyCards.surestBoth(normal.map { NearbyStore.sure(trips[it], rides, now).percent },
                     normal.indexOf(s.best?.index ?: -1).takeIf { it >= 0 } ?: 0)?.let { normal[it] }
                 Timelines(normal.map { trips[it] }, s.best?.index?.let { trips.getOrNull(it)?.id }, surest?.let { trips[it].id }, selected) { selected = it }
                 if (late.isNotEmpty()) {
@@ -408,7 +418,8 @@ private fun Timelines(trips: List<DoorTrip>, fastest: String?, surest: String?, 
                 val gaps = TripTimeline.gapLabels(placed, wDp, changeNeeds)
                 val rideText = TripTimeline.rideLabels(placed, wDp).associate { it.index to it.text }
                 val ends = TripTimeline.ends(axis.at(t.start), axis.at(t.end), wDp)
-                val border = when (t.id) { fastest -> Color(0xFFC9A227); surest -> Color(0xFF3DD598); else -> if (t.id == selected) DS.t.accent else Color.Transparent }
+                // (iOS 0.42.15) green when it's the surest (also when it's the fastest too), gold when only the fastest
+                val border = when (t.id) { surest -> tagColor(Nearby.Tag.SUREST); fastest -> tagColor(Nearby.Tag.FASTEST); else -> if (t.id == selected) DS.t.accent else Color.Transparent }
                 Column(Modifier.fillMaxWidth().border(BorderStroke(2.dp, border), RoundedCornerShape(8.dp)).clickable { onPick(t.id) }.padding(4.dp)) {
                     Box(Modifier.fillMaxWidth().height(14.dp)) {
                         Text(Fmt.time(t.start), fontSize = 10.sp, color = DS.t.secondary, modifier = Modifier.padding(start = (ends.leave * wDp).dp))
@@ -454,16 +465,22 @@ private fun Timelines(trips: List<DoorTrip>, fastest: String?, surest: String?, 
     }
 }
 
-/** The nearby map: the circles (arrival colour, minutes, ring, "+N"), the grey dots, you, the vehicles on the line now. */
+/**
+ * The nearby map (iOS 0.42.15): you, each stop a small dot (gold or green when tagged, grey else; grey dots for the stops
+ * not planned from), the vehicles on the line now; over it the walk lines from you (solid in the tag's colour, dashed
+ * grey else), each stop's mini card or pill where `NearbyCards.layout` puts it (never on top of another, of you or of
+ * a dot), with a leader line when it isn't right by its dot. Taps on a card, a pill or a dot open the stop.
+ */
 @Composable
-private fun NearbyMap(modifier: Modifier, me: GeoPoint?, circles: List<Circle>, greys: List<Pair<String, GeoPoint>>, vehicles: List<Pair<GeoPoint, Int>>,
-                      frame: Nearby.Frame?, onTap: (String) -> Unit, onZoom: (Double) -> Unit) {
+private fun NearbyMap(modifier: Modifier, me: GeoPoint?, cards: List<MiniCard>, greys: List<Pair<String, GeoPoint>>, vehicles: List<Pair<GeoPoint, Int>>,
+                      frame: Nearby.Frame?, showCards: Boolean, onTap: (String) -> Unit, onZoom: (Double) -> Unit) {
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val tap by rememberUpdatedState(onTap)
     val zoomed by rememberUpdatedState(onZoom)
     var map by remember { mutableStateOf<MapLibreMap?>(null) }
     var style by remember { mutableStateOf<Style?>(null) }
+    var moved by remember { mutableIntStateOf(0) }
     val density = context.resources.displayMetrics.density
     val view = remember {
         MapLibre.getInstance(context)
@@ -473,22 +490,28 @@ private fun NearbyMap(modifier: Modifier, me: GeoPoint?, circles: List<Circle>, 
                 m.uiSettings.isRotateGesturesEnabled = false
                 m.uiSettings.isTiltGesturesEnabled = false
                 m.uiSettings.isLogoEnabled = false
+                m.uiSettings.isAttributionEnabled = false
                 m.cameraPosition = CameraPosition.Builder().target(LatLng(me?.lat ?: 52.09, me?.lon ?: 5.12)).zoom(14.0).build()
                 m.setStyle(Style.Builder().fromUri(nl.haltewekker.map.MapStyle.STYLE_URL)) { s ->
-                    for (id in listOf("greys", "circles", "me", "vehicles")) s.addSource(GeoJsonSource(id))
+                    for (id in listOf("greys", "dots", "me", "vehicles")) s.addSource(GeoJsonSource(id))
                     s.addLayer(CircleLayer("greys-dots", "greys").withProperties(PropertyFactory.circleColor("#9AA1A8"), PropertyFactory.circleRadius(5f),
                         PropertyFactory.circleStrokeColor("#FFFFFF"), PropertyFactory.circleStrokeWidth(1.5f)))
-                    s.addLayer(SymbolLayer("circles-icons", "circles").withProperties(PropertyFactory.iconImage(Expression.get("icon")),
-                        PropertyFactory.iconAllowOverlap(true), PropertyFactory.iconIgnorePlacement(true)))
+                    s.addLayer(CircleLayer("stop-dots", "dots").withProperties(PropertyFactory.circleColor(Expression.get("color")),
+                        PropertyFactory.circleRadius(5f), PropertyFactory.circleStrokeColor("#0B0C0E"), PropertyFactory.circleStrokeWidth(2f)))
                     s.addLayer(CircleLayer("vehicles-dots", "vehicles").withProperties(PropertyFactory.circleColor(Expression.get("color")),
                         PropertyFactory.circleRadius(7f), PropertyFactory.circleStrokeColor("#FFFFFF"), PropertyFactory.circleStrokeWidth(2f)))
+                    s.addLayer(CircleLayer("me-halo", "me").withProperties(PropertyFactory.circleColor("#2F8CFF"), PropertyFactory.circleOpacity(0.18f),
+                        PropertyFactory.circleRadius(20f)))
                     s.addLayer(CircleLayer("me-dot", "me").withProperties(PropertyFactory.circleColor("#2F7CF6"), PropertyFactory.circleRadius(7f),
                         PropertyFactory.circleStrokeColor("#FFFFFF"), PropertyFactory.circleStrokeWidth(3f)))
                     style = s
                 }
-                m.addOnCameraIdleListener { zoomed(m.cameraPosition.zoom) }
+                m.addOnCameraIdleListener { zoomed(m.cameraPosition.zoom); moved++ }
+                m.addOnCameraMoveListener { moved++ }
                 m.addOnMapClickListener { ll ->
-                    val hit = m.queryRenderedFeatures(m.projection.toScreenLocation(ll), "circles-icons", "greys-dots").firstOrNull()
+                    val pt = m.projection.toScreenLocation(ll)
+                    val r = 10 * density
+                    val hit = m.queryRenderedFeatures(android.graphics.RectF(pt.x - r, pt.y - r, pt.x + r, pt.y + r), "stop-dots", "greys-dots").firstOrNull()
                     val id = hit?.getStringProperty("id") ?: return@addOnMapClickListener false
                     tap(id); true
                 }
@@ -515,14 +538,12 @@ private fun NearbyMap(modifier: Modifier, me: GeoPoint?, circles: List<Circle>, 
         val b = LatLngBounds.from(f.lat + f.latDelta / 2, f.lon + f.lonDelta / 2, f.lat - f.latDelta / 2, f.lon - f.lonDelta / 2)
         try { m.easeCamera(CameraUpdateFactory.newLatLngBounds(b, (24 * density).toInt()), 400) } catch (_: Exception) {}
     }
-    LaunchedEffect(style, circles) {
+    LaunchedEffect(style, cards) {
         val s = style ?: return@LaunchedEffect
-        val f = circles.map { c ->
-            val icon = "nb-${c.color}-${c.minutes}-${c.ring}-${c.more}-${c.ranked}"
-            if (s.getImage(icon) == null) s.addImage(icon, circleBitmap(c, density))
-            Feature.fromGeometry(Point.fromLngLat(c.p.lon, c.p.lat)).apply { addStringProperty("icon", icon); addStringProperty("id", c.id) }
-        }
-        (s.getSource("circles") as? GeoJsonSource)?.setGeoJson(FeatureCollection.fromFeatures(f))
+        (s.getSource("dots") as? GeoJsonSource)?.setGeoJson(FeatureCollection.fromFeatures(cards.map { c ->
+            Feature.fromGeometry(Point.fromLngLat(c.p.lon, c.p.lat)).apply {
+                addStringProperty("id", c.id); addStringProperty("color", String.format("#%06X", 0xFFFFFF and NearbyCards.color(c.edge)))
+            } }))
     }
     LaunchedEffect(style, greys) {
         val s = style ?: return@LaunchedEffect
@@ -538,33 +559,101 @@ private fun NearbyMap(modifier: Modifier, me: GeoPoint?, circles: List<Circle>, 
         (s.getSource("vehicles") as? GeoJsonSource)?.setGeoJson(FeatureCollection.fromFeatures(vehicles.map { (p, c) ->
             Feature.fromGeometry(Point.fromLngLat(p.lon, p.lat)).apply { addStringProperty("color", String.format("#%06X", 0xFFFFFF and c)) } }))
     }
-    AndroidView(factory = { view }, modifier = modifier)
+    BoxWithConstraints(modifier) {
+        AndroidView(factory = { view }, modifier = Modifier.fillMaxSize())
+        val m = map
+        if (m != null && style != null && showCards) {
+            @Suppress("UNUSED_VARIABLE") val tick = moved          // (follows the map as it moves)
+            fun screen(p: GeoPoint): NearbyCards.Point {
+                val px = m.projection.toScreenLocation(LatLng(p.lat, p.lon))
+                return NearbyCards.Point(px.x / density.toDouble(), px.y / density.toDouble())
+            }
+            val wDp = maxWidth.value.toDouble(); val hDp = maxHeight.value.toDouble()
+            val bounds = NearbyCards.Rect(6.0, 6.0, max(0.0, wDp - 12), max(0.0, hDp - 12))
+            val items = cards.map { NearbyCards.Item(it.id, screen(it.p), it.badge.tagged) }
+            val you = me?.let(::screen)
+            val placed = NearbyCards.layout(items, bounds, you, greys.map { screen(it.second) })
+            val byId = cards.associateBy { it.id }
+            ComposeCanvas(Modifier.fillMaxSize()) {
+                val d = density
+                if (you != null) for (i in items) {
+                    val e = byId[i.id]?.edge ?: NearbyCards.Edge.PLAIN
+                    val dx = i.at.x - you.x; val dy = i.at.y - you.y
+                    val len = kotlin.math.sqrt(dx * dx + dy * dy)
+                    val a = NearbyCards.YOU_RADIUS * 0.45; val b = NearbyCards.DOT_RADIUS
+                    if (len <= a + b + 2) continue
+                    val ux = dx / len; val uy = dy / len
+                    val from = Offset(((you.x + ux * a) * d).toFloat(), ((you.y + uy * a) * d).toFloat())
+                    val to = Offset(((i.at.x - ux * b) * d).toFloat(), ((i.at.y - uy * b) * d).toFloat())
+                    if (NearbyCards.walkDashed(e)) drawLine(rgb(NearbyCards.color(e)).copy(alpha = 0.8f), from, to, strokeWidth = 2 * d,
+                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(4 * d, 4 * d)))
+                    else drawLine(rgb(NearbyCards.color(e)), from, to, strokeWidth = 3 * d)
+                }
+                for (p in placed) {
+                    val l = p.leader ?: continue
+                    val i = items.firstOrNull { it.id == p.id } ?: continue
+                    val e = byId[p.id]?.edge ?: NearbyCards.Edge.PLAIN
+                    drawLine(rgb(NearbyCards.color(e)), Offset((l.x * d).toFloat(), (l.y * d).toFloat()), Offset((i.at.x * d).toFloat(), (i.at.y * d).toFloat()), strokeWidth = 1.5f * d)
+                }
+            }
+            for (p in placed) {
+                if (p.kind == NearbyCards.Kind.HIDDEN) continue
+                val c = byId[p.id] ?: continue
+                Box(Modifier.offset(p.rect.x.dp, p.rect.y.dp).size(p.rect.w.dp, p.rect.h.dp).clickable { tap(c.id) }) {
+                    if (p.kind == NearbyCards.Kind.CARD) MiniCardView(c) else MiniPillView(c)
+                }
+            }
+        }
+    }
 }
 
-/** A stop's circle: filled in its arrival colour with the minutes inside, its ring how sure, "+N" for merged ones. */
-private fun circleBitmap(c: Circle, density: Float): Bitmap {
-    val d = (34 * density).toInt()
-    val pad = (8 * density).toInt()
-    val bmp = Bitmap.createBitmap(d + pad * 2, d + pad * 2, Bitmap.Config.ARGB_8888)
-    val cv = Canvas(bmp)
-    val cx = (d / 2 + pad).toFloat(); val cy = cx; val r = d / 2f
-    val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = (0xFF000000.toInt() or c.color); alpha = if (c.ranked) 255 else 150 }
-    cv.drawCircle(cx, cy, r, fill)
-    val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
-    when (c.ring) {
-        Nearby.Ring.SOLID -> { ring.color = 0xFF14171A.toInt(); ring.strokeWidth = 3 * density }
-        Nearby.Ring.DASHED -> { ring.color = 0xFF14171A.toInt(); ring.strokeWidth = 2.5f * density; ring.pathEffect = DashPathEffect(floatArrayOf(4 * density, 3 * density), 0f) }
-        Nearby.Ring.NEUTRAL -> { ring.color = 0xFF9AA1A8.toInt(); ring.strokeWidth = 1.2f * density }
+/** Text sizes that don't grow with the font size setting: the layout's boxes (`NearbyCards` sizes) must hold. */
+@Composable
+private fun fixedSp(x: Float) = (x / LocalDensity.current.fontScale).sp
+
+/** (iOS `NearbyMiniCard`) Its lines and "leave 10:41 · 9 min walk" (cut off first), "arrive 12:07" with "92% on time"
+ *  (and "estimate") beside it, the tags row. */
+@Composable
+private fun MiniCardView(c: MiniCard) {
+    val shape = RoundedCornerShape(10.dp)
+    Column(Modifier.fillMaxSize().background(DS.t.surface, shape).border(NearbyCards.edgeWidth(c.edge).dp, rgb(NearbyCards.color(c.edge)), shape)
+        .padding(horizontal = 8.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
+            c.lines.forEach { (line, colour) ->
+                Text(line, color = Color.White, fontSize = fixedSp(10f), fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false,
+                    modifier = Modifier.background(rgb(colour), RoundedCornerShape(4.dp)).padding(horizontal = 5.dp, vertical = 1.dp))
+            }
+            Text(c.leave, color = DS.t.secondary, fontSize = fixedSp(10.5f), maxLines = 1, softWrap = false,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("arrive " + c.arrive, color = if (c.ranked) DS.t.text else DS.t.secondary, fontSize = fixedSp(15f), fontWeight = FontWeight.Bold,
+                maxLines = 1, softWrap = false, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            Spacer(Modifier.width(6.dp))
+            if (c.onTime != null) Column(horizontalAlignment = Alignment.End) {
+                Text(c.onTime, color = DS.t.secondary, fontSize = fixedSp(10f), fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false)
+                c.estimate?.let { Text(it, color = DS.t.secondary, fontSize = fixedSp(9f), maxLines = 1, softWrap = false) }
+            }
+        }
+        if (c.badge.tagged) Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            if (c.badge.fastest) MiniTag("FASTEST", tagColor(Nearby.Tag.FASTEST))
+            if (c.badge.surest) MiniTag("SUREST", tagColor(Nearby.Tag.SUREST))
+        }
     }
-    cv.drawCircle(cx, cy, r + 2 * density, ring)
-    val text = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0xFF14171A.toInt(); textSize = 13 * density; typeface = Typeface.DEFAULT_BOLD; textAlign = Paint.Align.CENTER
+}
+
+@Composable
+private fun MiniTag(text: String, fill: Color) {
+    Text(text, color = Color(0xFF10140F), fontSize = fixedSp(9f), fontWeight = FontWeight.ExtraBold, maxLines = 1, softWrap = false,
+        modifier = Modifier.background(fill, RoundedCornerShape(4.dp)).padding(horizontal = 5.dp, vertical = 2.dp))
+}
+
+/** A card folded to its arrival ("12:31") where there's no room for the card. */
+@Composable
+private fun MiniPillView(c: MiniCard) {
+    val shape = RoundedCornerShape(50)
+    Box(Modifier.fillMaxSize().background(DS.t.surface, shape).border(NearbyCards.edgeWidth(c.edge).dp, rgb(NearbyCards.color(c.edge)), shape),
+        contentAlignment = Alignment.Center) {
+        Text(c.pill, color = DS.t.text, fontSize = fixedSp(13f), fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
     }
-    cv.drawText("${c.minutes}", cx, cy + 4.5f * density, text)
-    if (c.more > 0) {
-        val bx = cx + r * 0.75f; val by = cy - r * 0.75f
-        cv.drawCircle(bx, by, 8 * density, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF14171A.toInt() })
-        cv.drawText("+${c.more}", bx, by + 3.5f * density, Paint(text).apply { color = 0xFFFFFFFF.toInt(); textSize = 9 * density })
-    }
-    return bmp
 }

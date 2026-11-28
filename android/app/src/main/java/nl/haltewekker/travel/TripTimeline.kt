@@ -137,8 +137,9 @@ object TripTimeline {
     }
 
     fun gapText(walk: Int, wait: Int, change: Boolean): String = when {
-        walk > 0 && wait > 0 -> "🚶$walk + $wait wait"
-        walk > 0 -> "🚶 $walk"
+        // (0.10.11, iOS 0.42.15) words, no walking emoji
+        walk > 0 && wait > 0 -> "$walk walk + $wait wait"
+        walk > 0 -> "$walk min walk"
         else -> if (change) "$wait min" else "$wait wait"
     }
 

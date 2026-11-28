@@ -133,11 +133,12 @@ final class TripTimelineTests: XCTestCase {
         let axis = TripTimeline.Axis(start: at(0), end: at(80))
         let placed: [TripTimeline.Placed] = TripTimeline.place(parts, on: axis)
         let g: [TripTimeline.GapLabel] = TripTimeline.gapLabels(placed, width: 320, changeNeeds: 6)
-        XCTAssertEqual(g.map(\.text), ["🚶2 + 1 wait", "🚶3 + 5 wait", "2 min", "🚶 4"])
+        XCTAssertEqual(g.map(\.text), ["2 walk + 1 wait", "3 walk + 5 wait", "2 min", "4 min walk"])
         XCTAssertEqual(g.map(\.tone), [.plain, .plain, .risky, .plain])
         XCTAssertEqual(g[1].x, (23.0 + 31) / 2 / 80, accuracy: 1e-9, "centred on the gap")
         XCTAssertTrue(g[1].below, "8 minutes is 32 pt: too narrow for its words, under the bar")
-        XCTAssertEqual(g.map(\.lane), [0, 1, 0, 0], "the second would touch the first: the row below")
+        XCTAssertEqual(g.map(\.lane), [0, 1, 0, 1], "the second would touch the first: the row below (and the last walk, in words, too)")
+        XCTAssertTrue(g[3].below, "\"4 min walk\" is wider than its 4 minutes: under the bar")
         // a long wait holds its minutes inside the gap
         let long: [TripTimeline.Leg] = [leg("158", 0, 20, from: "A", walk: 0), leg("SPR", 50, 70, from: "B", walk: 0, train: true)]
         let lp: [TripTimeline.Placed] = TripTimeline.place(TripTimeline.parts(leave: at(0), legs: long, end: at(70)), on: axis)

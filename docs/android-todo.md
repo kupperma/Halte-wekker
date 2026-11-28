@@ -3,6 +3,42 @@
 The rules and numbers for each are in [logs-export.md](logs-export.md) › For Android (parity), with the iOS files and
 their tests.
 
+## iOS 0.42.15 (stop cards on "Fastest trip, zoomed out")
+
+Approved design M4b: the coloured number circles on the map are now mini cards by each stop, and how sure a way is
+goes by the time you take it. Rules in `ios/App/NearbyCards.swift` and `ios/App/NearbySlot.swift` (tests
+`NearbyCardsTests`), shared vectors `docs/nearby-cards-vectors.json`.
+
+- [x] **Mini cards** (`NearbyCards`): a small dot at the stop (gold Fastest, green Surest, grey else) and a card by it:
+      lines, "leave 10:41 · 9 min walk", "arrive 12:07", "92% on time" (and "estimate" when not from your own rides)
+      beside the time, and a tags row FASTEST / SUREST, both on one card when one way is both. Edge green when Surest,
+      gold when only Fastest, grey else (thicker when tagged); the walk line from you solid in that colour, dashed grey
+      else. Tap: the stop as before. **Android 0.10.11:** `travel/NearbyCards.kt` (`NearbyCardsTest`, the same
+      vectors), drawn over MapLibre in `NearbyScreen.kt` (dots in a circle layer, cards and lines in Compose, moved
+      with the camera).
+- [x] **Never on top of anything** (`NearbyCards.layout`): in order (Fastest, Surest, then by arrival) each card at the
+      first spot by its dot (above, below, diagonals, sides, then up to three steps further) that's inside the map's
+      free part and clear (by 4 pt) of every card and pill before it, of you (20 pt), of every dot (7 pt) and of every
+      leader line; from the 5th, or when no card fits, a pill "12:31"; when no pill fits, none (its dot stays, it's in
+      the list). A spot not right by its dot gets a leader line (at most 120 pt, through no other card). Card 196 x 58
+      (76 with tags), pill 56 x 26, 12 pt from the dot. Text sizes on the cards are fixed so the boxes hold. Tested on
+      the vectors and on clusters of 2, 3, 5 and 8 stops at random places (edges, you under a spot).
+      **Android 0.10.11:** the same.
+- [x] **Tags:** Fastest the earliest by live times; Surest the most on time at 70 % or more (none under); the same way
+      may be both; overnight / out-of-window ways never tagged; "Slower" no longer shown. In the stop's sheet the
+      fastest departure is Surest too when it's as sure (`NearbyCards.surestBoth`). **Android 0.10.11:** the same.
+- [x] **How sure by the time of day** (`NearbySlot`): your own rides count only around the way's time at the stop:
+      within 60 min either side, else 90, else 120 (weekdays and weekends apart). Without 4 of them, the estimate by
+      the time of day (`NearbySlot.period`, also `Steady.period` now: rush hours 07–09 and 16–19, "evening" 19–20:30
+      still busy) with what the app saw of the line then and its live delays. `DelayBook` keeps each ride's delay with
+      the minute it was due (`delayBook.slots`, filled once from the old hour buckets). The sheet explains it (tap the %
+      or the i): "Based on your last 7 rides on the 305 to Eindhoven around 19:00 on weekdays: 6 on time (less than
+      3 min late)." or "Estimated: …". **Android 0.10.11:** the travel log's rides by their arrival time
+      (`NearbySlot.pick`), the model by `NearbySlot.period` (blended with the live delay at the end), the same words.
+- [x] **No walking emoji** anywhere in the app: "9 min walk" in the rows and the sheet, the whole-trip gap labels
+      "2 min walk" / "3 walk + 5 wait". **Android 0.10.11:** the same (`TripTimeline.gapText`, `NearbyScreen`).
+      (The live link's web page in `relay/` still draws one; not part of the apps.)
+
 ## iOS 0.42.14
 
 - [ ] Where to get on (`BoardAt`, ported from 0.40.1 on another branch): the trip's stops are fetched without the 3 s

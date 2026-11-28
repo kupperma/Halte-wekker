@@ -193,7 +193,9 @@ object Nearby {
         object Estimate : Source() { override fun toString() = "Estimate" }
     }
 
-    data class Sure(val percent: Int, val source: Source, val usual: Int?)
+    /** (0.10.11, iOS 0.42.15) `onTime`: of your rides, how many were on time; `made`: the chance you make the changes;
+     *  `window`: your rides were counted within this many minutes of the way's time (`NearbySlot.pick`). */
+    data class Sure(val percent: Int, val source: Source, val usual: Int?, val onTime: Int? = null, val made: Double = 1.0, val window: Int? = null)
 
     private fun roundHalf(x: Double) = floor(x + 0.5).toInt()
     private fun clampPercent(p: Double) = min(99, max(1, roundHalf(p * 100)))
@@ -206,12 +208,13 @@ object Nearby {
         val m = if (made.isFinite()) min(1.0, max(0.0, made)) else 1.0
         val mine = own.filter { it.isFinite() }.takeLast(OWN_KEPT)
         if (mine.size >= OWN_NEEDED) {
-            val share = mine.count { it < LATE_BY }.toDouble() / mine.size
+            val ok = mine.count { it < LATE_BY }
+            val share = ok.toDouble() / mine.size
             val med = median(mine)
-            return Sure(clampPercent(share * m), Source.Yours(mine.size), if (med >= 0.5) roundHalf(med) else null)
+            return Sure(clampPercent(share * m), Source.Yours(mine.size), if (med >= 0.5) roundHalf(med) else null, ok, m)
         }
         val late = if (modelLate.isFinite()) min(1.0, max(0.0, modelLate)) else 0.3
-        return Sure(clampPercent((1 - late) * m), if (live) Source.Live else Source.Estimate, null)
+        return Sure(clampPercent((1 - late) * m), if (live) Source.Live else Source.Estimate, null, null, m)
     }
 
     fun sureWords(s: Sure): String = when (val src = s.source) {

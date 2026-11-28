@@ -75,6 +75,8 @@ final class NearbyStore: ObservableObject {
     @Published private(set) var ways: [Way] = []
     @Published private(set) var options: [Nearby.Option] = []
     @Published private(set) var tags: [String: [Nearby.Tag]] = [:]
+    /// (0.42.15) Fastest and Surest as the cards and rows show them (both on one when one way is both).
+    @Published private(set) var badges: [String: NearbyCards.Badge] = [:]
     @Published private(set) var radius: Double = Nearby.searchRadii[0]
     @Published private(set) var busy = false
     @Published private(set) var stopsFailed = false
@@ -515,6 +517,16 @@ final class NearbyStore: ObservableObject {
         return Nearby.late(dep(t, later: walk(w.group).shown.later), window)
     }
 
+    /// (0.42.15) Where a trip's % comes from (`NearbySlot.explain`), for the sheet.
+    func explain(_ t: DoorTrip) -> String {
+        let last: Ride = t.last
+        let c = Calendar.current
+        let slot: String = NearbySlot.slotWords(minute: NearbySlot.minute(last.scheduledArrival, calendar: c), weekend: c.isDateInWeekend(last.scheduledArrival))
+        let line: String = last.isTrain ? Transit.trainLabel(last.line) : last.line
+        return NearbySlot.explain(sure(t), line: line, to: Fmt.stop(last.toStop), slot: slot, period: Steady.period(last.scheduledArrival).name,
+                                  changes: t.rides.count - 1)
+    }
+
     func way(_ id: String) -> Way? { ways.first { $0.id == id } }
     func bestTrip(_ id: String) -> DoorTrip? { best[id] }
     func option(_ id: String) -> Nearby.Option? { options.first { $0.id == id } }
@@ -525,13 +537,16 @@ final class NearbyStore: ObservableObject {
     func sure(_ t: DoorTrip) -> Nearby.Sure {
         if let s = sures[t.id] { return s }
         let last: Ride = t.last
-        let own: [Double] = DelayBook.shared.delays(line: last.line, stop: last.toStop, at: last.scheduledArrival)
+        // (0.42.15) only your rides around this time (a 19:00 bus is far less on time than a 13:00 one)
+        let slot: (delays: [Double], window: Int) = DelayBook.shared.slotDelays(line: last.line, stop: last.toStop, at: last.scheduledArrival)
+        let own: [Double] = slot.delays
         let model: Double = Steady.late(line: last.line, train: last.isTrain, stop: last.toStop, at: last.scheduledArrival, by: Nearby.lateBy)
         var made: Double = 1
         for i in t.rides.indices.dropFirst() { made *= 1 - Risk.miss(t, at: i) }
         let name: String = LiveDelays.name(last.line, train: last.isTrain)
         let live: Bool = t.rides.contains { $0.live } || LiveDelays.shared.now(line: name).count >= 2
-        let s: Nearby.Sure = Nearby.sure(own: own, modelLate: model, made: made, live: live)
+        var s: Nearby.Sure = Nearby.sure(own: own, modelLate: model, made: made, live: live)
+        if case .yours = s.source { s.window = slot.window }
         sures[t.id] = s
         return s
     }
@@ -566,6 +581,7 @@ final class NearbyStore: ObservableObject {
         best = b
         options = opts
         tags = Nearby.tags(opts)
+        badges = NearbyCards.badges(opts)
     }
 
     /// The earliest and latest arrival of the ranked stops (for the colours and the legend); of them all when none is.

@@ -7,10 +7,10 @@ struct NearbyPick: Identifiable, Hashable { let id: String }
 
 /// "Fastest trip, zoomed out" (0.42, concept N5): Fastest trip's overview. The map zooms out to the stops you could
 /// walk to (one plan from where you are, walking up to 1.6 km, 3 km while fewer than 3 have a way, framed on the
-/// useful ones; 0.42.2: circles that would overlap as one, grey dots for stops to tap and check); each stop a circle coloured by when
-/// you'd be there (green the earliest … red the latest, its minutes inside), its ring how sure (solid: almost always
-/// on time, dashed: often late, thin: no live times to go by). Leave now / in 10 / in 20 min. Under it the stops,
-/// tagged Fastest, Surest and Slower. Tap one: its times, the whole trip, what's on the line now, and Go.
+/// useful ones; grey dots for stops to tap and check); 0.42.15: each stop with a way a mini card by its dot (its line,
+/// leave and walk, arrive, how sure, FASTEST and SUREST), never on top of another, of you or of a dot
+/// (`NearbyCards.layout`), the walk line from you solid gold or green to a tagged one. Leave now / in 10 / in 20 min.
+/// Under it the stops, tagged Fastest and Surest. Tap one: its times, the whole trip, what's on the line now, and Go.
 /// "Your trip and other times" (or the top right) shows Fastest trip's own cards as before.
 struct NearbyOverview: View {
     @EnvironmentObject var go: GoStore
@@ -19,8 +19,8 @@ struct NearbyOverview: View {
     @StateObject private var line = NearbyLineModel()
     @State private var camera: MapCameraPosition = .automatic
     @State private var picked: NearbyPick?
-    /// The map's metres per point (for circles that would overlap: `Nearby.merge`).
-    @State private var metresPerPoint: Double = 3
+    /// (0.42.15) Counts the map's moves: the cards follow their stops on the screen.
+    @State private var moved: Int = 0
     /// Show Fastest trip's own cards.
     let onClose: () -> Void
 
@@ -43,7 +43,7 @@ struct NearbyOverview: View {
         GeometryReader { g in
             let mapH: CGFloat = max(240, g.size.height * 0.46)
             VStack(spacing: 0) {
-                mapView(height: mapH + 24)
+                mapView(width: g.size.width, height: mapH + 24)
                     .frame(height: mapH + 24)               // (the last 24 under the list's round corners)
                 panel
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -93,63 +93,46 @@ struct NearbyOverview: View {
 
     // MARK: the map
 
+    /// A stop's dot on the map: tagged (gold, green), with a way (grey), or not planned from yet (`NearbyStopMark`).
     private struct Mark: Identifiable {
         let id: String
         let name: String
         let coordinate: CLLocationCoordinate2D
         let state: NearbyStopMark.Look
-        let fill: Color
-        let minutes: String
-        let ring: Nearby.Ring
+        let edge: NearbyCards.Edge
         let spoken: String
-        var more = 0                    // other stops drawn under this one (too close to tell apart)
     }
 
-    /// The stops' circles: coloured by when you'd be there, the ones that would overlap at this zoom as one (the
-    /// earliest there, `Nearby.merge`), and grey dots for the stops not planned from (tap one to check it), left out
-    /// under a circle.
+    /// (0.42.15) Every stop as a small dot; the ones with a way get a mini card by it (`NearbyCards.layout`, over the map).
     private func marks() -> [Mark] {
-        let span: (earliest: Date, latest: Date)? = store.arrivals
-        var ready: [String: Mark] = [:]
-        var pins: [Nearby.Pin] = []
-        var dots: [Mark] = []
+        var out: [Mark] = []
         for w in store.ways {
             let g: Nearby.Group = w.group
             let c = CLLocationCoordinate2D(latitude: g.lat, longitude: g.lon)
             let name: String = Fmt.stop(g.name)
-            if let o = store.option(w.id), let s = span {
-                let f: Double = Nearby.fraction(o.arrival, earliest: s.earliest, latest: s.latest)
-                let fill: Color = o.ranked ? Color(hex: Nearby.color(f)) : DS.legQuiet
-                let mins: String = String(Fmt.hhmm(o.arrival).suffix(2))
-                let spoken: String = "\(name): there at \(Fmt.hhmm(o.arrival))" + (o.sure.map { ", on time \($0.percent)%" } ?? "")
-                ready[w.id] = Mark(id: w.id, name: name, coordinate: c, state: .ready, fill: fill, minutes: mins,
-                                   ring: o.ranked ? Nearby.ring(o.sure) : .neutral, spoken: spoken)
-                pins.append(Nearby.Pin(id: w.id, lat: g.lat, lon: g.lon, arrival: o.arrival))
-            } else {
-                let st: NearbyStopMark.Look
-                let spoken: String
-                switch w.check {
-                case .asking: st = .pending; spoken = "\(name): asking"
-                case .done: st = .none; spoken = "\(name): no way from here in this time"
-                case .unasked: st = .unasked; spoken = "\(name): not checked. Tap to check it"
-                case .failed: st = .unasked; spoken = "\(name): couldn’t check it. Tap to try again"
-                }
-                dots.append(Mark(id: w.id, name: name, coordinate: c, state: st, fill: DS.legQuiet, minutes: "", ring: .neutral, spoken: spoken))
+            if let o = store.option(w.id) {
+                let e: NearbyCards.Edge = NearbyCards.edge(store.badges[w.id])
+                out.append(Mark(id: w.id, name: name, coordinate: c, state: .ready, edge: e, spoken: spoken(o, name: name)))
+                continue
             }
+            let st: NearbyStopMark.Look
+            let said: String
+            switch w.check {
+            case .asking: st = .pending; said = "\(name): asking"
+            case .done: st = .none; said = "\(name): no way from here in this time"
+            case .unasked: st = .unasked; said = "\(name): not checked. Tap to check it"
+            case .failed: st = .unasked; said = "\(name): couldn’t check it. Tap to try again"
+            }
+            out.append(Mark(id: w.id, name: name, coordinate: c, state: st, edge: .plain, spoken: said))
         }
-        let within: Double = Nearby.pinPoints * max(0.1, metresPerPoint)
-        var out: [Mark] = []
-        for cl in Nearby.merge(pins, within: within) {
-            guard var m = ready[cl.id] else { continue }
-            m.more = cl.members.count - 1
-            out.append(m)
-        }
-        let circles: [GeoPoint] = out.map { GeoPoint(lat: $0.coordinate.latitude, lon: $0.coordinate.longitude) }
-        let free: [Mark] = dots.filter { d in
-            let p = GeoPoint(lat: d.coordinate.latitude, lon: d.coordinate.longitude)
-            return !circles.contains { Geo.metres($0, p) < within * 0.6 }
-        }
-        return free + out
+        return out
+    }
+
+    private func spoken(_ o: Nearby.Option, name: String) -> String {
+        let tags: [Nearby.Tag] = store.badges[o.id]?.tags ?? []
+        let tagWords: String = tags.map { ", " + $0.rawValue }.joined()
+        let sure: String = o.sure.map { ", on time \($0.percent)%" + (NearbyCards.estimateWord($0).map { " (\($0))" } ?? "") } ?? ""
+        return "\(name)\(tagWords): leave \(Fmt.hhmm(o.departure)), \(o.walk) minutes walk, there at \(Fmt.hhmm(o.arrival))\(sure)"
     }
 
     private var lineColor: Color { DS.mode(train: line.routeTrain, line: line.routeLine) }
@@ -167,41 +150,122 @@ struct NearbyOverview: View {
         line.coming.compactMap { c in c.spot.map { Spot(coming: c, coordinate: $0.coordinate) } }
     }
 
-    private func mapView(height: CGFloat) -> some View {
+    private func mapView(width: CGFloat, height: CGFloat) -> some View {
         let ms: [Mark] = marks()
         let following: Bool = picked != nil
-        return Map(position: $camera) {
-            if following && line.route.count >= 2 {
-                MapPolyline(coordinates: line.route).stroke(lineColor, lineWidth: 5)
-            }
-            if let h = here {
-                Annotation("You", coordinate: h.coordinate, anchor: .center) { youDot }
-                    .annotationTitles(.hidden)
-            }
-            ForEach(ms) { m in
-                Annotation(m.name, coordinate: m.coordinate, anchor: .center) {
-                    Button { picked = NearbyPick(id: m.id) } label: {
-                        NearbyStopMark(state: m.state, fill: m.fill, text: m.minutes, ring: m.ring, selected: picked?.id == m.id, more: m.more)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(m.state == .pending)
-                    .accessibilityLabel(m.more > 0 ? m.spoken + ", and \(m.more) more stop\(m.more == 1 ? "" : "s") close by" : m.spoken)
+        return MapReader { proxy in
+            Map(position: $camera) {
+                if following && line.route.count >= 2 {
+                    MapPolyline(coordinates: line.route).stroke(lineColor, lineWidth: 5)
                 }
-                .annotationTitles(.hidden)
-            }
-            if following {
-                ForEach(spots) { p in
-                    Annotation(p.coming.line, coordinate: p.coordinate, anchor: .center) { vehicleChip(p.coming) }
+                if let h = here {
+                    Annotation("You", coordinate: h.coordinate, anchor: .center) { youDot }
                         .annotationTitles(.hidden)
                 }
+                ForEach(ms) { m in
+                    Annotation(m.name, coordinate: m.coordinate, anchor: .center) {
+                        Button { picked = NearbyPick(id: m.id) } label: {
+                            NearbyStopMark(state: m.state, fill: Color(hex: NearbyCards.color(m.edge)), selected: picked?.id == m.id)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(m.state == .pending)
+                        .accessibilityLabel(m.spoken)
+                    }
+                    .annotationTitles(.hidden)
+                }
+                if following {
+                    ForEach(spots) { p in
+                        Annotation(p.coming.line, coordinate: p.coordinate, anchor: .center) { vehicleChip(p.coming) }
+                            .annotationTitles(.hidden)
+                    }
+                }
+            }
+            .mapStyle(.standard(pointsOfInterest: .excludingAll))
+            .onMapCameraChange(frequency: .continuous) { _ in moved &+= 1 }
+            .overlay {
+                if !following {
+                    cards(proxy, marks: ms, width: width, height: height)
+                }
             }
         }
-        .mapStyle(.standard(pointsOfInterest: .excludingAll))
-        .onMapCameraChange(frequency: .onEnd) { ctx in
-            let h: Double = max(1, Double(height))
-            let m: Double = ctx.region.span.latitudeDelta * 111_320 / h
-            if m.isFinite && m > 0 { metresPerPoint = m }
+    }
+
+    /// The map's part the cards may use: under the top bar, above the list's round corners, off the edges.
+    private func cardBounds(width: CGFloat, height: CGFloat) -> NearbyCards.Rect {
+        let top: Double = 4 + Double(DS.hit) + 6
+        let bottom: Double = Double(height) - 24 - 6
+        return NearbyCards.Rect(x: 8, y: top, w: max(0, Double(width) - 16), h: max(0, bottom - top))
+    }
+
+    private func screen(_ proxy: MapProxy, _ c: CLLocationCoordinate2D) -> NearbyCards.Point? {
+        guard let p = proxy.convert(c, to: .local) else { return nil }
+        return NearbyCards.Point(x: Double(p.x), y: Double(p.y))
+    }
+
+    /// The mini cards (and pills), the walk lines from you to each stop with a way (solid gold or green when tagged,
+    /// dashed grey else) and the leader lines, all at their screen places (`NearbyCards.layout`: never on top of each
+    /// other, of you, of a dot, of the top bar or of the list).
+    private func cards(_ proxy: MapProxy, marks ms: [Mark], width: CGFloat, height: CGFloat) -> some View {
+        let _ = moved                                                  // (redrawn as the map moves)
+        let opts: [Nearby.Option] = Nearby.ordered(store.options)
+        var items: [NearbyCards.Item] = []
+        var spotOf: [String: NearbyCards.Point] = [:]
+        for o in opts {
+            guard let w = store.way(o.id) else { continue }
+            let c = CLLocationCoordinate2D(latitude: w.group.lat, longitude: w.group.lon)
+            guard let p = screen(proxy, c) else { continue }
+            spotOf[o.id] = p
+            items.append(NearbyCards.Item(id: o.id, at: p, tagged: store.badges[o.id]?.tagged ?? false))
         }
+        let others: [NearbyCards.Point] = ms.filter { spotOf[$0.id] == nil }.compactMap { screen(proxy, $0.coordinate) }
+        let you: NearbyCards.Point? = here.flatMap { screen(proxy, $0.coordinate) }
+        let bounds: NearbyCards.Rect = cardBounds(width: width, height: height)
+        let placed: [NearbyCards.Placed] = NearbyCards.layout(items, bounds: bounds, you: you, dots: others)
+        return ZStack(alignment: .topLeading) {
+            NearbyCardLines(you: you, items: items, placed: placed, edges: edges(items))
+                .allowsHitTesting(false)
+            ForEach(placed.filter { $0.kind != .hidden }, id: \.id) { p in
+                if let o = store.option(p.id) {
+                    cardButton(p, o)
+                }
+            }
+        }
+        .frame(width: width, height: height, alignment: .topLeading)
+    }
+
+    private func edges(_ items: [NearbyCards.Item]) -> [String: NearbyCards.Edge] {
+        var out: [String: NearbyCards.Edge] = [:]
+        for i in items { out[i.id] = NearbyCards.edge(store.badges[i.id]) }
+        return out
+    }
+
+    private func cardButton(_ p: NearbyCards.Placed, _ o: Nearby.Option) -> some View {
+        let name: String = store.way(o.id).map { Fmt.stop($0.group.name) } ?? ""
+        let badge: NearbyCards.Badge = store.badges[o.id] ?? NearbyCards.Badge()
+        var seen = Set<String>()
+        let rides: [Ride] = store.departures(o.id).map(\.first).filter { seen.insert($0.line).inserted }
+        let lines: [(String, Bool)] = rides.prefix(2).map { r -> (String, Bool) in
+            let label: String = r.isTrain ? Transit.trainLabel(r.line) : r.line
+            return (label, r.isTrain)
+        }
+        let day: String? = Nearby.dayWord(o.arrival, now: Date(), calendar: Calendar.current)
+        let arrive: String = (day.map { $0 + " " } ?? "") + Fmt.hhmm(o.arrival)
+        let w: CGFloat = CGFloat(p.rect.w), h: CGFloat = CGFloat(p.rect.h)
+        let cx: CGFloat = CGFloat(p.rect.x) + w / 2, cy: CGFloat = CGFloat(p.rect.y) + h / 2
+        return Button { picked = NearbyPick(id: o.id) } label: {
+            if p.kind == .card {
+                NearbyMiniCard(lines: lines, leave: NearbyCards.leaveWords(Fmt.hhmm(o.departure), walk: o.walk), arrive: arrive,
+                               sure: o.sure, badge: badge, ranked: o.ranked)
+                    .frame(width: w, height: h)
+            } else {
+                NearbyMiniPill(text: Fmt.hhmm(o.arrival), edge: NearbyCards.edge(badge))
+                    .frame(width: w, height: h)
+            }
+        }
+        .buttonStyle(DSPressStyle())
+        .contentShape(Rectangle().inset(by: p.kind == .pill ? -8 : 0))
+        .position(x: cx, y: cy)
+        .accessibilityLabel(spoken(o, name: name))
     }
 
     private var youDot: some View {
@@ -277,11 +341,8 @@ struct NearbyOverview: View {
                 HStack(alignment: .firstTextBaseline) {
                     Text(go.dest == .home ? "Home" : "To \(destWord)").font(DS.title).foregroundStyle(DS.text)
                         .lineLimit(1).minimumScaleFactor(0.7).accessibilityAddTraits(.isHeader)
-                    Spacer(minLength: 4)
-                    Text("colour = arrival").font(DS.footnote).foregroundStyle(DS.secondary)
                 }
                 leaveSwitch
-                legend
                 status
                 ForEach(Nearby.ordered(store.options)) { o in
                     if let w = store.way(o.id) {
@@ -318,25 +379,6 @@ struct NearbyOverview: View {
         .background(DS.surface3, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
     }
 
-    @ViewBuilder private var legend: some View {
-        if let s = store.arrivals {
-            VStack(alignment: .leading, spacing: 4) {
-                LinearGradient(colors: Nearby.scale.map { Color(hex: $0) }, startPoint: .leading, endPoint: .trailing)
-                    .frame(height: 10).clipShape(Capsule())
-                    .accessibilityHidden(true)
-                HStack {
-                    Text("arrive \(Fmt.hhmm(s.earliest))")
-                    Spacer()
-                    Text(Fmt.hhmm(s.latest))
-                }
-                .font(DS.footnote).monospacedDigit().foregroundStyle(DS.secondary)
-                Text("Solid ring = almost always on time · dashed = often late")
-                    .font(DS.footnote).foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
-            }
-            .accessibilityElement(children: .combine)
-        }
-    }
-
     private var rangeWord: String {
         let km: Double = store.radius / 1000
         return km == km.rounded() ? "\(Int(km)) km" : String(format: "%.1f km", km)
@@ -365,15 +407,17 @@ struct NearbyOverview: View {
 
     private func row(_ o: Nearby.Option, _ w: NearbyStore.Way) -> some View {
         let name: String = Fmt.stop(w.group.name)
-        let tg: [Nearby.Tag] = store.tags[o.id] ?? []
+        let tg: [Nearby.Tag] = store.badges[o.id]?.tags ?? []
         let deps: [DoorTrip] = store.departures(o.id)
         var seen = Set<String>()
         let lines: [Ride] = deps.map(\.first).filter { seen.insert($0.line).inserted }
-        let sureText: String = o.sure.map { s in s.source == .estimate ? "about \(s.percent)%" : "on time \(s.percent)%" } ?? ""
+        let sureText: String = o.sure.map(NearbyCards.onTimeWords) ?? ""
+        let estimate: String? = o.sure.flatMap(NearbyCards.estimateWord)
         // (0.42.2) a way overnight or much later: with its day, no tags
         let day: String? = Nearby.dayWord(o.arrival, now: Date(), calendar: Calendar.current)
         let arriveText: String = (day.map { $0 + " " } ?? "") + Fmt.hhmm(o.arrival)
-        let spoken: String = "\(name), \(tg.map(\.rawValue).joined(separator: ", ")), \(o.walk) minutes walk, leaves \(Fmt.hhmm(o.departure)), there \(arriveText), \(sureText)"
+        let tagWords: String = tg.map { $0.rawValue + ", " }.joined()
+        let spoken: String = "\(name), \(tagWords)\(o.walk) minutes walk, leaves \(Fmt.hhmm(o.departure)), there \(arriveText), \(sureText)\(estimate.map { ", " + $0 } ?? "")"
         return HStack(alignment: .center, spacing: DS.s12) {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
@@ -386,8 +430,7 @@ struct NearbyOverview: View {
                     }
                 }
                 HStack(spacing: 4) {
-                    Image(systemName: "figure.walk").font(.caption.weight(.semibold)).foregroundStyle(DS.secondary)
-                    Text("\(o.walk) min ·").font(DS.footnote).foregroundStyle(DS.secondary)
+                    Text(NearbyCards.walkWords(o.walk) + " ·").font(DS.footnote).foregroundStyle(DS.secondary).lineLimit(1).fixedSize()
                     ForEach(Array(lines.prefix(3).enumerated()), id: \.offset) { _, r in
                         DSLinePill(line: r.isTrain ? Transit.trainLabel(r.line) : r.line, train: r.isTrain)
                     }
@@ -409,9 +452,13 @@ struct NearbyOverview: View {
                 }
                 Text(Fmt.hhmm(o.arrival)).font(DS.bigNumber).monospacedDigit().foregroundStyle(o.ranked ? DS.text : DS.secondary)
                 if !sureText.isEmpty {
-                    Text(sureText).font(DS.footnote).monospacedDigit().foregroundStyle(DS.secondary)
+                    Text(sureText).font(DS.footnote).monospacedDigit().foregroundStyle(DS.secondary).lineLimit(1).fixedSize()
+                }
+                if let e = estimate {
+                    Text(e).font(DS.caption).foregroundStyle(DS.secondary).lineLimit(1).fixedSize()
                 }
             }
+            .layoutPriority(1)
         }
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -423,67 +470,45 @@ struct NearbyOverview: View {
     }
 }
 
-/// A stop on the map: its circle in its arrival colour with the minutes, and the ring for how sure (a small "+1" when
-/// another stop close by is drawn under it); a small grey dot while it's asked, a grey dot for a stop not planned from
-/// yet (tap it to check), a smaller one when there's no way from it.
+/// A stop on the map (0.42.15): a small dot, gold or green when it's tagged and grey else (its card is by it, over the
+/// map); a small grey ring while it's asked, a grey dot for a stop not planned from yet (tap it to check), a smaller
+/// one when there's no way from it.
 struct NearbyStopMark: View {
     enum Look: Equatable { case ready, pending, unasked, none }
     let state: Look
     let fill: Color
-    let text: String
-    let ring: Nearby.Ring
     var selected = false
-    var more = 0
 
     var body: some View {
         ZStack {
             switch state {
             case .ready:
-                Circle().fill(fill).frame(width: 36, height: 36)
-                Text(text).font(.system(size: 13, weight: .heavy, design: .rounded)).monospacedDigit()
-                    .foregroundStyle(Color(hex: 0x0B0C0E))
-                ringView
-                if more > 0 {
-                    Text("+\(more)").font(.system(size: 10, weight: .bold, design: .rounded))
-                        .foregroundStyle(DS.text)
-                        .padding(.horizontal, 4).padding(.vertical, 1)
-                        .background(DS.surface, in: Capsule())
-                        .offset(x: 17, y: -17)
-                }
+                Circle().fill(fill).frame(width: 12, height: 12)
+                    .overlay(Circle().stroke(Color(hex: 0x0B0C0E), lineWidth: 2))
             case .pending:
-                Circle().fill(DS.surface3).frame(width: 18, height: 18)
-                Circle().stroke(DS.legQuiet, lineWidth: 2).frame(width: 18, height: 18)
+                Circle().fill(DS.surface3).frame(width: 14, height: 14)
+                Circle().stroke(DS.legQuiet, lineWidth: 2).frame(width: 14, height: 14)
             case .unasked:
-                Circle().fill(DS.legQuiet.opacity(0.7)).frame(width: 14, height: 14)
+                Circle().fill(DS.legQuiet.opacity(0.7)).frame(width: 12, height: 12)
                     .overlay(Circle().stroke(DS.surface, lineWidth: 1.5))
             case .none:
-                Circle().fill(DS.legQuiet.opacity(0.7)).frame(width: 10, height: 10)
+                Circle().fill(DS.legQuiet.opacity(0.7)).frame(width: 9, height: 9)
             }
         }
-        .frame(width: 54, height: 54)
-        .scaleEffect(selected ? 1.18 : 1)
-        .contentShape(Circle())
-    }
-
-    @ViewBuilder private var ringView: some View {
-        switch ring {
-        case .solid:
-            Circle().stroke(fill, lineWidth: 3).frame(width: 48, height: 48)
-        case .dashed:
-            Circle().stroke(fill, style: StrokeStyle(lineWidth: 3, dash: [5, 4])).frame(width: 48, height: 48)
-        case .neutral:
-            Circle().stroke(DS.legQuiet, lineWidth: 1.5).frame(width: 46, height: 46)
-        }
+        .frame(width: 14, height: 14)
+        .scaleEffect(selected ? 1.3 : 1)
+        .contentShape(Circle().inset(by: -6))
     }
 }
 
-/// "Fastest" (gold), "Surest" (the accent), "Slower" (quiet).
+/// "Fastest" (gold), "Surest" (green).
 struct NearbyTagChip: View {
     let tag: Nearby.Tag
-    static let gold = Color(hex: 0xE8A33D)
+    static let gold = Color(hex: NearbyCards.color(.fastest))
+    static let green = Color(hex: NearbyCards.color(.surest))
     var body: some View {
-        let fill: Color = tag == .fastest ? Self.gold : tag == .surest ? DS.accent : DS.surface3
-        let ink: Color = tag == .fastest ? Color(hex: 0x1A1205) : tag == .surest ? DS.onAccent : DS.secondary
+        let fill: Color = tag == .fastest ? Self.gold : tag == .surest ? Self.green : DS.surface3
+        let ink: Color = tag == .slower ? DS.secondary : Color(hex: 0x10140F)
         Text(tag.rawValue)
             .font(DS.caption)
             .foregroundStyle(ink)
@@ -492,6 +517,135 @@ struct NearbyTagChip: View {
             .padding(.horizontal, 7).padding(.vertical, 2)
             .background(fill, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
             .layoutPriority(2)
+    }
+}
+
+/// (0.42.15) A stop's mini card on the map (design M4b): its lines and "leave 10:41 · 9 min walk", "arrive 12:07"
+/// with how sure beside it ("92% on time", "estimate" when it isn't from your own rides), and the tags row (FASTEST,
+/// SUREST; both when one way is both). Fixed sizes (`NearbyCards.cardWidth` and heights), so the layout's boxes hold:
+/// the walk words give way first (cut off), the time and the % never.
+struct NearbyMiniCard: View {
+    let lines: [(String, Bool)]
+    let leave: String
+    let arrive: String
+    let sure: Nearby.Sure?
+    let badge: NearbyCards.Badge
+    let ranked: Bool
+
+    var body: some View {
+        let edge: NearbyCards.Edge = NearbyCards.edge(badge)
+        let stroke: Color = Color(hex: NearbyCards.color(edge))
+        let radius: CGFloat = 10
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 5) {
+                ForEach(Array(lines.enumerated()), id: \.offset) { _, l in
+                    Text(l.0).font(.system(size: 10, weight: .bold)).monospacedDigit()
+                        .foregroundStyle(DS.onAccent).lineLimit(1).fixedSize()
+                        .padding(.horizontal, 5).padding(.vertical, 1)
+                        .background(DS.mode(train: l.1, line: l.0), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                }
+                Text(leave).font(.system(size: 10.5)).monospacedDigit().foregroundStyle(DS.secondary)
+                    .lineLimit(1).truncationMode(.tail).layoutPriority(-1)
+            }
+            HStack(alignment: .center, spacing: 6) {
+                Text("arrive " + arrive).font(.system(size: 15, weight: .bold)).monospacedDigit()
+                    .foregroundStyle(ranked ? DS.text : DS.secondary)
+                    .lineLimit(1).minimumScaleFactor(0.75)
+                Spacer(minLength: 6)
+                if let s = sure {
+                    VStack(alignment: .trailing, spacing: 0) {
+                        Text(NearbyCards.onTimeWords(s)).font(.system(size: 10, weight: .medium)).monospacedDigit()
+                            .foregroundStyle(DS.secondary).lineLimit(1)
+                        if let e = NearbyCards.estimateWord(s) {
+                            Text(e).font(.system(size: 9)).foregroundStyle(DS.secondary).lineLimit(1)
+                        }
+                    }
+                    .fixedSize()
+                }
+            }
+            if badge.tagged {
+                HStack(spacing: 4) {
+                    if badge.fastest { NearbyMiniTag(text: "FASTEST", fill: NearbyTagChip.gold) }
+                    if badge.surest { NearbyMiniTag(text: "SUREST", fill: NearbyTagChip.green) }
+                }
+            }
+        }
+        .padding(.horizontal, 8).padding(.vertical, 6)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(DS.surface, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).stroke(stroke, lineWidth: CGFloat(NearbyCards.edgeWidth(edge))))
+        .shadow(color: .black.opacity(0.25), radius: 6, y: 2)
+        .dynamicTypeSize(.large)            // (fixed sizes: the boxes the layout made hold)
+    }
+}
+
+/// FASTEST / SUREST on a mini card: one line, never cut.
+struct NearbyMiniTag: View {
+    let text: String
+    let fill: Color
+    var body: some View {
+        Text(text).font(.system(size: 9, weight: .heavy)).foregroundStyle(Color(hex: 0x10140F))
+            .lineLimit(1).fixedSize()
+            .padding(.horizontal, 5).padding(.vertical, 2)
+            .background(fill, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+    }
+}
+
+/// A stop's card folded to its arrival ("12:31") where there's no room for the card.
+struct NearbyMiniPill: View {
+    let text: String
+    let edge: NearbyCards.Edge
+    var body: some View {
+        Text(text).font(.system(size: 13, weight: .bold)).monospacedDigit().foregroundStyle(DS.text)
+            .lineLimit(1).minimumScaleFactor(0.8)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(DS.surface, in: Capsule())
+            .overlay(Capsule().stroke(Color(hex: NearbyCards.color(edge)), lineWidth: CGFloat(NearbyCards.edgeWidth(edge))))
+            .shadow(color: .black.opacity(0.25), radius: 4, y: 1)
+            .dynamicTypeSize(.large)
+    }
+}
+
+/// The lines under the cards: from you to each stop with a way (solid in its colour when tagged, dashed grey else),
+/// stopping short of your dot and of the stop's; and each card's leader line to its dot.
+struct NearbyCardLines: View {
+    let you: NearbyCards.Point?
+    let items: [NearbyCards.Item]
+    let placed: [NearbyCards.Placed]
+    let edges: [String: NearbyCards.Edge]
+
+    var body: some View {
+        Canvas { ctx, _ in
+            if let y = you {
+                for i in items { walk(ctx, from: y, to: i) }
+            }
+            for p in placed {
+                guard let l = p.leader, let i = items.first(where: { $0.id == p.id }) else { continue }
+                var path = Path()
+                path.move(to: CGPoint(x: l.x, y: l.y))
+                path.addLine(to: CGPoint(x: i.at.x, y: i.at.y))
+                let e: NearbyCards.Edge = edges[p.id] ?? .plain
+                ctx.stroke(path, with: .color(Color(hex: NearbyCards.color(e))), lineWidth: 1.5)
+            }
+        }
+    }
+
+    private func walk(_ ctx: GraphicsContext, from y: NearbyCards.Point, to i: NearbyCards.Item) {
+        let dx: Double = i.at.x - y.x, dy: Double = i.at.y - y.y
+        let d: Double = (dx * dx + dy * dy).squareRoot()
+        let start: Double = NearbyCards.youRadius * 0.45, end: Double = NearbyCards.dotRadius
+        guard d > start + end + 2 else { return }
+        let ux: Double = dx / d, uy: Double = dy / d
+        var path = Path()
+        path.move(to: CGPoint(x: y.x + ux * start, y: y.y + uy * start))
+        path.addLine(to: CGPoint(x: i.at.x - ux * end, y: i.at.y - uy * end))
+        let e: NearbyCards.Edge = edges[i.id] ?? .plain
+        let c: Color = Color(hex: NearbyCards.color(e))
+        if NearbyCards.walkDashed(e) {
+            ctx.stroke(path, with: .color(c.opacity(0.8)), style: StrokeStyle(lineWidth: 2, lineCap: .round, dash: [4, 4]))
+        } else {
+            ctx.stroke(path, with: .color(c), style: StrokeStyle(lineWidth: 3, lineCap: .round))
+        }
     }
 }
 

@@ -1,0 +1,852 @@
+{
+  "bounds" : [
+    8,
+    56,
+    374,
+    360
+  ],
+  "layout" : [
+    {
+      "dots" : [
+
+      ],
+      "items" : [
+        {
+          "id" : "a",
+          "tagged" : true,
+          "x" : 250,
+          "y" : 330
+        },
+        {
+          "id" : "b",
+          "tagged" : true,
+          "x" : 140,
+          "y" : 250
+        }
+      ],
+      "name" : "two apart",
+      "placed" : [
+        {
+          "id" : "a",
+          "kind" : "card",
+          "rect" : [
+            152,
+            242,
+            196,
+            76
+          ]
+        },
+        {
+          "id" : "b",
+          "kind" : "card",
+          "rect" : [
+            42,
+            162,
+            196,
+            76
+          ]
+        }
+      ],
+      "you" : [
+        230,
+        120
+      ]
+    },
+    {
+      "dots" : [
+        [
+          330,
+          300
+        ]
+      ],
+      "items" : [
+        {
+          "id" : "veghel",
+          "tagged" : true,
+          "x" : 250,
+          "y" : 390
+        },
+        {
+          "id" : "rembrandt",
+          "tagged" : true,
+          "x" : 330,
+          "y" : 300
+        },
+        {
+          "id" : "bolken",
+          "tagged" : false,
+          "x" : 150,
+          "y" : 250
+        }
+      ],
+      "name" : "design three",
+      "placed" : [
+        {
+          "id" : "veghel",
+          "kind" : "card",
+          "leader" : [
+            238,
+            378
+          ],
+          "rect" : [
+            42,
+            302,
+            196,
+            76
+          ]
+        },
+        {
+          "id" : "rembrandt",
+          "kind" : "card",
+          "rect" : [
+            186,
+            212,
+            196,
+            76
+          ]
+        },
+        {
+          "id" : "bolken",
+          "kind" : "card",
+          "leader" : [
+            150,
+            168
+          ],
+          "rect" : [
+            8,
+            110,
+            196,
+            58
+          ]
+        }
+      ],
+      "you" : [
+        230,
+        150
+      ]
+    },
+    {
+      "dots" : [
+
+      ],
+      "items" : [
+        {
+          "id" : "a",
+          "tagged" : true,
+          "x" : 190,
+          "y" : 260
+        },
+        {
+          "id" : "b",
+          "tagged" : true,
+          "x" : 240,
+          "y" : 300
+        },
+        {
+          "id" : "c",
+          "tagged" : false,
+          "x" : 160,
+          "y" : 330
+        }
+      ],
+      "name" : "three within 150 m",
+      "placed" : [
+        {
+          "id" : "a",
+          "kind" : "card",
+          "rect" : [
+            92,
+            172,
+            196,
+            76
+          ]
+        },
+        {
+          "id" : "b",
+          "kind" : "card",
+          "rect" : [
+            186,
+            312,
+            196,
+            76
+          ]
+        },
+        {
+          "id" : "c",
+          "kind" : "pill",
+          "leader" : [
+            148,
+            318
+          ],
+          "rect" : [
+            92,
+            292,
+            56,
+            26
+          ]
+        }
+      ],
+      "you" : [
+        195,
+        110
+      ]
+    },
+    {
+      "dots" : [
+        [
+          120,
+          200
+        ]
+      ],
+      "items" : [
+        {
+          "id" : "a",
+          "tagged" : true,
+          "x" : 200,
+          "y" : 250
+        },
+        {
+          "id" : "b",
+          "tagged" : true,
+          "x" : 250,
+          "y" : 280
+        },
+        {
+          "id" : "c",
+          "tagged" : false,
+          "x" : 170,
+          "y" : 300
+        },
+        {
+          "id" : "d",
+          "tagged" : false,
+          "x" : 220,
+          "y" : 340
+        },
+        {
+          "id" : "e",
+          "tagged" : false,
+          "x" : 150,
+          "y" : 260
+        }
+      ],
+      "name" : "five within 150 m",
+      "placed" : [
+        {
+          "id" : "a",
+          "kind" : "card",
+          "rect" : [
+            186,
+            162,
+            196,
+            76
+          ]
+        },
+        {
+          "id" : "b",
+          "kind" : "pill",
+          "rect" : [
+            222,
+            242,
+            56,
+            26
+          ]
+        },
+        {
+          "id" : "c",
+          "kind" : "card",
+          "rect" : [
+            8,
+            312,
+            196,
+            58
+          ]
+        },
+        {
+          "id" : "d",
+          "kind" : "pill",
+          "leader" : [
+            232,
+            328
+          ],
+          "rect" : [
+            232,
+            302,
+            56,
+            26
+          ]
+        },
+        {
+          "id" : "e",
+          "kind" : "pill",
+          "rect" : [
+            122,
+            222,
+            56,
+            26
+          ]
+        }
+      ],
+      "you" : [
+        195,
+        100
+      ]
+    },
+    {
+      "dots" : [
+
+      ],
+      "items" : [
+        {
+          "id" : "left",
+          "tagged" : true,
+          "x" : 14,
+          "y" : 200
+        },
+        {
+          "id" : "right",
+          "tagged" : true,
+          "x" : 378,
+          "y" : 260
+        },
+        {
+          "id" : "top",
+          "tagged" : false,
+          "x" : 200,
+          "y" : 62
+        },
+        {
+          "id" : "bottom",
+          "tagged" : false,
+          "x" : 120,
+          "y" : 410
+        }
+      ],
+      "name" : "edges",
+      "placed" : [
+        {
+          "id" : "left",
+          "kind" : "card",
+          "rect" : [
+            8,
+            112,
+            196,
+            76
+          ]
+        },
+        {
+          "id" : "right",
+          "kind" : "card",
+          "rect" : [
+            186,
+            272,
+            196,
+            76
+          ]
+        },
+        {
+          "id" : "top",
+          "kind" : "pill",
+          "rect" : [
+            172,
+            74,
+            56,
+            26
+          ]
+        },
+        {
+          "id" : "bottom",
+          "kind" : "card",
+          "rect" : [
+            132,
+            358,
+            196,
+            58
+          ]
+        }
+      ],
+      "you" : [
+        195,
+        230
+      ]
+    },
+    {
+      "dots" : [
+
+      ],
+      "items" : [
+        {
+          "id" : "a",
+          "tagged" : true,
+          "x" : 200,
+          "y" : 260
+        },
+        {
+          "id" : "b",
+          "tagged" : false,
+          "x" : 260,
+          "y" : 160
+        }
+      ],
+      "name" : "you under the first spot",
+      "placed" : [
+        {
+          "id" : "a",
+          "kind" : "card",
+          "rect" : [
+            102,
+            272,
+            196,
+            76
+          ]
+        },
+        {
+          "id" : "b",
+          "kind" : "card",
+          "rect" : [
+            162,
+            90,
+            196,
+            58
+          ]
+        }
+      ],
+      "you" : [
+        200,
+        200
+      ]
+    },
+    {
+      "dots" : [
+        [
+          40,
+          90
+        ]
+      ],
+      "items" : [
+        {
+          "id" : "s0",
+          "tagged" : true,
+          "x" : 40,
+          "y" : 120
+        },
+        {
+          "id" : "s1",
+          "tagged" : true,
+          "x" : 140,
+          "y" : 120
+        },
+        {
+          "id" : "s2",
+          "tagged" : false,
+          "x" : 240,
+          "y" : 120
+        },
+        {
+          "id" : "s3",
+          "tagged" : false,
+          "x" : 340,
+          "y" : 120
+        },
+        {
+          "id" : "s4",
+          "tagged" : false,
+          "x" : 40,
+          "y" : 320
+        },
+        {
+          "id" : "s5",
+          "tagged" : false,
+          "x" : 140,
+          "y" : 320
+        },
+        {
+          "id" : "s6",
+          "tagged" : false,
+          "x" : 240,
+          "y" : 320
+        },
+        {
+          "id" : "s7",
+          "tagged" : false,
+          "x" : 340,
+          "y" : 320
+        }
+      ],
+      "name" : "eight scattered",
+      "placed" : [
+        {
+          "id" : "s0",
+          "kind" : "card",
+          "rect" : [
+            8,
+            132,
+            196,
+            76
+          ]
+        },
+        {
+          "id" : "s1",
+          "kind" : "pill",
+          "rect" : [
+            112,
+            82,
+            56,
+            26
+          ]
+        },
+        {
+          "id" : "s2",
+          "kind" : "pill",
+          "rect" : [
+            212,
+            82,
+            56,
+            26
+          ]
+        },
+        {
+          "id" : "s3",
+          "kind" : "pill",
+          "rect" : [
+            312,
+            82,
+            56,
+            26
+          ]
+        },
+        {
+          "id" : "s4",
+          "kind" : "pill",
+          "rect" : [
+            12,
+            282,
+            56,
+            26
+          ]
+        },
+        {
+          "id" : "s5",
+          "kind" : "pill",
+          "rect" : [
+            112,
+            282,
+            56,
+            26
+          ]
+        },
+        {
+          "id" : "s6",
+          "kind" : "pill",
+          "rect" : [
+            212,
+            282,
+            56,
+            26
+          ]
+        },
+        {
+          "id" : "s7",
+          "kind" : "pill",
+          "rect" : [
+            312,
+            282,
+            56,
+            26
+          ]
+        }
+      ],
+      "you" : [
+        195,
+        236
+      ]
+    },
+    {
+      "dots" : [
+
+      ],
+      "items" : [
+        {
+          "id" : "in",
+          "tagged" : true,
+          "x" : 195,
+          "y" : 300
+        },
+        {
+          "id" : "out",
+          "tagged" : false,
+          "x" : 500,
+          "y" : 300
+        }
+      ],
+      "name" : "off the map",
+      "placed" : [
+        {
+          "id" : "in",
+          "kind" : "card",
+          "rect" : [
+            97,
+            312,
+            196,
+            76
+          ]
+        },
+        {
+          "id" : "out",
+          "kind" : "hidden"
+        }
+      ],
+      "you" : [
+        195,
+        236
+      ]
+    }
+  ],
+  "periods" : [
+    {
+      "bus" : 2,
+      "hour" : 13,
+      "late3" : 0.22313,
+      "name" : "daytime",
+      "train" : 0.8,
+      "weekend" : false
+    },
+    {
+      "bus" : 2.4,
+      "hour" : 19,
+      "late3" : 0.2865,
+      "name" : "evening",
+      "train" : 0.9,
+      "weekend" : false
+    },
+    {
+      "bus" : 3.5,
+      "hour" : 8,
+      "late3" : 0.42437,
+      "name" : "rush hour",
+      "train" : 1.2,
+      "weekend" : false
+    },
+    {
+      "bus" : 3.5,
+      "hour" : 17.5,
+      "late3" : 0.42437,
+      "name" : "rush hour",
+      "train" : 1.2,
+      "weekend" : false
+    },
+    {
+      "bus" : 3.5,
+      "hour" : 18.75,
+      "late3" : 0.42437,
+      "name" : "rush hour",
+      "train" : 1.2,
+      "weekend" : false
+    },
+    {
+      "bus" : 2.4,
+      "hour" : 20,
+      "late3" : 0.2865,
+      "name" : "evening",
+      "train" : 0.9,
+      "weekend" : false
+    },
+    {
+      "bus" : 1.5,
+      "hour" : 22,
+      "late3" : 0.13534000000000002,
+      "name" : "quiet",
+      "train" : 0.7,
+      "weekend" : false
+    },
+    {
+      "bus" : 2.6,
+      "hour" : 6.75,
+      "late3" : 0.31542000000000003,
+      "name" : "busy",
+      "train" : 1,
+      "weekend" : false
+    },
+    {
+      "bus" : 1.8,
+      "hour" : 13,
+      "late3" : 0.18888,
+      "name" : "weekend",
+      "train" : 0.8,
+      "weekend" : true
+    }
+  ],
+  "picks" : [
+    {
+      "delays" : [
+        0,
+        1,
+        0.5,
+        2
+      ],
+      "minute" : 780,
+      "percent" : 99,
+      "weekend" : false,
+      "window" : 60
+    },
+    {
+      "delays" : [
+        6,
+        4,
+        1,
+        8
+      ],
+      "minute" : 1140,
+      "percent" : 25,
+      "weekend" : false,
+      "window" : 60
+    },
+    {
+      "delays" : [
+        0,
+        0
+      ],
+      "minute" : 1140,
+      "percent" : 60,
+      "weekend" : true,
+      "window" : 120
+    },
+    {
+      "delays" : [
+        6,
+        1
+      ],
+      "minute" : 1020,
+      "percent" : 60,
+      "weekend" : false,
+      "window" : 120
+    },
+    {
+      "delays" : [
+        3.5,
+        0
+      ],
+      "minute" : 0,
+      "percent" : 60,
+      "weekend" : false,
+      "window" : 120
+    },
+    {
+      "delays" : [
+
+      ],
+      "minute" : 300,
+      "percent" : 60,
+      "weekend" : false,
+      "window" : 120
+    }
+  ],
+  "sizes" : {
+    "card" : [
+      196,
+      58
+    ],
+    "dot" : 7,
+    "gap" : 12,
+    "maxCards" : 4,
+    "pad" : 4,
+    "pill" : [
+      56,
+      26
+    ],
+    "tagged" : [
+      196,
+      76
+    ],
+    "you" : 20
+  },
+  "slotEntries" : [
+    {
+      "delay" : 0,
+      "minute" : 780,
+      "weekend" : false
+    },
+    {
+      "delay" : 1,
+      "minute" : 790,
+      "weekend" : false
+    },
+    {
+      "delay" : 0.5,
+      "minute" : 770,
+      "weekend" : false
+    },
+    {
+      "delay" : 2,
+      "minute" : 800,
+      "weekend" : false
+    },
+    {
+      "delay" : 6,
+      "minute" : 1140,
+      "weekend" : false
+    },
+    {
+      "delay" : 4,
+      "minute" : 1150,
+      "weekend" : false
+    },
+    {
+      "delay" : 1,
+      "minute" : 1130,
+      "weekend" : false
+    },
+    {
+      "delay" : 8,
+      "minute" : 1145,
+      "weekend" : false
+    },
+    {
+      "delay" : 2,
+      "minute" : 1230,
+      "weekend" : false
+    },
+    {
+      "delay" : 0,
+      "minute" : 1140,
+      "weekend" : true
+    },
+    {
+      "delay" : 0,
+      "minute" : 1145,
+      "weekend" : true
+    },
+    {
+      "delay" : 3.5,
+      "minute" : 5,
+      "weekend" : false
+    },
+    {
+      "delay" : 0,
+      "minute" : 1430,
+      "weekend" : false
+    }
+  ],
+  "slotWords" : [
+    {
+      "minute" : 1140,
+      "text" : "around 19:00 on weekdays",
+      "weekend" : false
+    },
+    {
+      "minute" : 1154,
+      "text" : "around 19:00 on weekdays",
+      "weekend" : false
+    },
+    {
+      "minute" : 1436,
+      "text" : "around 00:00 on weekends",
+      "weekend" : true
+    },
+    {
+      "minute" : 785,
+      "text" : "around 13:00 on weekdays",
+      "weekend" : false
+    }
+  ]
+}

@@ -18,6 +18,8 @@ struct NearbyDetailSheet: View {
     @State private var pick: String?            // the chosen departure's trip id (nil: the one there first)
     @State private var going = false
     @State private var failed = false
+    /// (0.42.15) Where the on-time % comes from, shown under it.
+    @State private var why = false
 
     private var deps: [DoorTrip] { Array(store.departures(stopId).prefix(8)) }
 
@@ -33,8 +35,8 @@ struct NearbyDetailSheet: View {
         return (s.isEmpty ? d : s).min { $0.end < $1.end }
     }
 
-    /// Of the departures that aren't late: the one there first, and the surest (`Nearby.surestOf`: 70% at least, and
-    /// surer than that one).
+    /// Of the departures that aren't late: the one there first, and the surest (`NearbyCards.surestBoth`: 70% at
+    /// least; the one there first itself when it's as sure, so one can be both).
     private var marks: (fastest: String?, surest: String?) {
         let d: [DoorTrip] = soon
         // (0.42.8) by live arrival (the trips are freshened with the newest live times)
@@ -43,7 +45,7 @@ struct NearbyDetailSheet: View {
         let leaves: [Date] = d.map(\.first.departure)
         guard let fi = NearbyLive.fastest(arrivals: arrivals, changes: changes, departures: leaves) else { return (nil, nil) }
         let pcts: [Int] = d.map { store.sure($0).percent }
-        let si: Int? = Nearby.surestOf(pcts, fastest: fi)
+        let si: Int? = NearbyCards.surestBoth(pcts, fastest: fi)
         return (d[fi].first.tripId, si.map { d[$0].first.tripId })
     }
 
@@ -93,18 +95,14 @@ struct NearbyDetailSheet: View {
     private var header: some View {
         let w: NearbyStore.Way? = store.way(stopId)
         let walk: Int = w.map { store.walk($0.group).shown.walk } ?? 0
-        let tags: [Nearby.Tag] = store.tags[stopId] ?? []
+        let tags: [Nearby.Tag] = store.badges[stopId]?.tags ?? []
         return HStack(alignment: .firstTextBaseline, spacing: DS.s8) {
             Text(w.map { Fmt.stop($0.group.name) } ?? "").font(DS.title).foregroundStyle(DS.text)
                 .lineLimit(2).minimumScaleFactor(0.7).accessibilityAddTraits(.isHeader)
             Spacer(minLength: 4)
-            HStack(spacing: 4) {
-                Image(systemName: "figure.walk").font(.caption.weight(.semibold))
-                Text("\(walk) min").font(DS.footnoteStrong)
-            }
-            .foregroundStyle(DS.secondary)
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel("\(walk) minutes walk")
+            Text(NearbyCards.walkWords(walk)).font(DS.footnoteStrong).foregroundStyle(DS.secondary)
+                .lineLimit(1).fixedSize()
+                .accessibilityLabel("\(walk) minutes walk")
             ForEach(tags, id: \.self) { NearbyTagChip(tag: $0) }
         }
     }
@@ -112,8 +110,31 @@ struct NearbyDetailSheet: View {
     @ViewBuilder private var sureLine: some View {
         if let t = chosen {
             let s: Nearby.Sure = store.sure(t)
-            Text("Arrive \(destWord): \(Nearby.sureWords(s))")
-                .font(DS.footnote).foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 4) {
+                // (0.42.15) tap the % (or the i) for where it comes from: your own rides around this time, or the estimate
+                Button { withAnimation(.easeInOut(duration: 0.2)) { why.toggle() } } label: {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text("Arrive \(destWord): \(Nearby.sureWords(s))")
+                            .font(DS.footnote).foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
+                            .multilineTextAlignment(.leading)
+                        Spacer(minLength: 4)
+                        Image(systemName: "info.circle").font(.footnote.weight(.semibold)).foregroundStyle(DS.accentText)
+                    }
+                    .frame(minHeight: DS.hit)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Arrive \(destWord): \(Nearby.sureWords(s))")
+                .accessibilityHint(why ? "Hides where this comes from" : "Shows where this comes from")
+                if why {
+                    Text(store.explain(t))
+                        .font(DS.footnote).foregroundStyle(DS.text).fixedSize(horizontal: false, vertical: true)
+                        .padding(DS.s12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(DS.surface2, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .transition(.opacity)
+                }
+            }
         }
     }
 
@@ -222,7 +243,8 @@ struct NearbyDetailSheet: View {
                     .lineLimit(1).truncationMode(.tail).layoutPriority(-1)
             }
             Spacer(minLength: 4)
-            if fastest { NearbyTagChip(tag: .fastest) } else if surest { NearbyTagChip(tag: .surest) }
+            if fastest { NearbyTagChip(tag: .fastest) }
+            if surest { NearbyTagChip(tag: .surest) }
             Text("arrive").font(DS.footnote).foregroundStyle(DS.secondary).lineLimit(1).layoutPriority(-1)
             if let d = Nearby.dayWord(t.end, now: Date(), calendar: Calendar.current) {
                 Text(d).font(DS.footnote).foregroundStyle(DS.secondary).lineLimit(1)
@@ -235,7 +257,7 @@ struct NearbyDetailSheet: View {
         .overlay(alignment: .top) { Rectangle().fill(DS.divider).frame(height: 1).padding(.horizontal, 8) }
         .contentShape(Rectangle())
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(GoStore.what(f)) at \(Fmt.hhmm(st.shown.time))\(st.shown.planned.map { ", planned \(Fmt.hhmm($0))" } ?? ""), \(st.text), there \(Fmt.hhmm(t.end))\(fastest ? ", fastest" : surest ? ", surest" : "")")
+        .accessibilityLabel("\(GoStore.what(f)) at \(Fmt.hhmm(st.shown.time))\(st.shown.planned.map { ", planned \(Fmt.hhmm($0))" } ?? ""), \(st.text), there \(Fmt.hhmm(t.end))\(fastest ? ", fastest" : "")\(surest ? ", surest" : "")")
         .accessibilityAddTraits(on ? [.isButton, .isSelected] : .isButton)
     }
 
@@ -428,12 +450,13 @@ struct NearbyTimelineRow: View {
         let startX: Double = placed.first?.x ?? 0
         let endX: Double = placed.last.map { $0.x + $0.width } ?? 1
         let changes: [TripTimeline.Label] = TripTimeline.changeLabels(legs, parts: placed, ends: nil)
-        let edge: Color = fastest ? NearbyTagChip.gold : surest ? DS.accent : selected ? DS.legQuiet : Color.clear
+        let edge: Color = surest ? NearbyTagChip.green : fastest ? NearbyTagChip.gold : selected ? DS.legQuiet : Color.clear
         return VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 4) {
                 ForEach(Array(legs.enumerated()), id: \.offset) { _, l in DSLinePill(line: l.line, train: l.train) }
                 Spacer(minLength: 4)
-                if fastest { NearbyTagChip(tag: .fastest) } else if surest { NearbyTagChip(tag: .surest) }
+                if fastest { NearbyTagChip(tag: .fastest) }
+            if surest { NearbyTagChip(tag: .surest) }
             }
             GeometryReader { g in
                 let w: CGFloat = g.size.width
@@ -489,7 +512,7 @@ struct NearbyTimelineRow: View {
 
     private var spoken: String {
         let rides: String = legs.map { "\($0.train ? "train" : "bus") \($0.line) at \(Fmt.hhmm($0.departure))" }.joined(separator: ", then ")
-        let tag: String = fastest ? ", fastest" : surest ? ", surest" : ""
+        let tag: String = (fastest ? ", fastest" : "") + (surest ? ", surest" : "")
         return "Leave \(Fmt.hhmm(leave)), \(rides), there \(Fmt.hhmm(arrive))\(tag)"
     }
 

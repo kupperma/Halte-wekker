@@ -202,25 +202,45 @@ class NearbyStore(val destId: String, private val seed: List<DoorTrip>) {
     }
 
     companion object {
-        /** How sure (`Nearby.sure`): your own rides on its last line to its last stop (the travel log), else a rough model. */
+        /** How sure (`Nearby.sure`): your own rides on its last line to its last stop around the same time (the travel
+         *  log; iOS 0.42.15 `NearbySlot.pick`: within an hour either side, else 90 or 120 minutes, weekdays and weekends
+         *  apart), else the model by the time of day (`NearbySlot.period`: rush hours worst) and its live delay. */
         fun sure(t: DoorTrip, rides: List<RideRecord>, now: Double): Nearby.Sure {
             val last = t.last
-            val own = rides.filter { it.to == last.toStop && (it.label.endsWith(" " + last.line) || it.label == last.line || it.label == last.name) }
-                .mapNotNull { it.late }
+            val zone = java.time.ZoneId.of("Europe/Amsterdam")
+            fun slotOf(at: Double): Pair<Int, Boolean> {
+                val z = java.time.Instant.ofEpochSecond(at.toLong()).atZone(zone)
+                return (z.hour * 60 + z.minute) to (z.dayOfWeek == java.time.DayOfWeek.SATURDAY || z.dayOfWeek == java.time.DayOfWeek.SUNDAY)
+            }
+            val entries = rides.filter { it.to == last.toStop && (it.label.endsWith(" " + last.line) || it.label == last.line || it.label == last.name) }
+                .mapNotNull { r -> r.late?.let { l -> slotOf(r.arr).let { (m, we) -> NearbySlot.Entry(m, we, l) } } }
+            val (mm, weekend) = slotOf(last.scheduledArrival)
+            val (own, window) = NearbySlot.pick(entries, mm, weekend)
             // the model: a live delay at the end already says a lot; else by the time of day (rush hours later more often)
-            val h = java.time.Instant.ofEpochSecond(last.scheduledArrival.toLong()).atZone(java.time.ZoneId.of("Europe/Amsterdam")).hour
+            val p = NearbySlot.period(mm / 60.0, weekend)
+            val byTime = NearbySlot.lateChance(if (last.isTrain) p.train else p.bus, Nearby.LATE_BY)
             val late = when {
                 last.live && last.arrival - last.scheduledArrival >= Nearby.LATE_BY * 60 -> 0.85
-                last.live -> 0.15
-                h in 7..9 || h in 16..18 -> 0.3
-                else -> 0.2
+                last.live -> 0.5 * byTime + 0.5 * 0.15
+                else -> byTime
             }
             var made = 1.0
             for (i in 1 until t.rides.size) {
                 val room = (t.rides[i].departure - t.rides[i - 1].arrival) / 60 - t.rides[i].walkBefore
                 made *= 1 - when { room < 1 -> 0.5; room < 3 -> 0.25; room < 5 -> 0.1; else -> 0.03 }
             }
-            return Nearby.sure(own, late, made, t.rides.any { it.live })
+            val s = Nearby.sure(own, late, made, t.rides.any { it.live })
+            return if (s.source is Nearby.Source.Yours) s.copy(window = window) else s
+        }
+
+        /** (iOS 0.42.15) Where a trip's % comes from, for the sheet (`NearbySlot.explain`). */
+        fun explain(t: DoorTrip, rides: List<RideRecord>, now: Double): String {
+            val last = t.last
+            val z = java.time.Instant.ofEpochSecond(last.scheduledArrival.toLong()).atZone(java.time.ZoneId.of("Europe/Amsterdam"))
+            val m = z.hour * 60 + z.minute
+            val we = z.dayOfWeek == java.time.DayOfWeek.SATURDAY || z.dayOfWeek == java.time.DayOfWeek.SUNDAY
+            return NearbySlot.explain(sure(t, rides, now), last.line, last.toStop, NearbySlot.slotWords(m, we),
+                NearbySlot.period(m / 60.0, we).name, t.rides.size - 1)
         }
     }
 }

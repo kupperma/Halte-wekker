@@ -11,8 +11,34 @@ final class DelayBook {
     /// Written off the main thread, one at a time, in order.
     private let io = DispatchQueue(label: "nl.haltewekker.delaybook", qos: .utility)
 
+    /// (0.42.15) Your rides at a stop with the minute they were due there (`NearbySlot.Entry`), per line and stop:
+    /// how sure a way is counts only the rides around its own time. Filled once from the hour buckets above.
+    private var slots: [String: [NearbySlot.Entry]]
+    private let slotsKey = "delayBook.slots"
+
     private init() {
-        book = (UserDefaults.standard.data(forKey: storeKey).flatMap { try? JSONDecoder().decode([String: [Double]].self, from: $0) }) ?? [:]
+        let b: [String: [Double]] = (UserDefaults.standard.data(forKey: storeKey).flatMap { try? JSONDecoder().decode([String: [Double]].self, from: $0) }) ?? [:]
+        book = b
+        if let d = UserDefaults.standard.data(forKey: slotsKey), let s = try? JSONDecoder().decode([String: [NearbySlot.Entry]].self, from: d) {
+            slots = s
+        } else {
+            slots = Self.slotsFrom(b)
+        }
+    }
+
+    /// The hour buckets as rides at half past that hour (what was kept before 0.42.15; your own rides only).
+    private static func slotsFrom(_ b: [String: [Double]]) -> [String: [NearbySlot.Entry]] {
+        var out: [String: [NearbySlot.Entry]] = [:]
+        for (k, list) in b {
+            let p = k.split(separator: "|", omittingEmptySubsequences: false)
+            guard p.count == 3, p[1] != "*" else { continue }
+            let slot = String(p[2])
+            let weekend = slot.hasPrefix("we")
+            guard let h = Int(slot.dropFirst(2)) else { continue }
+            let base = "\(p[0])|\(p[1])"
+            out[base, default: []] += list.map { NearbySlot.Entry(minute: h * 60 + 30, weekend: weekend, delay: $0) }
+        }
+        return out
     }
 
     private static func base(_ line: String, _ stop: String) -> String { "\(line)|\(Fmt.place(stop))" }
@@ -29,6 +55,14 @@ final class DelayBook {
         var list = book[k] ?? []
         list.append((delay * 10).rounded() / 10)
         book[k] = Array(list.suffix(30))
+        if stop != "*" {
+            let b = Self.base(line, stop)
+            let c = Calendar.current
+            let e = NearbySlot.Entry(minute: NearbySlot.minute(scheduled, calendar: c), weekend: c.isDateInWeekend(scheduled),
+                                     delay: (delay * 10).rounded() / 10)
+            slots[b] = Array(((slots[b] ?? []) + [e]).suffix(80))
+            if slots.count > 300 { slots = Dictionary(uniqueKeysWithValues: slots.sorted { $0.value.count > $1.value.count }.prefix(250).map { ($0.key, $0.value) }) }
+        }
         if book.count > 400 { book = Dictionary(uniqueKeysWithValues: book.sorted { $0.value.count > $1.value.count }.prefix(300).map { ($0.key, $0.value) }) }
         saveSoon()
     }
@@ -49,7 +83,18 @@ final class DelayBook {
         guard saveDue else { return }
         saveDue = false
         let snapshot = book, key = storeKey
-        io.async { UserDefaults.standard.set(try? JSONEncoder().encode(snapshot), forKey: key) }
+        let slotSnapshot = slots, slotKey = slotsKey
+        io.async {
+            UserDefaults.standard.set(try? JSONEncoder().encode(snapshot), forKey: key)
+            UserDefaults.standard.set(try? JSONEncoder().encode(slotSnapshot), forKey: slotKey)
+        }
+    }
+
+    /// (0.42.15) Your rides on `line` to `stop` around the time it's due there (`NearbySlot.pick`: within an hour
+    /// either side, else 90 or 120 minutes; weekdays and weekends apart), and the window used.
+    func slotDelays(line: String, stop: String, at: Date) -> (delays: [Double], window: Int) {
+        let c = Calendar.current
+        return NearbySlot.pick(slots[Self.base(line, stop)] ?? [], minute: NearbySlot.minute(at, calendar: c), weekend: c.isDateInWeekend(at))
     }
 
     /// What it's been like around that time: that hour, else the hours either side, else any time.
@@ -98,9 +143,9 @@ final class DelayBook {
     func count(line: String, at: Date) -> Int { lineDelays(line: line, stop: nil, at: at).count }
 
     func clear() {
-        book = [:]; saveDue = false
-        let key = storeKey
-        io.async { UserDefaults.standard.removeObject(forKey: key) }       // (after any save already on its way)
+        book = [:]; slots = [:]; saveDue = false
+        let key = storeKey, slotKey = slotsKey
+        io.async { UserDefaults.standard.removeObject(forKey: key); UserDefaults.standard.set(try? JSONEncoder().encode([String: [NearbySlot.Entry]]()), forKey: slotKey) }       // (after any save already on its way)
     }
 }
 
@@ -184,15 +229,11 @@ final class LiveDelays: ObservableObject {
 enum Steady {
     /// What part of the day it is, and how late buses and trains typically get then (minutes, before anything's known).
     static func period(_ at: Date) -> (name: String, bus: Double, train: Double) {
+        // (0.42.15) the table is `NearbySlot.period` (tested): rush hours 07–09 and 16–19, the evening after still busy
         let c = Calendar.current
-        if c.isDateInWeekend(at) { return ("weekend", 1.8, 0.8) }
         let h = Double(c.component(.hour, from: at)) + Double(c.component(.minute, from: at)) / 60
-        switch h {
-        case 7..<9, 16..<18.5: return ("rush hour", 3.5, 1.2)
-        case 6.5..<7, 9..<9.5, 15..<16, 18.5..<19: return ("busy", 2.6, 1.0)
-        case 9.5..<15: return ("daytime", 2.0, 0.8)
-        default: return ("quiet", 1.5, 0.7)
-        }
+        let p: NearbySlot.Period = NearbySlot.period(hour: h, weekend: c.isDateInWeekend(at))
+        return (p.name, p.bus, p.train)
     }
 
     /// How late it typically gets, in minutes: the chance it's more than x minutes late is about e^(−x / this).

@@ -204,17 +204,17 @@ enum TripTimeline {
     /// A change shorter than this is a risky one.
     static let riskyChange = 3.0
 
-    /// About how wide a label is (points): a digit or letter 6.5, the walker 14.
+    /// About how wide a label is (points): a digit or letter 6.5, anything else 14.
     static func textWidth(_ s: String) -> Double {
         var w: Double = 6
         for ch in s { w += ch.isASCII ? 6.5 : 14 }
         return w
     }
 
-    /// "🚶 2", "🚶3 + 5 wait", "6 min", "5 wait".
+    /// "2 min walk", "3 walk + 5 wait", "6 min", "5 wait" (0.42.15: words, no walking emoji).
     static func gapText(walk: Int, wait: Int, change: Bool) -> String {
-        if walk > 0 && wait > 0 { return "🚶\(walk) + \(wait) wait" }
-        if walk > 0 { return "🚶 \(walk)" }
+        if walk > 0 && wait > 0 { return "\(walk) walk + \(wait) wait" }
+        if walk > 0 { return "\(walk) min walk" }
         return change ? "\(wait) min" : "\(wait) wait"
     }
 
