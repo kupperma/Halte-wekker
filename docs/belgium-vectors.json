@@ -1,0 +1,1323 @@
+{
+ "_about": "Haltewekker in Belgium (iOS 0.42.17, Android 0.10.13): which country a stop is in, where a train's live data comes from (NS or iRail through the relay), the relay's /be/liveboard, /be/vehicle and /be/composition read, and a Belgian train's iRail data laid over its Transitous trip. Checked by iOS BelgiumTests and Android BelgiumTest. Bodies are the relay's trimmed answers of real iRail data (2026-11-28; relay/test-irail/). Times are ISO 8601 UTC.",
+ "country": [
+  {
+   "id": "be-sncb_S8821006",
+   "lat": 51.2172,
+   "lon": 4.4211,
+   "want": "BE",
+   "why": "SNCB station, UIC 88"
+  },
+  {
+   "id": "be-sncb_8400131",
+   "lat": 51.595676,
+   "lon": 4.780017,
+   "want": "NL",
+   "why": "Breda in the SNCB feed: UIC 84 wins over the feed"
+  },
+  {
+   "id": "de-DELFI_000008800007",
+   "lat": 51.215813,
+   "lon": 4.421168,
+   "want": "BE",
+   "why": "DELFI id with a Belgian UIC"
+  },
+  {
+   "id": "de-DELFI_000008400319",
+   "lat": 51.69048,
+   "lon": 5.29362,
+   "want": "NL"
+  },
+  {
+   "id": "de-DELFI_000008000105",
+   "lat": 50.107,
+   "lon": 8.663,
+   "want": "other",
+   "why": "Frankfurt: a German UIC"
+  },
+  {
+   "id": "nl-OpenOV_stoparea:482359",
+   "lat": 50.83489,
+   "lon": 4.33505,
+   "want": "BE",
+   "why": "an OpenOV stop in Brussels: by where it is"
+  },
+  {
+   "id": "nl-OpenOV_stoparea:17911",
+   "lat": 51.595,
+   "lon": 4.78,
+   "want": "NL"
+  },
+  {
+   "id": "be-delijn_gs:delijn:103734",
+   "lat": 51.2189,
+   "lon": 4.42132,
+   "want": "BE",
+   "why": "a De Lijn stop: the feed says"
+  },
+  {
+   "id": "be-stib_8032",
+   "lat": 50.8467,
+   "lon": 4.3525,
+   "want": "BE"
+  },
+  {
+   "id": "be-tec_tec:s-bruxellesmidi",
+   "lat": 50.836372,
+   "lon": 4.338615,
+   "want": "BE"
+  },
+  {
+   "id": "",
+   "lat": 50.85028,
+   "lon": 5.70556,
+   "want": "NL",
+   "why": "Maastricht"
+  },
+  {
+   "id": "",
+   "lat": 50.77195,
+   "lon": 5.71,
+   "want": "NL",
+   "why": "Eijsden, next to the border"
+  },
+  {
+   "id": "",
+   "lat": 51.308,
+   "lon": 3.386,
+   "want": "NL",
+   "why": "Sluis"
+  },
+  {
+   "id": "",
+   "lat": 51.445,
+   "lon": 4.93,
+   "want": "NL",
+   "why": "Baarle-Nassau: enclaves, Dutch unless the feed says"
+  },
+  {
+   "id": "",
+   "lat": 51.54028,
+   "lon": 4.45833,
+   "want": "NL",
+   "why": "Roosendaal"
+  },
+  {
+   "id": "",
+   "lat": 50.893,
+   "lon": 5.647,
+   "want": "BE",
+   "why": "Lanaken"
+  },
+  {
+   "id": "",
+   "lat": 51.036,
+   "lon": 3.71,
+   "want": "BE",
+   "why": "Gent"
+  },
+  {
+   "id": "",
+   "lat": 51.4628,
+   "lon": 4.4513,
+   "want": "BE",
+   "why": "Essen"
+  },
+  {
+   "id": "",
+   "lat": 50.6245,
+   "lon": 5.5666,
+   "want": "BE",
+   "why": "Liège-Guillemins"
+  },
+  {
+   "id": "",
+   "lat": 49.6833,
+   "lon": 5.8167,
+   "want": "BE",
+   "why": "Arlon"
+  },
+  {
+   "id": "",
+   "lat": 52.379,
+   "lon": 4.9,
+   "want": "NL",
+   "why": "Amsterdam"
+  }
+ ],
+ "uic": [
+  {
+   "id": "be-sncb_S8821006",
+   "want": "8821006"
+  },
+  {
+   "id": "be-sncb_8812005",
+   "want": "8812005"
+  },
+  {
+   "id": "be-sncb_8400131",
+   "want": "8400131"
+  },
+  {
+   "id": "de-DELFI_000008400319",
+   "want": "8400319"
+  },
+  {
+   "id": "de-DELFI_000008800007",
+   "want": "8800007"
+  },
+  {
+   "id": "nl-OpenOV_stoparea:482359",
+   "want": null
+  },
+  {
+   "id": "be-delijn_gs:delijn:103734",
+   "want": null
+  },
+  {
+   "id": "eu-european-sleeper_8814001",
+   "want": null
+  }
+ ],
+ "railSource": [
+  {
+   "id": "be-sncb_S8821006",
+   "name": "Antwerpen-Centraal",
+   "lat": 51.2172,
+   "lon": 4.4211,
+   "want": "be:8821006"
+  },
+  {
+   "id": "be-sncb_8814001",
+   "name": "Bruxelles-Midi",
+   "lat": 50.8357,
+   "lon": 4.3365,
+   "want": "be:8814001"
+  },
+  {
+   "id": "be-sncb_S8821402",
+   "name": "Essen",
+   "lat": 51.4628,
+   "lon": 4.4513,
+   "want": "be:8821402"
+  },
+  {
+   "id": "be-sncb_8400131",
+   "name": "Breda (NL)",
+   "lat": 51.595676,
+   "lon": 4.780017,
+   "want": "BD",
+   "why": "the Dutch side of a cross-border train: NS"
+  },
+  {
+   "id": "be-sncb_8400526",
+   "name": "Roosendaal (NL)",
+   "lat": 51.54,
+   "lon": 4.458,
+   "want": "RSD"
+  },
+  {
+   "id": "de-DELFI_000008400131",
+   "name": "Breda",
+   "lat": 51.59555,
+   "lon": 4.78,
+   "want": "BD"
+  },
+  {
+   "id": "de-DELFI_000008400319",
+   "name": "'s-Hertogenbosch",
+   "lat": 51.69048,
+   "lon": 5.29362,
+   "want": "HT"
+  },
+  {
+   "id": "de-DELFI_000008800007",
+   "name": "Antwerpen-Centraal",
+   "lat": 51.215813,
+   "lon": 4.421168,
+   "want": "be:Antwerpen-Centraal",
+   "why": "88000xx is an international code iRail doesn't know: by name"
+  },
+  {
+   "id": "nl-OpenOV_stoparea:482359",
+   "name": "Brussel-Zuid",
+   "lat": 50.83489,
+   "lon": 4.33505,
+   "want": "be:Brussel-Zuid"
+  },
+  {
+   "id": "nl-OpenOV_stoparea:17911",
+   "name": "Breda",
+   "lat": 51.595,
+   "lon": 4.78,
+   "want": "BD"
+  },
+  {
+   "id": "be-delijn_gs:delijn:103734",
+   "name": "Antwerpen Centraal Station",
+   "lat": 51.2189,
+   "lon": 4.42132,
+   "want": null,
+   "why": "a tram and bus stop: no train data"
+  },
+  {
+   "id": "",
+   "name": "Utrecht Centraal",
+   "lat": 52.0894,
+   "lon": 5.1099,
+   "want": "UT"
+  }
+ ],
+ "nsCode": [
+  {
+   "id": "be-sncb_S8821006",
+   "name": "Antwerpen-Centraal",
+   "want": null
+  },
+  {
+   "id": "be-sncb_8400131",
+   "name": "Breda (NL)",
+   "want": "BD"
+  },
+  {
+   "id": "de-DELFI_000008800007",
+   "name": "Antwerpen-Centraal",
+   "want": null
+  },
+  {
+   "id": "be-delijn_gs:delijn:102192",
+   "name": "Essen Station",
+   "want": null
+  },
+  {
+   "id": "de-DELFI_000008400319",
+   "name": "'s-Hertogenbosch",
+   "want": "HT"
+  }
+ ],
+ "belgianTrip": [
+  {
+   "tripId": "20261128_11:36_be-sncb_88____:100::8812005:8400131:7:1319:20261212",
+   "want": true
+  },
+  {
+   "tripId": "20261128_12:23_be-delijn_1234",
+   "want": true
+  },
+  {
+   "tripId": "20261117_11:57_nl-OpenOV_374105578",
+   "want": false
+  },
+  {
+   "tripId": "20261128_10:00_de-DELFI_1234",
+   "want": false
+  },
+  {
+   "tripId": "garbage",
+   "want": false
+  }
+ ],
+ "onlyBelgium": [
+  {
+   "stops": [
+    {
+     "id": "be-sncb_S8821006",
+     "lat": 51.2172,
+     "lon": 4.4211
+    },
+    {
+     "id": "be-sncb_8814001",
+     "lat": 50.8357,
+     "lon": 4.3365
+    }
+   ],
+   "want": true
+  },
+  {
+   "stops": [
+    {
+     "id": "be-sncb_S8821006",
+     "lat": 51.2172,
+     "lon": 4.4211
+    },
+    {
+     "id": "be-sncb_8400131",
+     "lat": 51.595676,
+     "lon": 4.780017
+    }
+   ],
+   "want": false,
+   "why": "to Breda: NS's rules still count"
+  },
+  {
+   "stops": [
+    {
+     "id": "de-DELFI_000008400319",
+     "lat": 51.69048,
+     "lon": 5.29362
+    }
+   ],
+   "want": false
+  },
+  {
+   "stops": [],
+   "want": false
+  }
+ ],
+ "liveboard": {
+  "body": {
+   "station": {
+    "uic": "8821006",
+    "name": "Antwerpen-Centraal",
+    "lat": 51.2172,
+    "lon": 4.421101
+   },
+   "departures": [
+    {
+     "num": "2962",
+     "type": "S33",
+     "name": "S33 2962",
+     "vehicle": "BE.NMBS.S332962",
+     "to": "Herentals",
+     "toUic": "8821717",
+     "planned": "2026-11-28T11:23:00Z",
+     "delay": 0,
+     "platform": "1",
+     "platformChanged": false,
+     "canceled": false,
+     "left": false,
+     "occupancy": "low"
+    },
+    {
+     "num": "3334",
+     "type": "IC",
+     "name": "IC 3334",
+     "vehicle": "BE.NMBS.IC3334",
+     "to": "Charleroi-Central",
+     "toUic": "8872009",
+     "planned": "2026-11-28T11:36:00Z",
+     "delay": 0,
+     "platform": "24",
+     "platformChanged": true,
+     "canceled": false,
+     "left": false,
+     "occupancy": "low"
+    },
+    {
+     "num": "9235",
+     "type": "EC",
+     "name": "EC 9235",
+     "vehicle": "BE.NMBS.EC9235",
+     "to": "Breda",
+     "toUic": "8400131",
+     "planned": "2026-11-28T11:45:00Z",
+     "delay": 0,
+     "platform": "22",
+     "platformChanged": false,
+     "canceled": false,
+     "left": false,
+     "occupancy": null
+    },
+    {
+     "num": "2562",
+     "type": "S32",
+     "name": "S32 2562",
+     "vehicle": "BE.NMBS.S322562",
+     "to": "Roosendaal",
+     "toUic": "8400526",
+     "planned": "2026-11-28T11:50:00Z",
+     "delay": 60,
+     "platform": "21",
+     "platformChanged": false,
+     "canceled": false,
+     "left": false,
+     "occupancy": "low"
+    },
+    {
+     "num": "2862",
+     "type": "L",
+     "name": "L 2862",
+     "vehicle": "BE.NMBS.L2862",
+     "to": "Leuven",
+     "toUic": "8833001",
+     "planned": "2026-11-28T11:46:00Z",
+     "delay": 0,
+     "platform": "13",
+     "platformChanged": false,
+     "canceled": true,
+     "left": false,
+     "occupancy": "low"
+    }
+   ]
+  },
+  "want": [
+   {
+    "num": "2962",
+    "planned": "2026-11-28T11:23:00Z",
+    "actual": "2026-11-28T11:23:00Z",
+    "track": "1",
+    "plannedTrack": "1",
+    "changed": false,
+    "cancelled": false,
+    "crowd": 1
+   },
+   {
+    "num": "3334",
+    "planned": "2026-11-28T11:36:00Z",
+    "actual": "2026-11-28T11:36:00Z",
+    "track": "24",
+    "plannedTrack": "",
+    "changed": true,
+    "cancelled": false,
+    "crowd": 1
+   },
+   {
+    "num": "9235",
+    "planned": "2026-11-28T11:45:00Z",
+    "actual": "2026-11-28T11:45:00Z",
+    "track": "22",
+    "plannedTrack": "22",
+    "changed": false,
+    "cancelled": false,
+    "crowd": 0
+   },
+   {
+    "num": "2562",
+    "planned": "2026-11-28T11:50:00Z",
+    "actual": "2026-11-28T11:51:00Z",
+    "track": "21",
+    "plannedTrack": "21",
+    "changed": false,
+    "cancelled": false,
+    "crowd": 1
+   },
+   {
+    "num": "2862",
+    "planned": "2026-11-28T11:46:00Z",
+    "actual": "2026-11-28T11:46:00Z",
+    "track": "13",
+    "plannedTrack": "13",
+    "changed": false,
+    "cancelled": true,
+    "crowd": 1
+   }
+  ]
+ },
+ "composition": {
+  "body": {
+   "num": "2912",
+   "segments": [
+    {
+     "from": {
+      "uic": "8821006",
+      "name": "Antwerpen-Centraal"
+     },
+     "to": {
+      "uic": "8833001",
+      "name": "Leuven"
+     },
+     "units": [
+      {
+       "type": "AM80M",
+       "sub": "a",
+       "first": 0,
+       "second": 99,
+       "length": 25,
+       "toilets": false,
+       "bikes": false,
+       "prm": false
+      },
+      {
+       "type": "AM80M",
+       "sub": "b",
+       "first": 0,
+       "second": 77,
+       "length": 25,
+       "toilets": false,
+       "bikes": true,
+       "prm": true
+      },
+      {
+       "type": "AM80M",
+       "sub": "c",
+       "first": 32,
+       "second": 40,
+       "length": 25,
+       "toilets": true,
+       "bikes": false,
+       "prm": false
+      },
+      {
+       "type": "AM80M",
+       "sub": "a",
+       "first": 0,
+       "second": 99,
+       "length": 25,
+       "toilets": false,
+       "bikes": false,
+       "prm": false
+      },
+      {
+       "type": "AM80M",
+       "sub": "b",
+       "first": 0,
+       "second": 77,
+       "length": 25,
+       "toilets": false,
+       "bikes": true,
+       "prm": true
+      },
+      {
+       "type": "AM80M",
+       "sub": "c",
+       "first": 32,
+       "second": 40,
+       "length": 25,
+       "toilets": true,
+       "bikes": false,
+       "prm": false
+      }
+     ]
+    }
+   ],
+   "cars": 6,
+   "seats": 496
+  },
+  "cars": 6,
+  "seats": 496
+ },
+ "vehicleQuery": [
+  {
+   "tripId": "20261128_11:36_be-sncb_88____:100::8812005:8400131:7:1319:20261212",
+   "num": "9235",
+   "want": "/be/vehicle?id=9235&date=281126"
+  },
+  {
+   "tripId": "nope",
+   "num": "2912",
+   "want": "/be/vehicle?id=2912"
+  },
+  {
+   "tripId": "20261128_11:36_be-sncb_x",
+   "num": "",
+   "want": null
+  },
+  {
+   "tripId": "20261128_11:36_be-sncb_x",
+   "num": "IC 2912",
+   "want": null
+  }
+ ],
+ "overlay": [
+  {
+   "why": "Transitous has SNCB's live times but no platforms: iRail's platforms are filled in, the times stay; Breda (a Dutch station) is left alone",
+   "trip": {
+    "legs": [
+     {
+      "mode": "REGIONAL_RAIL",
+      "from": {
+       "name": "Bruxelles-Nord",
+       "stopId": "be-sncb_8812005",
+       "lat": 50.85965999999999,
+       "lon": 4.360849999999999,
+       "departure": "2026-11-28T10:37:00Z",
+       "scheduledDeparture": "2026-11-28T10:36:00Z",
+       "cancelled": false,
+       "pickupType": "NORMAL",
+       "dropoffType": "NOT_ALLOWED"
+      },
+      "to": {
+       "name": "Breda (NL)",
+       "stopId": "be-sncb_8400131",
+       "lat": 51.595676000000005,
+       "lon": 4.780017,
+       "arrival": "2026-11-28T12:19:00Z",
+       "scheduledArrival": "2026-11-28T12:19:00Z",
+       "cancelled": false,
+       "pickupType": "NOT_ALLOWED",
+       "dropoffType": "NORMAL"
+      },
+      "startTime": "2026-11-28T10:37:00Z",
+      "endTime": "2026-11-28T12:19:00Z",
+      "scheduledStartTime": "2026-11-28T10:36:00Z",
+      "scheduledEndTime": "2026-11-28T12:19:00Z",
+      "realTime": true,
+      "headsign": "Breda (NL)",
+      "tripId": "20261128_11:36_be-sncb_88____:100::8812005:8400131:7:1319:20261212",
+      "routeShortName": "EC",
+      "tripShortName": "9235",
+      "displayName": "EC 9235",
+      "agencyName": "NMBS/SNCB",
+      "intermediateStops": [
+       {
+        "name": "Brussels Airport-Zaventem",
+        "stopId": "be-sncb_8819406",
+        "lat": 50.89682,
+        "lon": 4.48549,
+        "arrival": "2026-11-28T10:49:00Z",
+        "departure": "2026-11-28T10:51:00Z",
+        "scheduledArrival": "2026-11-28T10:49:00Z",
+        "scheduledDeparture": "2026-11-28T10:51:00Z",
+        "cancelled": false,
+        "pickupType": "NORMAL",
+        "dropoffType": "NORMAL"
+       },
+       {
+        "name": "Anvers-Berchem",
+        "stopId": "be-sncb_8821121",
+        "lat": 51.199226,
+        "lon": 4.432219000000001,
+        "arrival": "2026-11-28T11:36:00Z",
+        "departure": "2026-11-28T11:38:00Z",
+        "scheduledArrival": "2026-11-28T11:36:00Z",
+        "scheduledDeparture": "2026-11-28T11:38:00Z",
+        "cancelled": false,
+        "pickupType": "NORMAL",
+        "dropoffType": "NORMAL"
+       },
+       {
+        "name": "Anvers-Central",
+        "stopId": "be-sncb_8821006",
+        "lat": 51.217197,
+        "lon": 4.421098000000001,
+        "arrival": "2026-11-28T11:42:00Z",
+        "departure": "2026-11-28T11:45:00Z",
+        "scheduledArrival": "2026-11-28T11:42:00Z",
+        "scheduledDeparture": "2026-11-28T11:45:00Z",
+        "cancelled": false,
+        "pickupType": "NORMAL",
+        "dropoffType": "NORMAL"
+       },
+       {
+        "name": "Noorderkempen (Brecht)",
+        "stopId": "be-sncb_8821105",
+        "lat": 51.35683399999999,
+        "lon": 4.6322,
+        "arrival": "2026-11-28T11:59:00Z",
+        "departure": "2026-11-28T12:01:00Z",
+        "scheduledArrival": "2026-11-28T11:59:00Z",
+        "scheduledDeparture": "2026-11-28T12:01:00Z",
+        "cancelled": false,
+        "pickupType": "NORMAL",
+        "dropoffType": "NORMAL"
+       }
+      ]
+     }
+    ]
+   },
+   "vehicle": {
+    "vehicle": "BE.NMBS.EC9235",
+    "num": "9235",
+    "type": "EC",
+    "name": "EC 9235",
+    "stops": [
+     {
+      "uic": "8812005",
+      "name": "Brussels-North",
+      "lat": 50.859663,
+      "lon": 4.360846,
+      "arrival": "2026-11-28T10:36:00Z",
+      "departure": "2026-11-28T10:36:00Z",
+      "arrivalDelay": 0,
+      "departureDelay": 60,
+      "platform": "5",
+      "platformChanged": false,
+      "arrivalCanceled": false,
+      "departureCanceled": false,
+      "arrived": true,
+      "left": true
+     },
+     {
+      "uic": "8819406",
+      "name": "Brussels Airport - Zaventem",
+      "lat": 50.896456,
+      "lon": 4.482076,
+      "arrival": "2026-11-28T10:49:00Z",
+      "departure": "2026-11-28T10:51:00Z",
+      "arrivalDelay": 0,
+      "departureDelay": 0,
+      "platform": "3",
+      "platformChanged": false,
+      "arrivalCanceled": false,
+      "departureCanceled": false,
+      "arrived": true,
+      "left": true
+     },
+     {
+      "uic": "8821121",
+      "name": "Antwerp-Berchem",
+      "lat": 51.19923,
+      "lon": 4.432221,
+      "arrival": "2026-11-28T11:36:00Z",
+      "departure": "2026-11-28T11:38:00Z",
+      "arrivalDelay": 0,
+      "departureDelay": 0,
+      "platform": "10",
+      "platformChanged": false,
+      "arrivalCanceled": false,
+      "departureCanceled": false,
+      "arrived": false,
+      "left": false
+     },
+     {
+      "uic": "8821006",
+      "name": "Antwerp-Central",
+      "lat": 51.2172,
+      "lon": 4.421101,
+      "arrival": "2026-11-28T11:42:00Z",
+      "departure": "2026-11-28T11:45:00Z",
+      "arrivalDelay": 0,
+      "departureDelay": 0,
+      "platform": "22",
+      "platformChanged": false,
+      "arrivalCanceled": false,
+      "departureCanceled": false,
+      "arrived": false,
+      "left": false
+     },
+     {
+      "uic": "8821105",
+      "name": "Noorderkempen (brecht)",
+      "lat": 51.356838,
+      "lon": 4.632204,
+      "arrival": "2026-11-28T11:59:00Z",
+      "departure": "2026-11-28T12:01:00Z",
+      "arrivalDelay": 0,
+      "departureDelay": 0,
+      "platform": "1",
+      "platformChanged": false,
+      "arrivalCanceled": false,
+      "departureCanceled": false,
+      "arrived": false,
+      "left": false
+     },
+     {
+      "uic": "8400131",
+      "name": "Breda",
+      "lat": 51.594459,
+      "lon": 4.7764,
+      "arrival": "2026-11-28T12:19:00Z",
+      "departure": "2026-11-28T12:19:00Z",
+      "arrivalDelay": 0,
+      "departureDelay": 0,
+      "platform": null,
+      "platformChanged": false,
+      "arrivalCanceled": false,
+      "departureCanceled": false,
+      "arrived": false,
+      "left": false
+     }
+    ]
+   },
+   "num": "9235",
+   "realTime": true,
+   "want": [
+    {
+     "name": "Bruxelles-Nord",
+     "track": "5",
+     "scheduledTrack": "5",
+     "arrival": null,
+     "departure": "2026-11-28T10:37:00Z",
+     "cancelled": false
+    },
+    {
+     "name": "Brussels Airport-Zaventem",
+     "track": "3",
+     "scheduledTrack": "3",
+     "arrival": "2026-11-28T10:49:00Z",
+     "departure": "2026-11-28T10:51:00Z",
+     "cancelled": false
+    },
+    {
+     "name": "Anvers-Berchem",
+     "track": "10",
+     "scheduledTrack": "10",
+     "arrival": "2026-11-28T11:36:00Z",
+     "departure": "2026-11-28T11:38:00Z",
+     "cancelled": false
+    },
+    {
+     "name": "Anvers-Central",
+     "track": "22",
+     "scheduledTrack": "22",
+     "arrival": "2026-11-28T11:42:00Z",
+     "departure": "2026-11-28T11:45:00Z",
+     "cancelled": false
+    },
+    {
+     "name": "Noorderkempen (Brecht)",
+     "track": "1",
+     "scheduledTrack": "1",
+     "arrival": "2026-11-28T11:59:00Z",
+     "departure": "2026-11-28T12:01:00Z",
+     "cancelled": false
+    },
+    {
+     "name": "Breda (NL)",
+     "track": null,
+     "scheduledTrack": null,
+     "arrival": "2026-11-28T12:19:00Z",
+     "departure": null,
+     "cancelled": false
+    }
+   ]
+  },
+  {
+   "why": "no live times in Transitous: iRail's delays are put on the timetable (made-up delays, a changed platform with no planned one, and a cancelled stop, on the same train)",
+   "trip": {
+    "legs": [
+     {
+      "mode": "REGIONAL_RAIL",
+      "from": {
+       "name": "Bruxelles-Nord",
+       "stopId": "be-sncb_8812005",
+       "lat": 50.85965999999999,
+       "lon": 4.360849999999999,
+       "departure": "2026-11-28T10:36:00Z",
+       "scheduledDeparture": "2026-11-28T10:36:00Z",
+       "cancelled": false,
+       "pickupType": "NORMAL",
+       "dropoffType": "NOT_ALLOWED"
+      },
+      "to": {
+       "name": "Breda (NL)",
+       "stopId": "be-sncb_8400131",
+       "lat": 51.595676000000005,
+       "lon": 4.780017,
+       "arrival": "2026-11-28T12:19:00Z",
+       "scheduledArrival": "2026-11-28T12:19:00Z",
+       "cancelled": false,
+       "pickupType": "NOT_ALLOWED",
+       "dropoffType": "NORMAL"
+      },
+      "startTime": "2026-11-28T10:36:00Z",
+      "endTime": "2026-11-28T12:19:00Z",
+      "scheduledStartTime": "2026-11-28T10:36:00Z",
+      "scheduledEndTime": "2026-11-28T12:19:00Z",
+      "realTime": false,
+      "headsign": "Breda (NL)",
+      "tripId": "20261128_11:36_be-sncb_88____:100::8812005:8400131:7:1319:20261212",
+      "routeShortName": "EC",
+      "tripShortName": "9235",
+      "displayName": "EC 9235",
+      "agencyName": "NMBS/SNCB",
+      "intermediateStops": [
+       {
+        "name": "Brussels Airport-Zaventem",
+        "stopId": "be-sncb_8819406",
+        "lat": 50.89682,
+        "lon": 4.48549,
+        "arrival": "2026-11-28T10:49:00Z",
+        "departure": "2026-11-28T10:51:00Z",
+        "scheduledArrival": "2026-11-28T10:49:00Z",
+        "scheduledDeparture": "2026-11-28T10:51:00Z",
+        "cancelled": false,
+        "pickupType": "NORMAL",
+        "dropoffType": "NORMAL"
+       },
+       {
+        "name": "Anvers-Berchem",
+        "stopId": "be-sncb_8821121",
+        "lat": 51.199226,
+        "lon": 4.432219000000001,
+        "arrival": "2026-11-28T11:36:00Z",
+        "departure": "2026-11-28T11:38:00Z",
+        "scheduledArrival": "2026-11-28T11:36:00Z",
+        "scheduledDeparture": "2026-11-28T11:38:00Z",
+        "cancelled": false,
+        "pickupType": "NORMAL",
+        "dropoffType": "NORMAL"
+       },
+       {
+        "name": "Anvers-Central",
+        "stopId": "be-sncb_8821006",
+        "lat": 51.217197,
+        "lon": 4.421098000000001,
+        "arrival": "2026-11-28T11:42:00Z",
+        "departure": "2026-11-28T11:45:00Z",
+        "scheduledArrival": "2026-11-28T11:42:00Z",
+        "scheduledDeparture": "2026-11-28T11:45:00Z",
+        "cancelled": false,
+        "pickupType": "NORMAL",
+        "dropoffType": "NORMAL"
+       },
+       {
+        "name": "Noorderkempen (Brecht)",
+        "stopId": "be-sncb_8821105",
+        "lat": 51.35683399999999,
+        "lon": 4.6322,
+        "arrival": "2026-11-28T11:59:00Z",
+        "departure": "2026-11-28T12:01:00Z",
+        "scheduledArrival": "2026-11-28T11:59:00Z",
+        "scheduledDeparture": "2026-11-28T12:01:00Z",
+        "cancelled": false,
+        "pickupType": "NORMAL",
+        "dropoffType": "NORMAL"
+       }
+      ]
+     }
+    ]
+   },
+   "vehicle": {
+    "vehicle": "BE.NMBS.EC9235",
+    "num": "9235",
+    "type": "EC",
+    "name": "EC 9235",
+    "stops": [
+     {
+      "uic": "8812005",
+      "name": "Brussels-North",
+      "lat": 50.859663,
+      "lon": 4.360846,
+      "arrival": "2026-11-28T10:36:00Z",
+      "departure": "2026-11-28T10:36:00Z",
+      "arrivalDelay": 0,
+      "departureDelay": 60,
+      "platform": "5",
+      "platformChanged": false,
+      "arrivalCanceled": false,
+      "departureCanceled": false,
+      "arrived": true,
+      "left": true
+     },
+     {
+      "uic": "8819406",
+      "name": "Brussels Airport - Zaventem",
+      "lat": 50.896456,
+      "lon": 4.482076,
+      "arrival": "2026-11-28T10:49:00Z",
+      "departure": "2026-11-28T10:51:00Z",
+      "arrivalDelay": 0,
+      "departureDelay": 0,
+      "platform": "3",
+      "platformChanged": false,
+      "arrivalCanceled": false,
+      "departureCanceled": false,
+      "arrived": true,
+      "left": true
+     },
+     {
+      "uic": "8821121",
+      "name": "Antwerp-Berchem",
+      "lat": 51.19923,
+      "lon": 4.432221,
+      "arrival": "2026-11-28T11:36:00Z",
+      "departure": "2026-11-28T11:38:00Z",
+      "arrivalDelay": 120,
+      "departureDelay": 0,
+      "platform": "10",
+      "platformChanged": false,
+      "arrivalCanceled": false,
+      "departureCanceled": false,
+      "arrived": false,
+      "left": false
+     },
+     {
+      "uic": "8821006",
+      "name": "Antwerp-Central",
+      "lat": 51.2172,
+      "lon": 4.421101,
+      "arrival": "2026-11-28T11:42:00Z",
+      "departure": "2026-11-28T11:45:00Z",
+      "arrivalDelay": 0,
+      "departureDelay": 180,
+      "platform": "23",
+      "platformChanged": true,
+      "arrivalCanceled": false,
+      "departureCanceled": false,
+      "arrived": false,
+      "left": false
+     },
+     {
+      "uic": "8821105",
+      "name": "Noorderkempen (brecht)",
+      "lat": 51.356838,
+      "lon": 4.632204,
+      "arrival": "2026-11-28T11:59:00Z",
+      "departure": "2026-11-28T12:01:00Z",
+      "arrivalDelay": 0,
+      "departureDelay": 0,
+      "platform": "1",
+      "platformChanged": false,
+      "arrivalCanceled": false,
+      "departureCanceled": true,
+      "arrived": false,
+      "left": false
+     },
+     {
+      "uic": "8400131",
+      "name": "Breda",
+      "lat": 51.594459,
+      "lon": 4.7764,
+      "arrival": "2026-11-28T12:19:00Z",
+      "departure": "2026-11-28T12:19:00Z",
+      "arrivalDelay": 0,
+      "departureDelay": 0,
+      "platform": null,
+      "platformChanged": false,
+      "arrivalCanceled": false,
+      "departureCanceled": false,
+      "arrived": false,
+      "left": false
+     }
+    ]
+   },
+   "num": "9235",
+   "realTime": true,
+   "want": [
+    {
+     "name": "Bruxelles-Nord",
+     "track": "5",
+     "scheduledTrack": "5",
+     "arrival": null,
+     "departure": "2026-11-28T10:37:00Z",
+     "cancelled": false
+    },
+    {
+     "name": "Brussels Airport-Zaventem",
+     "track": "3",
+     "scheduledTrack": "3",
+     "arrival": "2026-11-28T10:49:00Z",
+     "departure": "2026-11-28T10:51:00Z",
+     "cancelled": false
+    },
+    {
+     "name": "Anvers-Berchem",
+     "track": "10",
+     "scheduledTrack": "10",
+     "arrival": "2026-11-28T11:38:00Z",
+     "departure": "2026-11-28T11:38:00Z",
+     "cancelled": false
+    },
+    {
+     "name": "Anvers-Central",
+     "track": "23",
+     "scheduledTrack": null,
+     "arrival": "2026-11-28T11:42:00Z",
+     "departure": "2026-11-28T11:48:00Z",
+     "cancelled": false
+    },
+    {
+     "name": "Noorderkempen (Brecht)",
+     "track": "1",
+     "scheduledTrack": "1",
+     "arrival": "2026-11-28T11:59:00Z",
+     "departure": "2026-11-28T12:01:00Z",
+     "cancelled": true
+    },
+    {
+     "name": "Breda (NL)",
+     "track": null,
+     "scheduledTrack": null,
+     "arrival": "2026-11-28T12:19:00Z",
+     "departure": null,
+     "cancelled": false
+    }
+   ]
+  },
+  {
+   "why": "another train's iRail answer: nothing changes",
+   "trip": {
+    "legs": [
+     {
+      "mode": "REGIONAL_RAIL",
+      "from": {
+       "name": "Bruxelles-Nord",
+       "stopId": "be-sncb_8812005",
+       "lat": 50.85965999999999,
+       "lon": 4.360849999999999,
+       "departure": "2026-11-28T10:37:00Z",
+       "scheduledDeparture": "2026-11-28T10:36:00Z",
+       "cancelled": false,
+       "pickupType": "NORMAL",
+       "dropoffType": "NOT_ALLOWED"
+      },
+      "to": {
+       "name": "Breda (NL)",
+       "stopId": "be-sncb_8400131",
+       "lat": 51.595676000000005,
+       "lon": 4.780017,
+       "arrival": "2026-11-28T12:19:00Z",
+       "scheduledArrival": "2026-11-28T12:19:00Z",
+       "cancelled": false,
+       "pickupType": "NOT_ALLOWED",
+       "dropoffType": "NORMAL"
+      },
+      "startTime": "2026-11-28T10:37:00Z",
+      "endTime": "2026-11-28T12:19:00Z",
+      "scheduledStartTime": "2026-11-28T10:36:00Z",
+      "scheduledEndTime": "2026-11-28T12:19:00Z",
+      "realTime": true,
+      "headsign": "Breda (NL)",
+      "tripId": "20261128_11:36_be-sncb_88____:100::8812005:8400131:7:1319:20261212",
+      "routeShortName": "EC",
+      "tripShortName": "9235",
+      "displayName": "EC 9235",
+      "agencyName": "NMBS/SNCB",
+      "intermediateStops": [
+       {
+        "name": "Brussels Airport-Zaventem",
+        "stopId": "be-sncb_8819406",
+        "lat": 50.89682,
+        "lon": 4.48549,
+        "arrival": "2026-11-28T10:49:00Z",
+        "departure": "2026-11-28T10:51:00Z",
+        "scheduledArrival": "2026-11-28T10:49:00Z",
+        "scheduledDeparture": "2026-11-28T10:51:00Z",
+        "cancelled": false,
+        "pickupType": "NORMAL",
+        "dropoffType": "NORMAL"
+       },
+       {
+        "name": "Anvers-Berchem",
+        "stopId": "be-sncb_8821121",
+        "lat": 51.199226,
+        "lon": 4.432219000000001,
+        "arrival": "2026-11-28T11:36:00Z",
+        "departure": "2026-11-28T11:38:00Z",
+        "scheduledArrival": "2026-11-28T11:36:00Z",
+        "scheduledDeparture": "2026-11-28T11:38:00Z",
+        "cancelled": false,
+        "pickupType": "NORMAL",
+        "dropoffType": "NORMAL"
+       },
+       {
+        "name": "Anvers-Central",
+        "stopId": "be-sncb_8821006",
+        "lat": 51.217197,
+        "lon": 4.421098000000001,
+        "arrival": "2026-11-28T11:42:00Z",
+        "departure": "2026-11-28T11:45:00Z",
+        "scheduledArrival": "2026-11-28T11:42:00Z",
+        "scheduledDeparture": "2026-11-28T11:45:00Z",
+        "cancelled": false,
+        "pickupType": "NORMAL",
+        "dropoffType": "NORMAL"
+       },
+       {
+        "name": "Noorderkempen (Brecht)",
+        "stopId": "be-sncb_8821105",
+        "lat": 51.35683399999999,
+        "lon": 4.6322,
+        "arrival": "2026-11-28T11:59:00Z",
+        "departure": "2026-11-28T12:01:00Z",
+        "scheduledArrival": "2026-11-28T11:59:00Z",
+        "scheduledDeparture": "2026-11-28T12:01:00Z",
+        "cancelled": false,
+        "pickupType": "NORMAL",
+        "dropoffType": "NORMAL"
+       }
+      ]
+     }
+    ]
+   },
+   "vehicle": {
+    "vehicle": "BE.NMBS.EC9235",
+    "num": "9235",
+    "type": "EC",
+    "name": "EC 9235",
+    "stops": [
+     {
+      "uic": "8812005",
+      "name": "Brussels-North",
+      "lat": 50.859663,
+      "lon": 4.360846,
+      "arrival": "2026-11-28T10:36:00Z",
+      "departure": "2026-11-28T10:36:00Z",
+      "arrivalDelay": 0,
+      "departureDelay": 60,
+      "platform": "5",
+      "platformChanged": false,
+      "arrivalCanceled": false,
+      "departureCanceled": false,
+      "arrived": true,
+      "left": true
+     },
+     {
+      "uic": "8819406",
+      "name": "Brussels Airport - Zaventem",
+      "lat": 50.896456,
+      "lon": 4.482076,
+      "arrival": "2026-11-28T10:49:00Z",
+      "departure": "2026-11-28T10:51:00Z",
+      "arrivalDelay": 0,
+      "departureDelay": 0,
+      "platform": "3",
+      "platformChanged": false,
+      "arrivalCanceled": false,
+      "departureCanceled": false,
+      "arrived": true,
+      "left": true
+     },
+     {
+      "uic": "8821121",
+      "name": "Antwerp-Berchem",
+      "lat": 51.19923,
+      "lon": 4.432221,
+      "arrival": "2026-11-28T11:36:00Z",
+      "departure": "2026-11-28T11:38:00Z",
+      "arrivalDelay": 0,
+      "departureDelay": 0,
+      "platform": "10",
+      "platformChanged": false,
+      "arrivalCanceled": false,
+      "departureCanceled": false,
+      "arrived": false,
+      "left": false
+     },
+     {
+      "uic": "8821006",
+      "name": "Antwerp-Central",
+      "lat": 51.2172,
+      "lon": 4.421101,
+      "arrival": "2026-11-28T11:42:00Z",
+      "departure": "2026-11-28T11:45:00Z",
+      "arrivalDelay": 0,
+      "departureDelay": 0,
+      "platform": "22",
+      "platformChanged": false,
+      "arrivalCanceled": false,
+      "departureCanceled": false,
+      "arrived": false,
+      "left": false
+     },
+     {
+      "uic": "8821105",
+      "name": "Noorderkempen (brecht)",
+      "lat": 51.356838,
+      "lon": 4.632204,
+      "arrival": "2026-11-28T11:59:00Z",
+      "departure": "2026-11-28T12:01:00Z",
+      "arrivalDelay": 0,
+      "departureDelay": 0,
+      "platform": "1",
+      "platformChanged": false,
+      "arrivalCanceled": false,
+      "departureCanceled": false,
+      "arrived": false,
+      "left": false
+     },
+     {
+      "uic": "8400131",
+      "name": "Breda",
+      "lat": 51.594459,
+      "lon": 4.7764,
+      "arrival": "2026-11-28T12:19:00Z",
+      "departure": "2026-11-28T12:19:00Z",
+      "arrivalDelay": 0,
+      "departureDelay": 0,
+      "platform": null,
+      "platformChanged": false,
+      "arrivalCanceled": false,
+      "departureCanceled": false,
+      "arrived": false,
+      "left": false
+     }
+    ]
+   },
+   "num": "1234",
+   "realTime": true,
+   "same": true
+  }
+ ]
+}

@@ -154,7 +154,10 @@ fun TripNotes(t: DoorTrip, others: List<DoorTrip>, now: Double) {
     LaunchedEffect(t.id, s.studentOV, s.rainAdvice, s.ovFiets) {
         HabitStore.load(c)
         val product = StudentOV.Product.of(s.studentOV)
-        if (product != StudentOV.Product.NONE) {
+        // (0.10.13) a way only in Belgium: the Dutch student OV doesn't count there
+        val belgian = nl.haltewekker.core.Country.onlyBelgium(t.rides.flatMap {
+            listOf(nl.haltewekker.core.CountryStop(it.fromId, it.fromLat, it.fromLon), nl.haltewekker.core.CountryStop("", it.toLat, it.toLon)) })
+        if (product != StudentOV.Product.NONE && !belgian) {
             val codes = NSCodes.get(c)
             val trains = t.rides.filter { it.isTrain }
             val cents = if (trains.isNotEmpty()) {

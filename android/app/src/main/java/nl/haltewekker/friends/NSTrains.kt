@@ -46,8 +46,17 @@ class NSCodes(val stations: List<NSStation>) {
 
     fun code(stopId: String, name: String?): String? {
         uic(stopId)?.let { u -> byUIC[u]?.let { return it } }
+        if (notDutch(stopId)) return null
         return name?.let { code(it) }
     }
+
+    /**
+     * (0.10.13, iOS `NSStore.railCode`) Where a station's board comes from: its NS code in the Netherlands (as `code`),
+     * "be:<UIC>" or "be:<name>" in Belgium (iRail through the relay, `Country.railSource`). For the board only: NS's
+     * other services keep asking `code`, which is null in Belgium.
+     */
+    fun railCode(stopId: String, name: String, lat: Double?, lon: Double?): String? =
+        nl.haltewekker.core.Country.railSource(stopId, name, lat, lon) { i, n -> code(i, n) }
 
     /** The nearest station within `within` metres. */
     fun nearest(p: GeoPoint, within: Double = 5000.0): NSStation? =
@@ -63,13 +72,13 @@ class NSCodes(val stations: List<NSStation>) {
         fun decode(text: String?): List<NSStation> =
             text?.let { FriendJson.decode(ListSerializer(NSStation.serializer()), it) } ?: emptyList()
 
-        fun uic(id: String): String? {
-            if (!id.contains("DELFI")) return null
-            val tail = id.split('_').last()
-            val digits = tail.takeWhile { it in '0'..'9' }
-            if (digits.length < 7) return null
-            val trimmed = digits.trimStart('0')
-            return if (trimmed.length == 7 && trimmed.startsWith("84")) trimmed else null
+        /** A Dutch station's UIC in a DELFI id, or (0.10.13) an SNCB one's (`be-sncb_8400131`: Breda in SNCB's feed). */
+        fun uic(id: String): String? = nl.haltewekker.core.Country.uic(id)?.takeIf { it.startsWith("84") }
+
+        /** (0.10.13) A stop plainly outside the Netherlands by its id: never an NS station by its name. */
+        fun notDutch(id: String): Boolean {
+            nl.haltewekker.core.Country.uic(id)?.let { return !it.startsWith("84") }
+            return id.startsWith("be-")
         }
 
         /** Lower case, no accents, every other mark a space ("’s-Hertogenbosch" → "s hertogenbosch"). */

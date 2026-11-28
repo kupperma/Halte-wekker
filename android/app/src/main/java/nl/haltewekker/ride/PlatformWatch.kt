@@ -16,7 +16,7 @@ import java.time.format.DateTimeFormatter
  * (0.10.1) Your trains' platforms and cancellations, for every train of the trip that runs (iOS `WatchStore`, with what
  * 0.42.4 fixed there): each train leg still ahead (and the one you wait for, also at a change) whose departure is within
  * 3 hours, seeded with the planner's planned platform so a change before NS's first answer still counts, looked at on
- * NS's board (relay `/ns/departures`) at most once a minute. A change is told at once, quietly while the ride sleeps
+ * NS's board (relay `/ns/departures`; in Belgium, 0.10.13, iRail's `/be/liveboard`) at most once a minute. A change is told at once, quietly while the ride sleeps
  * (with sound when you're awake), and the trip's ride gets the new platform (the change card, the ride's notification).
  */
 object PlatformWatch {
@@ -108,6 +108,10 @@ object PlatformWatch {
         }
     }
 
+    /** (0.10.13) The relay's `/be/liveboard` (iRail) as NS's board rows: no planned platform when it changed. */
+    fun parseBelgian(text: String?): List<Dep>? =
+        nl.haltewekker.data.IRail.departures(text)?.map { Dep(it.num, it.planned, it.plannedTrack, it.track, it.cancelled) }
+
     // MARK: the watch that runs (kept with the ride; gone when it ends)
 
     private var watches: List<Watch> = emptyList()
@@ -133,6 +137,13 @@ object PlatformWatch {
         try {
             val boards = HashMap<String, List<Dep>>()
             for (c in watches.map { it.code }.distinct()) {
+                // (0.10.13) a Belgian station ("be:…"): iRail's board through the relay
+                val be = nl.haltewekker.core.Country.liveboardParams(c)
+                if (be != null) {
+                    val a = Net.get(nl.haltewekker.friends.FriendRelay.BASE + "/be/liveboard", be)
+                    if (a.status == 200) parseBelgian(a.text)?.let { boards[c] = it }
+                    continue
+                }
                 val a = Net.get(nl.haltewekker.friends.FriendRelay.BASE + "/ns/departures", listOf("station" to c))
                 if (a.status == 200) parse(a.text)?.let { boards[c] = it }
             }

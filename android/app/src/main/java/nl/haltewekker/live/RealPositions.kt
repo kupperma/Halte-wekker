@@ -265,6 +265,8 @@ object RealPositions {
     }
 
     fun usable(f: GPSFix, tripId: String, now: Double, fresh: Double = FRESH): GPSFix? {
+        // (0.10.13) a Belgian train (SNCB's feed): NS's positions by number aren't its own; it goes by its times
+        if (nl.haltewekker.core.Country.belgianTrip(tripId)) return null
         val age = now - f.at
         if (age > fresh || age < -60) return null
         val tripDay = serviceDate(tripId)

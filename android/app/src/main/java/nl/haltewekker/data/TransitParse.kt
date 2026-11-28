@@ -124,7 +124,7 @@ object TransitParse {
             val la = m.d("lat") ?: return@mapNotNull null
             val lo = m.d("lon") ?: return@mapNotNull null
             val country = m.s("country")
-            if (country != null && country !in setOf("NL", "BE", "DE")) return@mapNotNull null
+            if (country != null && country !in setOf("NL", "BE", "DE", "LU", "FR")) return@mapNotNull null      // (0.10.13: LU, FR)
             val type = m.s("type")
             if (stopsOnly && type != "STOP") return@mapNotNull null
             val areas = m.a("areas").mapNotNull { it.obj }

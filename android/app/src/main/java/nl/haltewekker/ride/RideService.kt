@@ -695,7 +695,7 @@ class RideService : Service() {
     private suspend fun platformLook(now: Double) {
         val s = RideStore.state.value ?: return
         val codes = nl.haltewekker.friends.NSCodes.get(this)
-        PlatformWatch.tick(s, now, { r -> codes.code(r.fromId, r.fromStop) }, { Notifications.time(it) }) { a ->
+        PlatformWatch.tick(s, now, { r -> codes.railCode(r.fromId, r.fromStop, r.fromLat, r.fromLon) }, { Notifications.time(it) }) { a ->
             val sleeping = RideStore.state.value?.phase == Phase.SLEEPING
             PlatformWatch.post(this, a, quiet = sleeping)
             FieldLog.ride(if (a.cancelled) "a train of the trip is cancelled · told" else "a train's platform changed · told" + if (sleeping) " quietly" else "")
@@ -761,7 +761,9 @@ class RideService : Service() {
         // the trains' lateness, for money back
         if (l.isTrain) RideStore.update(this) { it.copy(trainLates = it.trainLates + lateMin, trainEndPlanned = l.scheduledArrival, trainEndActual = now) }
         // "Did you check out?" a minute after getting off, where the card wants it (iOS 0.36)
-        if (st.checkOut) {
+        // (0.10.13) not where you got off in Belgium: no OV-chipkaart there
+        val offInBelgium = l.to?.let { nl.haltewekker.core.Country.of("", it.lat, it.lon) == nl.haltewekker.core.Country.BE } ?: false
+        if (st.checkOut && !offInBelgium) {
             val rides = s.trip.rides.map { nl.haltewekker.travel.CheckOut.Ride(it.isTrain, it.agency) }
             if (nl.haltewekker.travel.CheckOut.due(s.index, rides)) {
                 val next = s.trip.rides.getOrNull(s.index + 1)
@@ -796,6 +798,10 @@ class RideService : Service() {
     /** Money back for a late train (iOS 0.36), once, after the trip. */
     private fun delayClaim(s: RideState) {
         if (!app.store.settings.value.delayClaim || s.trainLates.isEmpty()) return
+        // (0.10.13) trains only in Belgium: NS's money back isn't for them (SNCB's own rules aren't told)
+        val trains = s.trip.rides.filter { it.isTrain }
+        if (trains.isNotEmpty() && nl.haltewekker.core.Country.onlyBelgium(trains.flatMap {
+                listOf(nl.haltewekker.core.CountryStop(it.fromId, it.fromLat, it.fromLon), nl.haltewekker.core.CountryStop("", it.toLat, it.toLon)) })) return
         val m = nl.haltewekker.travel.DelayClaim.minutesLate(s.trainEndPlanned, s.trainEndActual, s.trainLates)
         if (!nl.haltewekker.travel.DelayClaim.due(m, told = false) || m == null) return
         val (t, b) = nl.haltewekker.travel.DelayClaim.text(m)
@@ -1034,6 +1040,8 @@ class RideService : Service() {
         if (s.phase == Phase.ALARM || s.phase == Phase.FINISHED || doorAsking) return
         val codes = nl.haltewekker.friends.NSCodes.get(this)
         val code = codes.code(leg.toStop) ?: codes.nearest(to, 600.0)?.code
+            // (0.10.13) a Belgian station by its name (the relay asks OpenStreetMap; Belgium isn't in its seed)
+            ?: leg.toStop.trim().takeIf { it.isNotEmpty() && nl.haltewekker.core.Country.of("", to.lat, to.lon) == nl.haltewekker.core.Country.BE }
         val a = DoorSide.ask(leg.isTrain, t.stops, to, code) ?: return
         if (a.key == s.doorKey) return
         val now = Iso.now()

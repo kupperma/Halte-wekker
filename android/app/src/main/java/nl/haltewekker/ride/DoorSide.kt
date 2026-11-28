@@ -21,10 +21,19 @@ object DoorSide {
     /** What the app asks for: the station, its platform, the stop before and the station's place. */
     data class Ask(val station: String, val track: String, val from: GeoPoint, val at: GeoPoint) {
         val key: String get() = "$station|$track|${query()}"
-        fun query(): String = "station=$station&track=$track&from=${c(from.lat)},${c(from.lon)}&at=${c(at.lat)},${c(at.lon)}"
+        /** (0.10.13) A Belgian station goes by its name, escaped ("NOORDERKEMPEN%20%28BRECHT%29"); a code is as it is. */
+        fun query(): String = "station=${escape(station)}&track=$track&from=${c(from.lat)},${c(from.lon)}&at=${c(at.lat)},${c(at.lon)}"
     }
 
     private fun c(x: Double) = String.format(Locale.ROOT, "%.4f", x)
+
+    /** Every character but ASCII letters, digits and "-._~" as %XX of its UTF-8 bytes (as iOS). */
+    fun escape(s: String): String = buildString {
+        for (b in s.toByteArray(Charsets.UTF_8)) {
+            val ch = (b.toInt() and 0xff).toChar()
+            if (ch in 'A'..'Z' || ch in 'a'..'z' || ch in '0'..'9' || ch in "-._~") append(ch) else append("%%%02X".format(b.toInt() and 0xff))
+        }
+    }
 
     fun cleanTrack(t: String?): String = (t ?: "").trim().lowercase(Locale.ROOT).filter { !it.isWhitespace() }
 

@@ -3,6 +3,45 @@
 The rules and numbers for each are in [logs-export.md](logs-export.md) › For Android (parity), with the iOS files and
 their tests.
 
+## iOS 0.42.17 (Belgium)
+
+The app also works in Belgium. Data per station by its country (`Country`: the UIC in the stop id, 84 NL / 88 BE, then a
+Belgian feed `be-…`, then a rough outline of Belgium drawn a little inside the Dutch border; NS's own station list is
+still asked first for everything else, so the Netherlands is unchanged — tested: no NS station falls inside the outline).
+Shared vectors `docs/belgium-vectors.json` (iOS `BelgiumTests`, Android `BelgiumTest`); relay `relay/irail.js` with
+`relay/test-irail.mjs` on trimmed real answers (`relay/test-irail/`).
+
+- [x] **Relay:** `/be/liveboard?station=|id=`, `/be/vehicle?id=[&date=ddmmyy]`, `/be/composition?id=` from iRail
+      (https://api.irail.be, open NMBS/SNCB data, no key), trimmed, 30 s cache, descriptive User-Agent, 10 s quiet after a
+      429. No GPS: iRail's vehicle "location" is worked out from the timetable and is not passed on. `/rail/v1/side` takes
+      Belgian names with accents (Overpass; Belgium has no seed).
+- [x] **Boards:** `NSStore.railCode` / Android `NSCodes.railCode`: NS code in NL, `be:<UIC>` (or `be:<name>` for DELFI's
+      international 8800… codes) in Belgium. Platform, platform change (iRail's `normal: 0`; it has no planned platform, so
+      a change already made before the first look shows as the platform, not as a change), cancellations, live delays,
+      occupancy as the crowd level, carriages/seats from the composition. iOS: plan rows (`enrich`), the platform/cancel/
+      delay watch, a station's live times (`nsLive`). **Android 0.10.13:** the ride's platform watch (`PlatformWatch`).
+- [x] **Trips:** a Transitous trip of a train that stops in Belgium gets iRail's answer laid over it (`IRail.overlay`):
+      Belgian stops get their platform and cancellation and, when Transitous has no live times, iRail's delays (the leg is
+      then live). Dutch stops of a cross-border train (Breda, Roosendaal) stay NS's. So the stop lists, "stay on", through
+      trains, the by-times position and the exit side have them. **Android 0.10.13:** the same in `Transit.trip`.
+- [x] **Positions:** no NS GPS for a trip from a Belgian feed (a Belgian train number can be an NS one); Belgian trains
+      and buses go by their (live) times. OVapi stays NL only (only `nl-OpenOV` trips have a key).
+- [x] **Hidden in Belgium:** check-out reminder (getting off in Belgium), the student OV line (a way only in Belgium),
+      NS's money back (trains only in Belgium), OV-fiets, NS price and works (no NS code there), "A train's time" (no NS
+      station near). SNCB's own compensation is not told.
+- [x] **Setup:** the school list stays Dutch; any address (also Belgium, Luxembourg, France) can be searched; home stops
+      come from Transitous's map stops, any country.
+- Later options (not built): De Lijn and STIB/MIVB official realtime APIs (need keys), Blue-bike at stations, SNCB's
+  compensation, iRail disruptions.
+
+Live check, 2026-11-28 (relay): `/ns/departures?station=BD` 200 (EC 9232/9236 to Brussel-Noord, platform 5);
+`/be/liveboard?station=Antwerpen-Centraal` 200 (18 departures). Planned Antwerpen-Centraal → Gent-Sint-Pieters through
+the relay: IC 713 (`be-sncb`, Transitous live, no tracks). `/be/vehicle?id=713&date=281126` 200, 15 stops, every one
+with a platform (Antwerpen-Centraal 2, Berchem 6, Sint-Niklaas 1 changed and 1 min late, Gent-Sint-Pieters 6);
+`/be/liveboard?id=8821006` has IC 713 on platform 2, occupancy medium; `/be/composition?id=713` 6 carriages, 424 seats;
+`/rail/v1/side` Gent-Sint-Pieters platform 6 from Gent-Dampoort: right (low); Antwerpen-Centraal: Overpass timed out
+(asked again later).
+
 ## iOS 0.42.16 (review fixes to the stop cards)
 
 - [x] **Card slots:** only cards actually placed count toward the 4 (`NearbyCards.layout`); a stop off the map, or

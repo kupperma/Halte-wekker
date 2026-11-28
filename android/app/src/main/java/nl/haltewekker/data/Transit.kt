@@ -158,7 +158,14 @@ object Transit {
     private suspend fun tripHere(tripId: String, maxAge: Double): TransitParse.LiveTrip? {
         val now = Iso.now()
         trips[tripId]?.let { if (now - it.at < maxAge) return it.trip }
-        val t = ask("/v5/trip", listOf("tripId" to tripId))?.let(TransitParse::parseTrip) ?: return trips[tripId]?.trip
+        var body = ask("/v5/trip", listOf("tripId" to tripId))
+        // (0.10.13, iOS 0.42.17) a train in Belgium: iRail's platforms, cancellations and (when Transitous has none)
+        // live times laid over it (`IRail.overlay`)
+        if (body != null) IRail.trainNumber(body)?.let { n -> IRail.vehicleParams(tripId, n) }?.let { p ->
+            val v = Net.get(nl.haltewekker.friends.FriendRelay.BASE + "/be/vehicle", p)
+            if (v.ok) IRail.overlay(body, v.text)?.let { body = it }
+        }
+        val t = body?.let(TransitParse::parseTrip) ?: return trips[tripId]?.trip
         if (trips.size > 50) trips.clear()
         trips[tripId] = KeptTrip(now, t)
         return t

@@ -265,7 +265,7 @@ fun HomeScreen(ride: RideState?, onPlan: (Direction?) -> Unit, onRide: () -> Uni
                     }
                 }
             }
-            Text("Trips and times: Transitous (MOTIS). Live positions: OVapi and NS. Map: OpenFreeMap, © OpenStreetMap contributors.",
+            Text("Trips and times: Transitous (MOTIS). Live positions: OVapi and NS. Trains in Belgium: iRail (NMBS/SNCB open data). Map: OpenFreeMap, © OpenStreetMap contributors.",
                 color = DS.t.secondary, style = MaterialTheme.typography.bodySmall)
             Spacer(Modifier.height(24.dp))
         }

@@ -243,7 +243,7 @@ private fun TopicPage(t: SettingsTopic, onBack: () -> Unit, onSetup: () -> Unit,
                 Card {
                     Text("About and open data", fontWeight = FontWeight.Bold, color = DS.t.text)
                     Text("Haltewekker for Android ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}), made by ${nl.haltewekker.logs.Maker.NAME}.", color = DS.t.text)
-                    Text("Trips and times: Transitous (MOTIS). Live positions: OVapi and NS. Map: OpenFreeMap and MapLibre, © OpenStreetMap contributors. Weather: Open-Meteo. Icons: Material Symbols (Apache 2.0).",
+                    Text("Trips and times: Transitous (MOTIS). Live positions: OVapi and NS. Trains in Belgium: iRail (NMBS/SNCB open data). Map: OpenFreeMap and MapLibre, © OpenStreetMap contributors. Weather: Open-Meteo. Icons: Material Symbols (Apache 2.0).",
                         color = DS.t.secondary, style = MaterialTheme.typography.bodySmall)
                 }
             }
