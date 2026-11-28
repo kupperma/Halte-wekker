@@ -258,7 +258,7 @@ private struct SetupSchoolStep: View {
                 results
             }
             DSQuietButton(title: "Search an address, stop or station", icon: "mappin.and.ellipse", full: true) { finding = true }
-            Text("Not in the list, or another building? Search its address: trips go to that spot.")
+            Text("Not in the list (it has Dutch schools), abroad or another building? Search its address: trips go to that spot.")
                 .font(DS.footnote).foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
         }
         .sheet(isPresented: $finding) {

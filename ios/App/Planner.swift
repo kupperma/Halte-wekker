@@ -347,7 +347,7 @@ final class Planner: ObservableObject {
 
     /// The train of the plan you picked is watched for platform changes by itself.
     private func watchChosen() {
-        guard let c = chosen, let code = NSStore.code(c.from) else { return }
+        guard let c = chosen, let code = NSStore.railCode(c.from) else { return }
         let k = WatchStore.key(code: code, ride: c.train.first)
         let w = WatchStore.shared
         if w.watches.contains(where: { $0.auto && $0.key == k }) { return }     // already watching it: keep what it knows

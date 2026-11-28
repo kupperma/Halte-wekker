@@ -297,7 +297,8 @@ enum Transit {
     }
 
     /// Search for an address, a named place, a stop or a station (Transitous's geocoder, any type), nearest to `near`
-    /// first when given; only results in the Netherlands and its neighbours' border towns.
+    /// first when given; only results in the Netherlands, Belgium and their neighbours (0.42.17: also Luxembourg and France,
+    /// for a home or school in Belgium near them).
     static func findPlaces(_ q: String, near: CLLocationCoordinate2D?) async -> [PlaceHit] {
         var items: [URLQueryItem] = [.init(name: "text", value: q), .init(name: "numResults", value: "12")]
         if let c = near { items.append(.init(name: "place", value: "\(c.latitude),\(c.longitude)")) }
@@ -305,7 +306,7 @@ enum Transit {
         guard let list = answer as? [[String: Any]] else { return [] }
         return list.compactMap { m in
             guard let name = m["name"] as? String, let la = m["lat"] as? Double, let lo = m["lon"] as? Double,
-                  ["NL", "BE", "DE", nil].contains(m["country"] as? String) else { return nil }
+                  ["NL", "BE", "DE", "LU", "FR", nil].contains(m["country"] as? String) else { return nil }
             let areas = (m["areas"] as? [[String: Any]]) ?? []
             let a = areas.first { ($0["default"] as? Bool) == true } ?? areas.first { ($0["matched"] as? Bool) == true } ?? areas.first
             let kind: PlaceHit.Kind = (m["type"] as? String) == "STOP" ? .stop : (m["type"] as? String) == "ADDRESS" ? .address : .place
@@ -543,7 +544,8 @@ enum Transit {
     /// (0.42.8) A station's trips with NS's live times (by train number, from its board): a late train is moved to its
     /// live time, and a way whose changes it no longer makes goes.
     private static func nsLive(_ trips: [DoorTrip], station: NearStop?) async -> [DoorTrip] {
-        guard let st = station, let code = NSStore.code(stopId: st.id, name: st.name), trips.contains(where: { $0.first.isTrain }) else { return trips }
+        guard let st = station, let code = NSStore.railCode(stopId: st.id, name: st.name, lat: st.lat, lon: st.lon),
+              trips.contains(where: { $0.first.isTrain }) else { return trips }
         guard let board = await NSStore.shared.board(code) else { return trips }
         let now = Date()
         var ups: [NearbyLive.Update] = []
@@ -972,6 +974,12 @@ enum Transit {
         await tripAnswers.get(tripId, group: urgent ? 1 : 0, maxAge: maxAge) {
             guard let d = try? await raw("/v5/trip", [.init(name: "tripId", value: tripId)]),
                   let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any], j["legs"] is [Any] else { return nil }
+            // (0.42.17) a train in Belgium: iRail's platforms, cancellations and (when Transitous has none) live times
+            // laid over it, so its stops, the ride and the exit side have them (`IRail.overlay`)
+            if let n = IRail.trainNumber(j), let path = IRail.vehiclePath(tripId: tripId, num: n),
+               let v = await NSStore.beVehicle(path), let patched = IRail.overlay(tripData: d, vehicleData: v) {
+                return patched
+            }
             return d
         }
     }

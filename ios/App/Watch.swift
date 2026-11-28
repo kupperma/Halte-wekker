@@ -56,7 +56,7 @@ final class WatchStore: ObservableObject {
     static func key(code: String, ride: Ride) -> String { "\(code)|\(ride.num)|\(Int(ride.scheduledDeparture.timeIntervalSince1970))" }
 
     func isWatched(_ ride: Ride, from: Place) -> Bool {
-        guard ride.isTrain, let c = NSStore.code(from) else { return false }
+        guard ride.isTrain, let c = NSStore.railCode(from) else { return false }
         let k = Self.key(code: c, ride: ride)
         return watches.contains { $0.key == k }
     }
@@ -65,7 +65,7 @@ final class WatchStore: ObservableObject {
     @discardableResult
     func toggle(_ trip: DoorTrip, from: Place, to: Place) -> Bool {
         let r = trip.first
-        guard r.isTrain, let c = NSStore.code(from) else { return false }
+        guard r.isTrain, let c = NSStore.railCode(from) else { return false }
         let k = Self.key(code: c, ride: r)
         if watches.contains(where: { $0.key == k }) { remove(k); return false }
         add(trip, from: from, to: to, auto: false)
@@ -76,13 +76,13 @@ final class WatchStore: ObservableObject {
     @discardableResult
     func add(_ trip: DoorTrip, from: Place, to: Place, auto: Bool) -> Bool {
         let r = trip.first
-        guard r.isTrain, let c = NSStore.code(from) else { return false }
+        guard r.isTrain, let c = NSStore.railCode(from) else { return false }
         let k = Self.key(code: c, ride: r)
         guard !watches.contains(where: { $0.key == k }) else { return false }
         let dest = r.headsign.isEmpty ? to.short : r.headsign
         append(r, code: c, from: from.short, to: dest, auto: auto)
         for later in trip.rides.dropFirst() where later.isTrain {
-            guard let lc = NSStore.code(stopId: later.fromId, name: later.fromStop) else { continue }
+            guard let lc = NSStore.railCode(stopId: later.fromId, name: later.fromStop, lat: later.fromLat, lon: later.fromLon) else { continue }
             let lk = Self.key(code: lc, ride: later)
             guard !watches.contains(where: { $0.key == lk }) else { continue }
             let ld: String = later.headsign.isEmpty ? Fmt.place(later.toStop) : later.headsign
@@ -133,7 +133,7 @@ final class WatchStore: ObservableObject {
     static func rideWatches(_ t: DoorTrip, now: Date = Date()) -> [RideWatch] {
         let rides: [Ride] = t.rides
         let legs: [PlatformWatch.Leg] = rides.map { r in
-            PlatformWatch.Leg(train: r.isTrain, num: r.num, code: r.isTrain ? NSStore.code(stopId: r.fromId, name: r.fromStop) : nil,
+            PlatformWatch.Leg(train: r.isTrain, num: r.num, code: r.isTrain ? NSStore.railCode(stopId: r.fromId, name: r.fromStop, lat: r.fromLat, lon: r.fromLon) : nil,
                               planned: r.scheduledDeparture)
         }
         return PlatformWatch.toWatch(legs, now: now).compactMap { k -> RideWatch? in

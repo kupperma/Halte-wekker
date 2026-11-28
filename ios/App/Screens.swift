@@ -2370,7 +2370,7 @@ struct SettingsView: View {
                 Section {
                     Button("Reset everything", role: .destructive) { confirmReset = true }
                 } footer: {
-                    Text("Haltewekker \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")\n\nOpen data: trips by Transitous (© OpenStreetMap contributors and open transit data), bus positions by OVapi, trains by NS, weather by Open-Meteo, NS station list by Rijden de Treinen (CC BY 4.0).")
+                    Text("Haltewekker \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")\n\nOpen data: trips by Transitous (© OpenStreetMap contributors and open transit data), bus positions by OVapi, trains by NS and, in Belgium, iRail (NMBS/SNCB open data), weather by Open-Meteo, NS station list by Rijden de Treinen (CC BY 4.0).")
                 }
             }
             .scrollContentBackground(newLook ? .automatic : .hidden)

@@ -72,14 +72,17 @@ enum NSCodes {
 
     /// The UIC number in a DELFI stop id: the 7 digits of a Dutch station (84…) after the zeros it's padded with, at the
     /// start of the id's last part. `de-DELFI_000008400319` → `8400319`; anything else → nil.
+    /// (0.42.17) Also an SNCB id's: `be-sncb_8400131` (Breda in SNCB's feed) → `8400131` (`Country.uic`).
     static func uic(fromStopId id: String) -> String? {
-        guard id.contains("DELFI") else { return nil }
-        let tail = id.split(separator: "_").last.map(String.init) ?? id
-        let digits = tail.prefix { $0.isASCII && $0.isNumber }
-        guard digits.count >= 7 else { return nil }
-        let trimmed = String(digits.drop { $0 == "0" })
-        guard trimmed.count == 7, trimmed.hasPrefix("84") else { return nil }
-        return trimmed
+        guard let u = Country.uic(id), u.hasPrefix("84") else { return nil }
+        return u
+    }
+
+    /// (0.42.17) A stop plainly outside the Netherlands by its id (a Belgian feed's, or a station with a foreign UIC):
+    /// never an NS station by its name ("Essen" in Belgium is no Dutch station).
+    static func notDutch(_ id: String) -> Bool {
+        if let u = Country.uic(id) { return !u.hasPrefix("84") }
+        return id.hasPrefix("be-")
     }
 
     /// A name as the lookup compares it: lower case, no accents, every other mark a space ("’s-Hertogenbosch" and
@@ -116,12 +119,14 @@ enum NSCodes {
     /// list knows).
     static func code(forStopId id: String, name: String?, in index: Index = NSCodes.shared) -> String? {
         if let u = uic(fromStopId: id), let c = index.byUIC[u] { return c }
+        if notDutch(id) { return nil }
         return name.flatMap { code(forName: $0, in: index) }
     }
 
     /// A place with several stop ids (a station's platforms): the first that's a station, else by the name.
     static func code(forStopIds ids: [String], name: String?, in index: Index = NSCodes.shared) -> String? {
         for id in ids { if let u = uic(fromStopId: id), let c = index.byUIC[u] { return c } }
+        if !ids.isEmpty, ids.allSatisfy({ notDutch($0) }) { return nil }
         return name.flatMap { code(forName: $0, in: index) }
     }
 }

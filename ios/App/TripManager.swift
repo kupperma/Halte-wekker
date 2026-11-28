@@ -620,7 +620,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         let now = Date()
         let list: [PlatformWatch.Leg] = custom.indices.map { k in
             let p: PlannedRide = planned[k]
-            let code: String? = p.isTrain ? NSStore.code(custom[k].from) : nil
+            let code: String? = p.isTrain ? NSStore.railCode(custom[k].from) : nil
             return PlatformWatch.Leg(train: p.isTrain, num: p.num, code: code, planned: p.scheduled ?? p.departure)
         }
         let rides: [WatchStore.RideWatch] = PlatformWatch.toWatch(list, now: now).compactMap { k -> WatchStore.RideWatch? in
@@ -749,6 +749,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     /// on board in that minute (the next leg found the one you got off; at the end, two fixes at a vehicle's speed).
     private func remindCheckOut(gotOff: String?) {
         guard TravelNotes.shared.checkOut, let l = leg else { return }      // (0.42.4: off unless you turn it on)
+        guard !l.to.inBelgium else { return }                                // (0.42.17: no OV-chipkaart there)
         let planned = route?.planned
         var rides: [CheckOut.Ride] = legs.indices.map { k in CheckOut.Ride(train: legs[k].mode == .train, company: planned?[safe: k]?.agency) }
         if let v = vehicle, rides.indices.contains(index) { rides[index] = CheckOut.Ride(train: v.isTrain, company: rides[index].company) }
@@ -781,6 +782,9 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
     private func considerClaim() {
         guard !demo, TravelNotes.shared.delayClaim, let s = tripStart, claimTold != s else { return }
         guard phase == .finished || phase == .idle else { return }
+        // (0.42.17) trains only in Belgium: NS's money back isn't for them (SNCB's own rules aren't told)
+        let trains: [Leg] = legs.filter { $0.mode == .train }
+        if !trains.isEmpty, trains.allSatisfy({ $0.from.inBelgium && $0.to.inBelgium }) { return }
         let lastIsTrain = phase == .finished && legs.last?.mode == .train
         let end: Date? = phase == .finished ? finishedAt : nil
         let m = DelayClaim.minutesLate(plannedEnd: lastIsTrain ? tripPlannedEnd : nil, actualEnd: lastIsTrain ? end : nil, trainDelays: trainLate)
@@ -3050,7 +3054,7 @@ final class TripManager: NSObject, ObservableObject, CLLocationManagerDelegate, 
         let ringing: Bool = { if case .alarm = phase { return true }; return false }()
         let stops: [DoorSide.Stop] = t.stops.map { DoorSide.Stop(point: GeoPoint($0.coordinate), track: $0.track) }
         DoorSideStore.shared.look(train: legIsTrain, stops: stops, to: GeoPoint(l.to.coordinate), toName: l.to.name,
-                                  code: NSStore.code(l.to), ringing: ringing)
+                                  code: NSStore.sideStation(l.to), ringing: ringing)
     }
 
     /// (0.42.11) "Exit on the left · platform 4" for this train leg's stop; nil: not known (or not a train).

@@ -160,6 +160,8 @@ final class RealPositionsStore: ObservableObject {
     /// A train trip's number, from its trip (`LiveTrip.num`), for its NS position. Only a rail trip's: a bus's or tram's
     /// trip number is no train's.
     func learn(_ tripId: String, trip: LiveTrip?) {
+        // (0.42.17) a Belgian train (SNCB's feed): NS's positions aren't its own, even with the same number
+        guard !Country.belgianTrip(tripId) else { return }
         guard let t = trip, RealPositions.isRail(mode: t.mode), let n = RealPositions.trainNumber(t.num) else { return }
         if numbers.count > 500 { numbers = [:] }
         numbers[tripId] = n
@@ -175,7 +177,7 @@ final class RealPositionsStore: ObservableObject {
         if hold { matcherLooks(trains: anyTrain, now: now) }
         if anyTrain, !trainFixes.isEmpty {
             let ask = Array(tracks.filter { t in
-                t.isTrain && numbers[t.tripId] == nil && (noNumber[t.tripId].map { now.timeIntervalSince($0) > 600 } ?? true)
+                t.isTrain && !Country.belgianTrip(t.tripId) && numbers[t.tripId] == nil && (noNumber[t.tripId].map { now.timeIntervalSince($0) > 600 } ?? true)
             }.map(\.tripId).prefix(4))
             if !ask.isEmpty {
                 let jobs: [@Sendable () async -> Int?] = ask.map { id in

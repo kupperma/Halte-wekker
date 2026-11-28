@@ -59,7 +59,10 @@ struct RailInfo: Hashable {
     var cancelled = false
     var crowd = 0                       // 1 quiet, 2 busy, 3 very busy
     var size: TrainSize?
+    /// (0.42.17) The board said the platform changed without saying the planned one (iRail, in Belgium).
+    var changed = false
     var trackChanged: Bool {
+        if changed, let t = track, !t.isEmpty { return true }
         guard let t = track, let p = plannedTrack, !t.isEmpty, !p.isEmpty else { return false }
         return t != p
     }
@@ -72,6 +75,9 @@ struct NSDeparture {
     let actualTrack: String
     let cancelled: Bool
     var actual: Date? = nil
+    /// (0.42.17) iRail: the platform changed (it gives no planned one); how busy it is (1…3, 0 not known).
+    var changed = false
+    var crowd = 0
     /// Minutes late (negative: early).
     var delay: Int { guard let a = actual, let p = planned else { return 0 }; return Int((a.timeIntervalSince(p) / 60).rounded()) }
 }
@@ -93,12 +99,38 @@ final class NSStore: ObservableObject {
     /// The station a train leaves from or arrives at, by its stop (any NS station, 0.24).
     nonisolated static func code(stopId: String, name: String) -> String? { NSCodes.code(forStopId: stopId, name: name) }
 
+    /// (0.42.17) Where a station's boards come from: its NS code in the Netherlands (as `code`), "be:<UIC>" or
+    /// "be:<name>" in Belgium (iRail through the relay, `Country.railSource`). For the boards, platforms, live times and
+    /// sizes only; NS's other services (price, OV-fiets, works) keep asking `code`, which is nil in Belgium.
+    nonisolated static func railCode(_ p: Place) -> String? {
+        if let c = code(p) { return c }
+        if p.key == RoleLogic.homeKey || p.key == RoleLogic.schoolKey || p.key == "here" { return nil }
+        for id in p.ids {
+            if let c = Country.railSource(id: id, name: p.name, lat: p.coordinate.latitude, lon: p.coordinate.longitude, ns: { _, _ in nil }) { return c }
+        }
+        if p.ids.isEmpty { return Country.railSource(id: "", name: p.name, lat: p.coordinate.latitude, lon: p.coordinate.longitude, ns: { _, _ in nil }) }
+        return nil
+    }
+
+    /// (0.42.17) The station the exit side is asked about: its NS code, or a Belgian station's name (the relay's
+    /// `/rail/v1/side` takes either; Belgium isn't in its seed, so OpenStreetMap is asked).
+    nonisolated static func sideStation(_ p: Place) -> String? {
+        if let c = code(p) { return c }
+        guard railCode(p)?.hasPrefix("be:") == true else { return nil }
+        let n: String = p.name.trimmingCharacters(in: .whitespaces)
+        return n.isEmpty ? nil : n
+    }
+
+    nonisolated static func railCode(stopId: String, name: String, lat: Double?, lon: Double?) -> String? {
+        Country.railSource(id: stopId, name: name, lat: lat, lon: lon) { i, n in NSCodes.code(forStopId: i, name: n) }
+    }
+
     /// Where NS is asked about a trip in a list: its first train, the station it leaves from and the one its last train
     /// gets to. The places it was planned between when they're stations (the corridor's lists: as before 0.24), else
     /// the trains' own stops.
     nonisolated static func railEnds(_ t: DoorTrip, from: Place, to: Place) -> (ride: Ride, from: String, to: String?)? {
         guard let f = t.rides.first(where: \.isTrain) else { return nil }
-        let a = (f.id == t.first.id ? code(from) : nil) ?? code(stopId: f.fromId, name: f.fromStop)
+        let a = (f.id == t.first.id ? railCode(from) : nil) ?? railCode(stopId: f.fromId, name: f.fromStop, lat: f.fromLat, lon: f.fromLon)
         guard let a else { return nil }
         let last = t.rides.last(where: \.isTrain) ?? f
         let b = (last.id == t.last.id ? code(to) : nil) ?? code(stopId: "", name: last.toStop)
@@ -147,6 +179,7 @@ final class NSStore: ObservableObject {
     @discardableResult
     func board(_ code: String) async -> [NSDeparture]? {
         if let b = boards[code], Date().timeIntervalSince(b.at) < 45 { return b.list }
+        if let path = Country.liveboardPath(code) { return await beBoard(code, path: path) }
         if Date() < offUntil { return boards[code]?.list }
         let (j, st) = await fetch("/ns/departures?station=\(code)")
         guard let d = j as? [String: Any] else {
@@ -165,6 +198,38 @@ final class NSStore: ObservableObject {
         return list
     }
 
+    /// (0.42.17) A Belgian station's board from iRail (the relay's `/be/liveboard`): its own pause when it doesn't
+    /// answer, so NS's `available` never hears of it.
+    private var beOffUntil = Date.distantPast
+    private func beBoard(_ code: String, path: String) async -> [NSDeparture]? {
+        if Date() < beOffUntil { return boards[code]?.list }
+        let a = await Self.fetchData(path)
+        guard let list = IRail.departures(a.data) else {
+            beOffUntil = Date().addingTimeInterval(a.status == 404 || a.status == 400 ? 600 : 60)
+            return boards[code]?.list
+        }
+        let rows: [NSDeparture] = list.map { d in
+            NSDeparture(num: d.num, planned: d.planned, plannedTrack: d.plannedTrack, actualTrack: d.track, cancelled: d.cancelled,
+                        actual: d.actual, changed: d.changed, crowd: d.crowd)
+        }
+        for d in rows where !d.num.isEmpty && d.crowd > 0 { crowd["be:" + d.num] = d.crowd }
+        boards[code] = (Date(), rows)
+        return rows
+    }
+
+    /// The relay's answer as it came (for iRail's, read by `IRail`).
+    private struct Raw: @unchecked Sendable { let data: Data?; let status: Int }
+    private nonisolated static func fetchData(_ path: String) async -> Raw {
+        guard let url = URL(string: relay + path) else { return Raw(data: nil, status: 0) }
+        var r = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData)
+        r.setValue(Transit.userAgent, forHTTPHeaderField: "User-Agent")
+        guard let a = try? await Net.response(r, lane: .background, label: String(path.prefix { $0 != "?" })) else { return Raw(data: nil, status: -1) }
+        return Raw(data: a.status == 200 ? a.data : nil, status: a.status)
+    }
+
+    /// (0.42.17) A Belgian train's stops from iRail (the relay's `/be/vehicle`), for `IRail.overlay`. Nil: no answer.
+    nonisolated static func beVehicle(_ path: String) async -> Data? { await fetchData(path).data }
+
     func match(_ code: String, num: String, planned: Date) -> NSDeparture? {
         guard let list = boards[code]?.list else { return nil }
         if !num.isEmpty { return list.first { $0.num == num } }
@@ -173,6 +238,7 @@ final class NSStore: ObservableObject {
 
     /// NS's crowd forecast for the trains between two stations around a time (kept 5 min per half hour).
     private func loadCrowd(from: String, to: String, at: Date) async {
+        if from.hasPrefix("be:") || to.hasPrefix("be:") { return }      // (0.42.17: NS's planner is NS's stations only)
         let k = "\(from)>\(to)@\(Int(at.timeIntervalSince1970 / 1800))"
         if let c = tripsAsked[k], Date().timeIntervalSince(c) < 300 { return }
         guard Date() >= offUntil else { return }
@@ -196,6 +262,15 @@ final class NSStore: ObservableObject {
     func trainSize(num: String, code: String) async -> TrainSize? {
         let k = "\(num)@\(code)"
         if let c = sizes[k], Date().timeIntervalSince(c.at) < 900 { return c.v }
+        if code.hasPrefix("be:") {
+            // (0.42.17) iRail's composition: carriages and seats, no drawing
+            guard num.allSatisfy({ $0.isASCII && $0.isNumber }) else { return nil }
+            let a = await Self.fetchData("/be/composition?id=\(num)")
+            if a.status == -1 { return sizes[k]?.v }
+            let v: TrainSize? = IRail.composition(a.data).map { TrainSize(cars: $0.cars, seats: $0.seats, cut: false, layout: nil) }
+            sizes[k] = (Date(), v)
+            return v
+        }
         guard Date() >= offUntil else { return sizes[k]?.v }
         let (j, st) = await fetch("/ns/train?num=\(num)&station=\(code)&features=zitplaats")
         guard let d = j as? [String: Any] else {
@@ -281,8 +356,10 @@ final class NSStore: ObservableObject {
                     if !m.plannedTrack.isEmpty { i.plannedTrack = m.plannedTrack }
                     if !m.actualTrack.isEmpty { i.track = m.actualTrack }
                     if m.cancelled { i.cancelled = true }
+                    if m.changed { i.changed = true }
                 }
-                i.crowd = r.trip.rides.filter(\.isTrain).map { crowd[$0.num] ?? 0 }.max() ?? 0
+                let belgian: Bool = code.hasPrefix("be:")
+                i.crowd = r.trip.rides.filter(\.isTrain).map { crowd[(belgian ? "be:" : "") + $0.num] ?? 0 }.max() ?? 0
                 if let s = got[f.id] { i.size = s }
                 info[f.id] = i
             }
@@ -320,5 +397,13 @@ final class NSStore: ObservableObject {
             if let v = byKey["\(r.ride.num)@\(r.code)"] { got[r.ride.id] = .some(v) }
         }
         fill()
+    }
+}
+
+extension Place {
+    /// (0.42.17) In Belgium (`Country`): NS's and the OV-chipkaart's rules don't apply there.
+    var inBelgium: Bool {
+        let id: String = ids.first { !$0.contains(",") } ?? ""
+        return Country.of(id: id, lat: coordinate.latitude, lon: coordinate.longitude) == .be
     }
 }

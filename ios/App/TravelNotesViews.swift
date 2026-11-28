@@ -14,7 +14,11 @@ struct StudentFareLine: View {
     var body: some View {
         let cents: Int? = ends.flatMap { notes.fullFare(from: $0.from, to: $0.to) }
         let rows: [(train: Bool, at: Date)] = rides.map { (train: $0.isTrain, at: $0.departure) }
-        if let text = StudentOV.tripLine(notes.student, rides: rows, fullCents: cents) {
+        // (0.42.17) a way only in Belgium: the Dutch student OV doesn't count there
+        let stops: [(id: String, lat: Double?, lon: Double?)] = rides.flatMap { r -> [(id: String, lat: Double?, lon: Double?)] in
+            [(id: r.fromId, lat: r.fromLat, lon: r.fromLon), (id: "", lat: r.toLat, lon: r.toLon)]
+        }
+        if !Country.onlyBelgium(stops), let text = StudentOV.tripLine(notes.student, rides: rows, fullCents: cents) {
             let free = text.hasPrefix("Free")
             Label(text, systemImage: free ? "checkmark.seal" : "eurosign.circle")
                 .font(DS.footnote)

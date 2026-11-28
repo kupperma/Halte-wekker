@@ -26,7 +26,9 @@ enum DoorSide {
         var query: String {
             let f: String = "\(coord(from.lat)),\(coord(from.lon))"
             let a: String = "\(coord(at.lat)),\(coord(at.lon))"
-            return "station=\(station)&track=\(track)&from=\(f)&at=\(a)"
+            // (0.42.17) a Belgian station goes by its name: escaped ("NOORDERKEMPEN%20(BRECHT)"); a code is as it is
+            let st: String = station.addingPercentEncoding(withAllowedCharacters: Country.unreserved) ?? station
+            return "station=\(st)&track=\(track)&from=\(f)&at=\(a)"
         }
         var key: String { "\(station)|\(track)|\(query)" }
     }

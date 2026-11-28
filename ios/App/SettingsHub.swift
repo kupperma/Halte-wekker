@@ -705,7 +705,7 @@ private struct MapSettingsRows: View {
             .disabled(!realPositions)
             .settingsAnchor("map.busPosition")
         } footer: {
-            Text("Shows buses and trains where their GPS says they are (open data from OVapi and NS), and uses it to tell which one you’re on. Uses about 10 MB an hour while a map is open or it checks which one you’re on during a ride; off in Low Data Mode and Low Power Mode. Bus position: Real GPS draws the one you wait for where it last said it was, with how old that is, and a faint dot where it’s expected; Estimated mixes its GPS with its times.")
+            Text("Shows buses and trains where their GPS says they are (open data from OVapi and NS, in the Netherlands; in Belgium they go by their live times), and uses it to tell which one you’re on. Uses about 10 MB an hour while a map is open or it checks which one you’re on during a ride; off in Low Data Mode and Low Power Mode. Bus position: Real GPS draws the one you wait for where it last said it was, with how old that is, and a faint dot where it’s expected; Estimated mixes its GPS with its times.")
         }
         Section {
             SettingsSwitch(title: "Moving station", detail: "The station and train behind the home and ride screens. It pauses when the screen is off. Off shows a still picture.", isOn: $trip.movingStation)
@@ -923,7 +923,7 @@ private struct AdvancedSettingsRows: View {
             SettingsValueRow(title: "Haltewekker", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")
                 .settingsAnchor("adv.about")
         } header: { Text("About") } footer: {
-            Text("Open data: trips by Transitous (© OpenStreetMap contributors and open transit data), bus positions by OVapi, trains by NS, weather by Open-Meteo, NS station list by Rijden de Treinen (CC BY 4.0).")
+            Text("Open data: trips by Transitous (© OpenStreetMap contributors and open transit data), bus positions by OVapi, trains by NS and, in Belgium, iRail (NMBS/SNCB open data), weather by Open-Meteo, NS station list by Rijden de Treinen (CC BY 4.0).")
         }
     }
 }

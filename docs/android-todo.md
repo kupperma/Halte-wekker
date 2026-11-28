@@ -5,6 +5,8 @@ their tests.
 
 ## iOS 0.42.17 (Belgium)
 
+Shipped with Android 0.10.13 (both parts below are on both platforms unless marked iOS).
+
 The app also works in Belgium. Data per station by its country (`Country`: the UIC in the stop id, 84 NL / 88 BE, then a
 Belgian feed `be-…`, then a rough outline of Belgium drawn a little inside the Dutch border; NS's own station list is
 still asked first for everything else, so the Netherlands is unchanged — tested: no NS station falls inside the outline).
