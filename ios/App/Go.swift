@@ -506,6 +506,7 @@ final class GoStore: ObservableObject {
         // (the stops are looked up first: by then a newer answer may be on its way in, or the screen gone; that one wins)
         applies += 1
         let mine = applies
+        if !quiet { lastAnswer = (answer, loc, d) }
         let found = await reboarded(answer, loc: loc, now: now, fetch: !quiet)
         guard mine == applies, !Task.isCancelled, watching, dest == d, onBoard == nil else { return }
         if let c = chosen, let k = await reboarded([c], loc: loc, now: now, fetch: false).first, k.id != c.id { chosen = k }
@@ -639,6 +640,10 @@ final class GoStore: ObservableObject {
     private var applies = 0               // the answers handed to `apply`, numbered
     /// The first buses it looks up the stops of, per answer.
     static let reboardMax = 6
+    /// How long an answer waits for those stops before it goes on screen as it is (the stops still come, `reboarded`).
+    static let reboardWait: Double = 3
+    /// The last answer handed to `apply` live, to use again when the stops come in late.
+    private var lastAnswer: (list: [DoorTrip], loc: CLLocation, d: Place)?
 
     /// Each way's first bus got on at the stop of its own trip you walk to least while you still make it (`BoardAt`).
     /// The planner, and an earlier bus onto the same connection (`earlierWays`), take the stop that was asked about: in
@@ -657,22 +662,40 @@ final class GoStore: ObservableObject {
         for t in list where wanted(t) && !ids.contains(t.first.tripId) { ids.append(t.first.tripId) }
         guard !ids.isEmpty else { return list }
         if fetch {
+            // (0.40.1) The stops are fetched in a task of their own that the screen's 3 second wait doesn't cancel. Before,
+            // a trip whose answer took longer than 3 s (a slow connection, Transitous busy, the requests queued behind
+            // the plan and the departures) was cancelled, and asked again from scratch at the next look, and cut off
+            // again: it never got the stops, and the 158 stayed at the bus station instead of Bolkenplein round the
+            // corner. Now an answer that comes in late is kept, and puts the closer stop on screen when it lands.
             let ask = Array(ids.prefix(Self.reboardMax))
-            let got: [(String, [BoardAt.Stop]?)] = await Transit.$urgent.withValue(true) {
-                await withTaskGroup(of: (String, [BoardAt.Stop]?).self) { g in
-                    for id in ask {
-                        g.addTask {
-                            let s: [BoardAt.Stop]? = await Net.within(3) { await Transit.boardStops(id, maxAge: RideTick.tripCache) } ?? nil
-                            return (id, s)
+            let startedBy = applies
+            let job = Task { @MainActor [weak self] () -> Bool in
+                var gotNew = false
+                await Transit.$urgent.withValue(true) {
+                    await withTaskGroup(of: (String, [BoardAt.Stop]?).self) { g in
+                        for id in ask {
+                            g.addTask { (id, await Transit.boardStops(id, maxAge: RideTick.tripCache)) }
+                        }
+                        for await (id, s) in g {
+                            guard let self, let s else { continue }
+                            if self.boardKept[id] == nil { gotNew = true }
+                            self.boardKept[id] = (Date(), s)
                         }
                     }
-                    var out: [(String, [BoardAt.Stop]?)] = []
-                    for await r in g { out.append(r) }
-                    return out
+                }
+                return gotNew
+            }
+            let inTime = await Net.within(Self.reboardWait) { await job.value } != nil
+            boardKept = boardKept.filter { now.timeIntervalSince($0.value.at) < 600 }
+            if !inTime {
+                Task { @MainActor [weak self] in
+                    // came in after the screen moved on: put it to use, unless a newer answer is on its way (that one
+                    // reads `boardKept` itself)
+                    guard await job.value, let self, self.applies == startedBy, let last = self.lastAnswer,
+                          self.watching, self.dest == last.d, self.onBoard == nil else { return }
+                    await self.apply(last.list, loc: self.here ?? last.loc, d: last.d, now: Date(), quiet: true)
                 }
             }
-            for (id, s) in got { if let s { boardKept[id] = (now, s) } }
-            boardKept = boardKept.filter { now.timeIntervalSince($0.value.at) < 600 }
         }
         var seen = Set<String>()          // (two answers' ways onto the same bus can now be one and the same)
         return list.map { t -> DoorTrip in
@@ -681,7 +704,7 @@ final class GoStore: ObservableObject {
             let from: GeoPoint? = f.fromLat.flatMap { a in f.fromLon.map { GeoPoint(lat: a, lon: $0) } }
             let to: GeoPoint? = f.toLat.flatMap { a in f.toLon.map { GeoPoint(lat: a, lon: $0) } }
             guard let c = BoardAt.better(stops, fromId: f.fromId, from: from, departure: f.departure, to: to, toName: f.toStop,
-                                         you: you, now: now) else { return t }
+                                         you: you, now: now, fromName: f.fromStop) else { return t }
             return t.boardingFirst(at: c.stop, walk: c.walk)
         }
         .filter { seen.insert($0.id).inserted }

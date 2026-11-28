@@ -3,6 +3,17 @@
 The rules and numbers for each are in [logs-export.md](logs-export.md) › For Android (parity), with the iOS files and
 their tests.
 
+## iOS 0.42.14
+
+- [ ] Where to get on (`BoardAt`, ported from 0.40.1 on another branch): the trip's stops are fetched without the 3 s
+      cut-off cancelling them (the screen still waits at most 3 s; an answer that comes later is kept and puts the
+      closer stop on screen when it lands). Before, a slow trip answer was cancelled and asked again from scratch at
+      every look, so the 158 never moved from the bus station to Bolkenplein. The boarding stop is also found by its
+      name when neither the planner's stop id nor its point (within 80 m) matches the trip's list.
+      **Android:** nothing to fix yet: it has no "get on at a closer stop of the same bus" (`reboarded`) at all, so no
+      cut-off that cancels the trip's stops. When it gets one, fetch the stops without the cut-off cancelling them and
+      match the boarding stop by name too (`BoardAtTests.test_planIdAndPointOff_findsTheStopByName`).
+
 ## iOS 0.42.13
 
 From a ride screen at 16:01 ("Bus 306 to Veghel · 2 min to Veghel · there at 16:03 · Stops ahead: Veghel your stop"):

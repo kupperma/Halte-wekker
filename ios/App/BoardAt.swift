@@ -48,12 +48,17 @@ enum BoardAt {
         max(1, Int((max(0, m) * 1.33 / 1.2 / 60).rounded(.up)))
     }
 
-    /// Where in `stops` the ride gets on now: a call at its stop id (else within `sameStop` of where it's said to be),
-    /// the one closest to its departure. Nil: not there.
-    static func boardingIndex(_ stops: [Stop], fromId: String, from: GeoPoint?, departure: Date) -> Int? {
+    /// Where in `stops` the ride gets on now: a call at its stop id (else within `sameStop` of where it's said to be,
+    /// else (0.40.1) by its name: a big bus station's stands can be further apart than that), the one closest to its
+    /// departure. Nil: not there.
+    static func boardingIndex(_ stops: [Stop], fromId: String, from: GeoPoint?, departure: Date, fromName: String = "") -> Int? {
         var hits = stops.indices.filter { !fromId.isEmpty && stops[$0].id == fromId }
         if hits.isEmpty, let f = from {
             hits = stops.indices.filter { Geo.metres(f, stops[$0].point) <= sameStop }
+        }
+        let name = fromName.trimmingCharacters(in: .whitespaces).lowercased()
+        if hits.isEmpty, !name.isEmpty {
+            hits = stops.indices.filter { stops[$0].name.trimmingCharacters(in: .whitespaces).lowercased() == name }
         }
         func off(_ i: Int) -> Double {
             let t: Date = stops[i].departure ?? stops[i].scheduledDeparture ?? .distantPast
@@ -96,8 +101,8 @@ enum BoardAt {
     /// The whole question for one ride: where it gets on now (`fromId`, `from`, `departure`), where it gets off (`to`,
     /// `toName`), and where you'd better get on instead. Nil: where it gets on is best (or it can't tell).
     static func better(_ stops: [Stop], fromId: String, from: GeoPoint?, departure: Date, to: GeoPoint?, toName: String,
-                       you: GeoPoint, now: Date) -> Choice? {
-        guard let b = boardingIndex(stops, fromId: fromId, from: from, departure: departure),
+                       you: GeoPoint, now: Date, fromName: String = "") -> Choice? {
+        guard let b = boardingIndex(stops, fromId: fromId, from: from, departure: departure, fromName: fromName),
               let e = alightingIndex(stops, after: b, to: to, toName: toName) else { return nil }
         return pick(stops, board: b, alight: e, you: you, now: now)
     }
